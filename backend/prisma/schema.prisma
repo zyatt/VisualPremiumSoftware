@@ -1,0 +1,263 @@
+// Visual Premium - Prisma Schema
+// PostgreSQL + Prisma ORM
+
+generator client {
+  provider        = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// USUÁRIOS E CONTROLE DE ACESSO
+// ============================================================
+
+enum Role {
+  ADMIN       // Acesso total: todas as páginas e ações
+  GERENTE     // Acesso total exceto gerenciamento de usuários
+  COMPRADOR   // Orçamento, Ordem de Compra, Histórico
+  ESTOQUISTA  // Estoque, Controle de Estoque, Relatórios OS
+  VISUALIZADOR // Somente leitura em todas as páginas
+}
+
+model Usuario {
+  id        Int      @id @default(autoincrement())
+  nome      String
+  username  String   @unique
+  senha     String   // bcrypt hash
+  role      Role     @default(VISUALIZADOR)
+  ativo     Boolean  @default(true)
+  criadoEm  DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  ordens_compra OrdemCompra[]
+
+  @@map("usuarios")
+}
+
+// ============================================================
+// MATERIAIS
+// ============================================================
+
+enum StatusEstoque {
+  OK       // quantidade > estoqueMinimo
+  LIMITE   // quantidade == estoqueMinimo
+  CRITICO  // quantidade < estoqueMinimo
+  INATIVO  // desativado pelo usuário
+}
+
+model Material {
+  id              Int           @id @default(autoincrement())
+  nome            String        @unique
+  unidade         String?
+  categoria       String?
+  medida          String?
+  espessura       String?
+  valor           Decimal?      @db.Decimal(10, 2)
+  valorMetroQuadrado Decimal?   @db.Decimal(10, 2)
+  quantidade      Decimal       @default(0) @db.Decimal(10, 3)
+  estoqueMinimo   Decimal       @default(0) @db.Decimal(10, 3)
+  status          StatusEstoque @default(OK)
+  estoqueConfirmado Boolean     @default(false)
+  ativo           Boolean       @default(true)
+  ultimoValorPago Decimal?      @db.Decimal(10, 2)
+  criadoEm        DateTime      @default(now())
+  atualizadoEm    DateTime      @updatedAt
+
+  // Relações
+  fornecedorMateriais FornecedorMaterial[]
+  ordemItens          OrdemCompraItem[]
+  movimentacoes       MovimentacaoEstoque[]
+  orcamentoItens      OrcamentoItem[]
+
+  @@map("materiais")
+}
+
+// ============================================================
+// FORNECEDORES
+// ============================================================
+
+model Fornecedor {
+  id            Int      @id @default(autoincrement())
+  nomeFantasia  String
+  tipoFornecedor String?
+  telefone      String?  // normalizado: somente dígitos, ex: "4233091000"
+  cnpj          String?  @unique
+  razaoSocial   String?
+  nomeVendedor  String?
+  ativo         Boolean  @default(true)
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+
+  // Relações
+  materiais     FornecedorMaterial[]
+  ordens_compra OrdemCompra[]
+  orcamentoItens OrcamentoItem[]
+
+  @@map("fornecedores")
+}
+
+// Tabela de junção: Fornecedor <-> Material com preço específico por fornecedor
+model FornecedorMaterial {
+  id               Int       @id @default(autoincrement())
+  fornecedorId     Int
+  materialId       Int
+  preco            Decimal?  @db.Decimal(10, 2) // valor chapa
+  precoMetroQuadrado Decimal? @db.Decimal(10, 2)
+  prazoEntrega     String?   // ex: "1 dia", "3 dias"
+  ativo            Boolean   @default(true)
+  criadoEm         DateTime  @default(now())
+  atualizadoEm     DateTime  @updatedAt
+
+  fornecedor Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Cascade)
+  material   Material   @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([fornecedorId, materialId])
+  @@map("fornecedor_materiais")
+}
+
+// ============================================================
+// ORÇAMENTOS
+// ============================================================
+
+enum StatusOrcamento {
+  ABERTO
+  CONVERTIDO // virou Ordem de Compra
+  CANCELADO
+}
+
+model Orcamento {
+  id          Int             @id @default(autoincrement())
+  titulo      String          @default("Orçamento")
+  status      StatusOrcamento @default(ABERTO)
+  criadoEm   DateTime         @default(now())
+  atualizadoEm DateTime       @updatedAt
+
+  itens       OrcamentoItem[]
+  ordens      OrdemCompra[]
+
+  @@map("orcamentos")
+}
+
+model OrcamentoItem {
+  id              Int      @id @default(autoincrement())
+  orcamentoId     Int
+  materialId      Int
+  fornecedorId    Int?     // fornecedor selecionado para este item
+  quantidade      Decimal  @default(1) @db.Decimal(10, 3)
+  precoUnitario   Decimal? @db.Decimal(10, 2) // preço no momento do orçamento
+  criadoEm        DateTime @default(now())
+
+  orcamento  Orcamento  @relation(fields: [orcamentoId], references: [id], onDelete: Cascade)
+  material   Material   @relation(fields: [materialId], references: [id])
+  fornecedor Fornecedor? @relation(fields: [fornecedorId], references: [id])
+
+  @@map("orcamento_itens")
+}
+
+// ============================================================
+// ORDENS DE COMPRA
+// ============================================================
+
+enum StatusOrdemCompra {
+  EM_ANDAMENTO
+  FINALIZADO
+  CANCELADO
+}
+
+model OrdemCompra {
+  id              Int               @id @default(autoincrement()) // número da OC
+  data            DateTime          @default(now())
+  fornecedorId    Int
+  requisitante    String
+  formaPagamento  String?
+  prazoPagamento  String?
+  observacoes     String?
+  empresa         String?           // para escolha de logo no PDF
+  status          StatusOrdemCompra @default(EM_ANDAMENTO)
+  usuarioId       Int?
+  orcamentoId     Int?
+  valorTotal      Decimal           @default(0) @db.Decimal(10, 2)
+  criadoEm        DateTime          @default(now())
+  atualizadoEm    DateTime          @updatedAt
+
+  fornecedor Fornecedor  @relation(fields: [fornecedorId], references: [id])
+  usuario    Usuario?    @relation(fields: [usuarioId], references: [id])
+  orcamento  Orcamento?  @relation(fields: [orcamentoId], references: [id])
+
+  itens      OrdemCompraItem[]
+  numerosOS  OrdemCompraOS[]
+  movimentacoes MovimentacaoEstoque[]
+
+  @@map("ordens_compra")
+}
+
+// Números de OS vinculados a uma Ordem de Compra (1 OC -> N OS)
+model OrdemCompraOS {
+  id            Int    @id @default(autoincrement())
+  ordemCompraId Int
+  numeroOS      String // pode ser número ou palavra
+
+  ordemCompra OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
+
+  @@map("ordem_compra_os")
+}
+
+model OrdemCompraItem {
+  id              Int      @id @default(autoincrement())
+  ordemCompraId   Int
+  materialId      Int
+  numeroOS        String   // obrigatório: vincular item a uma OS
+  quantidade      Decimal  @db.Decimal(10, 3)
+  precoUnitario   Decimal  @db.Decimal(10, 2)
+  precoMetroQuadrado Decimal? @db.Decimal(10, 2)
+  precoTotal      Decimal  @db.Decimal(10, 2) // qtd * precoUnitario
+  criadoEm        DateTime @default(now())
+
+  ordemCompra OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
+  material    Material    @relation(fields: [materialId], references: [id])
+
+  @@map("ordem_compra_itens")
+}
+
+// ============================================================
+// CONTROLE DE ESTOQUE - MOVIMENTAÇÕES
+// ============================================================
+
+enum TipoMovimentacao {
+  ENTRADA
+  SAIDA
+}
+
+// Relação/agrupador por número de OS
+model RelacaoOS {
+  id           Int      @id @default(autoincrement())
+  numeroOS     String   @unique // chave principal da relação
+  descricao    String?
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  movimentacoes MovimentacaoEstoque[]
+
+  @@map("relacoes_os")
+}
+
+model MovimentacaoEstoque {
+  id              Int              @id @default(autoincrement())
+  materialId      Int
+  tipo            TipoMovimentacao
+  quantidade      Decimal          @db.Decimal(10, 3)
+  numeroOS        String           // referência ao numeroOS da RelacaoOS
+  relacaoOSId     Int?
+  ordemCompraId   Int?             // preenchido quando origem é uma OC finalizada
+  precoUnitario   Decimal?         @db.Decimal(10, 2)
+  observacao      String?
+  criadoEm        DateTime         @default(now())
+
+  material    Material     @relation(fields: [materialId], references: [id])
+  relacaoOS   RelacaoOS?   @relation(fields: [relacaoOSId], references: [id])
+  ordemCompra OrdemCompra? @relation(fields: [ordemCompraId], references: [id])
+
+  @@map("movimentacoes_estoque")
+}

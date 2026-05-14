@@ -1,0 +1,4 @@
+DATABASE_URL="postgresql://postgres:1234@localhost:5432/visualpremiumsoftwarerebuild"
+PORT=3002
+NODE_ENV=development
+JWT_SECRET=visual_premium_secret_change_in_production
