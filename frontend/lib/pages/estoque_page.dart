@@ -1,8 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/material_model.dart';
 import '../providers/material_provider.dart';
 import '../theme/app_theme.dart';
+
+/// Formata qualquer entrada de texto para maiúsculas em tempo real.
+class _UpperCaseFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) =>
+      newValue.copyWith(text: newValue.text.toUpperCase());
+}
 
 class EstoquePage extends StatefulWidget {
   const EstoquePage({super.key});
@@ -15,6 +28,7 @@ class _EstoquePageState extends State<EstoquePage> {
   final _buscaCtrl = TextEditingController();
   String _statusFiltro    = '';
   String _categoriaFiltro = '';
+  Timer? _debounceTimer;
 
   @override
   void initState() {
@@ -28,6 +42,7 @@ class _EstoquePageState extends State<EstoquePage> {
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _buscaCtrl.dispose();
     super.dispose();
   }
@@ -38,6 +53,11 @@ class _EstoquePageState extends State<EstoquePage> {
           categoria: _categoriaFiltro,
           status:    _statusFiltro,
         );
+  }
+
+  void _onBuscaChanged(String _) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 400), _aplicarFiltros);
   }
 
   void _abrirFormMaterial([MaterialModel? material]) {
@@ -215,6 +235,7 @@ class _EstoquePageState extends State<EstoquePage> {
                       prefixIcon: Icon(Icons.search, color: AppTheme.textHint, size: 20),
                       isDense: true,
                     ),
+                    onChanged:   _onBuscaChanged,
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
                 ),
@@ -747,6 +768,7 @@ class _MaterialFormDialog extends StatefulWidget {
 class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   final _formKey = GlobalKey<FormState>();
   bool _salvando = false;
+  String? _erroDialog; // mensagem de erro exibida DENTRO do dialog
 
   late final TextEditingController _nome;
   late final TextEditingController _unidade;
@@ -796,7 +818,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
   Future<void> _salvar() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _salvando = true);
+    setState(() { _salvando = true; _erroDialog = null; });
 
     final dados = {
       'nome':          _nome.text.trim(),
@@ -830,10 +852,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         backgroundColor: AppTheme.success,
       ));
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(provider.erro ?? 'Erro ao salvar.'),
-        backgroundColor: AppTheme.error,
-      ));
+      // Mostra o erro dentro do próprio dialog — não fecha, não usa SnackBar
+      setState(() => _erroDialog = provider.erro ?? 'Erro ao salvar.');
     }
   }
 
@@ -849,10 +869,46 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // ── Banner de erro ───────────────────────────────────────
+                if (_erroDialog != null) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.error.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppTheme.error.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.error_outline, color: AppTheme.error, size: 18),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _erroDialog!,
+                            style: const TextStyle(
+                              color: AppTheme.error,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: () => setState(() => _erroDialog = null),
+                          child: const Icon(Icons.close, color: AppTheme.error, size: 16),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 // Nome (obrigatório)
                 TextFormField(
                   controller: _nome,
                   decoration: const InputDecoration(labelText: 'Nome *'),
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [_UpperCaseFormatter()],
+                  onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                   validator: (v) =>
                       v == null || v.trim().isEmpty ? 'Nome é obrigatório' : null,
                 ),
@@ -863,6 +919,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     child: TextFormField(
                       controller: _categoria,
                       decoration: const InputDecoration(labelText: 'Categoria'),
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [_UpperCaseFormatter()],
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -870,6 +928,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     child: TextFormField(
                       controller: _unidade,
                       decoration: const InputDecoration(labelText: 'Unidade'),
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [_UpperCaseFormatter()],
                     ),
                   ),
                 ]),
@@ -880,6 +940,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     child: TextFormField(
                       controller: _medida,
                       decoration: const InputDecoration(labelText: 'Medida'),
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [_UpperCaseFormatter()],
+                      onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -887,6 +950,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     child: TextFormField(
                       controller: _espessura,
                       decoration: const InputDecoration(labelText: 'Espessura'),
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [_UpperCaseFormatter()],
+                      onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                     ),
                   ),
                 ]),

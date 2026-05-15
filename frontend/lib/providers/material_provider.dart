@@ -2,6 +2,13 @@ import 'package:flutter/foundation.dart';
 import '../models/material_model.dart';
 import '../repositories/material_repository.dart';
 
+/// Remove prefixos como "Exception:", "HttpException:" que o Dart
+/// adiciona automaticamente ao fazer e.toString() em exceções.
+String _mensagemErro(Object e) {
+  final raw = e.toString();
+  return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+}
+
 class MaterialProvider extends ChangeNotifier {
   final MaterialRepository _repo = MaterialRepository();
 
@@ -40,7 +47,7 @@ class MaterialProvider extends ChangeNotifier {
         status: status,
       );
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
     } finally {
       _carregando = false;
       notifyListeners();
@@ -66,7 +73,7 @@ class MaterialProvider extends ChangeNotifier {
     try {
       return await _repo.buscarPorId(id);
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
       notifyListeners();
       return null;
     }
@@ -78,7 +85,7 @@ class MaterialProvider extends ChangeNotifier {
       await recarregar();
       return true;
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -90,7 +97,7 @@ class MaterialProvider extends ChangeNotifier {
       await recarregar();
       return true;
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -102,7 +109,7 @@ class MaterialProvider extends ChangeNotifier {
       await recarregar();
       return true;
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -114,7 +121,7 @@ class MaterialProvider extends ChangeNotifier {
       await recarregar();
       return true;
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -126,7 +133,7 @@ class MaterialProvider extends ChangeNotifier {
       await recarregar();
       return true;
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -138,7 +145,7 @@ class MaterialProvider extends ChangeNotifier {
       await carregar();
       return true;
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }

@@ -10,6 +10,16 @@ function calcularStatus(quantidade, estoqueMinimo, ativo) {
   return 'CRITICO';
 }
 
+function _throwDuplicado(medida, espessura) {
+  const partes = ['nome'];
+  if (medida)    partes.push('medida');
+  if (espessura) partes.push('espessura');
+  throw {
+    status: 409,
+    message: `Já existe um material com o mesmo ${partes.join(', ')}. Altere a medida ou a espessura para diferenciar.`,
+  };
+}
+
 async function listar(filtros = {}) {
   const { busca, categoria, status, comFornecedor } = filtros;
 
@@ -71,17 +81,59 @@ async function buscarPorId(id) {
 }
 
 async function criar(data) {
+  // Valida duplicidade: nome + medida + espessura não podem ser todos iguais
+  const nomeTrimmed      = data.nome?.trim();
+  const medidaTrimmed    = data.medida?.trim()    ?? null;
+  const espessuraTrimmed = data.espessura?.trim() ?? null;
+
+  const duplicado = await prisma.material.findFirst({
+    where: {
+      nome:      { equals: nomeTrimmed, mode: 'insensitive' },
+      medida:    medidaTrimmed    ? { equals: medidaTrimmed,    mode: 'insensitive' } : null,
+      espessura: espessuraTrimmed ? { equals: espessuraTrimmed, mode: 'insensitive' } : null,
+    },
+  });
+
+  if (duplicado) _throwDuplicado(medidaTrimmed, espessuraTrimmed);
+
   const status = calcularStatus(data.quantidade || 0, data.estoqueMinimo || 0, true);
-  return prisma.material.create({ data: { ...data, status } });
+  try {
+    return await prisma.material.create({ data: { ...data, status } });
+  } catch (e) {
+    if (e?.code === 'P2002') _throwDuplicado(medidaTrimmed, espessuraTrimmed);
+    throw e;
+  }
 }
 
 async function atualizar(id, data) {
   const atual = await prisma.material.findUnique({ where: { id } });
-  const quantidade = data.quantidade ?? atual.quantidade;
+
+  // Valida duplicidade ao alterar nome, medida ou espessura
+  const nomeTrimmed      = (data.nome      ?? atual.nome)?.trim();
+  const medidaTrimmed    = (data.medida     ?? atual.medida)?.trim()    ?? null;
+  const espessuraTrimmed = (data.espessura  ?? atual.espessura)?.trim() ?? null;
+
+  const duplicado = await prisma.material.findFirst({
+    where: {
+      id:        { not: id },
+      nome:      { equals: nomeTrimmed, mode: 'insensitive' },
+      medida:    medidaTrimmed    ? { equals: medidaTrimmed,    mode: 'insensitive' } : null,
+      espessura: espessuraTrimmed ? { equals: espessuraTrimmed, mode: 'insensitive' } : null,
+    },
+  });
+
+  if (duplicado) _throwDuplicado(medidaTrimmed, espessuraTrimmed);
+
+  const quantidade    = data.quantidade   ?? atual.quantidade;
   const estoqueMinimo = data.estoqueMinimo ?? atual.estoqueMinimo;
-  const ativo = data.ativo ?? atual.ativo;
+  const ativo         = data.ativo        ?? atual.ativo;
   const status = calcularStatus(quantidade, estoqueMinimo, ativo);
-  return prisma.material.update({ where: { id }, data: { ...data, status } });
+  try {
+    return await prisma.material.update({ where: { id }, data: { ...data, status } });
+  } catch (e) {
+    if (e?.code === 'P2002') _throwDuplicado(medidaTrimmed, espessuraTrimmed);
+    throw e;
+  }
 }
 
 async function desativar(id) {

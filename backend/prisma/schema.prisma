@@ -49,7 +49,7 @@ enum StatusEstoque {
 
 model Material {
   id              Int           @id @default(autoincrement())
-  nome            String        @unique
+  nome            String
   unidade         String?
   categoria       String?
   medida          String?
@@ -71,6 +71,7 @@ model Material {
   movimentacoes       MovimentacaoEstoque[]
   orcamentoItens      OrcamentoItem[]
 
+  @@unique([nome, medida, espessura])
   @@map("materiais")
 }
 
