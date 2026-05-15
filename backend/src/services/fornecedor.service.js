@@ -10,23 +10,70 @@ function normalizarTelefone(tel) {
   return digits;
 }
 
-async function listar(busca) {
+async function listar(busca, tipo, id) {
   const where = { ativo: true };
+
+  // Busca textual
   if (busca) {
     where.OR = [
       { nomeFantasia: { contains: busca, mode: 'insensitive' } },
       { nomeVendedor: { contains: busca, mode: 'insensitive' } },
+      { cnpj:         { contains: busca, mode: 'insensitive' } },
     ];
   }
+
+  // Filtro por tipo
+  if (tipo) {
+    where.tipoFornecedor = tipo;
+  }
+
+  // Filtro por ID
+  if (id) {
+    where.id = Number(id);
+  }
+
   return prisma.fornecedor.findMany({
     where,
     include: {
       materiais: {
         where: { ativo: true },
-        include: { material: { select: { id: true, nome: true } } },
+        include: {
+          material: {
+            select: {
+              id: true,
+              nome: true,
+              medida: true,
+              espessura: true,
+            },
+          },
+        },
       },
     },
     orderBy: { nomeFantasia: 'asc' },
+  });
+}
+
+// Busca rápida de fornecedores para o overlay de vínculo (retorna apenas campos essenciais)
+async function buscarParaVinculo(busca, limite = 50) {
+  const where = { ativo: true };
+
+  if (busca && busca.trim()) {
+    where.OR = [
+      { nomeFantasia: { contains: busca.trim(), mode: 'insensitive' } },
+      { nomeVendedor: { contains: busca.trim(), mode: 'insensitive' } },
+    ];
+  }
+
+  return prisma.fornecedor.findMany({
+    where,
+    select: {
+      id:             true,
+      nomeFantasia:   true,
+      tipoFornecedor: true,
+      nomeVendedor:   true,
+    },
+    orderBy: { nomeFantasia: 'asc' },
+    take: Number(limite),
   });
 }
 
@@ -35,32 +82,84 @@ async function buscarPorId(id) {
     where: { id },
     include: {
       materiais: {
-        include: { material: true },
+        where: { ativo: true },
+        include: {
+          material: {
+            select: {
+              id: true,
+              nome: true,
+              medida: true,
+              espessura: true,
+            },
+          },
+        },
       },
     },
   });
 }
 
+async function listarPorMaterial(materialId) {
+  return prisma.fornecedor.findMany({
+    where: {
+      ativo: true,
+      materiais: { some: { materialId, ativo: true } },
+    },
+    include: {
+      materiais: {
+        where: { materialId, ativo: true },
+      },
+    },
+    orderBy: { nomeFantasia: 'asc' },
+  });
+}
+
 async function criar(data) {
-  data.telefone = normalizarTelefone(data.telefone);
-  return prisma.fornecedor.create({ data });
+  const { nomeFantasia, tipoFornecedor, telefone, cnpj, razaoSocial, nomeVendedor } = data;
+  if (!nomeFantasia?.trim()) throw { status: 400, message: 'nomeFantasia é obrigatório' };
+
+  return prisma.fornecedor.create({
+    data: {
+      nomeFantasia: nomeFantasia.trim(),
+      tipoFornecedor: tipoFornecedor?.trim() ?? null,
+      telefone: normalizarTelefone(telefone),
+      cnpj: cnpj?.replace(/\D/g, '') || null,
+      razaoSocial: razaoSocial?.trim() ?? null,
+      nomeVendedor: nomeVendedor?.trim() ?? null,
+    },
+  });
 }
 
 async function atualizar(id, data) {
-  if (data.telefone) data.telefone = normalizarTelefone(data.telefone);
-  return prisma.fornecedor.update({ where: { id }, data });
+  const atual = await prisma.fornecedor.findUnique({ where: { id } });
+  if (!atual) throw { status: 404, message: 'Fornecedor não encontrado' };
+
+  const updateData = {};
+  if (data.nomeFantasia  !== undefined) updateData.nomeFantasia  = data.nomeFantasia.trim();
+  if (data.tipoFornecedor!== undefined) updateData.tipoFornecedor= data.tipoFornecedor?.trim() ?? null;
+  if (data.telefone      !== undefined) updateData.telefone      = normalizarTelefone(data.telefone);
+  if (data.cnpj          !== undefined) updateData.cnpj          = data.cnpj?.replace(/\D/g, '') || null;
+  if (data.razaoSocial   !== undefined) updateData.razaoSocial   = data.razaoSocial?.trim() ?? null;
+  if (data.nomeVendedor  !== undefined) updateData.nomeVendedor  = data.nomeVendedor?.trim() ?? null;
+
+  return prisma.fornecedor.update({ where: { id }, data: updateData });
 }
 
+// Soft-delete: apenas desativa
 async function remover(id) {
+  const atual = await prisma.fornecedor.findUnique({ where: { id } });
+  if (!atual) throw { status: 404, message: 'Fornecedor não encontrado' };
   return prisma.fornecedor.update({ where: { id }, data: { ativo: false } });
 }
 
-// Vincula um material ao fornecedor com preço
-async function vincularMaterial(fornecedorId, materialId, preco, precoMetroQuadrado, prazoEntrega) {
+// Vincula um material ao fornecedor com preço (upsert) — preços opcionais
+async function vincularMaterial(fornecedorId, materialId, preco, precoMetroQuadrado) {
+  const precoVal           = preco            != null ? parseFloat(preco)            : null;
+  const precoM2Val         = precoMetroQuadrado != null ? parseFloat(precoMetroQuadrado) : null;
+
   return prisma.fornecedorMaterial.upsert({
     where: { fornecedorId_materialId: { fornecedorId, materialId } },
-    create: { fornecedorId, materialId, preco, precoMetroQuadrado, prazoEntrega, ativo: true },
-    update: { preco, precoMetroQuadrado, prazoEntrega, ativo: true },
+    create: { fornecedorId, materialId, preco: precoVal, precoMetroQuadrado: precoM2Val, ativo: true },
+    update: { preco: precoVal, precoMetroQuadrado: precoM2Val, ativo: true },
   });
 }
 
@@ -78,4 +177,15 @@ async function atualizarPrecoVinculo(fornecedorId, materialId, data) {
   });
 }
 
-module.exports = { listar, buscarPorId, criar, atualizar, remover, vincularMaterial, desvincularMaterial, atualizarPrecoVinculo };
+module.exports = {
+  listar,
+  buscarParaVinculo,
+  buscarPorId,
+  listarPorMaterial,
+  criar,
+  atualizar,
+  remover,
+  vincularMaterial,
+  desvincularMaterial,
+  atualizarPrecoVinculo,
+};

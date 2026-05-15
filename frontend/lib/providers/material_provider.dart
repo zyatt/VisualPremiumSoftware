@@ -28,15 +28,18 @@ class MaterialProvider extends ChangeNotifier {
   String _busca = '';
   String _categoriaFiltro = '';
   String _statusFiltro = '';
+  String _idFiltro = '';
 
   Future<void> carregar({
     String busca = '',
     String categoria = '',
     String status = '',
+    String id = '',
   }) async {
     _busca = busca;
     _categoriaFiltro = categoria;
     _statusFiltro = status;
+    _idFiltro = id;
     _carregando = true;
     _erro = null;
     notifyListeners();
@@ -45,6 +48,7 @@ class MaterialProvider extends ChangeNotifier {
         busca: busca,
         categoria: categoria,
         status: status,
+        id: id,
       );
     } catch (e) {
       _erro = _mensagemErro(e);
@@ -59,6 +63,7 @@ class MaterialProvider extends ChangeNotifier {
       busca: _busca,
       categoria: _categoriaFiltro,
       status: _statusFiltro,
+      id: _idFiltro,
     );
   }
 

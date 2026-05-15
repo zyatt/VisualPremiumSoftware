@@ -4,7 +4,7 @@ import '../repositories/estoque_repository.dart';
 class RelatorioOSProvider extends ChangeNotifier {
   final EstoqueRepository _repo = EstoqueRepository();
 
-  List<dynamic> _relatorios = [];
+  final List<dynamic> _relatorios = [];
   List<dynamic> get relatorios => _relatorios;
 
   dynamic _selecionado;

@@ -106,7 +106,6 @@ model FornecedorMaterial {
   materialId       Int
   preco            Decimal?  @db.Decimal(10, 2) // valor chapa
   precoMetroQuadrado Decimal? @db.Decimal(10, 2)
-  prazoEntrega     String?   // ex: "1 dia", "3 dias"
   ativo            Boolean   @default(true)
   criadoEm         DateTime  @default(now())
   atualizadoEm     DateTime  @updatedAt

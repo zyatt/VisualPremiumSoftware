@@ -16,7 +16,7 @@ class OrcamentoTab {
 class OrcamentoProvider extends ChangeNotifier {
   final _uuid = const Uuid();
 
-  List<OrcamentoTab> _abas = [];
+  final List<OrcamentoTab> _abas = [];
   List<OrcamentoTab> get abas => _abas;
 
   int _abaAtiva = 0;

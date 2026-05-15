@@ -6,11 +6,13 @@ class MaterialRepository {
     String? busca,
     String? categoria,
     String? status,
+    String? id,
   }) async {
     final params = <String, String>{};
     if (busca != null && busca.isNotEmpty)         params['busca']     = busca;
     if (categoria != null && categoria.isNotEmpty) params['categoria'] = categoria;
     if (status != null && status.isNotEmpty)       params['status']    = status;
+    if (id != null && id.isNotEmpty)               params['id']        = id;
 
     final query = params.entries
         .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')

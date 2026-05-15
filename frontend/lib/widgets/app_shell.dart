@@ -97,7 +97,6 @@ class _SidebarContentState extends State<_SidebarContent> {
   @override
   Widget build(BuildContext context) {
     final usuario = context.watch<UsuarioProvider>().usuarioLogado;
-    final scheme  = Theme.of(context).colorScheme;
 
     return Container(
       color: AppTheme.sidebar, // defina AppTheme.sidebar na sua AppTheme

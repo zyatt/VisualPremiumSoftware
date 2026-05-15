@@ -21,11 +21,15 @@ function _throwDuplicado(medida, espessura) {
 }
 
 async function listar(filtros = {}) {
-  const { busca, categoria, status, comFornecedor } = filtros;
+  const { busca, categoria, status, comFornecedor, id, medida, espessura, ativo } = filtros;
 
-  // Sem filtro de ativo: inativos aparecem ofuscados na lista
+  // Sem filtro de ativo: inativos aparecem ofuscados na lista (exceto quando ativo=true explícito)
   const where = {};
+  if (ativo === 'true') where.ativo = true;
+  if (id) where.id = Number(id);
   if (busca) where.nome = { contains: busca, mode: 'insensitive' };
+  if (medida) where.medida = { contains: medida, mode: 'insensitive' };
+  if (espessura) where.espessura = { contains: espessura, mode: 'insensitive' };
   if (categoria) where.categoria = { contains: categoria, mode: 'insensitive' };
   if (status) where.status = status;
   if (comFornecedor === 'true') {
