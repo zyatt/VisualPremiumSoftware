@@ -20,7 +20,7 @@ class HistoricoProvider extends ChangeNotifier {
     try {
       final todas = await _repo.listar();
       // Histórico = apenas ordens finalizadas
-      _historico = todas.where((o) => o['status'] == 'FINALIZADA').toList();
+      _historico = todas.where((o) => o['status'] == 'FINALIZADO').toList();
     } catch (e) {
       _erro = e.toString();
     } finally {

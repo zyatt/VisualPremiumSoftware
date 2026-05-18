@@ -25,8 +25,8 @@ class OrdemCompraProvider extends ChangeNotifier {
     try {
       final todas = await _repo.listar();
       _emAndamento = todas.where((o) => o['status'] == 'EM_ANDAMENTO').toList();
-      _finalizadas = todas.where((o) => o['status'] == 'FINALIZADA').toList();
-      _canceladas  = todas.where((o) => o['status'] == 'CANCELADA').toList();
+      _finalizadas = todas.where((o) => o['status'] == 'FINALIZADO').toList();
+      _canceladas  = todas.where((o) => o['status'] == 'CANCELADO').toList();
     } catch (e) {
       _erro = e.toString();
     } finally {
@@ -41,17 +41,27 @@ class OrdemCompraProvider extends ChangeNotifier {
   }
 
   Future<void> finalizar(int id) async {
-    await _repo.atualizarStatus(id, 'FINALIZADA');
+    await _repo.atualizarStatus(id, 'FINALIZADO');
     await carregar();
   }
 
   Future<void> cancelar(int id) async {
-    await _repo.atualizarStatus(id, 'CANCELADA');
+    await _repo.atualizarStatus(id, 'CANCELADO');
+    await carregar();
+  }
+
+  Future<void> reverter(int id) async {
+    await _repo.reverter(id);
     await carregar();
   }
 
   Future<void> atualizar(int id, Map<String, dynamic> dados) async {
     await _repo.atualizar(id, dados);
+    await carregar();
+  }
+
+  Future<void> excluir(int id) async {
+    await _repo.excluir(id);
     await carregar();
   }
 }

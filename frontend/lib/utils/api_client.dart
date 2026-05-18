@@ -75,6 +75,13 @@ class ApiClient {
     _check(res);
   }
 
+  /// Baixa uma resposta binária (ex: PDF) e retorna os bytes brutos.
+  static Future<List<int>> getBytes(String path) async {
+    final res = await http.get(_uri(path), headers: _headers);
+    _check(res);
+    return res.bodyBytes;
+  }
+
   static void _check(http.Response res) {
     if (res.statusCode < 200 || res.statusCode >= 300) {
       String msg = 'Erro ${res.statusCode}';

@@ -21,13 +21,13 @@ class OrdemCompraItemModel {
 
   factory OrdemCompraItemModel.fromJson(Map<String, dynamic> json) => OrdemCompraItemModel(
     id:                 json['id'],
-    materialId:         json['materialId'],
+    materialId:         json['materialId'] ?? 0,
     materialNome:       json['material']?['nome'] ?? '',
-    numeroOS:           json['numeroOS'],
-    quantidade:         double.tryParse(json['quantidade'].toString()) ?? 0,
-    precoUnitario:      double.tryParse(json['precoUnitario'].toString()) ?? 0,
+    numeroOS:           json['numeroOS'] ?? '',
+    quantidade:         double.tryParse(json['quantidade']?.toString() ?? '0') ?? 0,
+    precoUnitario:      double.tryParse(json['precoUnitario']?.toString() ?? '0') ?? 0,
     precoMetroQuadrado: json['precoMetroQuadrado'] != null ? double.tryParse(json['precoMetroQuadrado'].toString()) : null,
-    precoTotal:         double.tryParse(json['precoTotal'].toString()) ?? 0,
+    precoTotal:         double.tryParse(json['precoTotal']?.toString() ?? '0') ?? 0,
   );
 }
 
@@ -63,19 +63,19 @@ class OrdemCompraModel {
   });
 
   factory OrdemCompraModel.fromJson(Map<String, dynamic> json) => OrdemCompraModel(
-    id:             json['id'],
-    data:           DateTime.parse(json['data']),
-    fornecedorId:   json['fornecedorId'],
+    id:             json['id'] ?? 0,
+    data:           json['data'] != null ? DateTime.tryParse(json['data'].toString()) ?? DateTime.now() : DateTime.now(),
+    fornecedorId:   json['fornecedorId'] ?? 0,
     fornecedorNome: json['fornecedor']?['nomeFantasia'],
-    requisitante:   json['requisitante'],
+    requisitante:   json['requisitante'] ?? '',
     formaPagamento: json['formaPagamento'],
     prazoPagamento: json['prazoPagamento'],
     observacoes:    json['observacoes'],
     empresa:        json['empresa'],
-    status:         json['status'],
-    valorTotal:     double.tryParse(json['valorTotal'].toString()) ?? 0,
+    status:         json['status'] ?? 'EM_ANDAMENTO',
+    valorTotal:     double.tryParse(json['valorTotal']?.toString() ?? '0') ?? 0,
     itens:          (json['itens'] as List? ?? [])
-        .map((i) => OrdemCompraItemModel.fromJson(i))
+        .map((i) => OrdemCompraItemModel.fromJson(i as Map<String, dynamic>))
         .toList(),
     numerosOS:      (json['numerosOS'] as List? ?? [])
         .map((o) => o['numeroOS'].toString())

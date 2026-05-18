@@ -61,18 +61,47 @@ model Material {
   status          StatusEstoque @default(OK)
   estoqueConfirmado Boolean     @default(false)
   ativo           Boolean       @default(true)
-  ultimoValorPago Decimal?      @db.Decimal(10, 2)
+
+  // Último valor de custo pago (atualizado ao finalizar uma OC)
+  ultimoValorPago   Decimal?    @db.Decimal(10, 2)
+  // Último custo por metro quadrado pago (atualizado ao finalizar uma OC)
+  ultimoValorPagoM2 Decimal?    @db.Decimal(10, 2)
+
   criadoEm        DateTime      @default(now())
   atualizadoEm    DateTime      @updatedAt
 
   // Relações
-  fornecedorMateriais FornecedorMaterial[]
-  ordemItens          OrdemCompraItem[]
-  movimentacoes       MovimentacaoEstoque[]
-  orcamentoItens      OrcamentoItem[]
+  fornecedorMateriais  FornecedorMaterial[]
+  ordemItens           OrdemCompraItem[]
+  movimentacoes        MovimentacaoEstoque[]
+  orcamentoItens       OrcamentoItem[]
+  historicoPrecos      HistoricoPrecoMaterial[]
 
   @@unique([nome, medida, espessura])
   @@map("materiais")
+}
+
+// ============================================================
+// HISTÓRICO DE PREÇOS DE CUSTO
+// ============================================================
+
+// Registra cada valor de custo pago por material ao finalizar uma OC.
+// Permite rastrear evolução de preços e qual fornecedor vendeu por qual valor.
+model HistoricoPrecoMaterial {
+  id              Int      @id @default(autoincrement())
+  materialId      Int
+  ordemCompraId   Int
+  fornecedorId    Int
+  precoUnitario   Decimal  @db.Decimal(10, 2)
+  precoM2         Decimal? @db.Decimal(10, 2)
+  quantidade      Decimal  @db.Decimal(10, 3)
+  criadoEm        DateTime @default(now())
+
+  material    Material    @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  ordemCompra OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
+  fornecedor  Fornecedor  @relation(fields: [fornecedorId], references: [id])
+
+  @@map("historico_precos_material")
 }
 
 // ============================================================
@@ -92,9 +121,10 @@ model Fornecedor {
   atualizadoEm  DateTime @updatedAt
 
   // Relações
-  materiais     FornecedorMaterial[]
-  ordens_compra OrdemCompra[]
-  orcamentoItens OrcamentoItem[]
+  materiais           FornecedorMaterial[]
+  ordens_compra       OrdemCompra[]
+  orcamentoItens      OrcamentoItem[]
+  historicoPrecos     HistoricoPrecoMaterial[]
 
   @@map("fornecedores")
 }
@@ -186,9 +216,10 @@ model OrdemCompra {
   usuario    Usuario?    @relation(fields: [usuarioId], references: [id])
   orcamento  Orcamento?  @relation(fields: [orcamentoId], references: [id])
 
-  itens      OrdemCompraItem[]
-  numerosOS  OrdemCompraOS[]
-  movimentacoes MovimentacaoEstoque[]
+  itens           OrdemCompraItem[]
+  numerosOS       OrdemCompraOS[]
+  movimentacoes   MovimentacaoEstoque[]
+  historicoPrecos HistoricoPrecoMaterial[]
 
   @@map("ordens_compra")
 }

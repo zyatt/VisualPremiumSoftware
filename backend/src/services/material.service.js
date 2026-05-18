@@ -23,7 +23,6 @@ function _throwDuplicado(medida, espessura) {
 async function listar(filtros = {}) {
   const { busca, categoria, status, comFornecedor, id, medida, espessura, ativo } = filtros;
 
-  // Sem filtro de ativo: inativos aparecem ofuscados na lista (exceto quando ativo=true explícito)
   const where = {};
   if (ativo === 'true') where.ativo = true;
   if (id) where.id = Number(id);
@@ -44,7 +43,6 @@ async function listar(filtros = {}) {
         include: { fornecedor: { select: { id: true, nomeFantasia: true } } },
       },
     },
-    // Ativos primeiro, depois inativos ao final
     orderBy: [{ ativo: 'desc' }, { nome: 'asc' }],
   });
 
@@ -67,7 +65,7 @@ async function listar(filtros = {}) {
 
     return {
       ...m,
-      precoMediano: mediana(precos),
+      precoMediano:  mediana(precos),
       precoM2Mediano: mediana(precosM2),
     };
   });
@@ -80,12 +78,20 @@ async function buscarPorId(id) {
       fornecedorMateriais: {
         include: { fornecedor: { select: { id: true, nomeFantasia: true } } },
       },
+      // Últimos 50 registros de histórico de custo, mais recente primeiro
+      historicoPrecos: {
+        orderBy: { criadoEm: 'desc' },
+        take: 50,
+        include: {
+          fornecedor:  { select: { id: true, nomeFantasia: true } },
+          ordemCompra: { select: { id: true, data: true } },
+        },
+      },
     },
   });
 }
 
 async function criar(data) {
-  // Valida duplicidade: nome + medida + espessura não podem ser todos iguais
   const nomeTrimmed      = data.nome?.trim();
   const medidaTrimmed    = data.medida?.trim()    ?? null;
   const espessuraTrimmed = data.espessura?.trim() ?? null;
@@ -112,7 +118,6 @@ async function criar(data) {
 async function atualizar(id, data) {
   const atual = await prisma.material.findUnique({ where: { id } });
 
-  // Valida duplicidade ao alterar nome, medida ou espessura
   const nomeTrimmed      = (data.nome      ?? atual.nome)?.trim();
   const medidaTrimmed    = (data.medida     ?? atual.medida)?.trim()    ?? null;
   const espessuraTrimmed = (data.espessura  ?? atual.espessura)?.trim() ?? null;
@@ -141,17 +146,13 @@ async function atualizar(id, data) {
 }
 
 async function desativar(id) {
-  // CORRIGIDO: where só é válido em relações to-many (ordemItens), não dentro
-  // do include de uma relação to-one (ordemCompra). Usamos _count com filtro aninhado.
   const material = await prisma.material.findUnique({
     where: { id },
     include: {
       _count: {
         select: {
           ordemItens: {
-            where: {
-              ordemCompra: { status: 'EM_ANDAMENTO' },
-            },
+            where: { ordemCompra: { status: 'EM_ANDAMENTO' } },
           },
         },
       },
@@ -176,7 +177,6 @@ async function reativar(id) {
   if (!material) throw { status: 404, message: 'Material não encontrado' };
   if (material.ativo) throw { status: 400, message: 'Material já está ativo' };
 
-  // Recalcula status com base na quantidade atual
   const status = calcularStatus(material.quantidade, material.estoqueMinimo, true);
 
   return prisma.material.update({
@@ -205,4 +205,29 @@ async function listarCategorias() {
   return result.map((r) => r.categoria);
 }
 
-module.exports = { listar, buscarPorId, criar, atualizar, desativar, reativar, excluir, confirmarEstoque, listarCategorias };
+// Retorna os últimos N registros do histórico de custo de um material específico
+async function listarHistoricoPrecos(materialId, limite = 50) {
+  return prisma.historicoPrecoMaterial.findMany({
+    where: { materialId: Number(materialId) },
+    orderBy: { criadoEm: 'desc' },
+    take: limite,
+    include: {
+      fornecedor:  { select: { id: true, nomeFantasia: true } },
+      ordemCompra: { select: { id: true, data: true } },
+    },
+  });
+}
+
+module.exports = {
+  calcularStatus,
+  listar,
+  buscarPorId,
+  criar,
+  atualizar,
+  desativar,
+  reativar,
+  excluir,
+  confirmarEstoque,
+  listarCategorias,
+  listarHistoricoPrecos,
+};

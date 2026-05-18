@@ -45,10 +45,10 @@ class MaterialProvider extends ChangeNotifier {
     notifyListeners();
     try {
       _materiais = await _repo.listar(
-        busca: busca,
+        busca:     busca,
         categoria: categoria,
-        status: status,
-        id: id,
+        status:    status,
+        id:        id,
       );
     } catch (e) {
       _erro = _mensagemErro(e);
@@ -60,10 +60,10 @@ class MaterialProvider extends ChangeNotifier {
 
   Future<void> recarregar() async {
     await carregar(
-      busca: _busca,
+      busca:     _busca,
       categoria: _categoriaFiltro,
-      status: _statusFiltro,
-      id: _idFiltro,
+      status:    _statusFiltro,
+      id:        _idFiltro,
     );
   }
 
@@ -153,6 +153,17 @@ class MaterialProvider extends ChangeNotifier {
       _erro = _mensagemErro(e);
       notifyListeners();
       return false;
+    }
+  }
+
+  /// Busca histórico de custos pagos via OC para o material informado.
+  /// Retorna lista vazia em caso de erro (não expõe _erro para não interferir
+  /// com o estado geral da página de estoque).
+  Future<List<HistoricoPrecoModel>> listarHistoricoPrecos(int materialId) async {
+    try {
+      return await _repo.listarHistoricoPrecos(materialId);
+    } catch (_) {
+      return [];
     }
   }
 }

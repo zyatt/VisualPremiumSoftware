@@ -13,11 +13,34 @@ class OrdemCompraRepository {
     return await ApiClient.post('/ordens-compra', dados);
   }
 
+  Future<int?> proximoId() async {
+    try {
+      final result = await ApiClient.get('/ordens-compra/proximo-id');
+      return result['proximoId'] as int?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>> atualizar(int id, Map<String, dynamic> dados) async {
     return await ApiClient.put('/ordens-compra/$id', dados);
   }
 
   Future<void> atualizarStatus(int id, String status) async {
-    await ApiClient.put('/ordens-compra/$id/status', {'status': status});
+    final rota = status == 'FINALIZADO' ? 'finalizar' : 'cancelar';
+    await ApiClient.patch('/ordens-compra/$id/$rota');
+  }
+
+  Future<void> reverter(int id) async {
+    await ApiClient.patch('/ordens-compra/$id/reverter');
+  }
+
+  Future<void> excluir(int id) async {
+    await ApiClient.delete('/ordens-compra/$id');
+  }
+
+  /// Baixa o PDF da OC e retorna os bytes prontos para exibição.
+  Future<List<int>> baixarPdf(int id) async {
+    return ApiClient.getBytes('/ordens-compra/$id/pdf');
   }
 }

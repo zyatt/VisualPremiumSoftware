@@ -62,5 +62,14 @@ class MaterialRepository {
   Future<MaterialModel> reativar(int id) async {
     final data = await ApiClient.patch('/materiais/$id/reativar', {});
     return MaterialModel.fromJson(data);
-}
+  }
+
+  /// GET /api/materiais/:id/historico-precos
+  /// Retorna o histórico de custos pagos via OC finalizada para o material.
+  Future<List<HistoricoPrecoModel>> listarHistoricoPrecos(int materialId) async {
+    final list = await ApiClient.getList('/materiais/$materialId/historico-precos');
+    return list
+        .map((e) => HistoricoPrecoModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
 }

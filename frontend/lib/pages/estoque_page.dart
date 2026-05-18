@@ -81,6 +81,9 @@ class _EstoquePageState extends State<EstoquePage> {
   String _categoriaFiltro = '';
   Timer? _debounceTimer;
 
+  static const int _itensPorPagina = 50;
+  int _paginaAtual = 0;
+
   @override
   void initState() {
     super.initState();
@@ -100,6 +103,7 @@ class _EstoquePageState extends State<EstoquePage> {
   }
 
   void _aplicarFiltros() {
+    setState(() => _paginaAtual = 0);
     context.read<MaterialProvider>().carregar(
           busca:     _buscaCtrl.text,
           categoria: _categoriaFiltro,
@@ -113,11 +117,23 @@ class _EstoquePageState extends State<EstoquePage> {
     _debounceTimer = Timer(const Duration(milliseconds: 400), _aplicarFiltros);
   }
 
+  void _abrirHistoricoPrecos(MaterialModel material) {
+    showDialog(
+      context: context,
+      builder: (_) => _HistoricoPrecoDialog(material: material),
+    );
+  }
+
   Future<void> _abrirFormMaterial([MaterialModel? material]) async {
     final salvou = await showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (_) => _MaterialFormDialog(material: material),
+      builder: (_) => _MaterialFormDialog(
+        material:    material,
+        onDesativar: material != null ? _desativar : null,
+        onReativar:  material != null ? _reativar  : null,
+        onExcluir:   material != null ? _excluir   : null,
+      ),
     );
 
     if (!mounted) return;
@@ -385,6 +401,7 @@ class _EstoquePageState extends State<EstoquePage> {
                     setState(() {
                       _statusFiltro    = '';
                       _categoriaFiltro = '';
+                      _paginaAtual     = 0;
                     });
                     context.read<MaterialProvider>().carregar();
                   },
@@ -458,23 +475,209 @@ class _EstoquePageState extends State<EstoquePage> {
                     );
                   }
 
-                  return Card(
-                    clipBehavior: Clip.antiAlias,
-                    child: SingleChildScrollView(
-                      child: _TabelaMateriais(
-                        materiais:         provider.materiais,
-                        onEditar:          _abrirFormMaterial,
-                        onDesativar:       _desativar,
-                        onReativar:        _reativar,
-                        onExcluir:         _excluir,
-                        onVerFornecedores: _abrirPrecosFornecedores,
+                  final todos        = provider.materiais;
+                  final totalPaginas = (todos.length / _itensPorPagina).ceil();
+                  final paginaSegura = _paginaAtual.clamp(0, (totalPaginas - 1).clamp(0, 999));
+                  final inicio       = paginaSegura * _itensPorPagina;
+                  final fim          = (inicio + _itensPorPagina).clamp(0, todos.length);
+                  final paginados    = todos.sublist(inicio, fim);
+
+                  return Column(
+                    children: [
+                      Expanded(
+                        child: Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: SingleChildScrollView(
+                            child: _TabelaMateriais(
+                              materiais:            paginados,
+                              onEditar:             _abrirFormMaterial,
+                              onVerFornecedores:    _abrirPrecosFornecedores,
+                              onVerHistoricoPrecos: _abrirHistoricoPrecos,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                      if (totalPaginas > 1) ...[
+                        const SizedBox(height: 12),
+                        _BarraPaginacao(
+                          paginaAtual:    paginaSegura,
+                          totalPaginas:   totalPaginas,
+                          totalItens:     todos.length,
+                          itensPorPagina: _itensPorPagina,
+                          onPaginaChanged: (p) => setState(() => _paginaAtual = p),
+                        ),
+                      ],
+                    ],
                   );
                 },
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Barra de paginação
+// ─────────────────────────────────────────────────────────────────────────────
+class _BarraPaginacao extends StatelessWidget {
+  final int paginaAtual;
+  final int totalPaginas;
+  final int totalItens;
+  final int itensPorPagina;
+  final void Function(int) onPaginaChanged;
+
+  const _BarraPaginacao({
+    required this.paginaAtual,
+    required this.totalPaginas,
+    required this.totalItens,
+    required this.itensPorPagina,
+    required this.onPaginaChanged,
+  });
+
+  List<int> _paginas() {
+    if (totalPaginas <= 7) return List.generate(totalPaginas, (i) => i);
+    final Set<int> vis = {0, totalPaginas - 1, paginaAtual};
+    if (paginaAtual > 0) vis.add(paginaAtual - 1);
+    if (paginaAtual < totalPaginas - 1) vis.add(paginaAtual + 1);
+    final sorted = vis.toList()..sort();
+    final List<int> result = [];
+    for (int i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.add(-1);
+      result.add(sorted[i]);
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inicio  = paginaAtual * itensPorPagina + 1;
+    final fim     = ((paginaAtual + 1) * itensPorPagina).clamp(0, totalItens);
+    final paginas = _paginas();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'Exibindo $inicio–$fim de $totalItens materiais',
+            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _BotaoPagina(
+                icon: Icons.chevron_left,
+                tooltip: 'Página anterior',
+                enabled: paginaAtual > 0,
+                onTap: () => onPaginaChanged(paginaAtual - 1),
+              ),
+              const SizedBox(width: 4),
+              for (final p in paginas) ...[
+                if (p == -1)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Text('…', style: TextStyle(color: AppTheme.textHint)),
+                  )
+                else
+                  _BotaoNumeroPagina(
+                    numero: p,
+                    ativa: p == paginaAtual,
+                    onTap: () => onPaginaChanged(p),
+                  ),
+                const SizedBox(width: 4),
+              ],
+              _BotaoPagina(
+                icon: Icons.chevron_right,
+                tooltip: 'Próxima página',
+                enabled: paginaAtual < totalPaginas - 1,
+                onTap: () => onPaginaChanged(paginaAtual + 1),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BotaoPagina extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _BotaoPagina({
+    required this.icon,
+    required this.tooltip,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: enabled ? AppTheme.divider : AppTheme.divider.withValues(alpha: 0.4),
+            ),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: enabled ? AppTheme.textSecondary : AppTheme.textHint,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BotaoNumeroPagina extends StatelessWidget {
+  final int numero;
+  final bool ativa;
+  final VoidCallback onTap;
+
+  const _BotaoNumeroPagina({
+    required this.numero,
+    required this.ativa,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: ativa ? null : onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: ativa ? AppTheme.primary : Colors.transparent,
+          border: Border.all(
+            color: ativa ? AppTheme.primary : AppTheme.divider,
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '${numero + 1}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
+            color: ativa ? Colors.white : AppTheme.textSecondary,
+          ),
         ),
       ),
     );
@@ -566,57 +769,66 @@ class _EmptySection extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tabela de materiais
+// Tabela de materiais  (Column + Row — hover cobre a linha inteira)
 // ─────────────────────────────────────────────────────────────────────────────
 class _TabelaMateriais extends StatelessWidget {
   final List<MaterialModel> materiais;
   final void Function(MaterialModel) onEditar;
-  final void Function(MaterialModel) onDesativar;
-  final void Function(MaterialModel) onReativar;
-  final void Function(MaterialModel) onExcluir;
   final void Function(MaterialModel) onVerFornecedores;
+  final void Function(MaterialModel) onVerHistoricoPrecos;
 
   const _TabelaMateriais({
     required this.materiais,
     required this.onEditar,
-    required this.onDesativar,
-    required this.onReativar,
-    required this.onExcluir,
     required this.onVerFornecedores,
+    required this.onVerHistoricoPrecos,
   });
 
-  static const _columnWidths = {
-    0: FixedColumnWidth(56),   // ID
-    1: FlexColumnWidth(2.0),   // Material
-    2: FlexColumnWidth(1.0),   // Categoria
-    3: FlexColumnWidth(0.9),   // Unid.
-    4: FlexColumnWidth(0.8),   // Medida
-    5: FlexColumnWidth(0.7),   // Esp.
-    6: FlexColumnWidth(0.6),   // Qtd
-    7: FlexColumnWidth(0.6),   // Mín
-    8: FlexColumnWidth(0.9),   // Valor
-    9: FlexColumnWidth(0.9),   // Valor m²
-    10: FlexColumnWidth(0.8),  // Status
-    11: FlexColumnWidth(1.2),  // Ações
-  };
+  // flex values para cada coluna
+  static const List<_ColDef> _cols = [
+    _ColDef(label: 'ID',             fixed: 56),
+    _ColDef(label: 'Material',       flex: 2.0),
+    _ColDef(label: 'Categoria',      flex: 1.0),
+    _ColDef(label: 'Unidade',        flex: 0.9),
+    _ColDef(label: 'Medida',         flex: 0.8),
+    _ColDef(label: 'Espessura',      flex: 0.7),
+    _ColDef(label: 'Estoque atual',  flex: 0.6),
+    _ColDef(label: 'Estoque mínimo', flex: 0.6),
+    _ColDef(label: 'Valor',          flex: 0.9),
+    _ColDef(label: 'Valor m²',       flex: 0.9),
+    _ColDef(label: 'Custo',          flex: 0.9),
+    _ColDef(label: 'Custo m²',       flex: 0.9),
+    _ColDef(label: 'Status',         flex: 0.8),
+    // Ações removidas da tabela — estão no formulário de edição
+  ];
 
-  TableRow get _cabecalho => TableRow(
-        decoration: const BoxDecoration(color: AppTheme.surfaceVariant),
-        children: [
-          _th('ID'),
-          _th('Material'),
-          _th('Categoria'),
-          _th('Unidade'),
-          _th('Medida'),
-          _th('Espessura'),
-          _th('Estoque atual'),
-          _th('Estoque mínimo'),
-          _th('Valor'),
-          _th('Valor m²'),
-          _th('Status'),
-          _th('Ações'),
-        ],
+  Widget _cabecalho() => Container(
+        color: AppTheme.surfaceVariant,
+        child: Row(
+          children: [
+            for (final col in _cols)
+              _colWrap(
+                col,
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  child: Text(
+                    col.label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       );
+
+  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
+      ? SizedBox(width: col.fixed, child: child)
+      : Expanded(flex: (col.flex! * 10).round(), child: child);
 
   @override
   Widget build(BuildContext context) {
@@ -627,7 +839,6 @@ class _TabelaMateriais extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // ── Seção: Aguardando confirmação ───────────────────────────────────
         _SectionHeader(
           icon: Icons.pending_outlined,
           label: 'Aguardando confirmação de estoque',
@@ -636,23 +847,24 @@ class _TabelaMateriais extends StatelessWidget {
         ),
         if (naoConfirm.isEmpty)
           const _EmptySection(message: 'Nenhum material pendente de confirmação.')
-        else
-          Table(
-            border: const TableBorder(
-              horizontalInside: BorderSide(color: AppTheme.divider, width: 0.8),
-              verticalInside:   BorderSide(color: AppTheme.divider, width: 0.5),
-              bottom:           BorderSide(color: AppTheme.divider, width: 0.8),
+        else ...[
+          _cabecalho(),
+          for (int i = 0; i < naoConfirm.length; i++) ...[
+            if (i > 0)
+              const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+            _LinhaMateria(
+              material:             naoConfirm[i],
+              cols:                 _cols,
+              onEditar:             onEditar,
+              onVerFornecedores:    onVerFornecedores,
+              onVerHistoricoPrecos: onVerHistoricoPrecos,
             ),
-            columnWidths: _columnWidths,
-            children: [
-              _cabecalho,
-              for (final m in naoConfirm) _buildRow(context, m),
-            ],
-          ),
+          ],
+          const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+        ],
 
         const SizedBox(height: 24),
 
-        // ── Seção: Estoque confirmado ───────────────────────────────────────
         _SectionHeader(
           icon: Icons.verified_outlined,
           label: 'Estoque confirmado',
@@ -661,268 +873,342 @@ class _TabelaMateriais extends StatelessWidget {
         ),
         if (confirmados.isEmpty)
           const _EmptySection(message: 'Nenhum material com estoque confirmado.')
-        else
-          Table(
-            border: const TableBorder(
-              horizontalInside: BorderSide(color: AppTheme.divider, width: 0.8),
-              verticalInside:   BorderSide(color: AppTheme.divider, width: 0.5),
-              bottom:           BorderSide(color: AppTheme.divider, width: 0.8),
+        else ...[
+          _cabecalho(),
+          for (int i = 0; i < confirmados.length; i++) ...[
+            if (i > 0)
+              const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+            _LinhaMateria(
+              material:             confirmados[i],
+              cols:                 _cols,
+              onEditar:             onEditar,
+              onVerFornecedores:    onVerFornecedores,
+              onVerHistoricoPrecos: onVerHistoricoPrecos,
             ),
-            columnWidths: _columnWidths,
-            children: [
-              _cabecalho,
-              for (final m in confirmados) _buildRow(context, m),
-            ],
-          ),
+          ],
+          const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+        ],
       ],
     );
   }
+}
 
-  TableRow _buildRow(BuildContext context, MaterialModel m) {
-    final inativo = !m.ativo;
+// Descritor de coluna
+class _ColDef {
+  final String label;
+  final double? fixed;
+  final double? flex;
+  const _ColDef({required this.label, this.fixed, this.flex});
+}
 
-    // Linha inteira ofuscada quando inativo
-    Widget wrapOpacity(Widget child) =>
-        inativo ? Opacity(opacity: 0.45, child: child) : child;
+// ─────────────────────────────────────────────────────────────────────────────
+// Linha da tabela — hover cobre tudo de uma vez
+// ─────────────────────────────────────────────────────────────────────────────
+class _LinhaMateria extends StatefulWidget {
+  final MaterialModel material;
+  final List<_ColDef> cols;
+  final void Function(MaterialModel) onEditar;
+  final void Function(MaterialModel) onVerFornecedores;
+  final void Function(MaterialModel) onVerHistoricoPrecos;
 
-    // Wrapper que abre edição ao clicar com hover laranja
-    Widget clickable(Widget child) => _HoverEditCell(
-          enabled: !inativo,
-          onTap: inativo ? null : () => onEditar(m),
-          child: child,
-        );
+  const _LinhaMateria({
+    required this.material,
+    required this.cols,
+    required this.onEditar,
+    required this.onVerFornecedores,
+    required this.onVerHistoricoPrecos,
+  });
 
-    return TableRow(
-      decoration: BoxDecoration(
-        color: inativo
-            ? AppTheme.surfaceVariant.withValues(alpha: 0.4)
-            : AppTheme.surface,
-      ),
-      children: [
-        // ID
-        _td(clickable(wrapOpacity(
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-            child: Text(
-              '${m.id}',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: inativo ? AppTheme.textHint : AppTheme.textSecondary,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
-        ))),
-        // Nome
-        _td(clickable(
-          wrapOpacity(
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-            child: Text(
-              m.nome,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
-                color: inativo ? AppTheme.textHint : AppTheme.textPrimary,
-                decoration: inativo ? TextDecoration.lineThrough : null,
-              ),
-            ),
-          ),
-          ),
-        )),
-        _td(clickable(wrapOpacity(_cell(m.categoria ?? '—')))),
-        _td(clickable(wrapOpacity(_cell(m.unidade ?? '—')))),
-        _td(clickable(wrapOpacity(_cell(m.medida ?? '—')))),
-        _td(clickable(wrapOpacity(_cell(m.espessura ?? '—')))),
-        _td(clickable(wrapOpacity(_cell(m.quantidade
-            .toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2))))),
-        _td(clickable(wrapOpacity(_cell(m.estoqueMinimo
-            .toStringAsFixed(m.estoqueMinimo % 1 == 0 ? 0 : 2))))),
-        // Valor unitário (mediano entre fornecedores — clicável separado, NÃO abre editar)
-        _td(wrapOpacity(_ValorMedianoCell(
-          valor: m.precoMediano,
-          temFornecedores: m.fornecedorMateriais.isNotEmpty,
-          onTap: () => onVerFornecedores(m),
-        ))),
-        // Valor m² (mediano — clicável separado, NÃO abre editar)
-        _td(wrapOpacity(_ValorMedianoCell(
-          valor: m.precoM2Mediano,
-          temFornecedores: m.fornecedorMateriais.isNotEmpty,
-          onTap: () => onVerFornecedores(m),
-        ))),
-        // Status badge
-        _td(clickable(wrapOpacity(Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-          child: Center(child: _StatusBadge(status: m.status)),
-        )))),
-        // Ações (não ofuscadas — sempre visíveis para o usuário agir)
-        _td(Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (!inativo) ...[
-                IconButton(
-                  tooltip: 'Editar',
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  color: AppTheme.textSecondary,
-                  onPressed: () => onEditar(m),
-                ),
-                IconButton(
-                  tooltip: 'Desativar',
-                  icon: const Icon(Icons.block, size: 18),
-                  color: AppTheme.warning,
-                  onPressed: () => onDesativar(m),
-                ),
-              ],
-              if (inativo) ...[
-                IconButton(
-                  tooltip: 'Reativar material',
-                  icon: const Icon(Icons.restore, size: 18),
-                  color: AppTheme.success,
-                  onPressed: () => onReativar(m),
-                ),
-                IconButton(
-                  tooltip: 'Excluir permanentemente',
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  color: AppTheme.error,
-                  onPressed: () => onExcluir(m),
-                ),
-              ],
-            ],
-          ),
-        )),
-      ],
-    );
+  @override
+  State<_LinhaMateria> createState() => _LinhaMateriaState();
+}
+
+class _LinhaMateriaState extends State<_LinhaMateria> {
+  bool _hovered = false;
+
+  // onHover é chamado a cada movimento do mouse DENTRO da região,
+  // inclusive sobre filhos interativos (IconButton, GestureDetector etc.).
+  // Diferente de onEnter/onExit, nunca é interrompido por filhos —
+  // elimina o piscar definitivamente.
+  void _onHover(PointerHoverEvent _) {
+    if (!_hovered) setState(() => _hovered = true);
   }
 
-  static Widget _th(String label) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
-            color: AppTheme.textSecondary,
-          ),
-        ),
-      );
+  void _onExit(PointerExitEvent _) {
+    if (_hovered) setState(() => _hovered = false);
+  }
 
-  static Widget _td(Widget child) => child;
 
-  static Widget _cell(String text) => Padding(
+  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
+      ? SizedBox(width: col.fixed, child: child)
+      : Expanded(flex: (col.flex! * 10).round(), child: child);
+
+  static Widget _cell(String text, {bool inativo = false}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         child: Text(
           text,
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+          style: TextStyle(
+            fontSize: 13,
+            color: inativo ? AppTheme.textHint : AppTheme.textPrimary,
+          ),
         ),
       );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Célula genérica clicável com hover laranja (abre editar)
-// ─────────────────────────────────────────────────────────────────────────────
-class _HoverEditCell extends StatefulWidget {
-  final Widget child;
-  final bool enabled;
-  final VoidCallback? onTap;
-
-  const _HoverEditCell({
-    required this.child,
-    required this.enabled,
-    this.onTap,
-  });
-
-  @override
-  State<_HoverEditCell> createState() => _HoverEditCellState();
-}
-
-class _HoverEditCellState extends State<_HoverEditCell> {
-  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
+    final m       = widget.material;
+    final inativo = !m.ativo;
+    final cols    = widget.cols;
+
+    // Fundo da linha: hover > inativo > normal
+    final bgColor = _hovered
+        ? const Color(0xFFFF9800).withValues(alpha: 0.10)
+        : inativo
+            ? AppTheme.surfaceVariant.withValues(alpha: 0.4)
+            : AppTheme.surface;
+
+    Widget maybeOpacity(Widget child) =>
+        inativo ? Opacity(opacity: 0.45, child: child) : child;
+
+    // Célula de valor sem MouseRegion próprio — o MouseRegion da linha cobre tudo
+    Widget valorCell(double? valor, bool temFornecedores) =>
+        _ValorCell(
+          valor: valor,
+          temFornecedores: temFornecedores,
+          onTap: () => widget.onVerFornecedores(m),
+        );
+
     return MouseRegion(
-      cursor: widget.enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-      onEnter: (_) { if (widget.enabled) setState(() => _hovered = true); },
-      onExit:  (_) => setState(() => _hovered = false),
+      cursor: SystemMouseCursors.click,
+      onHover: _onHover,
+      onExit: _onExit,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          color: _hovered
-              ? const Color(0xFFFF9800).withValues(alpha: 0.10)
-              : Colors.transparent,
-          child: widget.child,
+        onTap: () => widget.onEditar(m),
+        child: ColoredBox(
+          color: bgColor,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 52),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // ── ID ──────────────────────────────────────────────────────
+                _colWrap(cols[0], maybeOpacity(Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  child: Text(
+                    '${m.id}',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: inativo ? AppTheme.textHint : AppTheme.textSecondary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ))),
+                _vDivider(),
+                // ── Nome ────────────────────────────────────────────────────
+                _colWrap(cols[1], maybeOpacity(Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  child: Text(
+                    m.nome,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: inativo ? AppTheme.textHint : AppTheme.textPrimary,
+                      decoration: inativo ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                ))),
+                _vDivider(),
+                // ── Categoria ───────────────────────────────────────────────
+                _colWrap(cols[2], maybeOpacity(_cell(m.categoria ?? '—', inativo: inativo))),
+                _vDivider(),
+                // ── Unidade ─────────────────────────────────────────────────
+                _colWrap(cols[3], maybeOpacity(_cell(m.unidade ?? '—', inativo: inativo))),
+                _vDivider(),
+                // ── Medida ──────────────────────────────────────────────────
+                _colWrap(cols[4], maybeOpacity(_cell(m.medida ?? '—', inativo: inativo))),
+                _vDivider(),
+                // ── Espessura ───────────────────────────────────────────────
+                _colWrap(cols[5], maybeOpacity(_cell(m.espessura ?? '—', inativo: inativo))),
+                _vDivider(),
+                // ── Estoque atual ───────────────────────────────────────────
+                _colWrap(cols[6], maybeOpacity(_cell(
+                  m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2),
+                  inativo: inativo,
+                ))),
+                _vDivider(),
+                // ── Estoque mínimo ──────────────────────────────────────────
+                _colWrap(cols[7], maybeOpacity(_cell(
+                  m.estoqueMinimo.toStringAsFixed(m.estoqueMinimo % 1 == 0 ? 0 : 2),
+                  inativo: inativo,
+                ))),
+                _vDivider(),
+                // ── Valor ───────────────────────────────────────────────────
+                _colWrap(cols[8], maybeOpacity(valorCell(
+                  m.precoMediano,
+                  m.fornecedorMateriais.isNotEmpty,
+                ))),
+                _vDivider(),
+                // ── Valor m² ────────────────────────────────────────────────
+                _colWrap(cols[9], maybeOpacity(valorCell(
+                  m.precoM2Mediano,
+                  m.fornecedorMateriais.isNotEmpty,
+                ))),
+                _vDivider(),
+                // ── Custo (último valor pago via OC) ────────────────────────
+                _colWrap(cols[10], maybeOpacity(_CustoCell(
+                  valor:      m.ultimoValorPago,
+                  temHistorico: true,
+                  onTap:      () => widget.onVerHistoricoPrecos(m),
+                ))),
+                _vDivider(),
+                // ── Custo m² (último custo m² pago via OC) ──────────────────
+                _colWrap(cols[11], maybeOpacity(_CustoCell(
+                  valor:      m.ultimoValorPagoM2,
+                  temHistorico: true,
+                  onTap:      () => widget.onVerHistoricoPrecos(m),
+                ))),
+                _vDivider(),
+                // ── Status ──────────────────────────────────────────────────
+                _colWrap(cols[12], maybeOpacity(Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                    child: _StatusBadge(status: m.status),
+                  ),
+                ))),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
+
+  static Widget _vDivider() => const VerticalDivider(
+        width: 1, thickness: 0.5, color: AppTheme.divider,
+      );
 }
 
-/// Célula clicável que exibe o valor intermediário dos fornecedores.
-class _ValorMedianoCell extends StatefulWidget {
+// Célula de valor: hover próprio (levemente mais forte) sobre hover de linha
+class _ValorCell extends StatefulWidget {
   final double? valor;
   final bool temFornecedores;
   final VoidCallback onTap;
 
-  const _ValorMedianoCell({
+  const _ValorCell({
     required this.valor,
     required this.temFornecedores,
     required this.onTap,
   });
 
   @override
-  State<_ValorMedianoCell> createState() => _ValorMedianoCellState();
+  State<_ValorCell> createState() => _ValorCellState();
 }
 
-class _ValorMedianoCellState extends State<_ValorMedianoCell> {
+class _ValorCellState extends State<_ValorCell> {
   bool _hovered = false;
+
+  // onHover do filho NÃO cancela o onHover do pai (_LinhaMateria),
+  // então o fundo da linha permanece estável enquanto este hover local
+  // adiciona destaque só na célula.
+  void _onHover(PointerHoverEvent _) {
+    if (!_hovered) setState(() => _hovered = true);
+  }
+
+  void _onExit(PointerExitEvent _) {
+    if (_hovered) setState(() => _hovered = false);
+  }
 
   @override
   Widget build(BuildContext context) {
     final hasValue = widget.valor != null && widget.valor! > 0;
-    final label = hasValue ? 'R\$ ${widget.valor!.toStringAsFixed(2)}' : '—';
-    final canTap = widget.temFornecedores;
+    final label    = hasValue ? 'R\$ ${widget.valor!.toStringAsFixed(2)}' : '—';
+    final canTap   = widget.temFornecedores;
+    final showHover = canTap && _hovered;
 
     return MouseRegion(
-      cursor: canTap ? SystemMouseCursors.click : SystemMouseCursors.basic,
-      onEnter: (_) { if (canTap) setState(() => _hovered = true); },
-      onExit:  (_) => setState(() => _hovered = false),
+      cursor: canTap ? SystemMouseCursors.click : MouseCursor.defer,
+      onHover: _onHover,
+      onExit: _onExit,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: canTap ? widget.onTap : null,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          decoration: BoxDecoration(
-            color: _hovered
-                ? const Color(0xFFFF9800).withValues(alpha: 0.13)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: _hovered
-                      ? const Color(0xFFE65100)
-                      : (hasValue ? AppTheme.textPrimary : AppTheme.textHint),
-                  fontWeight: hasValue ? FontWeight.w500 : FontWeight.normal,
-                ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+            decoration: BoxDecoration(
+              color: showHover
+                  ? AppTheme.primary.withValues(alpha: 0.12)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                color: showHover
+                    ? AppTheme.primary
+                    : hasValue ? AppTheme.textPrimary : AppTheme.textHint,
+                fontWeight: hasValue ? FontWeight.w500 : FontWeight.normal,
               ),
-            ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Botão de ícone com hover visual próprio (círculo colorido) sem usar
+class _IconBtn extends StatefulWidget {
+  final IconData icon;
+  final Color color;
+  final VoidCallback onPressed;
+  final String tooltip;
+
+  const _IconBtn({
+    required this.icon,
+    required this.color,
+    required this.onPressed,
+    required this.tooltip,
+  });
+
+  @override
+  State<_IconBtn> createState() => _IconBtnState();
+}
+
+class _IconBtnState extends State<_IconBtn> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: widget.tooltip,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        // onHover não interrompe o onHover da linha pai
+        onHover: (_) { if (!_hovered) setState(() => _hovered = true); },
+        onExit:  (_) { if (_hovered)  setState(() => _hovered = false); },
+        child: GestureDetector(
+          onTap: widget.onPressed,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? widget.color.withValues(alpha: 0.12)
+                  : Colors.transparent,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(widget.icon, size: 18, color: widget.color),
           ),
         ),
       ),
@@ -1230,7 +1516,10 @@ class _FornecedorPrecoRow extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _MaterialFormDialog extends StatefulWidget {
   final MaterialModel? material;
-  const _MaterialFormDialog({this.material});
+  final void Function(MaterialModel)? onDesativar;
+  final void Function(MaterialModel)? onReativar;
+  final void Function(MaterialModel)? onExcluir;
+  const _MaterialFormDialog({this.material, this.onDesativar, this.onReativar, this.onExcluir});
 
   @override
   State<_MaterialFormDialog> createState() => _MaterialFormDialogState();
@@ -1494,22 +1783,487 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
           ),
         ),
       ),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      actions: [
+        // ── Botões de ação destrutiva (apenas ao editar) ─────────────────
+        Row(
+          children: [
+            if (_editando) ...[
+              if (widget.material!.ativo && widget.onDesativar != null)
+                TextButton.icon(
+                  onPressed: _salvando
+                      ? null
+                      : () {
+                          Navigator.of(context, rootNavigator: true).pop(false);
+                          widget.onDesativar!(widget.material!);
+                        },
+                  icon: const Icon(Icons.block, size: 16),
+                  label: const Text('Desativar'),
+                  style: TextButton.styleFrom(foregroundColor: AppTheme.warning),
+                ),
+              if (!widget.material!.ativo && widget.onReativar != null)
+                TextButton.icon(
+                  onPressed: _salvando
+                      ? null
+                      : () {
+                          Navigator.of(context, rootNavigator: true).pop(false);
+                          widget.onReativar!(widget.material!);
+                        },
+                  icon: const Icon(Icons.restore, size: 16),
+                  label: const Text('Reativar'),
+                  style: TextButton.styleFrom(foregroundColor: AppTheme.success),
+                ),
+              if (!widget.material!.ativo && widget.onExcluir != null)
+                TextButton.icon(
+                  onPressed: _salvando
+                      ? null
+                      : () {
+                          Navigator.of(context, rootNavigator: true).pop(false);
+                          widget.onExcluir!(widget.material!);
+                        },
+                  icon: const Icon(Icons.delete_outline, size: 16),
+                  label: const Text('Excluir'),
+                  style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+                ),
+            ],
+            const Spacer(),
+            TextButton(
+              onPressed: _salvando ? null : () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: _salvando ? null : _salvar,
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+              child: _salvando
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : Text(_editando ? 'Salvar' : 'Criar'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// Célula de custo — último valor pago via OC (clicável → histórico)
+// ─────────────────────────────────────────────────────────────────────────────
+class _CustoCell extends StatefulWidget {
+  final double? valor;
+  final bool temHistorico;
+  final VoidCallback onTap;
+
+  const _CustoCell({
+    required this.valor,
+    required this.temHistorico,
+    required this.onTap,
+  });
+
+  @override
+  State<_CustoCell> createState() => _CustoCellState();
+}
+
+class _CustoCellState extends State<_CustoCell> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasValue  = widget.valor != null && widget.valor! > 0;
+    final label     = hasValue ? 'R\$ ${widget.valor!.toStringAsFixed(2)}' : '—';
+    final showHover = widget.temHistorico && _hovered;
+
+    return MouseRegion(
+      cursor: widget.temHistorico ? SystemMouseCursors.click : MouseCursor.defer,
+      onHover: (_) { if (!_hovered) setState(() => _hovered = true); },
+      onExit:  (_) { if (_hovered)  setState(() => _hovered = false); },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.temHistorico ? widget.onTap : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+            decoration: BoxDecoration(
+              color: showHover
+                  ? const Color(0xFF9C27B0).withValues(alpha: 0.12)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (hasValue && showHover)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 0),
+                  ),
+                Flexible(
+                  child: Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: showHover
+                          ? const Color(0xFF9C27B0)
+                          : hasValue
+                              ? AppTheme.textPrimary
+                              : AppTheme.textHint,
+                      fontWeight: hasValue ? FontWeight.w500 : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dialog: histórico de custos pagos via OC
+// ─────────────────────────────────────────────────────────────────────────────
+class _HistoricoPrecoDialog extends StatefulWidget {
+  final MaterialModel material;
+  const _HistoricoPrecoDialog({required this.material});
+
+  @override
+  State<_HistoricoPrecoDialog> createState() => _HistoricoPrecoDialogState();
+}
+
+class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
+  List<HistoricoPrecoModel> _historico = [];
+  bool _carregando = true;
+  String? _erro;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregar();
+  }
+
+  Future<void> _carregar() async {
+    try {
+      final lista = await context
+          .read<MaterialProvider>()
+          .listarHistoricoPrecos(widget.material.id);
+      if (mounted) setState(() { _historico = lista; _carregando = false; });
+    } catch (e) {
+      if (mounted) setState(() { _erro = e.toString(); _carregando = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = widget.material;
+    final temCusto   = m.ultimoValorPago   != null && m.ultimoValorPago!   > 0;
+    final temCustoM2 = m.ultimoValorPagoM2 != null && m.ultimoValorPagoM2! > 0;
+
+    return AlertDialog(
+      backgroundColor: AppTheme.surface,
+      title: Row(
+        children: [
+          const Icon(Icons.history, size: 20, color: Color(0xFF9C27B0)),
+          const SizedBox(width: 8),
+          Expanded(child: Text('Histórico de Compras — ${m.nome}')),
+        ],
+      ),
+      content: SizedBox(
+        width: 580,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Resumo dos custos atuais ──────────────────────────────────
+            if (temCusto || temCustoM2)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF9C27B0).withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF9C27B0).withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.payments_outlined, size: 16, color: Color(0xFF9C27B0)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 20,
+                        runSpacing: 4,
+                        children: [
+                          const Text(
+                            'Último custo registrado:',
+                            style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                          ),
+                          if (temCusto)
+                            RichText(
+                              text: TextSpan(
+                                style: const TextStyle(fontSize: 12),
+                                children: [
+                                  const TextSpan(
+                                    text: 'Custo: ',
+                                    style: TextStyle(color: AppTheme.textSecondary),
+                                  ),
+                                  TextSpan(
+                                    text: 'R\$ ${m.ultimoValorPago!.toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                      color: Color(0xFF9C27B0),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (temCustoM2)
+                            RichText(
+                              text: TextSpan(
+                                style: const TextStyle(fontSize: 12),
+                                children: [
+                                  const TextSpan(
+                                    text: 'Custo m²: ',
+                                    style: TextStyle(color: AppTheme.textSecondary),
+                                  ),
+                                  TextSpan(
+                                    text: 'R\$ ${m.ultimoValorPagoM2!.toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                      color: Color(0xFF9C27B0),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // ── Cabeçalho da lista ────────────────────────────────────────
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: AppTheme.divider, width: 0.8)),
+              ),
+              child: const Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      'Fornecedor',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                          color: AppTheme.textSecondary),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 100,
+                    child: Text(
+                      'OC #',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                          color: AppTheme.textSecondary),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 100,
+                    child: Text(
+                      'Custo unit.',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                          color: AppTheme.textSecondary),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 100,
+                    child: Text(
+                      'Custo m²',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                          color: AppTheme.textSecondary),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 90,
+                    child: Text(
+                      'Data',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                          color: AppTheme.textSecondary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Corpo ─────────────────────────────────────────────────────
+            if (_carregando)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 32),
+                child: Center(child: CircularProgressIndicator(color: Color(0xFF9C27B0))),
+              )
+            else if (_erro != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Center(
+                  child: Text(_erro!, style: const TextStyle(color: AppTheme.error, fontSize: 13)),
+                ),
+              )
+            else if (_historico.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 32),
+                child: Center(
+                  child: Text(
+                    'Nenhum custo registrado.\nO histórico é criado automaticamente ao finalizar uma Ordem de Compra.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: AppTheme.textHint),
+                  ),
+                ),
+              )
+            else
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 360),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: List.generate(_historico.length, (i) {
+                      final h = _historico[i];
+                      final isUltimo = i == 0; // mais recente primeiro
+                      final data = h.dataOrdem ?? h.criadoEm;
+                      final dataStr =
+                          '${data.day.toString().padLeft(2, '0')}/'
+                          '${data.month.toString().padLeft(2, '0')}/'
+                          '${data.year}';
+
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+                            decoration: isUltimo
+                                ? BoxDecoration(
+                                    color: const Color(0xFF9C27B0).withValues(alpha: 0.05),
+                                    borderRadius: BorderRadius.circular(6),
+                                  )
+                                : null,
+                            child: Row(
+                              children: [
+                                // Fornecedor
+                                Expanded(
+                                  flex: 3,
+                                  child: Row(
+                                    children: [
+                                      if (isUltimo) ...[
+                                        const Tooltip(
+                                          message: 'Custo atual (mais recente)',
+                                          child: Icon(Icons.radio_button_checked,
+                                              size: 13, color: Color(0xFF9C27B0)),
+                                        ),
+                                        const SizedBox(width: 4),
+                                      ],
+                                      Expanded(
+                                        child: Text(
+                                          h.fornecedorNome,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: isUltimo
+                                                ? FontWeight.w700
+                                                : FontWeight.normal,
+                                            color: isUltimo
+                                                ? AppTheme.textPrimary
+                                                : AppTheme.textSecondary,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                // OC #
+                                SizedBox(
+                                  width: 100,
+                                  child: Text(
+                                    '#${h.ordemCompraId}',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                        fontSize: 12, color: AppTheme.textSecondary),
+                                  ),
+                                ),
+                                // Custo unitário
+                                SizedBox(
+                                  width: 100,
+                                  child: Text(
+                                    'R\$ ${h.precoUnitario.toStringAsFixed(2)}',
+                                    textAlign: TextAlign.right,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: isUltimo
+                                          ? FontWeight.w700
+                                          : FontWeight.normal,
+                                      color: isUltimo
+                                          ? const Color(0xFF9C27B0)
+                                          : AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                                // Custo m²
+                                SizedBox(
+                                  width: 100,
+                                  child: Text(
+                                    h.precoM2 != null && h.precoM2! > 0
+                                        ? 'R\$ ${h.precoM2!.toStringAsFixed(2)}'
+                                        : '—',
+                                    textAlign: TextAlign.right,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: isUltimo
+                                          ? const Color(0xFF9C27B0)
+                                          : AppTheme.textPrimary,
+                                      fontWeight: isUltimo
+                                          ? FontWeight.w700
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                ),
+                                // Data
+                                SizedBox(
+                                  width: 90,
+                                  child: Text(
+                                    dataStr,
+                                    textAlign: TextAlign.right,
+                                    style: const TextStyle(
+                                        fontSize: 12, color: AppTheme.textSecondary),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (i < _historico.length - 1)
+                            const Divider(height: 1, color: AppTheme.divider),
+                        ],
+                      );
+                    }),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
       actions: [
         TextButton(
-          onPressed: _salvando ? null : () => Navigator.pop(context),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: _salvando ? null : _salvar,
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-          child: _salvando
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : Text(_editando ? 'Salvar' : 'Criar'),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Fechar'),
         ),
       ],
     );

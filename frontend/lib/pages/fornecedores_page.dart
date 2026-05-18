@@ -143,7 +143,10 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
     showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (_) => _FornecedorDialog(fornecedor: fornecedor),
+      builder: (_) => _FornecedorDialog(
+        fornecedor: fornecedor,
+        onRemover:  fornecedor != null ? _confirmarRemover : null,
+      ),
     ).then((salvou) {
       if (salvou == true) _aplicarFiltros();
     });
@@ -331,14 +334,15 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                       child: DropdownButtonFormField<String>(
                         key: ValueKey('tipo_${tipos.join('|')}'),
                         initialValue: _tipoFiltro.isEmpty ? null : _tipoFiltro,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Tipo',
                           isDense: true,
                         ),
                         items: [
-                          const DropdownMenuItem(value: '', child: Text('TODOS')),
+                          const DropdownMenuItem(value: '', child: Text('TODOS', overflow: TextOverflow.ellipsis)),
                           for (final t in tipos)
-                            DropdownMenuItem(value: t, child: Text(t)),
+                            DropdownMenuItem(value: t, child: Text(t, overflow: TextOverflow.ellipsis)),
                         ],
                         onChanged: (v) {
                           setState(() => _tipoFiltro = v ?? '');
@@ -460,6 +464,14 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Tabela de fornecedores
 // ─────────────────────────────────────────────────────────────────────────────
+
+class _ColDef {
+  final String label;
+  final double? fixed;
+  final double? flex;
+  const _ColDef({required this.label, this.fixed, this.flex});
+}
+
 class _TabelaFornecedores extends StatelessWidget {
   final List<FornecedorModel> fornecedores;
   final void Function(FornecedorModel) onEditar;
@@ -473,292 +485,326 @@ class _TabelaFornecedores extends StatelessWidget {
     required this.onMateriais,
   });
 
-  static const _columnWidths = {
-    0: FixedColumnWidth(56),   // ID
-    1: FlexColumnWidth(2.2),   // Nome Fantasia
-    2: FlexColumnWidth(1.8),   // Razão Social
-    3: FlexColumnWidth(1.4),   // CNPJ
-    4: FlexColumnWidth(1.2),   // WhatsApp
-    5: FlexColumnWidth(1.4),   // Vendedor
-    6: FlexColumnWidth(1.0),   // Tipo
-    7: FlexColumnWidth(0.8),   // Materiais
-    8: FlexColumnWidth(1.0),   // Ações
-  };
+  static const List<_ColDef> _cols = [
+    _ColDef(label: 'ID',           fixed: 56),
+    _ColDef(label: 'NOME FANTASIA',flex: 2.2),
+    _ColDef(label: 'RAZÃO SOCIAL', flex: 1.8),
+    _ColDef(label: 'CNPJ',         flex: 1.4),
+    _ColDef(label: 'WHATSAPP',     flex: 1.2),
+    _ColDef(label: 'VENDEDOR',     flex: 1.4),
+    _ColDef(label: 'TIPO',         flex: 1.0),
+    _ColDef(label: 'MATERIAIS',    flex: 0.9),
+    // Ações removidas — excluir está no formulário de edição
+  ];
 
-  TableRow get _cabecalho => TableRow(
-        decoration: const BoxDecoration(color: AppTheme.surfaceVariant),
-        children: [
-          _th('ID'),
-          _th('NOME FANTASIA'),
-          _th('RAZÃO SOCIAL'),
-          _th('CNPJ'),
-          _th('WHATSAPP'),
-          _th('VENDEDOR'),
-          _th('TIPO'),
-          _th('MATERIAIS'),
-          _th('AÇÕES'),
-        ],
+  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
+      ? SizedBox(width: col.fixed, child: child)
+      : Expanded(flex: (col.flex! * 10).round(), child: child);
+
+  Widget _cabecalho() => Container(
+        color: AppTheme.surfaceVariant,
+        child: Row(
+          children: [
+            for (final col in _cols)
+              _colWrap(
+                col,
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  child: Text(
+                    col.label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       );
 
   @override
   Widget build(BuildContext context) {
-    return Table(
-      border: const TableBorder(
-        horizontalInside: BorderSide(color: AppTheme.divider, width: 0.8),
-        verticalInside:   BorderSide(color: AppTheme.divider, width: 0.5),
-        bottom:           BorderSide(color: AppTheme.divider, width: 0.8),
-      ),
-      columnWidths: _columnWidths,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        _cabecalho,
-        for (final f in fornecedores) _buildRow(context, f),
+        _cabecalho(),
+        for (int i = 0; i < fornecedores.length; i++) ...[
+          if (i > 0)
+            const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+          _LinhaFornecedor(
+            fornecedor:  fornecedores[i],
+            cols:        _cols,
+            onEditar:    onEditar,
+            onRemover:   onRemover,
+            onMateriais: onMateriais,
+          ),
+        ],
+        const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
       ],
     );
   }
+}
 
-  TableRow _buildRow(BuildContext context, FornecedorModel f) {
-    final isEven = fornecedores.indexOf(f).isEven;
+// ─────────────────────────────────────────────────────────────────────────────
+//  Linha da tabela de fornecedores
+// ─────────────────────────────────────────────────────────────────────────────
+class _LinhaFornecedor extends StatefulWidget {
+  final FornecedorModel fornecedor;
+  final List<_ColDef> cols;
+  final void Function(FornecedorModel) onEditar;
+  final void Function(FornecedorModel) onRemover;
+  final void Function(FornecedorModel) onMateriais;
 
-    // Notifier compartilhado — todas as células de editar escutam o mesmo objeto
-    final rowHover       = ValueNotifier<bool>(false);
-    // Notifier independente para a célula de Materiais
-    final materiaisHover = ValueNotifier<bool>(false);
+  const _LinhaFornecedor({
+    required this.fornecedor,
+    required this.cols,
+    required this.onEditar,
+    required this.onRemover,
+    required this.onMateriais,
+  });
 
-    // Wrapper clicável com hover laranja sincronizado para abrir edição
-    Widget clickable(Widget child) => _HoverEditCell(
-          enabled: true,
-          onTap: () => onEditar(f),
-          rowHover: rowHover,
-          child: child,
-        );
+  @override
+  State<_LinhaFornecedor> createState() => _LinhaFornecedorState();
+}
 
-    return TableRow(
-      decoration: BoxDecoration(
-        color: isEven ? AppTheme.surface : AppTheme.background,
-      ),
-      children: [
-        // ID
-        _td(clickable(Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-          child: Text(
-            '${f.id}',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: AppTheme.textSecondary,
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
-          ),
-        ))),
+class _LinhaFornecedorState extends State<_LinhaFornecedor> {
+  bool _hovered = false;
 
-        // Nome Fantasia
-        _td(clickable(Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-          child: Text(
-            f.nomeFantasia,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
-              color: AppTheme.textPrimary,
-            ),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ))),
-
-        // Razão Social
-        _td(clickable(_cell(f.razaoSocial ?? '—'))),
-
-        // CNPJ
-        _td(clickable(_cell(f.cnpj != null ? f.cnpjFormatado : '—'))),
-
-        // Telefone/WhatsApp
-        _td(clickable(_cell(f.telefone != null ? f.telefoneFormatado : '—'))),
-
-        // Vendedor
-        _td(clickable(_cell(f.nomeVendedor ?? '—'))),
-
-        // Tipo
-        _td(clickable(Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-          child: Center(
-            child: f.tipoFornecedor != null
-                ? _StatusChip(label: f.tipoFornecedor!)
-                : const Text(
-                    '—',
-                    style: TextStyle(fontSize: 13, color: AppTheme.textHint),
-                  ),
-          ),
-        ))),
-
-        // Materiais — célula inteira clicável, NÃO abre editar
-        _td(_HoverEditCell(
-          enabled: true,
-          onTap: () => onMateriais(f),
-          rowHover: materiaisHover,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-            child: Center(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.inventory_2_outlined, size: 18, color: AppTheme.primary),
-                  const SizedBox(width: 6),
-                  Text(
-                    f.materiais.isEmpty ? 'Ver' : '${f.materiais.length}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.primary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        )),
-
-        // Ações — não abre editar (têm ações próprias)
-        _td(Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                tooltip: 'Editar',
-                icon: const Icon(Icons.edit_outlined, size: 18),
-                color: AppTheme.textSecondary,
-                onPressed: () => onEditar(f),
-              ),
-              IconButton(
-                tooltip: 'Remover',
-                icon: const Icon(Icons.delete_outline, size: 18),
-                color: AppTheme.error,
-                onPressed: () => onRemover(f),
-              ),
-            ],
-          ),
-        )),
-      ],
-    );
+  // onHover é chamado a cada movimento do mouse dentro da região,
+  // inclusive sobre filhos interativos — nunca interrompido, sem piscar.
+  void _onHover(PointerHoverEvent _) {
+    if (!_hovered) setState(() => _hovered = true);
   }
 
-  static Widget _th(String label) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
-            color: AppTheme.textSecondary,
-          ),
-        ),
-      );
+  void _onExit(PointerExitEvent _) {
+    if (_hovered) setState(() => _hovered = false);
+  }
 
-  static Widget _td(Widget child) => child;
+  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
+      ? SizedBox(width: col.fixed, child: child)
+      : Expanded(flex: (col.flex! * 10).round(), child: child);
 
   static Widget _cell(String text) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         child: Text(
           text,
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
           overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
         ),
       );
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Célula genérica clicável com hover laranja sincronizado por linha
-// ─────────────────────────────────────────────────────────────────────────────
-class _HoverEditCell extends StatefulWidget {
-  final Widget child;
-  final bool enabled;
-  final VoidCallback? onTap;
-  /// Notifier compartilhado entre todas as células da mesma linha.
-  final ValueNotifier<bool> rowHover;
-
-  const _HoverEditCell({
-    required this.child,
-    required this.enabled,
-    required this.rowHover,
-    this.onTap,
-  });
-
-  @override
-  State<_HoverEditCell> createState() => _HoverEditCellState();
-}
-
-class _HoverEditCellState extends State<_HoverEditCell> {
-  @override
-  void initState() {
-    super.initState();
-    widget.rowHover.addListener(_onHoverChanged);
-  }
-
-  @override
-  void dispose() {
-    widget.rowHover.removeListener(_onHoverChanged);
-    super.dispose();
-  }
-
-  void _onHoverChanged() => setState(() {});
+  static Widget _vDivider() => const VerticalDivider(
+        width: 1, thickness: 0.5, color: AppTheme.divider,
+      );
 
   @override
   Widget build(BuildContext context) {
-    final hovered = widget.rowHover.value;
+    final f    = widget.fornecedor;
+    final cols = widget.cols;
+
+    final bgColor = _hovered
+        ? const Color(0xFFFF9800).withValues(alpha: 0.10)
+        : AppTheme.surface;
+
     return MouseRegion(
-      cursor: widget.enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-      onEnter: (_) { if (widget.enabled) widget.rowHover.value = true; },
-      onExit:  (_) => widget.rowHover.value = false,
+      cursor: SystemMouseCursors.click,
+      onHover: _onHover,
+      onExit:  _onExit,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => widget.onEditar(f),
+        child: ColoredBox(
+          color: bgColor,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 52),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // ── ID ────────────────────────────────────────────────────────
+                _colWrap(cols[0], Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  child: Text(
+                    '${f.id}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.textSecondary,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                )),
+                _vDivider(),
+                // ── Nome Fantasia ─────────────────────────────────────────────
+                _colWrap(cols[1], Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  child: Text(
+                    f.nomeFantasia,
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                )),
+                _vDivider(),
+                // ── Razão Social ──────────────────────────────────────────────
+                _colWrap(cols[2], _cell(f.razaoSocial ?? '—')),
+                _vDivider(),
+                // ── CNPJ ─────────────────────────────────────────────────────
+                _colWrap(cols[3], _cell(f.cnpj != null ? f.cnpjFormatado : '—')),
+                _vDivider(),
+                // ── WhatsApp ──────────────────────────────────────────────────
+                _colWrap(cols[4], _cell(f.telefone != null ? f.telefoneFormatado : '—')),
+                _vDivider(),
+                // ── Vendedor ──────────────────────────────────────────────────
+                _colWrap(cols[5], _cell(f.nomeVendedor ?? '—')),
+                _vDivider(),
+                // ── Tipo ──────────────────────────────────────────────────────
+                _colWrap(cols[6], _cell(f.tipoFornecedor ?? '—')),
+                _vDivider(),
+                // ── Materiais — hover extra próprio ───────────────────────────
+                _colWrap(cols[7], _MateriaisCell(
+                  count: f.materiais.length,
+                  onTap: () => widget.onMateriais(f),
+                )),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Célula de materiais com hover extra (badge azul ao passar o mouse)
+// ─────────────────────────────────────────────────────────────────────────────
+class _MateriaisCell extends StatefulWidget {
+  final int count;
+  final VoidCallback onTap;
+
+  const _MateriaisCell({required this.count, required this.onTap});
+
+  @override
+  State<_MateriaisCell> createState() => _MateriaisCellState();
+}
+
+class _MateriaisCellState extends State<_MateriaisCell> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final showHover = _hovered;
+    final label     = widget.count == 0 ? 'Ver' : '${widget.count}';
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      // onHover do filho não cancela o onHover da linha pai
+      onHover: (_) { if (!_hovered) setState(() => _hovered = true); },
+      onExit:  (_) { if (_hovered)  setState(() => _hovered = false); },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          color: hovered
-              ? const Color(0xFFFF9800).withValues(alpha: 0.10)
-              : Colors.transparent,
-          child: widget.child,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+          child: Center(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+              decoration: BoxDecoration(
+                color: showHover
+                    ? AppTheme.primary.withValues(alpha: 0.12)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.inventory_2_outlined,
+                    size: 16,
+                    color: showHover ? AppTheme.primary : AppTheme.primary.withValues(alpha: 0.7),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: showHover ? AppTheme.primary : AppTheme.primary.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+//  sem InkWell/IconButton — não interfere no fundo da linha
+class _IconBtn extends StatefulWidget {
+  final IconData icon;
+  final Color color;
+  final VoidCallback onPressed;
+  final String tooltip;
+
+  const _IconBtn({
+    required this.icon,
+    required this.color,
+    required this.onPressed,
+    required this.tooltip,
+  });
+
+  @override
+  State<_IconBtn> createState() => _IconBtnState();
+}
+
+class _IconBtnState extends State<_IconBtn> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: widget.tooltip,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        // onHover do ícone não cancela o onHover da linha pai
+        onHover: (_) { if (!_hovered) setState(() => _hovered = true); },
+        onExit:  (_) { if (_hovered)  setState(() => _hovered = false); },
+        child: GestureDetector(
+          onTap: widget.onPressed,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? widget.color.withValues(alpha: 0.12)
+                  : Colors.transparent,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(widget.icon, size: 18, color: widget.color),
+          ),
         ),
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Widgets auxiliares da tabela
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _StatusChip extends StatelessWidget {
-  final String label;
-  const _StatusChip({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      label,
-      style: const TextStyle(
-        fontSize: 13,
-        color: AppTheme.textPrimary,
-        fontWeight: FontWeight.w400,
-      ),
-      textAlign: TextAlign.center,
-      overflow: TextOverflow.ellipsis,
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Diálogo de criação / edição de fornecedor
-// ─────────────────────────────────────────────────────────────────────────────
 class _FornecedorDialog extends StatefulWidget {
   final FornecedorModel? fornecedor;
-  const _FornecedorDialog({this.fornecedor});
+  final void Function(FornecedorModel)? onRemover;
+  const _FornecedorDialog({this.fornecedor, this.onRemover});
 
   @override
   State<_FornecedorDialog> createState() => _FornecedorDialogState();
@@ -1010,6 +1056,20 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
         ),
       ),
       actions: [
+        if (_editando && widget.onRemover != null) ...[
+          TextButton.icon(
+            onPressed: _salvando
+                ? null
+                : () {
+                    Navigator.of(context).pop(false);
+                    widget.onRemover!(widget.fornecedor!);
+                  },
+            icon: const Icon(Icons.delete_outline, size: 16),
+            label: const Text('Remover'),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+          ),
+          const Spacer(),
+        ],
         TextButton(
           onPressed: _salvando ? null : () => Navigator.pop(context),
           child: const Text('Cancelar'),
@@ -1241,7 +1301,7 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Card de vínculo material–fornecedor
 // ─────────────────────────────────────────────────────────────────────────────
-class _VinculoCard extends StatelessWidget {
+class _VinculoCard extends StatefulWidget {
   final FornecedorMaterialVinculoModel vinculo;
   final VoidCallback onEditar;
   final VoidCallback onDesvincular;
@@ -1253,78 +1313,102 @@ class _VinculoCard extends StatelessWidget {
   });
 
   @override
+  State<_VinculoCard> createState() => _VinculoCardState();
+}
+
+class _VinculoCardState extends State<_VinculoCard> {
+  bool _hovered = false;
+
+  void _onHover(PointerHoverEvent _) {
+    if (!_hovered) setState(() => _hovered = true);
+  }
+
+  void _onExit(PointerExitEvent _) {
+    if (_hovered) setState(() => _hovered = false);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final v = vinculo;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.surfaceVariant,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.category_outlined,
-                color: AppTheme.primary, size: 18),
+    final v = widget.vinculo;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onHover: _onHover,
+      onExit: _onExit,
+      child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: _hovered
+                ? const Color(0xFFFF9800).withValues(alpha: 0.08)
+                : AppTheme.surfaceVariant,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppTheme.divider),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
               children: [
-                Text(
-                  v.descricaoCompleta,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary),
+                // ── Área clicável (abre editor) ───────────────────────────────
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: widget.onEditar,
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.category_outlined,
+                              color: AppTheme.primary, size: 18),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                v.descricaoCompleta,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                    color: AppTheme.textPrimary),
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  _PriceTag(label: 'Valor:', valor: v.preco),
+                                  const SizedBox(width: 10),
+                                  _PriceTag(label: 'Valor m²:', valor: v.precoMetroQuadrado),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    _PriceTag(label: 'Valor:', valor: v.preco),
-                    const SizedBox(width: 10),
-                    _PriceTag(label: 'Valor m²:', valor: v.precoMetroQuadrado),
-                  ],
+                // ── Botão desvincular ─────────────────────────────────────────
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: widget.onDesvincular,
+                  child: const Padding(
+                    padding: EdgeInsets.all(6),
+                    child: Icon(Icons.link_off, size: 18, color: AppTheme.error),
+                  ),
                 ),
               ],
             ),
           ),
-          Tooltip(
-            message: 'Editar valor',
-            child: InkWell(
-              onTap: onEditar,
-              borderRadius: BorderRadius.circular(6),
-              child: const Padding(
-                padding: EdgeInsets.all(6),
-                child: Icon(Icons.edit_outlined,
-                    size: 17, color: AppTheme.textSecondary),
-              ),
-            ),
-          ),
-          Tooltip(
-            message: 'Desvincular',
-            child: InkWell(
-              onTap: onDesvincular,
-              borderRadius: BorderRadius.circular(6),
-              child: const Padding(
-                padding: EdgeInsets.all(6),
-                child: Icon(Icons.link_off, size: 17, color: AppTheme.error),
-              ),
-            ),
-          ),
-        ],
-      ),
+        ),
     );
   }
 }
+
+
 
 class _PriceTag extends StatelessWidget {
   final String label;
@@ -1577,13 +1661,6 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     }
   }
 
-  /// Atribui texto a um ou ambos os campos sem disparar os listeners.
-  void _setFieldSilently({String? idText, String? nomeText}) {
-    _ignorarListeners = true;
-    if (idText   != null) _materialIdCtrl.text   = idText;
-    if (nomeText != null) _materialNomeCtrl.text  = nomeText;
-    _ignorarListeners = false;
-  }
 
   Future<void> _buscarMateriais({String? idPrefix, String? nomePrefix}) async {
     setState(() => _buscandoMateriais = true);
@@ -2427,13 +2504,6 @@ class _VincularPorMaterialDialogState
         _materialEspessuraCtrl.text.trim().isNotEmpty) {
       _buscarMateriais(nomePrefix: nome.isEmpty ? null : nome);
     }
-  }
-
-  void _setFieldSilently({String? idText, String? nomeText}) {
-    _ignorarListeners = true;
-    if (idText   != null) _materialIdCtrl.text   = idText;
-    if (nomeText != null) _materialNomeCtrl.text  = nomeText;
-    _ignorarListeners = false;
   }
 
   Future<void> _buscarMateriais({String? idPrefix, String? nomePrefix}) async {

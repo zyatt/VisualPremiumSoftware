@@ -2,6 +2,12 @@ const svc = require('../services/ordemCompra.service');
 
 const listar      = async (req, res, next) => { try { res.json(await svc.listar(req.query.status)); } catch(e){next(e);} };
 const buscarPorId = async (req, res, next) => { try { res.json(await svc.buscarPorId(+req.params.id)); } catch(e){next(e);} };
+const proximoId   = async (req, res, next) => {
+  try {
+    const ultima = await require('../utils/prisma').ordemCompra.findFirst({ orderBy: { id: 'desc' }, select: { id: true } });
+    res.json({ proximoId: (ultima?.id ?? 0) + 1 });
+  } catch(e){next(e);}
+};
 
 const criar = async (req, res, next) => {
   try {
@@ -52,4 +58,17 @@ const cancelar = async (req, res, next) => {
   } catch(e){next(e);}
 };
 
-module.exports = { listar, buscarPorId, criar, criarDeOrcamento, atualizar, adicionarItem, removerItem, atualizarItem, finalizar, cancelar };
+const reverter = async (req, res, next) => {
+  try {
+    res.json(await svc.reverter(+req.params.id));
+  } catch(e){next(e);}
+};
+
+const excluir = async (req, res, next) => {
+  try {
+    await svc.excluir(+req.params.id);
+    res.status(204).send();
+  } catch(e){next(e);}
+};
+
+module.exports = { listar, buscarPorId, proximoId, criar, criarDeOrcamento, atualizar, adicionarItem, removerItem, atualizarItem, finalizar, cancelar, reverter, excluir };

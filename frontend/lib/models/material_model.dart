@@ -1,3 +1,55 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Histórico de preço de custo pago por OC finalizada
+// ─────────────────────────────────────────────────────────────────────────────
+class HistoricoPrecoModel {
+  final int id;
+  final int materialId;
+  final int ordemCompraId;
+  final int fornecedorId;
+  final String fornecedorNome;
+  final double precoUnitario;
+  final double? precoM2;
+  final double quantidade;
+  final DateTime criadoEm;
+
+  // Data da ordem de compra (pode diferir da data de criação do registro)
+  final DateTime? dataOrdem;
+
+  HistoricoPrecoModel({
+    required this.id,
+    required this.materialId,
+    required this.ordemCompraId,
+    required this.fornecedorId,
+    required this.fornecedorNome,
+    required this.precoUnitario,
+    this.precoM2,
+    required this.quantidade,
+    required this.criadoEm,
+    this.dataOrdem,
+  });
+
+  factory HistoricoPrecoModel.fromJson(Map<String, dynamic> json) =>
+      HistoricoPrecoModel(
+        id:             json['id'],
+        materialId:     json['materialId'],
+        ordemCompraId:  json['ordemCompraId'],
+        fornecedorId:   json['fornecedorId'],
+        fornecedorNome: json['fornecedor']?['nomeFantasia'] ?? '—',
+        precoUnitario:  double.tryParse(json['precoUnitario'].toString()) ?? 0,
+        precoM2:        json['precoM2'] != null
+            ? double.tryParse(json['precoM2'].toString())
+            : null,
+        quantidade: double.tryParse(json['quantidade'].toString()) ?? 0,
+        criadoEm:   DateTime.parse(json['criadoEm']),
+        dataOrdem:  json['ordemCompra']?['data'] != null
+            ? DateTime.tryParse(json['ordemCompra']['data'].toString())
+            : null,
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fornecedor vinculado ao material com preços de tabela
+// ─────────────────────────────────────────────────────────────────────────────
 class FornecedorMaterialModel {
   final int id;
   final int fornecedorId;
@@ -26,6 +78,9 @@ class FornecedorMaterialModel {
       );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Material
+// ─────────────────────────────────────────────────────────────────────────────
 class MaterialModel {
   final int id;
   final String nome;
@@ -40,14 +95,22 @@ class MaterialModel {
   final String status; // OK | LIMITE | CRITICO | INATIVO
   final bool estoqueConfirmado;
   final bool ativo;
+
+  /// Último custo pago (preço unitário da última OC finalizada com este material)
   final double? ultimoValorPago;
 
-  // Calculados pelo backend (mediana entre fornecedores)
+  /// Último custo por m² pago (da última OC finalizada com este material)
+  final double? ultimoValorPagoM2;
+
+  // Calculados pelo backend (mediana entre fornecedores de tabela)
   final double? precoMediano;
   final double? precoM2Mediano;
 
-  // Lista de fornecedores vinculados com seus preços
+  // Fornecedores vinculados com preços de tabela
   final List<FornecedorMaterialModel> fornecedorMateriais;
+
+  // Histórico de custos pagos via OC (opcional — só vem no buscarPorId)
+  final List<HistoricoPrecoModel> historicoPrecos;
 
   MaterialModel({
     required this.id,
@@ -64,9 +127,11 @@ class MaterialModel {
     required this.estoqueConfirmado,
     required this.ativo,
     this.ultimoValorPago,
+    this.ultimoValorPagoM2,
     this.precoMediano,
     this.precoM2Mediano,
     this.fornecedorMateriais = const [],
+    this.historicoPrecos = const [],
   });
 
   factory MaterialModel.fromJson(Map<String, dynamic> json) => MaterialModel(
@@ -90,6 +155,9 @@ class MaterialModel {
         ultimoValorPago:    json['ultimoValorPago'] != null
             ? double.tryParse(json['ultimoValorPago'].toString())
             : null,
+        ultimoValorPagoM2:  json['ultimoValorPagoM2'] != null
+            ? double.tryParse(json['ultimoValorPagoM2'].toString())
+            : null,
         precoMediano:       json['precoMediano'] != null
             ? double.tryParse(json['precoMediano'].toString())
             : null,
@@ -98,6 +166,9 @@ class MaterialModel {
             : null,
         fornecedorMateriais: (json['fornecedorMateriais'] as List? ?? [])
             .map((f) => FornecedorMaterialModel.fromJson(f as Map<String, dynamic>))
+            .toList(),
+        historicoPrecos: (json['historicoPrecos'] as List? ?? [])
+            .map((h) => HistoricoPrecoModel.fromJson(h as Map<String, dynamic>))
             .toList(),
       );
 }
