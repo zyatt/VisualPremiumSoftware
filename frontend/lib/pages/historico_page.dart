@@ -7,10 +7,6 @@ import '../models/ordem_compra_model.dart';
 import '../providers/ordem_compra_provider.dart';
 import '../theme/app_theme.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PÁGINA PRINCIPAL DE HISTÓRICO
-// ─────────────────────────────────────────────────────────────────────────────
-
 class HistoricoPage extends StatefulWidget {
   const HistoricoPage({super.key});
 
@@ -78,8 +74,11 @@ class _HistoricoPageState extends State<HistoricoPage>
     );
     if (d != null) {
       setState(() {
-        if (isInicio) _dataInicio = d;
-        else          _dataFim    = d;
+        if (isInicio) {
+          _dataInicio = d;
+        } else {
+          _dataFim    = d;
+        }
       });
     }
   }
@@ -105,7 +104,6 @@ class _HistoricoPageState extends State<HistoricoPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ─────────────────────────────────────────────────────
             Consumer<OrdemCompraProvider>(builder: (_, p, __) {
               final total = p.finalizadas.length + p.canceladas.length;
               return Column(
@@ -131,7 +129,6 @@ class _HistoricoPageState extends State<HistoricoPage>
             }),
             const SizedBox(height: 20),
 
-            // ── Filtros ───────────────────────────────────────────────────────
             Row(
               children: [
                 Expanded(
@@ -162,7 +159,6 @@ class _HistoricoPageState extends State<HistoricoPage>
                   ),
                 ),
                 const SizedBox(width: 12),
-                // Data início
                 _DateFilterBtn(
                   label: _dataInicio != null
                       ? _formatData(_dataInicio!)
@@ -172,7 +168,6 @@ class _HistoricoPageState extends State<HistoricoPage>
                   onTap: () => _selecionarData(isInicio: true),
                 ),
                 const SizedBox(width: 8),
-                // Data fim
                 _DateFilterBtn(
                   label: _dataFim != null ? _formatData(_dataFim!) : 'Até',
                   icon: Icons.calendar_month_outlined,
@@ -180,7 +175,6 @@ class _HistoricoPageState extends State<HistoricoPage>
                   onTap: () => _selecionarData(isInicio: false),
                 ),
                 const SizedBox(width: 8),
-                // Limpar filtros
                 if (_filtroBusca.isNotEmpty ||
                     _dataInicio != null ||
                     _dataFim != null)
@@ -194,7 +188,6 @@ class _HistoricoPageState extends State<HistoricoPage>
             ),
             const SizedBox(height: 16),
 
-            // ── Abas ──────────────────────────────────────────────────────────
             Container(
               decoration: const BoxDecoration(
                 color: AppTheme.surface,
@@ -216,7 +209,6 @@ class _HistoricoPageState extends State<HistoricoPage>
               ),
             ),
 
-            // ── Listas ────────────────────────────────────────────────────────
             Expanded(
               child: Consumer<OrdemCompraProvider>(
                 builder: (context, prov, _) {
@@ -279,10 +271,6 @@ class _HistoricoPageState extends State<HistoricoPage>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BOTÃO DE FILTRO DE DATA
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _DateFilterBtn extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -315,10 +303,6 @@ class _DateFilterBtn extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LISTA DE HISTÓRICO
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _HistoricoList extends StatelessWidget {
   final List<OrdemCompraModel> ordens;
@@ -366,10 +350,6 @@ class _HistoricoList extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CARD DE HISTÓRICO (expansível)
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _HistoricoCard extends StatefulWidget {
   final OrdemCompraModel ordem;
@@ -429,7 +409,6 @@ class _HistoricoCardState extends State<_HistoricoCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Barra colorida + linha principal ─────────────────────────
                 Stack(
                   children: [
                     Positioned(
@@ -441,7 +420,6 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Título + total
                           Row(children: [
                             Expanded(
                               child: Text(
@@ -464,7 +442,6 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                           ]),
                           const SizedBox(height: 6),
 
-                          // Meta-info linha
                           Wrap(
                             spacing: 14,
                             runSpacing: 4,
@@ -480,7 +457,6 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                             ],
                           ),
 
-                          // Números de OS
                           if (o.numerosOS.isNotEmpty) ...[
                             const SizedBox(height: 6),
                             Wrap(
@@ -493,11 +469,9 @@ class _HistoricoCardState extends State<_HistoricoCard> {
 
                           const SizedBox(height: 10),
 
-                          // Botões ação
                           Row(
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: [
-                              // Expandir / recolher itens
                               GestureDetector(
                                 behavior: HitTestBehavior.opaque,
                                 onTap: () => setState(
@@ -527,14 +501,13 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                                 ),
                               ),
                               const SizedBox(width: 12),
-                              // Ver detalhes completo
                               GestureDetector(
                                 behavior: HitTestBehavior.opaque,
                                 onTap: widget.onVerDetalhes,
-                                child: Row(
+                                child: const Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Text(
+                                    Text(
                                       'Ver detalhes',
                                       style: TextStyle(
                                         fontSize: 12,
@@ -542,8 +515,8 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
-                                    const SizedBox(width: 3),
-                                    const Icon(Icons.open_in_new,
+                                    SizedBox(width: 3),
+                                    Icon(Icons.open_in_new,
                                         size: 13,
                                         color: AppTheme.textSecondary),
                                   ],
@@ -557,7 +530,6 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                   ],
                 ),
 
-                // ── Itens expandidos ─────────────────────────────────────────
                 AnimatedCrossFade(
                   duration: const Duration(milliseconds: 200),
                   crossFadeState: _expandido
@@ -573,7 +545,6 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Cabeçalho da seção
                             Row(children: [
                               const Icon(Icons.inventory_2_outlined,
                                   size: 14, color: AppTheme.primary),
@@ -589,7 +560,6 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                             ]),
                             const SizedBox(height: 10),
 
-                            // Lista de itens
                             ...o.itens.map((item) => Container(
                                   margin: const EdgeInsets.only(bottom: 8),
                                   padding: const EdgeInsets.all(12),
@@ -627,14 +597,15 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                                                 _itemChip(
                                                     Icons.format_list_numbered,
                                                     'Qtd: ${_fmtNum(item.quantidade)}'),
-                                                _itemChip(
+                                                _itemChipDestaque(
                                                     Icons.attach_money,
-                                                    'Unit: ${_moeda(item.precoUnitario)}'),
-                                                if (item.precoMetroQuadrado !=
-                                                    null)
-                                                  _itemChip(
+                                                    'Unit: ${_moeda(item.precoUnitario)}',
+                                                    ativo: !item.usarM2),
+                                                if (item.precoMetroQuadrado != null)
+                                                  _itemChipDestaque(
                                                       Icons.square_foot,
-                                                      'm²: ${_moeda(item.precoMetroQuadrado!)}'),
+                                                      'm²: ${_moeda(item.precoMetroQuadrado!)}',
+                                                      ativo: item.usarM2),
                                               ],
                                             ),
                                           ],
@@ -652,7 +623,6 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                                   ),
                                 )),
 
-                            // Total
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 14, vertical: 10),
@@ -729,13 +699,37 @@ class _HistoricoCardState extends State<_HistoricoCard> {
         ],
       );
 
+  Widget _itemChipDestaque(IconData icon, String label, {required bool ativo}) {
+    if (!ativo) {
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 12, color: AppTheme.textHint),
+        const SizedBox(width: 3),
+        Text(label,
+            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+      ]);
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.35)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 12, color: AppTheme.primary),
+        const SizedBox(width: 3),
+        Text(label,
+            style: const TextStyle(
+                fontSize: 12,
+                color: AppTheme.primary,
+                fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
+
   String _fmtNum(double v) =>
       v == v.truncateToDouble() ? v.toInt().toString() : v.toString();
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PÁGINA DE DETALHE COMPLETO
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _HistoricoDetalhePage extends StatelessWidget {
   final OrdemCompraModel ordem;
@@ -808,7 +802,6 @@ class _HistoricoDetalhePage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // ── Informações Gerais ─────────────────────────────────────────────
           _secaoCard('Informações Gerais', Icons.info_outline, [
             _infoRow(Icons.business_outlined, 'Fornecedor',
                 o.fornecedorNome ?? '—'),
@@ -826,7 +819,6 @@ class _HistoricoDetalhePage extends StatelessWidget {
           ]),
           const SizedBox(height: 16),
 
-          // ── Números de OS ──────────────────────────────────────────────────
           if (o.numerosOS.isNotEmpty) ...[
             _secaoCard('Números de OS', Icons.assignment_outlined, [
               Wrap(
@@ -852,7 +844,6 @@ class _HistoricoDetalhePage extends StatelessWidget {
             const SizedBox(height: 16),
           ],
 
-          // ── Itens ──────────────────────────────────────────────────────────
           _secaoCard('Itens (${o.itens.length})', Icons.inventory_2_outlined,
               [
             ...o.itens.map((item) => Container(
@@ -888,17 +879,18 @@ class _HistoricoDetalhePage extends StatelessWidget {
                             'OS: ${item.numeroOS}'),
                         _itemChip(Icons.format_list_numbered,
                             'Qtd: ${_fmtNum(item.quantidade)}'),
-                        _itemChip(Icons.attach_money,
-                            'Unit: ${_moeda(item.precoUnitario)}'),
+                        _itemChipDestaque(Icons.attach_money,
+                            'Unit: ${_moeda(item.precoUnitario)}',
+                            ativo: !item.usarM2),
                         if (item.precoMetroQuadrado != null)
-                          _itemChip(Icons.square_foot,
-                              'm²: ${_moeda(item.precoMetroQuadrado!)}'),
+                          _itemChipDestaque(Icons.square_foot,
+                              'm²: ${_moeda(item.precoMetroQuadrado!)}',
+                              ativo: item.usarM2),
                       ]),
                     ],
                   ),
                 )),
 
-            // Total
             Container(
               padding: const EdgeInsets.symmetric(
                   horizontal: 14, vertical: 12),
@@ -988,4 +980,32 @@ class _HistoricoDetalhePage extends StatelessWidget {
             style: const TextStyle(
                 fontSize: 12, color: AppTheme.textSecondary)),
       ]);
+
+  Widget _itemChipDestaque(IconData icon, String label, {required bool ativo}) {
+    if (!ativo) {
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 12, color: AppTheme.textHint),
+        const SizedBox(width: 3),
+        Text(label,
+            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+      ]);
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.35)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 12, color: AppTheme.primary),
+        const SizedBox(width: 3),
+        Text(label,
+            style: const TextStyle(
+                fontSize: 12,
+                color: AppTheme.primary,
+                fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
 }

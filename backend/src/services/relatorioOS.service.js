@@ -1,6 +1,5 @@
 const prisma = require('../utils/prisma');
 
-// Lista todas as relações OS que têm saídas (para o grid de cards)
 async function listar(busca) {
   const where = {
     movimentacoes: { some: { tipo: 'SAIDA' } },
@@ -36,7 +35,6 @@ async function buscarPorNumeroOS(numeroOS) {
   });
 }
 
-// Monta dados estruturados para o PDF
 async function dadosParaPDF(numeroOS) {
   const relacao = await buscarPorNumeroOS(numeroOS);
   if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };

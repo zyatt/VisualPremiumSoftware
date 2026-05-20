@@ -28,7 +28,6 @@ const atualizarItem = async (req, res, next) => {
 const gerarOrdemCompra = async (req, res, next) => {
   try {
     await svc.validarParaOC(+req.params.id);
-    // Redireciona para criação de OC com os dados do orçamento
     const orcamento = await svc.buscarPorId(+req.params.id);
     res.json({ orcamento, pronto: true });
   } catch(e){next(e);}

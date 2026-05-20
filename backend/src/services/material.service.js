@@ -1,6 +1,5 @@
 const prisma = require('../utils/prisma');
 
-// Recalcula status baseado em quantidade vs estoqueMinimo
 function calcularStatus(quantidade, estoqueMinimo, ativo) {
   if (!ativo) return 'INATIVO';
   const q = Number(quantidade);
@@ -21,15 +20,29 @@ function _throwDuplicado(medida, espessura) {
 }
 
 async function listar(filtros = {}) {
-  const { busca, categoria, status, comFornecedor, id, medida, espessura, ativo } = filtros;
+  const { busca, categoria, semCategoria, status, comFornecedor, id, medida, espessura, identificador, ativo } = filtros;
 
   const where = {};
   if (ativo === 'true') where.ativo = true;
   if (id) where.id = Number(id);
-  if (busca) where.nome = { contains: busca, mode: 'insensitive' };
+  if (busca) {
+    const tokens = busca.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 1) {
+      where.nome = { contains: tokens[0], mode: 'insensitive' };
+    } else {
+      where.AND = (where.AND ?? []).concat(
+        tokens.map((t) => ({ nome: { contains: t, mode: 'insensitive' } }))
+      );
+    }
+  }
+  if (identificador) where.identificador = { contains: identificador, mode: 'insensitive' };
   if (medida) where.medida = { contains: medida, mode: 'insensitive' };
   if (espessura) where.espessura = { contains: espessura, mode: 'insensitive' };
-  if (categoria) where.categoria = { contains: categoria, mode: 'insensitive' };
+  if (semCategoria === 'true') {
+    where.categoria = null;
+  } else if (categoria) {
+    where.categoria = { contains: categoria, mode: 'insensitive' };
+  }
   if (status) where.status = status;
   if (comFornecedor === 'true') {
     where.fornecedorMateriais = { some: { ativo: true } };
@@ -41,6 +54,11 @@ async function listar(filtros = {}) {
       fornecedorMateriais: {
         where: { ativo: true },
         include: { fornecedor: { select: { id: true, nomeFantasia: true } } },
+      },
+      historicoPrecos: {
+        orderBy: { criadoEm: 'desc' },
+        take: 1,
+        select: { precoUnitario: true, precoM2: true },
       },
     },
     orderBy: [{ ativo: 'desc' }, { nome: 'asc' }],
@@ -63,10 +81,15 @@ async function listar(filtros = {}) {
       return arr.length % 2 !== 0 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
     };
 
+    // Custo da última compra (registro mais recente do historicoPrecos)
+    const ultimoHistorico = m.historicoPrecos?.[0] ?? null;
+
     return {
       ...m,
-      precoMediano:  mediana(precos),
-      precoM2Mediano: mediana(precosM2),
+      precoMediano:        mediana(precos),
+      precoM2Mediano:      mediana(precosM2),
+      custoUltimaCompra:   ultimoHistorico?.precoUnitario ? Number(ultimoHistorico.precoUnitario) : null,
+      custoM2UltimaCompra: ultimoHistorico?.precoM2       ? Number(ultimoHistorico.precoM2)       : null,
     };
   });
 }
@@ -78,7 +101,6 @@ async function buscarPorId(id) {
       fornecedorMateriais: {
         include: { fornecedor: { select: { id: true, nomeFantasia: true } } },
       },
-      // Últimos 50 registros de histórico de custo, mais recente primeiro
       historicoPrecos: {
         orderBy: { criadoEm: 'desc' },
         take: 50,
@@ -205,7 +227,6 @@ async function listarCategorias() {
   return result.map((r) => r.categoria);
 }
 
-// Retorna os últimos N registros do histórico de custo de um material específico
 async function listarHistoricoPrecos(materialId, limite = 50) {
   return prisma.historicoPrecoMaterial.findMany({
     where: { materialId: Number(materialId) },

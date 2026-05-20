@@ -7,11 +7,6 @@ import '../models/fornecedor_model.dart';
 import '../providers/fornecedor_provider.dart';
 import '../theme/app_theme.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Formatters
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Converte para maiúsculas e remove acentos/diacríticos em tempo real.
 class _UpperCaseFormatter extends TextInputFormatter {
   static final _acentos = {
     'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A',
@@ -45,7 +40,6 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
-/// Permite apenas dígitos e um único separador decimal (vírgula → ponto).
 class _DecimalInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -73,10 +67,8 @@ class _CnpjInputFormatter extends TextInputFormatter {
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    // Remove tudo que não for número
     String digits = newValue.text.replaceAll(RegExp(r'\D'), '');
 
-    // Limita a 14 dígitos
     if (digits.length > 14) {
       digits = digits.substring(0, 14);
     }
@@ -102,9 +94,6 @@ class _CnpjInputFormatter extends TextInputFormatter {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Página principal
-// ─────────────────────────────────────────────────────────────────────────────
 class FornecedoresPage extends StatefulWidget {
   const FornecedoresPage({super.key});
 
@@ -224,7 +213,6 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ───────────────────────────────────────────────────
             Row(
               children: [
                 Column(
@@ -275,10 +263,8 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
             ),
             const SizedBox(height: 20),
 
-            // ── Filtros ─────────────────────────────────────────────────────
             Row(
               children: [
-                // Busca por ID
                 SizedBox(
                   width: 120,
                   child: TextField(
@@ -368,7 +354,6 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
             ),
             const SizedBox(height: 16),
 
-            // ── Conteúdo ────────────────────────────────────────────────────
             Expanded(
               child: Consumer<FornecedorProvider>(
                 builder: (_, prov, __) {
@@ -461,10 +446,6 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Tabela de fornecedores
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _ColDef {
   final String label;
   final double? fixed;
@@ -494,7 +475,6 @@ class _TabelaFornecedores extends StatelessWidget {
     _ColDef(label: 'VENDEDOR',     flex: 1.4),
     _ColDef(label: 'TIPO',         flex: 1.0),
     _ColDef(label: 'MATERIAIS',    flex: 0.9),
-    // Ações removidas — excluir está no formulário de edição
   ];
 
   static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
@@ -549,9 +529,6 @@ class _TabelaFornecedores extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Linha da tabela de fornecedores
-// ─────────────────────────────────────────────────────────────────────────────
 class _LinhaFornecedor extends StatefulWidget {
   final FornecedorModel fornecedor;
   final List<_ColDef> cols;
@@ -574,8 +551,6 @@ class _LinhaFornecedor extends StatefulWidget {
 class _LinhaFornecedorState extends State<_LinhaFornecedor> {
   bool _hovered = false;
 
-  // onHover é chamado a cada movimento do mouse dentro da região,
-  // inclusive sobre filhos interativos — nunca interrompido, sem piscar.
   void _onHover(PointerHoverEvent _) {
     if (!_hovered) setState(() => _hovered = true);
   }
@@ -625,7 +600,6 @@ class _LinhaFornecedorState extends State<_LinhaFornecedor> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // ── ID ────────────────────────────────────────────────────────
                 _colWrap(cols[0], Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
@@ -640,7 +614,6 @@ class _LinhaFornecedorState extends State<_LinhaFornecedor> {
                   ),
                 )),
                 _vDivider(),
-                // ── Nome Fantasia ─────────────────────────────────────────────
                 _colWrap(cols[1], Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
@@ -655,22 +628,16 @@ class _LinhaFornecedorState extends State<_LinhaFornecedor> {
                   ),
                 )),
                 _vDivider(),
-                // ── Razão Social ──────────────────────────────────────────────
                 _colWrap(cols[2], _cell(f.razaoSocial ?? '—')),
                 _vDivider(),
-                // ── CNPJ ─────────────────────────────────────────────────────
                 _colWrap(cols[3], _cell(f.cnpj != null ? f.cnpjFormatado : '—')),
                 _vDivider(),
-                // ── WhatsApp ──────────────────────────────────────────────────
                 _colWrap(cols[4], _cell(f.telefone != null ? f.telefoneFormatado : '—')),
                 _vDivider(),
-                // ── Vendedor ──────────────────────────────────────────────────
                 _colWrap(cols[5], _cell(f.nomeVendedor ?? '—')),
                 _vDivider(),
-                // ── Tipo ──────────────────────────────────────────────────────
                 _colWrap(cols[6], _cell(f.tipoFornecedor ?? '—')),
                 _vDivider(),
-                // ── Materiais — hover extra próprio ───────────────────────────
                 _colWrap(cols[7], _MateriaisCell(
                   count: f.materiais.length,
                   onTap: () => widget.onMateriais(f),
@@ -684,9 +651,6 @@ class _LinhaFornecedorState extends State<_LinhaFornecedor> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Célula de materiais com hover extra (badge azul ao passar o mouse)
-// ─────────────────────────────────────────────────────────────────────────────
 class _MateriaisCell extends StatefulWidget {
   final int count;
   final VoidCallback onTap;
@@ -707,7 +671,6 @@ class _MateriaisCellState extends State<_MateriaisCell> {
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
-      // onHover do filho não cancela o onHover da linha pai
       onHover: (_) { if (!_hovered) setState(() => _hovered = true); },
       onExit:  (_) { if (_hovered)  setState(() => _hovered = false); },
       child: GestureDetector(
@@ -751,7 +714,7 @@ class _MateriaisCellState extends State<_MateriaisCell> {
     );
   }
 }
-//  sem InkWell/IconButton — não interfere no fundo da linha
+
 class _IconBtn extends StatefulWidget {
   final IconData icon;
   final Color color;
@@ -778,7 +741,6 @@ class _IconBtnState extends State<_IconBtn> {
       message: widget.tooltip,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
-        // onHover do ícone não cancela o onHover da linha pai
         onHover: (_) { if (!_hovered) setState(() => _hovered = true); },
         onExit:  (_) { if (_hovered)  setState(() => _hovered = false); },
         child: GestureDetector(
@@ -824,10 +786,6 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
 
   bool get _editando => widget.fornecedor != null;
 
-  // Formatter de telefone: aceita exatamente 10 dígitos (DDD 2 + número 8).
-  // Formato de exibição: (42) 9999-9999
-  // NOTA: O backend armazena 10 dígitos. Celulares com 9º dígito NÃO são
-  // suportados pelo sistema — apenas fixos/comerciais de 8 dígitos.
   static String _formatarTelefone(String digits) {
     if (digits.length <= 2) return digits;
     if (digits.length <= 6) {
@@ -846,7 +804,6 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
     _nomeFantasiaCtrl = TextEditingController(text: f?.nomeFantasia ?? '');
     _razaoSocialCtrl = TextEditingController(text: f?.razaoSocial ?? '');
     _cnpjCtrl = TextEditingController(text: f?.cnpj ?? '');
-    // Ao editar, exibe o telefone já formatado
     _telefoneCtrl = TextEditingController(
       text: f?.telefone != null ? _formatarTelefone(f!.telefone!) : '',
     );
@@ -926,7 +883,6 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Banner de erro
                 if (_erroDialog != null) ...[
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -961,7 +917,6 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                   const SizedBox(height: 16),
                 ],
 
-                // Nome fantasia
                 TextFormField(
                   controller: _nomeFantasiaCtrl,
                   decoration:
@@ -978,7 +933,6 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                 ),
                 const SizedBox(height: 12),
 
-                // Razão social
                 TextFormField(
                   controller: _razaoSocialCtrl,
                   decoration:
@@ -987,7 +941,6 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                 ),
                 const SizedBox(height: 12),
 
-                // CNPJ + Telefone
                 Row(children: [
                   Expanded(
                     child: TextFormField(
@@ -1007,14 +960,12 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                       controller: _telefoneCtrl,
                       decoration: const InputDecoration(
                         labelText: 'WhatsAPP',
-                        // DDD (2) + número (8) = 10 dígitos, sem 9º dígito
                       ),
                       keyboardType: TextInputType.phone,
                       inputFormatters: [
-                        // Permite somente dígitos e os caracteres de formatação
                         FilteringTextInputFormatter.allow(
                             RegExp(r'[\d() \-]')),
-                        LengthLimitingTextInputFormatter(14), // (42) 9999-9999
+                        LengthLimitingTextInputFormatter(14),
                         _TelefoneFormatter(),
                       ],
                       validator: (v) {
@@ -1030,7 +981,6 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                 ]),
                 const SizedBox(height: 12),
 
-                // Vendedor + Tipo
                 Row(children: [
                   Expanded(
                     child: TextFormField(
@@ -1091,15 +1041,12 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
   }
 }
 
-/// Formata o telefone em tempo real no padrão (42) 9999-9999 (10 dígitos).
-/// Remove qualquer 9º dígito extra que o usuário tente digitar.
 class _TelefoneFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    // Extrai apenas os dígitos e limita a 10
     final digits = newValue.text.replaceAll(RegExp(r'\D'), '');
     final d = digits.length > 10 ? digits.substring(0, 10) : digits;
 
@@ -1122,9 +1069,6 @@ class _TelefoneFormatter extends TextInputFormatter {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Diálogo de materiais vinculados (substituiu o BottomSheet)
-// ─────────────────────────────────────────────────────────────────────────────
 class _MateriaisDialog extends StatefulWidget {
   final FornecedorModel fornecedor;
   const _MateriaisDialog({required this.fornecedor});
@@ -1213,7 +1157,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
         height: 520,
         child: Column(
           children: [
-            // Cabeçalho
             Padding(
               padding:
                   const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
@@ -1262,7 +1205,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
             ),
             const Divider(height: 1, color: AppTheme.divider),
 
-            // Lista
             Expanded(
               child: materiais.isEmpty
                   ? const Center(
@@ -1298,9 +1240,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Card de vínculo material–fornecedor
-// ─────────────────────────────────────────────────────────────────────────────
 class _VinculoCard extends StatefulWidget {
   final FornecedorMaterialVinculoModel vinculo;
   final VoidCallback onEditar;
@@ -1347,7 +1286,6 @@ class _VinculoCardState extends State<_VinculoCard> {
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                // ── Área clicável (abre editor) ───────────────────────────────
                 Expanded(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
@@ -1391,7 +1329,6 @@ class _VinculoCardState extends State<_VinculoCard> {
                     ),
                   ),
                 ),
-                // ── Botão desvincular ─────────────────────────────────────────
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: widget.onDesvincular,
@@ -1433,9 +1370,6 @@ class _PriceTag extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Diálogo de vínculo / edição de valor — com autocomplete de material
-// ─────────────────────────────────────────────────────────────────────────────
 class _VinculoMaterialDialog extends StatefulWidget {
   final int fornecedorId;
   final FornecedorMaterialVinculoModel? vinculo;
@@ -1457,22 +1391,18 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
   final _formKey = GlobalKey<FormState>();
   final _materialIdCtrl = TextEditingController();
   final _materialNomeCtrl = TextEditingController();
+  final _materialIdentificadorCtrl = TextEditingController();
   final _materialMedidaCtrl = TextEditingController();
   final _materialEspessuraCtrl = TextEditingController();
   final _precoCtrl = TextEditingController();
   final _precoM2Ctrl = TextEditingController();
   bool _salvando = false;
 
-  // Resultado da busca de materiais para autocomplete
   List<Map<String, dynamic>> _sugestoes = [];
   bool _buscandoMateriais = false;
-  // Material selecionado via autocomplete
   int? _materialIdSelecionado;
-  // Indica que o ID digitado não existe na base
   bool _idNaoEncontrado = false;
-  // Debounce para busca por ID
   Timer? _debounceId;
-  // Flag para suprimir listeners durante atribuições programáticas
   bool _ignorarListeners = false;
 
   bool get _editando => widget.vinculo != null;
@@ -1484,6 +1414,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
       final v = widget.vinculo!;
       _materialIdCtrl.text = v.materialId.toString();
       _materialNomeCtrl.text = v.materialNome ?? v.descricaoCompleta;
+      _materialIdentificadorCtrl.text = v.materialIdentificador ?? '';
       _materialMedidaCtrl.text = v.materialMedida ?? '';
       _materialEspessuraCtrl.text = v.materialEspessura ?? '';
       _materialIdSelecionado = v.materialId;
@@ -1493,6 +1424,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
 
     _materialIdCtrl.addListener(_onIdChanged);
     _materialNomeCtrl.addListener(_onNomeChanged);
+    _materialIdentificadorCtrl.addListener(_onFiltroAdicionalChanged);
     _materialMedidaCtrl.addListener(_onFiltroAdicionalChanged);
     _materialEspessuraCtrl.addListener(_onFiltroAdicionalChanged);
   }
@@ -1502,10 +1434,12 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     _debounceId?.cancel();
     _materialIdCtrl.removeListener(_onIdChanged);
     _materialNomeCtrl.removeListener(_onNomeChanged);
+    _materialIdentificadorCtrl.removeListener(_onFiltroAdicionalChanged);
     _materialMedidaCtrl.removeListener(_onFiltroAdicionalChanged);
     _materialEspessuraCtrl.removeListener(_onFiltroAdicionalChanged);
     _materialIdCtrl.dispose();
     _materialNomeCtrl.dispose();
+    _materialIdentificadorCtrl.dispose();
     _materialMedidaCtrl.dispose();
     _materialEspessuraCtrl.dispose();
     _precoCtrl.dispose();
@@ -1513,12 +1447,12 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     super.dispose();
   }
 
-  /// Limpa todos os campos de material e reseta o estado de seleção.
   void _limparSelecaoMaterial() {
     _debounceId?.cancel();
     _ignorarListeners = true;
     _materialIdCtrl.text        = '';
     _materialNomeCtrl.text      = '';
+    _materialIdentificadorCtrl.text = '';
     _materialMedidaCtrl.text    = '';
     _materialEspessuraCtrl.text = '';
     _ignorarListeners = false;
@@ -1529,18 +1463,17 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     });
   }
 
-  // Busca materiais pelo ID digitado — com debounce e busca por ID exato
   void _onIdChanged() {
     if (_ignorarListeners) return;
     final texto = _materialIdCtrl.text.trim();
 
-    // Apagar o ID limpa todos os campos
     if (texto.isEmpty) {
       _debounceId?.cancel();
       _ignorarListeners = true;
-      _materialNomeCtrl.text      = '';
-      _materialMedidaCtrl.text    = '';
-      _materialEspessuraCtrl.text = '';
+      _materialNomeCtrl.text          = '';
+      _materialIdentificadorCtrl.text = '';
+      _materialMedidaCtrl.text        = '';
+      _materialEspessuraCtrl.text     = '';
       _ignorarListeners = false;
       setState(() {
         _sugestoes             = [];
@@ -1550,11 +1483,9 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
       return;
     }
 
-    // Se o ID digitado coincide com o material já selecionado, não faz nada.
     final idDigitadoAgora = int.tryParse(texto);
     if (idDigitadoAgora != null && idDigitadoAgora == _materialIdSelecionado) return;
 
-    // Limpa seleção e erro enquanto o usuário digita
     if (_materialIdSelecionado != null || _idNaoEncontrado) {
       setState(() {
         _materialIdSelecionado = null;
@@ -1586,7 +1517,8 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
           _selecionarMaterial(match.first);
         } else {
           _ignorarListeners = true;
-          _materialNomeCtrl.text = '';
+          _materialNomeCtrl.text          = '';
+          _materialIdentificadorCtrl.text = '';
           _ignorarListeners = false;
           setState(() {
             _sugestoes       = [];
@@ -1601,18 +1533,17 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     });
   }
 
-  // Busca materiais pelo nome digitado; apagar nome limpa todos os campos
   void _onNomeChanged() {
     if (_ignorarListeners) return;
     final texto = _materialNomeCtrl.text.trim();
 
-    // Apagar o nome limpa todos os campos
     if (texto.isEmpty) {
       _debounceId?.cancel();
       _ignorarListeners = true;
-      _materialIdCtrl.text        = '';
-      _materialMedidaCtrl.text    = '';
-      _materialEspessuraCtrl.text = '';
+      _materialIdCtrl.text            = '';
+      _materialIdentificadorCtrl.text = '';
+      _materialMedidaCtrl.text        = '';
+      _materialEspessuraCtrl.text     = '';
       _ignorarListeners = false;
       setState(() {
         _sugestoes             = [];
@@ -1622,15 +1553,12 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
       return;
     }
 
-    // Material já selecionado: nome é read-only, não relança busca
     if (_materialIdSelecionado != null) return;
     _buscarMateriais(nomePrefix: texto);
   }
 
-  // Filtro de medida/espessura: apaga ID (mantém nome), relança busca com filtros atuais
   void _onFiltroAdicionalChanged() {
     if (_ignorarListeners) return;
-    // Se material já selecionado, desfaz apenas a seleção mas preserva o nome
     if (_materialIdSelecionado != null) {
       _ignorarListeners = true;
       _materialIdCtrl.text = '';
@@ -1642,6 +1570,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     }
     final nome = _materialNomeCtrl.text.trim();
     if (nome.isNotEmpty ||
+        _materialIdentificadorCtrl.text.trim().isNotEmpty ||
         _materialMedidaCtrl.text.trim().isNotEmpty ||
         _materialEspessuraCtrl.text.trim().isNotEmpty) {
       _buscarMateriais(nomePrefix: nome.isEmpty ? null : nome);
@@ -1650,11 +1579,11 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     }
   }
 
-  // Ao focar em medida ou espessura, dispara busca imediata para abrir o dropdown
   void _onFiltroAdicionalFocus() {
     if (_materialIdSelecionado != null) return;
     final nome = _materialNomeCtrl.text.trim();
     if (nome.isNotEmpty ||
+        _materialIdentificadorCtrl.text.trim().isNotEmpty ||
         _materialMedidaCtrl.text.trim().isNotEmpty ||
         _materialEspessuraCtrl.text.trim().isNotEmpty) {
       _buscarMateriais(nomePrefix: nome.isEmpty ? null : nome);
@@ -1667,8 +1596,9 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     try {
       final prov  = context.read<FornecedorProvider>();
       final lista = await prov.buscarMateriais(
-        idPrefix:  idPrefix,
+        idPrefix:   idPrefix,
         nomePrefix: nomePrefix,
+        identificador: _materialIdentificadorCtrl.text.trim().isEmpty ? null : _materialIdentificadorCtrl.text.trim(),
         medida:    _materialMedidaCtrl.text.trim().isEmpty ? null : _materialMedidaCtrl.text.trim(),
         espessura: _materialEspessuraCtrl.text.trim().isEmpty ? null : _materialEspessuraCtrl.text.trim(),
       );
@@ -1681,16 +1611,18 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
   }
 
   void _selecionarMaterial(Map<String, dynamic> material) {
-    final id        = material['id']        as int;
-    final nome      = material['nome']      as String? ?? '';
-    final medida    = material['medida']    as String?;
-    final espessura = material['espessura'] as String?;
+    final id           = material['id']           as int;
+    final nome         = material['nome']         as String? ?? '';
+    final identificador = material['identificador'] as String?;
+    final medida       = material['medida']       as String?;
+    final espessura    = material['espessura']    as String?;
 
     _ignorarListeners = true;
-    _materialIdCtrl.text        = id.toString();
-    _materialNomeCtrl.text      = nome;
-    _materialMedidaCtrl.text    = medida    ?? '';
-    _materialEspessuraCtrl.text = espessura ?? '';
+    _materialIdCtrl.text            = id.toString();
+    _materialNomeCtrl.text          = nome;
+    _materialIdentificadorCtrl.text = identificador ?? '';
+    _materialMedidaCtrl.text        = medida    ?? '';
+    _materialEspessuraCtrl.text     = espessura ?? '';
     _ignorarListeners = false;
 
     setState(() {
@@ -1747,20 +1679,18 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
       backgroundColor: AppTheme.surface,
       title: Text(_editando ? 'Editar valor' : 'Vincular material'),
       content: SizedBox(
-        width: 440,
+        width: 600,
         child: Form(
           key: _formKey,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // ── Seleção de material (apenas no modo criação) ───────────────
               if (!_editando) ...[
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Campo ID
                     SizedBox(
-                      width: 110,
+                      width: 120,
                       child: TextFormField(
                         controller: _materialIdCtrl,
                         decoration: InputDecoration(
@@ -1804,7 +1734,6 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    // Campo Nome (autocomplete)
                     Expanded(
                       child: TextFormField(
                         controller: _materialNomeCtrl,
@@ -1840,10 +1769,32 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                   ],
                 ),
 
-                // ── Filtros adicionais: Medida e Espessura ─────────────────
                 const SizedBox(height: 8),
                 Row(
                   children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _materialIdentificadorCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Identificador',
+                          isDense: true,
+                          prefixIcon: const Icon(
+                            Icons.qr_code_outlined,
+                            size: 16,
+                            color: AppTheme.textHint,
+                          ),
+                          suffixIcon: _materialIdSelecionado != null &&
+                                  _materialIdentificadorCtrl.text.isNotEmpty
+                              ? const Icon(Icons.check_circle,
+                                  color: AppTheme.success, size: 16)
+                              : null,
+                        ),
+                        inputFormatters: [_UpperCaseFormatter()],
+                        readOnly: _materialIdSelecionado != null,
+                        onTap: _onFiltroAdicionalFocus,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: TextFormField(
                         controller: _materialMedidaCtrl,
@@ -1898,7 +1849,6 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                   ],
                 ),
 
-                // Lista de sugestões
                 if (_sugestoes.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Container(
@@ -1921,9 +1871,11 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                       itemCount: _sugestoes.length,
                       itemBuilder: (_, i) {
                         final m = _sugestoes[i];
+                        final identificador = m['identificador'] as String?;
                         final medida    = m['medida']    as String?;
                         final espessura = m['espessura'] as String?;
                         final detalhe = [
+                          if (identificador != null && identificador.isNotEmpty) 'ID: $identificador',
                           if (medida    != null && medida.isNotEmpty)    medida,
                           if (espessura != null && espessura.isNotEmpty) espessura,
                         ].join(' · ');
@@ -2012,7 +1964,6 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                 const SizedBox(height: 12),
               ],
 
-              // ── Valores ─────────────────────────────────────────────────────
               Row(children: [
                 Expanded(
                   child: TextFormField(
@@ -2067,18 +2018,12 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     );
   }
 }
-// ─────────────────────────────────────────────────────────────────────────────
-//  Diálogo "Vincular por Material" — seleciona um material e vincula/atualiza
-//  preços em múltiplos fornecedores ao mesmo tempo.
-// ─────────────────────────────────────────────────────────────────────────────
 
-/// Dados mutáveis de um fornecedor na lista de vínculo.
 class _FornecedorVinculoEntry {
   final FornecedorModel fornecedor;
   bool selecionado;
   final TextEditingController precoCtrl;
   final TextEditingController precoM2Ctrl;
-  /// Se já havia vínculo ativo com o material selecionado.
   final bool jaVinculado;
 
   _FornecedorVinculoEntry({
@@ -2106,9 +2051,9 @@ class _VincularPorMaterialDialog extends StatefulWidget {
 
 class _VincularPorMaterialDialogState
     extends State<_VincularPorMaterialDialog> {
-  // ── Busca de material ────────────────────────────────────────────────────
   final _materialIdCtrl       = TextEditingController();
   final _materialNomeCtrl     = TextEditingController();
+  final _materialIdentificadorCtrl = TextEditingController();
   final _materialMedidaCtrl   = TextEditingController();
   final _materialEspessuraCtrl = TextEditingController();
 
@@ -2119,14 +2064,11 @@ class _VincularPorMaterialDialogState
   List<Map<String, dynamic>> _sugestoes = [];
   Timer? _debounceId;
 
-  // ── Lista de fornecedores ────────────────────────────────────────────────
   List<_FornecedorVinculoEntry> _entradas = [];
   bool _carregandoFornecedores = false;
 
-  // ── Salvamento ───────────────────────────────────────────────────────────
   bool _salvando = false;
 
-  // ── Busca de fornecedor para adicionar (overlay dropdown) ───────────────
   final _buscaFornecedorCtrl  = TextEditingController();
   final _buscaFornecedorFocus = FocusNode();
   final _buscaLayerLink       = LayerLink();
@@ -2140,6 +2082,7 @@ class _VincularPorMaterialDialogState
     super.initState();
     _materialIdCtrl.addListener(_onIdChanged);
     _materialNomeCtrl.addListener(_onNomeChanged);
+    _materialIdentificadorCtrl.addListener(_onFiltroAdicionalChanged);
     _materialMedidaCtrl.addListener(_onFiltroAdicionalChanged);
     _materialEspessuraCtrl.addListener(_onFiltroAdicionalChanged);
     _buscaFornecedorCtrl.addListener(_onBuscaFornecedorChanged);
@@ -2153,6 +2096,7 @@ class _VincularPorMaterialDialogState
     _debounceFornecedor?.cancel();
     _materialIdCtrl.removeListener(_onIdChanged);
     _materialNomeCtrl.removeListener(_onNomeChanged);
+    _materialIdentificadorCtrl.removeListener(_onFiltroAdicionalChanged);
     _materialMedidaCtrl.removeListener(_onFiltroAdicionalChanged);
     _materialEspessuraCtrl.removeListener(_onFiltroAdicionalChanged);
     _buscaFornecedorCtrl.removeListener(_onBuscaFornecedorChanged);
@@ -2161,6 +2105,7 @@ class _VincularPorMaterialDialogState
     _overlayEntry = null;
     _materialIdCtrl.dispose();
     _materialNomeCtrl.dispose();
+    _materialIdentificadorCtrl.dispose();
     _materialMedidaCtrl.dispose();
     _materialEspessuraCtrl.dispose();
     _buscaFornecedorCtrl.dispose();
@@ -2171,12 +2116,9 @@ class _VincularPorMaterialDialogState
     super.dispose();
   }
 
-  // ── Inicializa sem carregar fornecedores (aguarda seleção de material) ───
   Future<void> _carregarFornecedores() async {
-    // Nada a fazer na abertura do dialog; a lista fica vazia até um material ser selecionado.
   }
 
-  // ── Overlay helpers ─────────────────────────────────────────────────────
   void _mostrarOverlay() {
     _fecharOverlay();
     final overlay = Overlay.of(context);
@@ -2205,10 +2147,8 @@ class _VincularPorMaterialDialogState
 
   void _onBuscaFornecedorFocusChanged() {
     if (_buscaFornecedorFocus.hasFocus) {
-      // Ao focar, já dispara busca (mesmo campo vazio) para listar todos
       _dispararBuscaFornecedor(_buscaFornecedorCtrl.text.trim());
     } else {
-      // Pequeno delay para permitir cliques dentro do overlay
       Future.delayed(const Duration(milliseconds: 150), () {
         if (mounted && !_buscaFornecedorFocus.hasFocus) {
           _fecharOverlay();
@@ -2217,19 +2157,16 @@ class _VincularPorMaterialDialogState
     }
   }
 
-  // ── Busca fornecedores pelo nome para adicionar ──────────────────────────
   void _onBuscaFornecedorChanged() {
     if (_materialIdSelecionado == null) return;
     _dispararBuscaFornecedor(_buscaFornecedorCtrl.text.trim());
   }
 
-  /// Dispara a busca de fornecedores; [texto] vazio lista todos.
   void _dispararBuscaFornecedor(String texto) {
     if (_materialIdSelecionado == null) return;
 
     _debounceFornecedor?.cancel();
 
-    // Mostra overlay imediatamente com loading
     if (_overlayEntry == null) _mostrarOverlay();
 
     _debounceFornecedor = Timer(const Duration(milliseconds: 300), () async {
@@ -2238,7 +2175,6 @@ class _VincularPorMaterialDialogState
       _atualizarOverlay();
       try {
         final prov = context.read<FornecedorProvider>();
-        // busca vazia (null) retorna todos os fornecedores disponíveis
         final lista = await prov.buscarFornecedores(
             busca: texto.isEmpty ? null : texto);
         if (!mounted) return;
@@ -2265,7 +2201,6 @@ class _VincularPorMaterialDialogState
     });
   }
 
-  /// Clique no overlay → adiciona direto à lista de entradas e mantém overlay aberto.
   void _adicionarFornecedorDoOverlay(FornecedorModel f) {
     setState(() {
       _entradas.add(_FornecedorVinculoEntry(
@@ -2275,14 +2210,11 @@ class _VincularPorMaterialDialogState
         precoM2Ctrl: TextEditingController(),
         jaVinculado: false,
       ));
-      // Remove das sugestões para não aparecer de novo no overlay
       _sugestoesFornecedor.removeWhere((s) => s.id == f.id);
     });
-    // Mantém overlay aberto para selecionar mais
     _atualizarOverlay();
   }
 
-  // ── Carrega fornecedores vinculados ao material selecionado via API ───────
   Future<void> _carregarFornecedoresDoMaterial(int materialId) async {
     setState(() => _carregandoFornecedores = true);
     try {
@@ -2295,14 +2227,10 @@ class _VincularPorMaterialDialogState
     }
   }
 
-  /// Reconstrói `_entradas` com a lista de fornecedores fornecida.
-  /// Quando [materialTrocou] é true, ignora preços/seleção anteriores e
-  /// preenche com os dados do vínculo existente para o material atual.
   void _reconstruirEntradas(
     List<FornecedorModel> fornecedores, {
     bool materialTrocou = false,
   }) {
-    // Quando material trocou, descarta tudo e começa do zero
     if (materialTrocou) {
       for (final e in _entradas) {
         e.dispose();
@@ -2310,12 +2238,10 @@ class _VincularPorMaterialDialogState
       _entradas = [];
     }
 
-    // índice por id para recuperar entradas antigas (só útil quando material NÃO trocou)
     final antigos = {for (final e in _entradas) e.fornecedor.id: e};
 
     final novas = <_FornecedorVinculoEntry>[];
     for (final f in fornecedores) {
-      // Vínculo existente com o material atual (já vem na lista retornada pela API)
       FornecedorMaterialVinculoModel? vinculo;
       if (_materialIdSelecionado != null) {
         try {
@@ -2330,8 +2256,6 @@ class _VincularPorMaterialDialogState
       final antigo = antigos[f.id];
       final jaVinculado = vinculo != null;
 
-      // Quando material trocou: sempre usa o vínculo existente (ou vazio).
-      // Quando é o mesmo material: preserva digitação do usuário se houver.
       String precoInicial   = '';
       String precoM2Inicial = '';
       if (!materialTrocou && antigo != null && antigo.precoCtrl.text.isNotEmpty) {
@@ -2344,28 +2268,26 @@ class _VincularPorMaterialDialogState
 
       novas.add(_FornecedorVinculoEntry(
         fornecedor: f,
-        // Pré-seleciona se já estava vinculado
         selecionado: materialTrocou ? jaVinculado : (antigo?.selecionado ?? jaVinculado),
         precoCtrl:   TextEditingController(text: precoInicial),
         precoM2Ctrl: TextEditingController(text: precoM2Inicial),
         jaVinculado: jaVinculado,
       ));
 
-      // Descarta o antigo (novo controlador criado acima)
       if (!materialTrocou) antigo?.dispose();
     }
 
     _entradas = novas;
   }
 
-  /// Limpa todos os campos de material, reseta seleção e descarta entradas.
   void _limparSelecaoMaterial() {
     _debounceId?.cancel();
     _ignorarListeners = true;
-    _materialIdCtrl.text        = '';
-    _materialNomeCtrl.text      = '';
-    _materialMedidaCtrl.text    = '';
-    _materialEspessuraCtrl.text = '';
+    _materialIdCtrl.text            = '';
+    _materialNomeCtrl.text          = '';
+    _materialIdentificadorCtrl.text = '';
+    _materialMedidaCtrl.text        = '';
+    _materialEspessuraCtrl.text     = '';
     _ignorarListeners = false;
     for (final e in _entradas) { e.dispose(); }
     setState(() {
@@ -2376,18 +2298,17 @@ class _VincularPorMaterialDialogState
     });
   }
 
-  // ── Listeners de busca de material ──────────────────────────────────────
   void _onIdChanged() {
     if (_ignorarListeners) return;
     final texto = _materialIdCtrl.text.trim();
 
-    // Apagar o ID limpa todos os campos e a lista de fornecedores
     if (texto.isEmpty) {
       _debounceId?.cancel();
       _ignorarListeners = true;
-      _materialNomeCtrl.text      = '';
-      _materialMedidaCtrl.text    = '';
-      _materialEspessuraCtrl.text = '';
+      _materialNomeCtrl.text          = '';
+      _materialIdentificadorCtrl.text = '';
+      _materialMedidaCtrl.text        = '';
+      _materialEspessuraCtrl.text     = '';
       _ignorarListeners = false;
       for (final e in _entradas) { e.dispose(); }
       setState(() {
@@ -2399,7 +2320,6 @@ class _VincularPorMaterialDialogState
       return;
     }
 
-    // Se o ID digitado coincide com o material já selecionado, não faz nada.
     final idDigitadoAgora = int.tryParse(texto);
     if (idDigitadoAgora != null && idDigitadoAgora == _materialIdSelecionado) return;
 
@@ -2428,7 +2348,8 @@ class _VincularPorMaterialDialogState
           _selecionarMaterial(match.first);
         } else {
           _ignorarListeners = true;
-          _materialNomeCtrl.text = '';
+          _materialNomeCtrl.text          = '';
+          _materialIdentificadorCtrl.text = '';
           _ignorarListeners = false;
           setState(() {
             _sugestoes       = [];
@@ -2447,13 +2368,13 @@ class _VincularPorMaterialDialogState
     if (_ignorarListeners) return;
     final texto = _materialNomeCtrl.text.trim();
 
-    // Apagar o nome limpa todos os campos e a lista de fornecedores
     if (texto.isEmpty) {
       _debounceId?.cancel();
       _ignorarListeners = true;
-      _materialIdCtrl.text        = '';
-      _materialMedidaCtrl.text    = '';
-      _materialEspessuraCtrl.text = '';
+      _materialIdCtrl.text            = '';
+      _materialIdentificadorCtrl.text = '';
+      _materialMedidaCtrl.text        = '';
+      _materialEspessuraCtrl.text     = '';
       _ignorarListeners = false;
       for (final e in _entradas) { e.dispose(); }
       setState(() {
@@ -2464,16 +2385,12 @@ class _VincularPorMaterialDialogState
       });
       return;
     }
-
-    // Material já selecionado: nome é read-only, não relança busca
     if (_materialIdSelecionado != null) return;
     _buscarMateriais(nomePrefix: texto);
   }
 
-  // Filtro de medida/espessura: apaga ID (mantém nome), relança busca com filtros atuais
   void _onFiltroAdicionalChanged() {
     if (_ignorarListeners) return;
-    // Se material já selecionado, desfaz apenas a seleção mas preserva o nome e descarta entradas
     if (_materialIdSelecionado != null) {
       _ignorarListeners = true;
       _materialIdCtrl.text = '';
@@ -2487,6 +2404,7 @@ class _VincularPorMaterialDialogState
     }
     final nome = _materialNomeCtrl.text.trim();
     if (nome.isNotEmpty ||
+        _materialIdentificadorCtrl.text.trim().isNotEmpty ||
         _materialMedidaCtrl.text.trim().isNotEmpty ||
         _materialEspessuraCtrl.text.trim().isNotEmpty) {
       _buscarMateriais(nomePrefix: nome.isEmpty ? null : nome);
@@ -2495,11 +2413,11 @@ class _VincularPorMaterialDialogState
     }
   }
 
-  // Ao focar em medida ou espessura, dispara busca imediata para abrir o dropdown
   void _onFiltroAdicionalFocus() {
     if (_materialIdSelecionado != null) return;
     final nome = _materialNomeCtrl.text.trim();
     if (nome.isNotEmpty ||
+        _materialIdentificadorCtrl.text.trim().isNotEmpty ||
         _materialMedidaCtrl.text.trim().isNotEmpty ||
         _materialEspessuraCtrl.text.trim().isNotEmpty) {
       _buscarMateriais(nomePrefix: nome.isEmpty ? null : nome);
@@ -2511,10 +2429,11 @@ class _VincularPorMaterialDialogState
     try {
       final prov  = context.read<FornecedorProvider>();
       final lista = await prov.buscarMateriais(
-        idPrefix: idPrefix,
-        nomePrefix: nomePrefix,
-        medida: _materialMedidaCtrl.text.trim().isEmpty ? null : _materialMedidaCtrl.text.trim(),
-        espessura: _materialEspessuraCtrl.text.trim().isEmpty ? null : _materialEspessuraCtrl.text.trim(),
+        idPrefix:      idPrefix,
+        nomePrefix:    nomePrefix,
+        identificador: _materialIdentificadorCtrl.text.trim().isEmpty ? null : _materialIdentificadorCtrl.text.trim(),
+        medida:        _materialMedidaCtrl.text.trim().isEmpty ? null : _materialMedidaCtrl.text.trim(),
+        espessura:     _materialEspessuraCtrl.text.trim().isEmpty ? null : _materialEspessuraCtrl.text.trim(),
       );
       if (mounted) setState(() => _sugestoes = lista);
     } catch (_) {
@@ -2525,16 +2444,18 @@ class _VincularPorMaterialDialogState
   }
 
   void _selecionarMaterial(Map<String, dynamic> material) {
-    final id        = material['id']        as int;
-    final nome      = material['nome']      as String? ?? '';
-    final medida    = material['medida']    as String?;
-    final espessura = material['espessura'] as String?;
+    final id            = material['id']            as int;
+    final nome          = material['nome']          as String? ?? '';
+    final identificador = material['identificador'] as String?;
+    final medida        = material['medida']        as String?;
+    final espessura     = material['espessura']     as String?;
 
     _ignorarListeners = true;
-    _materialIdCtrl.text        = id.toString();
-    _materialNomeCtrl.text      = nome;
-    _materialMedidaCtrl.text    = medida    ?? '';
-    _materialEspessuraCtrl.text = espessura ?? '';
+    _materialIdCtrl.text            = id.toString();
+    _materialNomeCtrl.text          = nome;
+    _materialIdentificadorCtrl.text = identificador ?? '';
+    _materialMedidaCtrl.text        = medida    ?? '';
+    _materialEspessuraCtrl.text     = espessura ?? '';
     _ignorarListeners = false;
 
     _materialIdSelecionado = id;
@@ -2544,11 +2465,9 @@ class _VincularPorMaterialDialogState
       _sugestoes       = [];
     });
 
-    // Busca via API somente os fornecedores vinculados a este material
     _carregarFornecedoresDoMaterial(id);
   }
 
-  // ── Salvamento em lote ───────────────────────────────────────────────────
   Future<void> _salvar() async {
     if (_materialIdSelecionado == null) return;
 
@@ -2596,7 +2515,6 @@ class _VincularPorMaterialDialogState
     }
   }
 
-  // ── UI ───────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -2609,7 +2527,6 @@ class _VincularPorMaterialDialogState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 20, 16, 20),
               child: Row(
@@ -2646,7 +2563,6 @@ class _VincularPorMaterialDialogState
             ),
             const Divider(height: 1, color: AppTheme.divider),
 
-            // ── Seleção de material ─────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
               child: Column(
@@ -2663,7 +2579,6 @@ class _VincularPorMaterialDialogState
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ID
                       SizedBox(
                         width: 110,
                         child: TextField(
@@ -2697,7 +2612,6 @@ class _VincularPorMaterialDialogState
                         ),
                       ),
                       const SizedBox(width: 12),
-                      // Nome (autocomplete)
                       Expanded(
                         child: TextField(
                           controller: _materialNomeCtrl,
@@ -2726,10 +2640,29 @@ class _VincularPorMaterialDialogState
                     ],
                   ),
 
-                  // ── Filtros adicionais: Medida e Espessura ────────────────
                   const SizedBox(height: 8),
                   Row(
                     children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _materialIdentificadorCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'Identificador',
+                            isDense: true,
+                            prefixIcon: const Icon(Icons.qr_code_outlined,
+                                size: 16, color: AppTheme.textHint),
+                            suffixIcon: _materialIdSelecionado != null &&
+                                    _materialIdentificadorCtrl.text.isNotEmpty
+                                ? const Icon(Icons.check_circle,
+                                    color: AppTheme.success, size: 16)
+                                : null,
+                          ),
+                          inputFormatters: [_UpperCaseFormatter()],
+                          readOnly: _materialIdSelecionado != null,
+                          onTap: _onFiltroAdicionalFocus,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: TextField(
                           controller: _materialMedidaCtrl,
@@ -2772,7 +2705,6 @@ class _VincularPorMaterialDialogState
                     ],
                   ),
 
-                  // Sugestões de material
                   if (_sugestoes.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Container(
@@ -2795,9 +2727,11 @@ class _VincularPorMaterialDialogState
                         itemCount: _sugestoes.length,
                         itemBuilder: (_, i) {
                           final m         = _sugestoes[i];
+                          final identificador = m['identificador'] as String?;
                           final medida    = m['medida']    as String?;
                           final espessura = m['espessura'] as String?;
                           final detalhe   = [
+                            if (identificador != null && identificador.isNotEmpty) 'ID: $identificador',
                             if (medida    != null && medida.isNotEmpty)    medida,
                             if (espessura != null && espessura.isNotEmpty) espessura,
                           ].join(' · ');
@@ -2861,7 +2795,6 @@ class _VincularPorMaterialDialogState
 
             const Divider(height: 1, color: AppTheme.divider),
 
-            // ── Cabeçalho da tabela de fornecedores ────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 10, 24, 6),
               child: Column(
@@ -2877,10 +2810,8 @@ class _VincularPorMaterialDialogState
                             ),
                       ),
                       const Spacer(),
-                      // (sem seleção múltipla — todos os itens da lista serão salvos)
                     ],
                   ),
-                  // ── Campo para adicionar fornecedor via overlay ─────────
                   if (_materialIdSelecionado != null) ...[
                     const SizedBox(height: 8),
                     CompositedTransformTarget(
@@ -2891,7 +2822,6 @@ class _VincularPorMaterialDialogState
                           controller:  _buscaFornecedorCtrl,
                           focusNode:   _buscaFornecedorFocus,
                           onTap:       () {
-                            // Ao tocar no campo, já carrega sugestões
                             _dispararBuscaFornecedor(_buscaFornecedorCtrl.text.trim());
                           },
                           decoration: InputDecoration(
@@ -2925,13 +2855,11 @@ class _VincularPorMaterialDialogState
                         ),
                       ),
                     ),
-                    // (sem chips pendentes — seleção já vai direto para a lista)
                   ],
                 ],
               ),
             ),
 
-            // ── Lista de fornecedores ───────────────────────────────────────
             Expanded(
               child: _carregandoFornecedores
                   ? const Center(
@@ -2985,7 +2913,6 @@ class _VincularPorMaterialDialogState
                                 final f = entrada.fornecedor;
                                 setState(() {
                                   _entradas.removeAt(i);
-                                  // Recoloca na lista de sugestões se o overlay estiver aberto
                                   if (_overlayEntry != null) {
                                     _sugestoesFornecedor.insert(0, f);
                                   }
@@ -2999,8 +2926,6 @@ class _VincularPorMaterialDialogState
             ),
 
             const Divider(height: 1, color: AppTheme.divider),
-
-            // ── Rodapé ──────────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 14, 24, 14),
               child: Row(
@@ -3057,9 +2982,6 @@ class _VincularPorMaterialDialogState
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Overlay dropdown de busca de fornecedor — clique direto adiciona à lista
-// ─────────────────────────────────────────────────────────────────────────────
 class _BuscaFornecedorOverlay extends StatelessWidget {
   final LayerLink layerLink;
   final List<FornecedorModel> sugestoes;
@@ -3079,7 +3001,6 @@ class _BuscaFornecedorOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // Tap fora fecha
         Positioned.fill(
           child: GestureDetector(
             onTap: onFechar,
@@ -3188,9 +3109,6 @@ class _BuscaFornecedorOverlay extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Tile de fornecedor dentro do VincularPorMaterialDialog
-// ─────────────────────────────────────────────────────────────────────────────
 class _FornecedorVinculoTile extends StatefulWidget {
   final _FornecedorVinculoEntry entrada;
   final VoidCallback? onRemover;
@@ -3222,7 +3140,6 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Row(
           children: [
-            // ── Info do fornecedor ────────────────────────────────────────
             Expanded(
               flex: 3,
               child: Column(
@@ -3279,8 +3196,6 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
             ),
 
             const SizedBox(width: 12),
-
-            // ── Campos de preço — sempre visíveis ─────────────────────────
             SizedBox(
               width: 110,
               child: TextField(
@@ -3315,7 +3230,6 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
               ),
             ),
 
-            // ── Botão remover ─────────────────────────────────────────────
             if (widget.onRemover != null) ...[
               const SizedBox(width: 4),
               IconButton(

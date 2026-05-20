@@ -43,10 +43,25 @@ CREATE TABLE "materiais" (
     "estoqueConfirmado" BOOLEAN NOT NULL DEFAULT false,
     "ativo" BOOLEAN NOT NULL DEFAULT true,
     "ultimoValorPago" DECIMAL(10,2),
+    "ultimoValorPagoM2" DECIMAL(10,2),
     "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "atualizadoEm" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "materiais_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "historico_precos_material" (
+    "id" SERIAL NOT NULL,
+    "materialId" INTEGER NOT NULL,
+    "ordemCompraId" INTEGER NOT NULL,
+    "fornecedorId" INTEGER NOT NULL,
+    "precoUnitario" DECIMAL(10,2) NOT NULL,
+    "precoM2" DECIMAL(10,2),
+    "quantidade" DECIMAL(10,3) NOT NULL,
+    "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "historico_precos_material_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -72,7 +87,6 @@ CREATE TABLE "fornecedor_materiais" (
     "materialId" INTEGER NOT NULL,
     "preco" DECIMAL(10,2),
     "precoMetroQuadrado" DECIMAL(10,2),
-    "prazoEntrega" TEXT,
     "ativo" BOOLEAN NOT NULL DEFAULT true,
     "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "atualizadoEm" TIMESTAMP(3) NOT NULL,
@@ -142,6 +156,7 @@ CREATE TABLE "ordem_compra_itens" (
     "quantidade" DECIMAL(10,3) NOT NULL,
     "precoUnitario" DECIMAL(10,2) NOT NULL,
     "precoMetroQuadrado" DECIMAL(10,2),
+    "usarM2" BOOLEAN NOT NULL DEFAULT false,
     "precoTotal" DECIMAL(10,2) NOT NULL,
     "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -163,12 +178,13 @@ CREATE TABLE "relacoes_os" (
 CREATE TABLE "movimentacoes_estoque" (
     "id" SERIAL NOT NULL,
     "materialId" INTEGER NOT NULL,
-    "tipo" "TipoMovimentacao" NOT NULL,
+    "tipo" TEXT NOT NULL,
     "quantidade" DECIMAL(10,3) NOT NULL,
     "numeroOS" TEXT NOT NULL,
-    "relacaoOSId" INTEGER,
+    "relacaoOSId" INTEGER NOT NULL,
     "ordemCompraId" INTEGER,
     "precoUnitario" DECIMAL(10,2),
+    "precoM2" DECIMAL(65,30),
     "observacao" TEXT,
     "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -179,7 +195,7 @@ CREATE TABLE "movimentacoes_estoque" (
 CREATE UNIQUE INDEX "usuarios_username_key" ON "usuarios"("username");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "materiais_nome_key" ON "materiais"("nome");
+CREATE UNIQUE INDEX "materiais_nome_medida_espessura_key" ON "materiais"("nome", "medida", "espessura");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "fornecedores_cnpj_key" ON "fornecedores"("cnpj");
@@ -189,6 +205,15 @@ CREATE UNIQUE INDEX "fornecedor_materiais_fornecedorId_materialId_key" ON "forne
 
 -- CreateIndex
 CREATE UNIQUE INDEX "relacoes_os_numeroOS_key" ON "relacoes_os"("numeroOS");
+
+-- AddForeignKey
+ALTER TABLE "historico_precos_material" ADD CONSTRAINT "historico_precos_material_materialId_fkey" FOREIGN KEY ("materialId") REFERENCES "materiais"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "historico_precos_material" ADD CONSTRAINT "historico_precos_material_ordemCompraId_fkey" FOREIGN KEY ("ordemCompraId") REFERENCES "ordens_compra"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "historico_precos_material" ADD CONSTRAINT "historico_precos_material_fornecedorId_fkey" FOREIGN KEY ("fornecedorId") REFERENCES "fornecedores"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "fornecedor_materiais" ADD CONSTRAINT "fornecedor_materiais_fornecedorId_fkey" FOREIGN KEY ("fornecedorId") REFERENCES "fornecedores"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -227,7 +252,7 @@ ALTER TABLE "ordem_compra_itens" ADD CONSTRAINT "ordem_compra_itens_materialId_f
 ALTER TABLE "movimentacoes_estoque" ADD CONSTRAINT "movimentacoes_estoque_materialId_fkey" FOREIGN KEY ("materialId") REFERENCES "materiais"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "movimentacoes_estoque" ADD CONSTRAINT "movimentacoes_estoque_relacaoOSId_fkey" FOREIGN KEY ("relacaoOSId") REFERENCES "relacoes_os"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "movimentacoes_estoque" ADD CONSTRAINT "movimentacoes_estoque_relacaoOSId_fkey" FOREIGN KEY ("relacaoOSId") REFERENCES "relacoes_os"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "movimentacoes_estoque" ADD CONSTRAINT "movimentacoes_estoque_ordemCompraId_fkey" FOREIGN KEY ("ordemCompraId") REFERENCES "ordens_compra"("id") ON DELETE SET NULL ON UPDATE CASCADE;

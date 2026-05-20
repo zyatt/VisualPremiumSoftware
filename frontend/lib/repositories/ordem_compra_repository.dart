@@ -43,4 +43,14 @@ class OrdemCompraRepository {
   Future<List<int>> baixarPdf(int id) async {
     return ApiClient.getBytes('/ordens-compra/$id/pdf');
   }
+
+  Future<Map<String, dynamic>> adicionarItem(
+    int ordemCompraId,
+    Map<String, dynamic> item,
+  ) async {
+    return ApiClient.post(
+      '/ordens-compra/$ordemCompraId/itens',
+      item,
+    );
+  }
 }

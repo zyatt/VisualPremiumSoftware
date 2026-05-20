@@ -58,6 +58,7 @@ class EstoqueProvider extends ChangeNotifier {
     required double quantidade,
     required String numeroOS,
     double? precoUnitario,
+    double? precoM2,
     String? observacao,
     int? ordemCompraId,
   }) async {
@@ -68,10 +69,51 @@ class EstoqueProvider extends ChangeNotifier {
         quantidade:    quantidade,
         numeroOS:      numeroOS,
         precoUnitario: precoUnitario,
+        precoM2:       precoM2,
         observacao:    observacao,
         ordemCompraId: ordemCompraId,
       );
       await carregarRelacoesOS();
+      return true;
+    } catch (e) {
+      _erro = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Remove uma movimentação específica pelo [movimentacaoId].
+  /// Após remover, recarrega o detalhe da [numeroOS] e a lista geral.
+  Future<bool> removerMovimentacao({
+    required int movimentacaoId,
+    required String numeroOS,
+  }) async {
+    try {
+      await _repo.removerMovimentacao(movimentacaoId);
+      // Recarrega detalhe: se a OS ainda existe, atualiza; se foi excluída,
+      // relacaoSelecionada ficará null (tratado pelo backend retornando 404).
+      try {
+        _relacaoSelecionada = await _repo.buscarRelacaoOS(numeroOS);
+      } catch (_) {
+        _relacaoSelecionada = null;
+      }
+      await carregarRelacoesOS();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _erro = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Exclui a RelacaoOS inteira (e todas as movimentações vinculadas) pelo [numeroOS].
+  Future<bool> excluirRelacaoOS(String numeroOS) async {
+    try {
+      await _repo.excluirRelacaoOS(numeroOS);
+      _relacaoSelecionada = null;
+      await carregarRelacoesOS();
+      notifyListeners();
       return true;
     } catch (e) {
       _erro = e.toString();

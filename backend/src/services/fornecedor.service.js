@@ -1,6 +1,5 @@
 const prisma = require('../utils/prisma');
 
-// Normaliza telefone: remove tudo que não é dígito, valida DDD(2) + número(8) = 10 dígitos
 function normalizarTelefone(tel) {
   if (!tel) return null;
   const digits = tel.replace(/\D/g, '');
@@ -13,7 +12,6 @@ function normalizarTelefone(tel) {
 async function listar(busca, tipo, id) {
   const where = { ativo: true };
 
-  // Busca textual
   if (busca) {
     where.OR = [
       { nomeFantasia: { contains: busca, mode: 'insensitive' } },
@@ -22,12 +20,10 @@ async function listar(busca, tipo, id) {
     ];
   }
 
-  // Filtro por tipo
   if (tipo) {
     where.tipoFornecedor = tipo;
   }
 
-  // Filtro por ID
   if (id) {
     where.id = Number(id);
   }
@@ -42,6 +38,7 @@ async function listar(busca, tipo, id) {
             select: {
               id: true,
               nome: true,
+              identificador: true,
               medida: true,
               espessura: true,
             },
@@ -53,7 +50,6 @@ async function listar(busca, tipo, id) {
   });
 }
 
-// Busca rápida de fornecedores para o overlay de vínculo (retorna apenas campos essenciais)
 async function buscarParaVinculo(busca, limite = 50) {
   const where = { ativo: true };
 
@@ -88,6 +84,7 @@ async function buscarPorId(id) {
             select: {
               id: true,
               nome: true,
+              identificador: true,
               medida: true,
               espessura: true,
             },
@@ -144,14 +141,12 @@ async function atualizar(id, data) {
   return prisma.fornecedor.update({ where: { id }, data: updateData });
 }
 
-// Soft-delete: apenas desativa
 async function remover(id) {
   const atual = await prisma.fornecedor.findUnique({ where: { id } });
   if (!atual) throw { status: 404, message: 'Fornecedor não encontrado' };
   return prisma.fornecedor.update({ where: { id }, data: { ativo: false } });
 }
 
-// Vincula um material ao fornecedor com preço (upsert) — preços opcionais
 async function vincularMaterial(fornecedorId, materialId, preco, precoMetroQuadrado) {
   const precoVal           = preco            != null ? parseFloat(preco)            : null;
   const precoM2Val         = precoMetroQuadrado != null ? parseFloat(precoMetroQuadrado) : null;

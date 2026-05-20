@@ -41,7 +41,6 @@ async function criar(titulo) {
 }
 
 async function adicionarItem(orcamentoId, materialId, fornecedorId, quantidade, precoUnitario) {
-  // Verifica se item já existe → atualiza, senão cria
   const existente = await prisma.orcamentoItem.findFirst({
     where: { orcamentoId, materialId },
   });
@@ -70,7 +69,6 @@ async function cancelar(id) {
   return prisma.orcamento.update({ where: { id }, data: { status: 'CANCELADO' } });
 }
 
-// Valida mínimo de 3 fornecedores distintos no orçamento
 async function validarParaOC(orcamentoId) {
   const itens = await prisma.orcamentoItem.findMany({
     where: { orcamentoId },

@@ -44,17 +44,31 @@ async function buscarPorId(id) {
 async function criar(data, usuarioId) {
   const { itens, numerosOS, ...ordemData } = data;
 
-  // Garante que `data` é sempre um objeto Date válido
   if (ordemData.data !== undefined && ordemData.data !== null) {
     ordemData.data = new Date(ordemData.data);
   }
 
-  // Normaliza numerosOS: aceita string, array de strings ou array de objetos
+  // Garante que campos NOT NULL sem default nunca cheguem como undefined/null
+  if (!ordemData.fornecedorId) {
+    throw { status: 400, message: 'Campo obrigatório ausente: fornecedorId' };
+  }
+  // requisitante é NOT NULL no banco mas não obrigatório no fluxo de conversão de orçamento
+  ordemData.requisitante = ordemData.requisitante?.trim() || 'Não informado';
+
+  // Normaliza campos opcionais para evitar undefined no Prisma
+  ordemData.formaPagamento = ordemData.formaPagamento ?? null;
+  ordemData.prazoPagamento = ordemData.prazoPagamento ?? null;
+  ordemData.observacoes    = ordemData.observacoes    ?? null;
+  ordemData.empresa        = ordemData.empresa        ?? null;
+  ordemData.status         = ordemData.status         ?? 'EM_ANDAMENTO';
+
   const osArray = _normalizarNumerosOS(numerosOS);
 
-  // Calcula valor total
   const valorTotal = (itens || []).reduce((acc, item) => {
-    return acc + Number(item.quantidade) * Number(item.precoUnitario);
+    const precoBase = item.usarM2 && Number(item.precoMetroQuadrado) > 0
+      ? Number(item.precoMetroQuadrado)
+      : Number(item.precoUnitario);
+    return acc + Number(item.quantidade) * precoBase;
   }, 0);
 
   return prisma.ordemCompra.create({
@@ -73,7 +87,10 @@ async function criar(data, usuarioId) {
               quantidade:         item.quantidade,
               precoUnitario:      item.precoUnitario,
               precoMetroQuadrado: item.precoMetroQuadrado ?? null,
-              precoTotal:         Number(item.quantidade) * Number(item.precoUnitario),
+              usarM2:             item.usarM2 ?? false,
+              precoTotal:         item.usarM2 && Number(item.precoMetroQuadrado) > 0
+                ? Number(item.quantidade) * Number(item.precoMetroQuadrado)
+                : Number(item.quantidade) * Number(item.precoUnitario),
             })),
           }
         : undefined,
@@ -106,10 +123,8 @@ function _normalizarNumerosOS(numerosOS) {
 async function atualizar(id, data) {
   const { itens, numerosOS, ...ordemData } = data;
 
-  // Atualiza dados principais
   const ordem = await prisma.ordemCompra.update({ where: { id }, data: ordemData });
 
-  // Atualiza numerosOS se foram enviados
   if (Array.isArray(numerosOS)) {
     const osArray = _normalizarNumerosOS(numerosOS);
     await prisma.ordemCompra.update({
@@ -123,7 +138,6 @@ async function atualizar(id, data) {
     });
   }
 
-  // Atualiza itens se foram enviados: remove todos e recria
   if (Array.isArray(itens)) {
     await prisma.ordemCompraItem.deleteMany({ where: { ordemCompraId: id } });
     if (itens.length) {
@@ -135,7 +149,10 @@ async function atualizar(id, data) {
           quantidade:         item.quantidade,
           precoUnitario:      item.precoUnitario,
           precoMetroQuadrado: item.precoMetroQuadrado ?? null,
-          precoTotal:         Number(item.quantidade) * Number(item.precoUnitario),
+          usarM2:             item.usarM2 ?? false,
+          precoTotal:         item.usarM2 && Number(item.precoMetroQuadrado) > 0
+            ? Number(item.quantidade) * Number(item.precoMetroQuadrado)
+            : Number(item.quantidade) * Number(item.precoUnitario),
         })),
       });
     }
@@ -198,6 +215,10 @@ async function finalizar(id) {
   });
   if (!ordem) throw { status: 404, message: 'Ordem de compra não encontrada' };
   if (ordem.status !== 'EM_ANDAMENTO') throw { status: 400, message: 'Apenas ordens em andamento podem ser finalizadas' };
+
+  if (!ordem.itens || ordem.itens.length === 0) {
+    throw { status: 400, message: 'Não é possível finalizar uma OC sem itens' };
+  }
 
   const finalizada = await prisma.ordemCompra.update({
     where: { id },
@@ -286,7 +307,6 @@ async function reverter(id) {
   if (!ordem) throw { status: 404, message: 'Ordem de compra não encontrada' };
   if (ordem.status !== 'FINALIZADO') throw { status: 400, message: 'Apenas ordens finalizadas podem ser revertidas' };
 
-  // Desfaz cada item: cria movimentação de SAÍDA e subtrai do estoque
   for (const item of ordem.itens) {
     const material = await prisma.material.findUnique({ where: { id: item.materialId } });
     if (!material) continue;
@@ -313,14 +333,10 @@ async function reverter(id) {
     const novaQuantidade = Math.max(0, Number(material.quantidade) - Number(item.quantidade));
     const status = _calcularStatus(novaQuantidade, material.estoqueMinimo, material.ativo);
 
-    // Remove registro do histórico de preço criado pela finalização
     await prisma.historicoPrecoMaterial.deleteMany({
       where: { materialId: item.materialId, ordemCompraId: id },
     });
 
-    // Restaura ultimoValorPago / ultimoValorPagoM2 para o registro mais
-    // recente do histórico que ainda reste (após a deleção acima).
-    // Se não houver histórico anterior, zera os campos.
     const historicoAnterior = await prisma.historicoPrecoMaterial.findFirst({
       where: { materialId: item.materialId },
       orderBy: { criadoEm: 'desc' },
@@ -337,7 +353,6 @@ async function reverter(id) {
     });
   }
 
-  // Se havia orçamento vinculado, reverte seu status
   if (ordem.orcamentoId) {
     await prisma.orcamento.update({
       where: { id: ordem.orcamentoId },
@@ -366,26 +381,48 @@ async function criarDeOrcamento(orcamentoId, dadosExtras, usuarioId) {
 
   if (!orcamento) throw { status: 404, message: 'Orçamento não encontrado' };
 
-  const { fornecedorId, requisitante, formaPagamento, prazoPagamento, observacoes, empresa, data, numerosOS } = dadosExtras;
-
-  const itens = orcamento.itens.map((item) => ({
-    materialId:         item.materialId,
-    numeroOS:           dadosExtras.numeroOS || (numerosOS?.[0]) || 'OS-GERAL',
-    quantidade:         item.quantidade,
-    precoUnitario:      item.precoUnitario || 0,
-    precoMetroQuadrado: null,
-  }));
-
-  return criar({
+  const {
     fornecedorId,
     requisitante,
     formaPagamento,
     prazoPagamento,
     observacoes,
     empresa,
-    data:      data ? new Date(data) : new Date(),
+    data,
+    numerosOS,
+  } = dadosExtras;
+
+  // ── Validação dos campos NOT NULL sem default no schema ───────────────────────
+  if (!fornecedorId) {
+    throw { status: 400, message: 'Campo obrigatório ausente: fornecedorId' };
+  }
+
+  // ── Determina o numeroOS padrão para os itens ─────────────────────────────────
+  const osNormalizado = _normalizarNumerosOS(numerosOS);
+  const numeroOSPadrao = dadosExtras.numeroOS
+    || osNormalizado[0]
+    || 'OS-GERAL';
+
+  const itens = orcamento.itens.map((item) => ({
+    materialId:         item.materialId,
+    numeroOS:           item.numeroOS || numeroOSPadrao,
+    quantidade:         item.quantidade,
+    precoUnitario:      Number(item.precoUnitario) > 0 ? item.precoUnitario : 0,
+    precoMetroQuadrado: null,
+    usarM2:             false,
+  }));
+
+  return criar({
+    fornecedorId:   Number(fornecedorId),
+    requisitante:   requisitante?.trim() || 'Não informado',
+    formaPagamento: formaPagamento  ?? null,
+    prazoPagamento: prazoPagamento  ?? null,
+    observacoes:    observacoes     ?? null,
+    empresa:        empresa         ?? null,
+    data:           data ? new Date(data) : new Date(),
+    status:         'EM_ANDAMENTO',
     orcamentoId,
-    numerosOS: numerosOS || [],
+    numerosOS:      osNormalizado,
     itens,
   }, usuarioId);
 }

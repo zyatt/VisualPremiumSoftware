@@ -90,6 +90,7 @@ class FornecedorRepository {
   Future<List<Map<String, dynamic>>> buscarMateriais({
     String? idPrefix,
     String? nomePrefix,
+    String? identificador,
     String? medida,
     String? espessura,
   }) async {
@@ -101,6 +102,9 @@ class FornecedorRepository {
       final params = <String>['ativo=true'];
       if (nomePrefix != null && nomePrefix.isNotEmpty) {
         params.add('busca=${Uri.encodeComponent(nomePrefix)}');
+      }
+      if (identificador != null && identificador.isNotEmpty) {
+        params.add('identificador=${Uri.encodeComponent(identificador)}');
       }
       if (medida != null && medida.isNotEmpty) {
         params.add('medida=${Uri.encodeComponent(medida)}');
@@ -117,10 +121,11 @@ class FornecedorRepository {
       final item = e as Map<String, dynamic>;
 
       return {
-        'id':        item['id'],
-        'nome':      item['nome'],
-        'medida':    item['medida'],
-        'espessura': item['espessura'],
+        'id':           item['id'],
+        'nome':         item['nome'],
+        'identificador': item['identificador'],
+        'medida':       item['medida'],
+        'espessura':    item['espessura'],
       };
     }).toList();
   }

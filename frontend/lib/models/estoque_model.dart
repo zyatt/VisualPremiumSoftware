@@ -2,10 +2,15 @@ class MovimentacaoModel {
   final int id;
   final int materialId;
   final String materialNome;
-  final String tipo; // ENTRADA | SAIDA
+  final String? materialUnidade;
+  final String? materialIdentificador;
+  final String? materialMedida;
+  final String? materialEspessura;
+  final String tipo;
   final double quantidade;
   final String numeroOS;
   final double? precoUnitario;
+  final double? precoM2;
   final String? observacao;
   final DateTime criadoEm;
 
@@ -13,24 +18,38 @@ class MovimentacaoModel {
     required this.id,
     required this.materialId,
     required this.materialNome,
+    this.materialUnidade,
+    this.materialIdentificador,
+    this.materialMedida,
+    this.materialEspessura,
     required this.tipo,
     required this.quantidade,
     required this.numeroOS,
     this.precoUnitario,
+    this.precoM2,
     this.observacao,
     required this.criadoEm,
   });
 
   factory MovimentacaoModel.fromJson(Map<String, dynamic> json) => MovimentacaoModel(
-    id:            json['id'],
-    materialId:    json['materialId'],
-    materialNome:  json['material']?['nome'] ?? '',
-    tipo:          json['tipo'],
-    quantidade:    double.tryParse(json['quantidade'].toString()) ?? 0,
-    numeroOS:      json['numeroOS'],
-    precoUnitario: json['precoUnitario'] != null ? double.tryParse(json['precoUnitario'].toString()) : null,
-    observacao:    json['observacao'],
-    criadoEm:      DateTime.parse(json['criadoEm']),
+    id:                   (json['id'] as num?)?.toInt() ?? 0,
+    materialId:           (json['materialId'] as num?)?.toInt() ?? 0,
+    materialNome:         json['material']?['nome'] ?? '',
+    materialUnidade:      json['material']?['unidade'],
+    materialIdentificador: json['material']?['identificador'],
+    materialMedida:       json['material']?['medida'],
+    materialEspessura:    json['material']?['espessura'],
+    tipo:                 json['tipo'],
+    quantidade:           double.tryParse(json['quantidade'].toString()) ?? 0,
+    numeroOS:             json['numeroOS'],
+    precoUnitario:        json['precoUnitario'] != null
+        ? double.tryParse(json['precoUnitario'].toString())
+        : null,
+    precoM2:              json['precoM2'] != null
+        ? double.tryParse(json['precoM2'].toString())
+        : null,
+    observacao:           json['observacao'],
+    criadoEm:             DateTime.parse(json['criadoEm']),
   );
 }
 
@@ -38,19 +57,37 @@ class RelacaoOSModel {
   final int id;
   final String numeroOS;
   final String? descricao;
+  final DateTime? criadoEm;
+  final DateTime? atualizadoEm;
   final List<MovimentacaoModel> movimentacoes;
 
   RelacaoOSModel({
     required this.id,
     required this.numeroOS,
     this.descricao,
+    this.criadoEm,
+    this.atualizadoEm,
     required this.movimentacoes,
   });
 
+  int get totalItens => movimentacoes.length;
+
+  List<String> get materiaisNomes {
+    final nomes = movimentacoes.map((m) => m.materialNome).toSet().toList();
+    nomes.sort();
+    return nomes;
+  }
+
   factory RelacaoOSModel.fromJson(Map<String, dynamic> json) => RelacaoOSModel(
-    id:            json['id'],
-    numeroOS:      json['numeroOS'],
-    descricao:     json['descricao'],
+    id:           (json['id'] as num?)?.toInt() ?? 0,
+    numeroOS:     json['numeroOS'],
+    descricao:    json['descricao'],
+    criadoEm:     json['criadoEm'] != null
+        ? DateTime.tryParse(json['criadoEm'].toString())
+        : null,
+    atualizadoEm: json['atualizadoEm'] != null
+        ? DateTime.tryParse(json['atualizadoEm'].toString())
+        : null,
     movimentacoes: (json['movimentacoes'] as List? ?? [])
         .map((m) => MovimentacaoModel.fromJson(m))
         .toList(),

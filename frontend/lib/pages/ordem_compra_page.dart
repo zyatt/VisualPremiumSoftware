@@ -54,7 +54,7 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
 
   Future<void> _abrirCriacaoOC() async {
     final criou = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const _NovaOrdemCompraPage()),
+      MaterialPageRoute(builder: (_) => const NovaOrdemCompraPage()),
     );
     if (criou == true && mounted) {
       context.read<OrdemCompraProvider>().carregar();
@@ -241,6 +241,25 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
 
   void _confirmarFinalizar(
       BuildContext context, OrdemCompraProvider provider, int id) {
+        final ordem = provider.emAndamento.firstWhere(
+    (o) {
+      final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
+      return m.id == id;
+    },
+    orElse: () => null,
+  );
+  if (ordem != null) {
+    final model = ordem is OrdemCompraModel ? ordem : OrdemCompraModel.fromJson(ordem as Map<String, dynamic>);
+    if (model.itens.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Não é possível finalizar uma OC sem itens.'),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+      return;
+    }
+  }
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -775,6 +794,7 @@ class _OrdemCompraDetalhePageState extends State<_OrdemCompraDetalhePage> {
     );
     if (ok != true) return;
     setState(() => _processando = true);
+    // ignore: use_build_context_synchronously
     final provider = context.read<OrdemCompraProvider>();
     try {
       await provider.finalizar(_ordem.id);
@@ -804,6 +824,7 @@ class _OrdemCompraDetalhePageState extends State<_OrdemCompraDetalhePage> {
     );
     if (ok != true) return;
     setState(() => _processando = true);
+    // ignore: use_build_context_synchronously
     final provider = context.read<OrdemCompraProvider>();
     try {
       await provider.cancelar(_ordem.id);
@@ -837,6 +858,7 @@ class _OrdemCompraDetalhePageState extends State<_OrdemCompraDetalhePage> {
     );
     if (ok != true) return;
     setState(() => _processando = true);
+    // ignore: use_build_context_synchronously
     final provider = context.read<OrdemCompraProvider>();
     try {
       await provider.reverter(_ordem.id);
@@ -919,13 +941,31 @@ class _OrdemCompraDetalhePageState extends State<_OrdemCompraDetalhePage> {
                   Text('R\$ ${item.precoTotal.toStringAsFixed(2).replaceAll('.', ',')}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.primary)),
                 ]),
                 const SizedBox(height: 6),
-                Wrap(spacing: 12, runSpacing: 4, children: [
-                  _itemChip(Icons.assignment_outlined, 'OS: ${item.numeroOS}'),
-                  _itemChip(Icons.format_list_numbered, 'Qtd: ${item.quantidade}'),
-                  _itemChip(Icons.attach_money, 'Unit: R\$ ${item.precoUnitario.toStringAsFixed(2).replaceAll('.', ',')}'),
-                  if (item.precoMetroQuadrado != null)
-                    _itemChip(Icons.square_foot, 'm²: R\$ ${item.precoMetroQuadrado!.toStringAsFixed(2).replaceAll('.', ',')}'),
-                ]),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _itemChip(Icons.assignment_outlined, 'OS: ${item.numeroOS}'),
+                    _itemChip(
+                      Icons.format_list_numbered,
+                      item.usarM2
+                          ? 'Qtd (m²): ${item.quantidade}'
+                          : 'Qtd: ${item.quantidade}',
+                    ),
+                    _itemChipDestaque(
+                      Icons.attach_money,
+                      'Unitário: R\$ ${item.precoUnitario.toStringAsFixed(2).replaceAll('.', ',')}',
+                      ativo: !item.usarM2,
+                    ),
+                    if (item.precoMetroQuadrado != null)
+                      _itemChipDestaque(
+                        Icons.square_foot,
+                        'm²: R\$ ${item.precoMetroQuadrado!.toStringAsFixed(2).replaceAll('.', ',')}',
+                        ativo: item.usarM2,
+                      ),
+                  ],
+                ),
               ]),
             )),
             Container(
@@ -1003,11 +1043,83 @@ class _OrdemCompraDetalhePageState extends State<_OrdemCompraDetalhePage> {
     ]),
   );
 
-  Widget _itemChip(IconData icon, String label) => Row(mainAxisSize: MainAxisSize.min, children: [
-    Icon(icon, size: 12, color: AppTheme.textHint),
-    const SizedBox(width: 3),
-    Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-  ]);
+  Widget _itemChip(IconData icon, String label) {
+    return SizedBox(
+      height: 24,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: AppTheme.textHint),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _itemChipDestaque(
+    IconData icon,
+    String label, {
+    required bool ativo,
+  }) {
+    if (!ativo) {
+      return SizedBox(
+        height: 24,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: AppTheme.textHint),
+            const SizedBox(width: 3),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return IntrinsicHeight(
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 24),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 7,
+          vertical: 2,
+        ),
+        decoration: BoxDecoration(
+          color: AppTheme.primary.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(
+            color: AppTheme.primary.withValues(alpha: 0.35),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: AppTheme.primary),
+            const SizedBox(width: 3),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppTheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _statusBadge(String status) {
     Color bg, fg; String label;
@@ -1061,6 +1173,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       quantidade: i.quantidade,
       precoUnitario: i.precoUnitario,
       precoMetroQuadrado: i.precoMetroQuadrado,
+      usarM2: i.usarM2,
     )).toList();
     _requisitanteCtrl = TextEditingController(text: widget.ordem.requisitante);
     _formaPagamentoCtrl = TextEditingController(text: widget.ordem.formaPagamento ?? '');
@@ -1117,6 +1230,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         quantidade: 1,
         precoUnitario: vinculo.preco,
         precoMetroQuadrado: vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
+        usarM2: false,
       ));
     });
   }
@@ -1145,6 +1259,10 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um fornecedor.'), backgroundColor: AppTheme.error));
       return;
     }
+    if (_numerosOS.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Adicione ao menos um número de OS.'), backgroundColor: AppTheme.error));
+        return;
+     }
     for (final item in _itens) {
       if (item.numeroOS.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Atribua uma OS para todos os itens.'), backgroundColor: AppTheme.error));
@@ -1168,6 +1286,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           'quantidade': i.quantidade,
           'precoUnitario': i.precoUnitario,
           'precoMetroQuadrado': i.precoMetroQuadrado,
+          'usarM2': i.usarM2,
         }).toList(),
       });
       if (!mounted) return;
@@ -1190,9 +1309,13 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
   );
 
-  Widget _label(String text) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Text(text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
+  Widget _label(String text) => Text(
+    text,
+    style: const TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: AppTheme.textSecondary,
+    ),
   );
 
   Widget _card({ required String titulo, String? subtitulo, required List<Widget> children, Widget? trailing }) {
@@ -1304,17 +1427,30 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           ),
           const SizedBox(height: 14),
 
-          _label('Requisitante (opcional)'),
+          _label('Requisitante'),
           TextFormField(controller: _requisitanteCtrl, decoration: _deco('Nome do requisitante')),
           const SizedBox(height: 14),
-
-          _label('Forma de Pagamento (opcional)'),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 flex: 3,
-                child: TextFormField(controller: _formaPagamentoCtrl, decoration: _deco('Ex: Boleto, À Vista, Transferência...')),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _label('Forma de Pagamento'),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      height: 48,
+                      child: TextFormField(
+                        controller: _formaPagamentoCtrl,
+                        decoration: _deco(
+                          'Ex: Boleto, À Vista, Crédito...',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1322,8 +1458,17 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _label('Prazo de Pagamento (opcional)'),
-                    TextFormField(controller: _prazoPagamentoCtrl, decoration: _deco('Ex: 30 dias, 15/30/45...')),
+                    _label('Prazo de Pagamento'),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      height: 48,
+                      child: TextFormField(
+                        controller: _prazoPagamentoCtrl,
+                        decoration: _deco(
+                          'Ex: 30 dias, 15/30/45...',
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1331,7 +1476,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           ),
           const SizedBox(height: 14),
 
-          _label('Observações (opcional)'),
+          _label('Observações'),
           TextFormField(controller: _observacoesCtrl, decoration: _deco('Observações gerais'), maxLines: 3),
         ]),
         const SizedBox(height: 16),
@@ -1339,7 +1484,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         // ── Empresa ──────────────────────────────────────────────────────────
         _card(
           titulo: 'Empresa',
-          subtitulo: 'Selecione a empresa que aparecerá no cabeçalho da Ordem de Compra:',
+          subtitulo: 'Selecione a empresa que irá efetuar a ordem de compra.',
           children: [
             Row(children: [
               _empresaOption('VISUAL PREMIUM', 'Visual Premium'),
@@ -1353,7 +1498,17 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         // ── Números de OS ─────────────────────────────────────────────────────
         _OsInputSection(
           numerosOS: _numerosOS,
-          onChanged: () => setState(() {}),
+          onChanged: () {
+            setState(() {
+              // Se agora existe mais de uma OS,
+              // força o usuário a selecionar novamente
+              if (_numerosOS.length > 1) {
+                for (final item in _itens) {
+                  item.numeroOS = '';
+                }
+              }
+            });
+          },    
         ),
         const SizedBox(height: 16),
 
@@ -1454,14 +1609,42 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 // PÁGINA DE CRIAÇÃO DE NOVA OC (navegação dedicada)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _NovaOrdemCompraPage extends StatefulWidget {
-  const _NovaOrdemCompraPage();
+/// Dados de um item de orçamento a serem pré-carregados na nova OC.
+class ItemPreCarregadoOC {
+  final int materialId;
+  final String materialNome;
+  final double quantidade;
+  final double precoUnitario;
+  final double? precoMetroQuadrado;
+  final bool usarM2;
 
-  @override
-  State<_NovaOrdemCompraPage> createState() => _NovaOrdemCompraPageState();
+  const ItemPreCarregadoOC({
+    required this.materialId,
+    required this.materialNome,
+    required this.quantidade,
+    required this.precoUnitario,
+    this.precoMetroQuadrado,
+    this.usarM2 = false,
+  });
 }
 
-class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
+class NovaOrdemCompraPage extends StatefulWidget {
+  /// Quando vindo do orçamento, lista de itens pré-carregados.
+  final List<ItemPreCarregadoOC> itensPreCarregados;
+  /// Quando vindo do orçamento, fornecedor já selecionado.
+  final FornecedorModel? fornecedorInicial;
+
+  const NovaOrdemCompraPage({
+    super.key,
+    this.itensPreCarregados = const [],
+    this.fornecedorInicial,
+  });
+
+  @override
+  State<NovaOrdemCompraPage> createState() => NovaOrdemCompraPageState();
+}
+
+class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   final _formKey = GlobalKey<FormState>();
   final _repo = OrdemCompraRepository();
 
@@ -1484,6 +1667,22 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
   void initState() {
     super.initState();
     _carregarProximoId();
+
+    // Pré-preencher fornecedor e itens quando vindo do orçamento
+    if (widget.fornecedorInicial != null) {
+      _fornecedor = widget.fornecedorInicial;
+    }
+    for (final item in widget.itensPreCarregados) {
+      _itens.add(_ItemRascunho(
+        materialId:         item.materialId,
+        materialNome:       item.materialNome,
+        numeroOS:           '', // usuário deve preencher
+        quantidade:         item.quantidade,
+        precoUnitario:      item.precoUnitario,
+        precoMetroQuadrado: item.precoMetroQuadrado,
+        usarM2:             item.usarM2,
+      ));
+    }
   }
 
   Future<void> _carregarProximoId() async {
@@ -1547,6 +1746,7 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
                   'quantidade': i.quantidade,
                   'precoUnitario': i.precoUnitario,
                   'precoMetroQuadrado': i.precoMetroQuadrado,
+                  'usarM2': i.usarM2,
                 })
             .toList(),
       });
@@ -1583,6 +1783,7 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
         precoUnitario: vinculo.preco,
         precoMetroQuadrado:
             vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
+        usarM2: false,
       ));
     });
   }
@@ -1647,9 +1848,11 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
           icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: const Text(
-          'Nova Ordem de Compra',
-          style: TextStyle(
+        title: Text(
+          widget.itensPreCarregados.isNotEmpty
+              ? 'Nova OC — do Orçamento'
+              : 'Nova Ordem de Compra',
+          style: const TextStyle(
               fontWeight: FontWeight.w700,
               fontSize: 18,
               color: AppTheme.textPrimary),
@@ -1685,6 +1888,32 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
+            // ── Banner: itens vindos do orçamento ──────────────────────────
+            if (widget.itensPreCarregados.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, size: 18, color: AppTheme.primary),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '${widget.itensPreCarregados.length} '
+                        '${widget.itensPreCarregados.length == 1 ? 'item importado' : 'itens importados'} '
+                        'do orçamento. Adicione o número de OS e salve.',
+                        style: const TextStyle(fontSize: 13, color: AppTheme.primary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             // ── Dados da OC ────────────────────────────────────────────────
             _card(
               titulo: 'Dados da Ordem de Compra',
@@ -1751,7 +1980,7 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
                 const SizedBox(height: 14),
 
                 // Fornecedor
-                _label('Fornecedor principal (opcional)'),
+                _label('Fornecedor principal'),
                 InkWell(
                   onTap: _selecionarFornecedor,
                   borderRadius: BorderRadius.circular(8),
@@ -1773,7 +2002,7 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
                 const SizedBox(height: 14),
 
                 // Requisitante
-                _label('Requisitante (opcional)'),
+                _label('Requisitante'),
                 TextFormField(
                   controller: _requisitanteCtrl,
                   decoration: _deco('Nome do requisitante'),
@@ -1789,10 +2018,16 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _label('Forma de Pagamento (opcional)'),
-                          TextFormField(
-                            controller: _formaPagamentoCtrl,
-                            decoration: _deco('Ex: Boleto, À Vista, Crédito...'),
+                          _label('Forma de Pagamento'),
+                          const SizedBox(height: 6),
+                          SizedBox(
+                            height: 48,
+                            child: TextFormField(
+                              controller: _formaPagamentoCtrl,
+                              decoration: _deco(
+                                'Ex: Boleto, À Vista, Crédito...',
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -1803,10 +2038,16 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _label('Prazo de Pagamento (opcional)'),
-                          TextFormField(
-                            controller: _prazoPagamentoCtrl,
-                            decoration: _deco('Ex: 30 dias, 15/30/45...'),
+                          _label('Prazo de Pagamento'),
+                          const SizedBox(height: 6),
+                          SizedBox(
+                            height: 48,
+                            child: TextFormField(
+                              controller: _prazoPagamentoCtrl,
+                              decoration: _deco(
+                                'Ex: 30 dias, 15/30/45...',
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -1816,7 +2057,7 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
                 const SizedBox(height: 14),
 
                 // Observações
-                _label('Observações (opcional)'),
+                _label('Observações'),
                 TextFormField(
                   controller: _observacoesCtrl,
                   decoration: _deco('Observações gerais'),
@@ -1846,7 +2087,17 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
             // ── Números de OS ──────────────────────────────────────────────
             _OsInputSection(
               numerosOS: _numerosOS,
-              onChanged: () => setState(() {}),
+              onChanged: () {
+                setState(() {
+                  // Se agora existe mais de uma OS,
+                  // força o usuário a selecionar novamente
+                  if (_numerosOS.length > 1) {
+                    for (final item in _itens) {
+                      item.numeroOS = '';
+                    }
+                  }
+                });
+              },
             ),
             const SizedBox(height: 16),
 
@@ -2064,14 +2315,14 @@ class _NovaOrdemCompraPageState extends State<_NovaOrdemCompraPage> {
                 color: Color(0xFF92400E), fontSize: 13)),
       );
 
-  Widget _label(String label) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Text(label,
-            style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
-                color: AppTheme.textSecondary)),
-      );
+  Widget _label(String text) => Text(
+    text,
+    style: const TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: AppTheme.textSecondary,
+    ),
+  );
 
   InputDecoration _deco(String hint) => InputDecoration(
         hintText: hint,
@@ -2221,7 +2472,7 @@ class _OsInputSectionState extends State<_OsInputSection> {
           Wrap(
             spacing: 8,
             children: [
-              _atalho('⭐ Empresa', () {
+              _atalho('Empresa', () {
                 // Preenche o primeiro campo vazio ou adiciona
                 final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
                 if (idx != -1) {
@@ -2231,7 +2482,7 @@ class _OsInputSectionState extends State<_OsInputSection> {
                 }
                 _sincronizar();
               }),
-              _atalho('👥 Outros', () {
+              _atalho('Outros', () {
                 final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
                 if (idx != -1) {
                   setState(() => _controllers[idx].text = 'OUTROS');
@@ -2308,6 +2559,9 @@ class _ItemRascunho {
   double quantidade;
   double precoUnitario;
   double? precoMetroQuadrado;
+  /// Se true, o total é calculado como quantidade × precoMetroQuadrado;
+  /// caso contrário, quantidade × precoUnitario.
+  bool usarM2;
 
   _ItemRascunho({
     required this.materialId,
@@ -2316,9 +2570,15 @@ class _ItemRascunho {
     required this.quantidade,
     this.precoUnitario = 0,
     this.precoMetroQuadrado,
+    this.usarM2 = false,
   });
 
-  double get precoTotal => quantidade * precoUnitario;
+  double get precoTotal {
+    if (usarM2 && precoMetroQuadrado != null && precoMetroQuadrado! > 0) {
+      return quantidade * precoMetroQuadrado!;
+    }
+    return quantidade * precoUnitario;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2499,14 +2759,64 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       TextStyle(fontSize: 12, color: Color(0xFF92400E))),
             ),
           const SizedBox(height: 8),
+          // ── Seletor de modo de cálculo ───────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.divider),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Modo de cálculo',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _ModoCalculo(
+                        label: 'Qtd × Preço Unitário.',
+                        ativo: !widget.item.usarM2,
+                        onTap: () {
+                          setState(() => widget.item.usarM2 = false);
+                          widget.onChanged();
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _ModoCalculo(
+                        label: 'Qtd × m²',
+                        ativo: widget.item.usarM2,
+                        onTap: () {
+                          setState(() => widget.item.usarM2 = true);
+                          widget.onChanged();
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Quantidade',
-                        style: TextStyle(
+                    Text(
+                        widget.item.usarM2 ? 'Quantidade (m²)' : 'Quantidade',
+                        style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
                             color: AppTheme.textSecondary)),
@@ -2535,11 +2845,19 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Preço Unit.',
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textSecondary)),
+                    Row(
+                      children: [
+                        const Text('Preço Unitário.',
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textSecondary)),
+                        if (!widget.item.usarM2) ...[
+                          const SizedBox(width: 4),
+                          const _BadgeAtivo(),
+                        ],
+                      ],
+                    ),
                     const SizedBox(height: 4),
                     TextFormField(
                       controller: _precoCtrl,
@@ -2565,15 +2883,23 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Preço m²',
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textSecondary)),
+                    Row(
+                      children: [
+                        const Text('Preço m²',
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textSecondary)),
+                        if (widget.item.usarM2) ...[
+                          const SizedBox(width: 4),
+                          const _BadgeAtivo(),
+                        ],
+                      ],
+                    ),
                     const SizedBox(height: 4),
                     TextFormField(
                       controller: _precoM2Ctrl,
-                      decoration: _deco('Opcional'),
+                      decoration: _deco(widget.item.usarM2 ? '0.00' : 'Opcional'),
                       keyboardType: const TextInputType.numberWithOptions(
                           decimal: true),
                       inputFormatters: [
@@ -2584,6 +2910,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                         widget.item.precoMetroQuadrado =
                             v.isEmpty ? null : double.tryParse(v);
                         widget.onChanged();
+                        setState(() {});
                       },
                     ),
                   ],
@@ -2603,6 +2930,94 @@ class _ItemFormCardState extends State<_ItemFormCard> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS DO ITEM FORM CARD
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ModoCalculo extends StatelessWidget {
+  final String label;
+  final bool ativo;
+  final VoidCallback onTap;
+
+  const _ModoCalculo({required this.label, required this.ativo, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        decoration: BoxDecoration(
+          color: ativo ? AppTheme.primary.withValues(alpha: 0.10) : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: ativo ? AppTheme.primary : AppTheme.divider,
+            width: ativo ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: Checkbox(
+                value: ativo,
+                onChanged: (_) => onTap(),
+                activeColor: AppTheme.primary,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+                shape: const CircleBorder(),
+                side: BorderSide(
+                  color: ativo ? AppTheme.primary : AppTheme.textHint,
+                  width: 1.5,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: ativo ? AppTheme.primary : AppTheme.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BadgeAtivo extends StatelessWidget {
+  const _BadgeAtivo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: const Text(
+        'ativo',
+        style: TextStyle(
+          fontSize: 9,
+          color: AppTheme.primary,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+        ),
       ),
     );
   }

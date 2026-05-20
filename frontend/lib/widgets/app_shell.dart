@@ -110,16 +110,14 @@ class _SidebarContentState extends State<_SidebarContent> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    // ignore: prefer_const_constructors
-                    child: Icon(
-                      Icons.diamond_outlined,
-                      color: AppTheme.accent,
-                      size: 32,
+                   ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.asset(
+                      'assets/images/logo.png',
+                      width: 40,
+                      height: 40,
+                      fit: BoxFit.cover,
                     ),
-                    // Troque o Icon pelo Image.asset abaixo se tiver logo:
-                    // child: Image.asset('assets/images/logo.png', width: 36, height: 36, fit: BoxFit.cover),
                   ),
                   const SizedBox(height: 10),
                   Text(

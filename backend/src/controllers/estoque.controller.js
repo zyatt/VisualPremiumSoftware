@@ -14,10 +14,38 @@ const registrarMovimentacao = async (req, res, next) => {
   } catch(e){next(e);}
 };
 
+const removerMovimentacao = async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ message: 'ID inválido' });
+    res.json(await svc.removerMovimentacao(id));
+  } catch(e) {
+    if (e.status) return res.status(e.status).json({ message: e.message });
+    next(e);
+  }
+};
+
+const excluirRelacaoOS = async (req, res, next) => {
+  try {
+    const numeroOS = decodeURIComponent(req.params.numeroOS);
+    res.json(await svc.excluirRelacaoOS(numeroOS));
+  } catch(e) {
+    if (e.status) return res.status(e.status).json({ message: e.message });
+    next(e);
+  }
+};
+
 const listarMovimentacoesPorMaterial = async (req, res, next) => {
   try {
     res.json(await svc.listarMovimentacoesPorMaterial(+req.params.materialId));
   } catch(e){next(e);}
 };
 
-module.exports = { listarRelacoesOS, buscarRelacaoOS, registrarMovimentacao, listarMovimentacoesPorMaterial };
+module.exports = {
+  listarRelacoesOS,
+  buscarRelacaoOS,
+  registrarMovimentacao,
+  removerMovimentacao,
+  excluirRelacaoOS,
+  listarMovimentacoesPorMaterial,
+};

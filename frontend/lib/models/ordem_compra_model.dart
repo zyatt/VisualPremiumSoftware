@@ -7,6 +7,7 @@ class OrdemCompraItemModel {
   final double precoUnitario;
   final double? precoMetroQuadrado;
   final double precoTotal;
+  final bool usarM2;
 
   OrdemCompraItemModel({
     this.id,
@@ -17,6 +18,7 @@ class OrdemCompraItemModel {
     required this.precoUnitario,
     this.precoMetroQuadrado,
     required this.precoTotal,
+    this.usarM2 = false,
   });
 
   factory OrdemCompraItemModel.fromJson(Map<String, dynamic> json) => OrdemCompraItemModel(
@@ -28,6 +30,7 @@ class OrdemCompraItemModel {
     precoUnitario:      double.tryParse(json['precoUnitario']?.toString() ?? '0') ?? 0,
     precoMetroQuadrado: json['precoMetroQuadrado'] != null ? double.tryParse(json['precoMetroQuadrado'].toString()) : null,
     precoTotal:         double.tryParse(json['precoTotal']?.toString() ?? '0') ?? 0,
+    usarM2:             json['usarM2'] == true,
   );
 }
 
@@ -41,7 +44,7 @@ class OrdemCompraModel {
   final String? prazoPagamento;
   final String? observacoes;
   final String? empresa;
-  final String status; // EM_ANDAMENTO | FINALIZADO | CANCELADO
+  final String status;
   final double valorTotal;
   final List<OrdemCompraItemModel> itens;
   final List<String> numerosOS;

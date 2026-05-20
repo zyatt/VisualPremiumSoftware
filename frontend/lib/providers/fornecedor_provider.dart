@@ -171,15 +171,17 @@ class FornecedorProvider extends ChangeNotifier {
   Future<List<Map<String, dynamic>>> buscarMateriais({
     String? idPrefix,
     String? nomePrefix,
+    String? identificador,
     String? medida,
     String? espessura,
   }) async {
     try {
       return await _repo.buscarMateriais(
-        idPrefix: idPrefix,
-        nomePrefix: nomePrefix,
-        medida: medida,
-        espessura: espessura,
+        idPrefix:      idPrefix,
+        nomePrefix:    nomePrefix,
+        identificador: identificador,
+        medida:        medida,
+        espessura:     espessura,
       );
     } catch (e) {
       _erro = _mensagemErro(e);

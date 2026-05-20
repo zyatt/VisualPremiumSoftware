@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'rotas/app_router.dart';
 import 'theme/app_theme.dart';
@@ -58,6 +59,18 @@ class _VisualPremiumAppState extends State<VisualPremiumApp> {
         darkTheme: AppTheme.dark,
         themeMode: ThemeMode.dark,
         routerConfig: AppRouter.router,
+
+        // ↓ adicionar isto
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [
+          Locale('pt', 'BR'),
+          Locale('en', 'US'),
+        ],
+        locale: const Locale('pt', 'BR'),
       ),
     );
   }

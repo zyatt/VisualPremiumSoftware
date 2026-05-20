@@ -3,6 +3,7 @@ class FornecedorMaterialVinculoModel {
   final int fornecedorId;
   final int materialId;
   final String? materialNome;
+  final String? materialIdentificador;
   final String? materialMedida;
   final String? materialEspessura;
   final double preco;
@@ -14,6 +15,7 @@ class FornecedorMaterialVinculoModel {
     required this.fornecedorId,
     required this.materialId,
     this.materialNome,
+    this.materialIdentificador,
     this.materialMedida,
     this.materialEspessura,
     required this.preco,
@@ -21,26 +23,27 @@ class FornecedorMaterialVinculoModel {
     required this.ativo,
   });
 
-  /// Descrição compacta: nome + medida/espessura quando presentes.
   String get descricaoCompleta {
     final partes = <String>[];
     if (materialMedida != null && materialMedida!.isNotEmpty) partes.add(materialMedida!);
     if (materialEspessura != null && materialEspessura!.isNotEmpty) partes.add(materialEspessura!);
+    if (materialIdentificador != null && materialIdentificador!.isNotEmpty) partes.add(materialIdentificador!);
     if (partes.isEmpty) return materialNome ?? 'Material #$materialId';
     return '${materialNome ?? 'Material #$materialId'} · ${partes.join(' · ')}';
   }
 
   factory FornecedorMaterialVinculoModel.fromJson(Map<String, dynamic> json) =>
       FornecedorMaterialVinculoModel(
-        id:                  json['id'],
-        fornecedorId:        json['fornecedorId'],
-        materialId:          json['materialId'],
-        materialNome:        json['material']?['nome'],
-        materialMedida:      json['material']?['medida'],
-        materialEspessura:   json['material']?['espessura'],
-        preco:               double.tryParse(json['preco'].toString()) ?? 0,
-        precoMetroQuadrado:  double.tryParse(json['precoMetroQuadrado'].toString()) ?? 0,
-        ativo:               json['ativo'] ?? true,
+        id:                   json['id'],
+        fornecedorId:         json['fornecedorId'],
+        materialId:           json['materialId'],
+        materialNome:         json['material']?['nome'],
+        materialIdentificador: json['material']?['identificador'],
+        materialMedida:       json['material']?['medida'],
+        materialEspessura:    json['material']?['espessura'],
+        preco:                double.tryParse(json['preco'].toString()) ?? 0,
+        precoMetroQuadrado:   double.tryParse(json['precoMetroQuadrado'].toString()) ?? 0,
+        ativo:                json['ativo'] ?? true,
       );
 }
 
@@ -67,14 +70,12 @@ class FornecedorModel {
     this.materiais = const [],
   });
 
-  /// Telefone formatado para exibição: (42) 3309-1000
   String get telefoneFormatado {
     if (telefone == null || telefone!.length != 10) return telefone ?? '—';
     final t = telefone!;
     return '(${t.substring(0, 2)}) ${t.substring(2, 6)}-${t.substring(6)}';
   }
 
-  /// CNPJ formatado: 00.000.000/0001-00
   String get cnpjFormatado {
     if (cnpj == null || cnpj!.length != 14) return cnpj ?? '—';
     final c = cnpj!;

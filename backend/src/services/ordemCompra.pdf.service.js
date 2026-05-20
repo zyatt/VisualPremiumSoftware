@@ -2,8 +2,6 @@ const PDFDocument = require('pdfkit');
 const prisma      = require('../utils/prisma');
 const path        = require('path');
 
-// ── Formatters ────────────────────────────────────────────────────────────────
-
 function formatCurrency(value) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value ?? 0);
 }
@@ -20,8 +18,6 @@ function formatNumber(value) {
   }).format(value ?? 0);
 }
 
-// ── Palette ───────────────────────────────────────────────────────────────────
-
 const C = {
   black:     '#1A1A1A',
   gray:      '#6B7280',
@@ -31,19 +27,15 @@ const C = {
   bgRow:     '#FAFAFA',
   accent:    '#E85D04',
   white:     '#FFFFFF',
-  statusOk:  '#15803D',   // FINALIZADO (verde)
-  statusWarn:'#D97706',   // EM_ANDAMENTO (âmbar)
-  statusErr: '#DC2626',   // CANCELADO (vermelho)
+  statusOk:  '#15803D',
+  statusWarn:'#D97706',
+  statusErr: '#DC2626',
 };
-
-// ── Layout constants ──────────────────────────────────────────────────────────
 
 const MARGIN    = 36;
 const PAGE_W    = 595.28;
 const PAGE_H    = 841.89;
 const CONTENT_W = PAGE_W - MARGIN * 2;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fillRect(doc, x, y, w, h, color) {
   doc.fillColor(color).rect(x, y, w, h).fill();
@@ -60,15 +52,12 @@ function statusLabel(status) {
   return                                { text: 'EM ANDAMENTO', color: C.statusWarn };
 }
 
-// ── Page Header ───────────────────────────────────────────────────────────────
-
 function drawPageHeader(doc, oc, logoPath) {
   const H = 76;
 
   fillRect(doc, 0, 0, PAGE_W, H, C.white);
   fillRect(doc, 0, 0, PAGE_W, 4, C.accent);
 
-  // Logo
   const logoW = 95;
   const logoX = MARGIN;
   const logoY = 14;
@@ -83,7 +72,6 @@ function drawPageHeader(doc, oc, logoPath) {
        .text('comunicação visual', logoX, logoY + 22, { lineBreak: false });
   }
 
-  // Dados da empresa
   const isGuindaste = oc.logoEmpresa === 'GUINDASTE' || oc.empresa === 'VISUAL GUINDASTE';
   const empresa = isGuindaste
     ? {
@@ -114,7 +102,6 @@ function drawPageHeader(doc, oc, logoPath) {
   doc.font('Helvetica').fontSize(7).fillColor(C.gray)
      .text(empresa.telefone, infoX, infoY + 38, { width: infoW, lineBreak: false });
 
-  // OC título + número + status (direita)
   const ocX = infoX + infoW + 10;
   const ocW = PAGE_W - MARGIN - ocX;
 
@@ -127,7 +114,6 @@ function drawPageHeader(doc, oc, logoPath) {
   doc.font('Helvetica-Bold').fontSize(28).fillColor(C.black)
      .text(`#${oc.id}`, ocX, 22, { width: ocW, align: 'right', lineBreak: false });
 
-  // Badge de status
   const st = statusLabel(oc.status);
   doc.font('Helvetica-Bold').fontSize(6.5).fillColor(st.color)
      .text(st.text, ocX, 56, { width: ocW, align: 'right', lineBreak: false });
@@ -136,8 +122,6 @@ function drawPageHeader(doc, oc, logoPath) {
      .moveTo(0, H).lineTo(PAGE_W, H).stroke();
 }
 
-// ── Section Header ────────────────────────────────────────────────────────────
-
 function drawSectionHeader(doc, y, title) {
   fillRect(doc, MARGIN, y, CONTENT_W, 20, C.bgHeader);
   fillRect(doc, MARGIN, y, 4, 20, C.accent);
@@ -145,16 +129,12 @@ function drawSectionHeader(doc, y, title) {
      .text(title.toUpperCase(), MARGIN + 12, y + 7);
 }
 
-// ── Info Row ──────────────────────────────────────────────────────────────────
-
 function drawInfoRow(doc, y, label, value) {
   doc.font('Helvetica').fontSize(7.5).fillColor(C.lightGray)
      .text(label, MARGIN, y, { width: 130 });
   doc.font('Helvetica-Bold').fontSize(7.5).fillColor(C.black)
      .text(value || '—', MARGIN + 135, y, { width: CONTENT_W - 135 });
 }
-
-// ── OS Badges ─────────────────────────────────────────────────────────────────
 
 function drawOsBadges(doc, numerosOS, startY) {
   if (!numerosOS || numerosOS.length === 0) return startY;
@@ -168,7 +148,7 @@ function drawOsBadges(doc, numerosOS, startY) {
   for (const os of numerosOS) {
     const text  = typeof os === 'object' ? os.numeroOS : os;
     const tw    = doc.widthOfString(text, { fontSize: 7 }) + 12;
-    fillRect(doc, bx, by, tw, 13, C.accent + '1A'); // accent 10% opacidade
+    fillRect(doc, bx, by, tw, 13, C.accent + '1A');
     doc.rect(bx, by, tw, 13).strokeColor(C.accent + '55').lineWidth(0.5).stroke();
     doc.font('Helvetica-Bold').fontSize(7).fillColor(C.accent)
        .text(text, bx + 6, by + 3, { width: tw - 12, lineBreak: false });
@@ -177,8 +157,6 @@ function drawOsBadges(doc, numerosOS, startY) {
 
   return startY;
 }
-
-// ── Total Box ─────────────────────────────────────────────────────────────────
 
 function drawTotalBox(doc, y, valorTotal) {
   const boxW = 200;
@@ -195,8 +173,6 @@ function drawTotalBox(doc, y, valorTotal) {
   return y + boxH;
 }
 
-// ── Items Table ───────────────────────────────────────────────────────────────
-
 function drawItensTable(doc, itens, startY) {
   const cols = [
     { key: 'material',   label: 'MATERIAL',    w: 155, hAlign: 'left',   cAlign: 'left',   pad: 5 },
@@ -207,7 +183,6 @@ function drawItensTable(doc, itens, startY) {
     { key: 'precoTotal', label: 'TOTAL',       w: 78,  hAlign: 'center', cAlign: 'right',  pad: 5 },
   ];
 
-  // Calcula posições X
   let cx = MARGIN;
   for (const col of cols) { col.x = cx; cx += col.w; }
 
@@ -251,7 +226,6 @@ function drawItensTable(doc, itens, startY) {
     const matH = doc.heightOfString(nome, { width: cols[0].w - cols[0].pad * 2 });
     const rowH  = Math.max(20, matH + ROW_PAD_V * 2);
 
-    // Quebra de página
     if (y + rowH > PAGE_H - FOOTER_RESERVE) {
       drawFooter(doc, doc.bufferedPageRange().count);
       doc.addPage();
@@ -259,7 +233,6 @@ function drawItensTable(doc, itens, startY) {
       drawHeader();
     }
 
-    // Zebra
     if (idx % 2 === 0) fillRect(doc, MARGIN, y, CONTENT_W, rowH, C.bgRow);
 
     const tySingle = y + (rowH - FONT_SZ) / 2;
@@ -267,34 +240,28 @@ function drawItensTable(doc, itens, startY) {
 
     const [C0, C1, C2, C3, C4, C5] = cols;
 
-    // MATERIAL
     doc.save();
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
        .text(nome, C0.x + C0.pad, tyMulti, { width: C0.w - C0.pad * 2, align: 'left', lineBreak: true });
     doc.restore();
 
-    // QTD
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.black)
        .text(formatNumber(item.quantidade), C1.x + C1.pad, tySingle,
              { width: C1.w - C1.pad * 2, align: 'center', lineBreak: false });
 
-    // UNIDADE
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.black)
-       .text(unidade, C3.x + C3.pad, tySingle,
-             { width: C3.w - C3.pad * 2, align: 'center', lineBreak: false });
+       .text(unidade, C2.x + C2.pad, tySingle,
+             { width: C2.w - C2.pad * 2, align: 'center', lineBreak: false });
 
-    // PREÇO UNIT.
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(formatCurrency(item.precoUnitario), C3.x + C3.pad, tySingle,
              { width: C3.w - C3.pad * 2, align: 'center', lineBreak: false });
 
-    // PREÇO M²
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(item.precoMetroQuadrado != null ? formatCurrency(item.precoMetroQuadrado) : '—',
              C4.x + C4.pad, tySingle,
              { width: C4.w - C4.pad * 2, align: 'center', lineBreak: false });
 
-    // TOTAL
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
        .text(formatCurrency(item.precoTotal), C5.x + C5.pad, tySingle,
              { width: C5.w - C5.pad * 2, align: 'right', lineBreak: false });
@@ -309,8 +276,6 @@ function drawItensTable(doc, itens, startY) {
   return y;
 }
 
-// ── Observações Block ─────────────────────────────────────────────────────────
-
 function drawObservacoes(doc, observacoes) {
   if (!observacoes) return;
 
@@ -320,7 +285,6 @@ function drawObservacoes(doc, observacoes) {
   const padV    = 7;
   const padH    = 8;
 
-  // Quebra o texto em linhas para calcular altura do bloco
   const linhas  = observacoes.split('\n').filter(Boolean);
   const blockH  = padV + 10 + 3 + Math.max(linhas.length, 1) * lineH + padV;
   const blockY  = footerY - blockH - 6;
@@ -338,8 +302,6 @@ function drawObservacoes(doc, observacoes) {
     ty += lineH;
   }
 }
-
-// ── Info Fixa ─────────────────────────────────────────────────────────────────
 
 function drawInfoFixa(doc) {
   const footerY = PAGE_H - 44;
@@ -376,8 +338,6 @@ function drawInfoFixa(doc) {
   }
 }
 
-// ── Footer ────────────────────────────────────────────────────────────────────
-
 function drawFooter(doc, pageNum, empresaNome = 'Visual Premium') {
   const y = PAGE_H - 36;
   hline(doc, y - 8);
@@ -386,8 +346,6 @@ function drawFooter(doc, pageNum, empresaNome = 'Visual Premium') {
            MARGIN, y, { width: CONTENT_W - 60, align: 'left' })
      .text(`Página ${pageNum}`, MARGIN, y, { width: CONTENT_W, align: 'right' });
 }
-
-// ── Export ────────────────────────────────────────────────────────────────────
 
 const ordemCompraPdfService = {
   async gerarPdf(id) {
@@ -416,11 +374,9 @@ const ordemCompraPdfService = {
       const logoFile = (oc.logoEmpresa === 'GUINDASTE' || oc.empresa === 'VISUAL GUINDASTE') ? 'logoGuindaste.jpeg' : 'logoPreta.png';
       const logoPath = path.join(__dirname, '../../../frontend/assets/images/', logoFile);
 
-      // ── Cabeçalho ────────────────────────────────────────────────────────────
       drawPageHeader(doc, oc, logoPath);
       let y = 90;
 
-      // ── Informações da OC ─────────────────────────────────────────────────────
       drawSectionHeader(doc, y, 'Informações da Ordem de Compra');
       y += 26;
 
@@ -445,12 +401,10 @@ const ordemCompraPdfService = {
       hline(doc, y);
       y += 10;
 
-      // ── Total ─────────────────────────────────────────────────────────────────
       const valorTotal = oc.itens.reduce((s, i) => s + Number(i.precoTotal), 0);
       y = drawTotalBox(doc, y, valorTotal);
       y += 12;
 
-      // ── Itens ─────────────────────────────────────────────────────────────────
       drawSectionHeader(doc, y, `Itens da OC (${oc.itens.length})`);
       y += 24;
 
@@ -471,14 +425,12 @@ const ordemCompraPdfService = {
            .text(formatCurrency(valorTotal), MARGIN, y - 1, { width: CONTENT_W, align: 'right' });
       }
 
-      // ── Última página: observações + info fixa ────────────────────────────────
       const range       = doc.bufferedPageRange();
       const lastPageIdx = range.start + range.count - 1;
       doc.switchToPage(lastPageIdx);
       drawObservacoes(doc, oc.observacoes);
       drawInfoFixa(doc);
 
-      // ── Rodapé em todas as páginas ────────────────────────────────────────────
       const empresaNomeRodape = (oc.logoEmpresa === 'GUINDASTE' || oc.empresa === 'VISUAL GUINDASTE') ? 'Visual Guindaste' : 'Visual Premium';
       for (let i = 0; i < range.count; i++) {
         doc.switchToPage(range.start + i);

@@ -8,7 +8,7 @@ const ESCRITA  = ['ADMIN','GERENTE','COMPRADOR'];
 const EXCLUSAO = ['ADMIN','GERENTE'];
 
 router.get('/',                                       authMiddleware, roleMiddleware(LEITURA),  ctrl.listar);
-router.get('/proximo-id',                             authMiddleware, roleMiddleware(LEITURA),  ctrl.proximoId);  // deve vir ANTES de /:id
+router.get('/proximo-id',                             authMiddleware, roleMiddleware(LEITURA),  ctrl.proximoId);
 router.get('/:id/pdf',                                authMiddleware, roleMiddleware(LEITURA),  pdfCtrl.gerarPdf);
 router.get('/:id',                                    authMiddleware, roleMiddleware(LEITURA),  ctrl.buscarPorId);
 router.post('/',                                      authMiddleware, roleMiddleware(ESCRITA),  ctrl.criar);

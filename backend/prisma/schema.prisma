@@ -54,6 +54,7 @@ model Material {
   categoria       String?
   medida          String?
   espessura       String?
+  identificador   String?
   valor           Decimal?      @db.Decimal(10, 2)
   valorMetroQuadrado Decimal?   @db.Decimal(10, 2)
   quantidade      Decimal       @default(0) @db.Decimal(10, 3)
@@ -243,7 +244,8 @@ model OrdemCompraItem {
   quantidade      Decimal  @db.Decimal(10, 3)
   precoUnitario   Decimal  @db.Decimal(10, 2)
   precoMetroQuadrado Decimal? @db.Decimal(10, 2)
-  precoTotal      Decimal  @db.Decimal(10, 2) // qtd * precoUnitario
+  usarM2          Boolean  @default(false)     // se true, precoTotal = qtd * precoMetroQuadrado
+  precoTotal      Decimal  @db.Decimal(10, 2)
   criadoEm        DateTime @default(now())
 
   ordemCompra OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
@@ -277,17 +279,18 @@ model RelacaoOS {
 model MovimentacaoEstoque {
   id              Int              @id @default(autoincrement())
   materialId      Int
-  tipo            TipoMovimentacao
+  tipo            String
   quantidade      Decimal          @db.Decimal(10, 3)
   numeroOS        String           // referência ao numeroOS da RelacaoOS
-  relacaoOSId     Int?
+  relacaoOSId     Int
   ordemCompraId   Int?             // preenchido quando origem é uma OC finalizada
   precoUnitario   Decimal?         @db.Decimal(10, 2)
+  precoM2         Decimal?
   observacao      String?
   criadoEm        DateTime         @default(now())
 
   material    Material     @relation(fields: [materialId], references: [id])
-  relacaoOS   RelacaoOS?   @relation(fields: [relacaoOSId], references: [id])
+  relacaoOS   RelacaoOS    @relation(fields: [relacaoOSId], references: [id])
   ordemCompra OrdemCompra? @relation(fields: [ordemCompraId], references: [id])
 
   @@map("movimentacoes_estoque")

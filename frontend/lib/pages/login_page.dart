@@ -14,11 +14,13 @@ class _LoginPageState extends State<LoginPage> {
   final _userCtrl  = TextEditingController();
   final _senhaCtrl = TextEditingController();
   bool _obscure = true;
+  final _senhaFocus = FocusNode();
 
   @override
   void dispose() {
     _userCtrl.dispose();
     _senhaCtrl.dispose();
+    _senhaFocus.dispose();
     super.dispose();
   }
 
@@ -29,16 +31,13 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) return;
     if (ok) {
       context.go('/inicio');
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(provider.erro ?? 'Erro ao fazer login')),
-      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final loading = context.watch<UsuarioProvider>().carregando;
+    final erro = context.watch<UsuarioProvider>().erro;
     return Scaffold(
       body: Center(
         child: ConstrainedBox(
@@ -55,16 +54,30 @@ class _LoginPageState extends State<LoginPage> {
                     const Text('Visual Premium',
                         style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 32),
+                    if (erro != null) ...[
+                      Text(
+                        erro,
+                        style: const TextStyle(color: Colors.red, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     TextFormField(
                       controller: _userCtrl,
                       decoration: const InputDecoration(labelText: 'Usuário'),
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) =>
+                          FocusScope.of(context).requestFocus(_senhaFocus),
                       validator: (v) =>
                           (v == null || v.isEmpty) ? 'Informe o usuário' : null,
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _senhaCtrl,
+                      focusNode: _senhaFocus,
                       obscureText: _obscure,
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) => loading ? null : _login(),
                       decoration: InputDecoration(
                         labelText: 'Senha',
                         suffixIcon: IconButton(

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
@@ -9,9 +10,13 @@ class ApiClient {
     return 'http://$host:$port';
   }
 
+  /// URL base pública (ex: para montar links de PDF via url_launcher).
+  static String get baseUrl => _base;
+
   // Token injetado pelo UsuarioProvider após login
   static String? _token;
   static void setToken(String? token) => _token = token;
+  static String? get token => _token;
 
   static Map<String, String> get _headers => {
         'Content-Type': 'application/json',
@@ -78,6 +83,17 @@ class ApiClient {
   /// Baixa uma resposta binária (ex: PDF) e retorna os bytes brutos.
   static Future<List<int>> getBytes(String path) async {
     final res = await http.get(_uri(path), headers: _headers);
+    _check(res);
+    return res.bodyBytes;
+  }
+
+  /// Envia um POST com body JSON e retorna a resposta como bytes brutos (ex: PDF).
+  static Future<Uint8List> postBytes(String path, Map<String, dynamic> body) async {
+    final res = await http.post(
+      _uri(path),
+      headers: _headers,
+      body: jsonEncode(body),
+    );
     _check(res);
     return res.bodyBytes;
   }

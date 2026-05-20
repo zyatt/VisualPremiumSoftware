@@ -22,14 +22,18 @@ class UsuarioProvider extends ChangeNotifier {
     _carregando = true;
     _erro = null;
     notifyListeners();
+
     try {
       final result = await _repo.login(username, senha);
+
       _token = result.token;
       _usuarioLogado = result.usuario;
-      ApiClient.setToken(_token); // ← injeta o JWT em todas as requisições
+
+      ApiClient.setToken(_token);
+
       return true;
     } catch (e) {
-      _erro = e.toString();
+      _erro = e.toString().replaceFirst('Exception: ', '');
       return false;
     } finally {
       _carregando = false;
@@ -40,7 +44,9 @@ class UsuarioProvider extends ChangeNotifier {
   void logout() {
     _usuarioLogado = null;
     _token = null;
+
     ApiClient.setToken(null);
+
     notifyListeners();
   }
 }

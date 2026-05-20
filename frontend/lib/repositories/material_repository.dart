@@ -7,12 +7,22 @@ class MaterialRepository {
     String? categoria,
     String? status,
     String? id,
+    String? identificador,
+    String? medida,
+    String? espessura,
   }) async {
     final params = <String, String>{};
-    if (busca != null && busca.isNotEmpty)         params['busca']     = busca;
-    if (categoria != null && categoria.isNotEmpty) params['categoria'] = categoria;
-    if (status != null && status.isNotEmpty)       params['status']    = status;
-    if (id != null && id.isNotEmpty)               params['id']        = id;
+    if (busca != null && busca.isNotEmpty)               params['busca']        = busca;
+    if (categoria != null && categoria.isEmpty) {
+      params['semCategoria'] = 'true';
+    } else if (categoria != null && categoria.isNotEmpty)  {
+      params['categoria']    = categoria;
+    }
+    if (status != null && status.isNotEmpty)             params['status']       = status;
+    if (id != null && id.isNotEmpty)                     params['id']           = id;
+    if (identificador != null && identificador.isNotEmpty) params['identificador'] = identificador;
+    if (medida != null && medida.isNotEmpty)             params['medida']       = medida;
+    if (espessura != null && espessura.isNotEmpty)       params['espessura']    = espessura;
 
     final query = params.entries
         .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')

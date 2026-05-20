@@ -26,29 +26,41 @@ class MaterialProvider extends ChangeNotifier {
 
   // Filtros ativos
   String _busca = '';
-  String _categoriaFiltro = '';
+  String? _categoriaFiltro;   // null = todos, '' = sem categoria
   String _statusFiltro = '';
   String _idFiltro = '';
+  String _identificadorFiltro = '';
+  String _medidaFiltro = '';
+  String _espessuraFiltro = '';
 
   Future<void> carregar({
     String busca = '',
-    String categoria = '',
+    String? categoria,         // null = todos, '' = sem categoria
     String status = '',
     String id = '',
+    String identificador = '',
+    String medida = '',
+    String espessura = '',
   }) async {
     _busca = busca;
     _categoriaFiltro = categoria;
     _statusFiltro = status;
     _idFiltro = id;
+    _identificadorFiltro = identificador;
+    _medidaFiltro = medida;
+    _espessuraFiltro = espessura;
     _carregando = true;
     _erro = null;
     notifyListeners();
     try {
       _materiais = await _repo.listar(
-        busca:     busca,
-        categoria: categoria,
-        status:    status,
-        id:        id,
+        busca:        busca,
+        categoria:    categoria,
+        status:       status,
+        id:           id,
+        identificador: identificador,
+        medida:       medida,
+        espessura:    espessura,
       );
     } catch (e) {
       _erro = _mensagemErro(e);
@@ -60,10 +72,13 @@ class MaterialProvider extends ChangeNotifier {
 
   Future<void> recarregar() async {
     await carregar(
-      busca:     _busca,
-      categoria: _categoriaFiltro,
-      status:    _statusFiltro,
-      id:        _idFiltro,
+      busca:        _busca,
+      categoria:    _categoriaFiltro,
+      status:       _statusFiltro,
+      id:           _idFiltro,
+      identificador: _identificadorFiltro,
+      medida:       _medidaFiltro,
+      espessura:    _espessuraFiltro,
     );
   }
 
@@ -153,6 +168,17 @@ class MaterialProvider extends ChangeNotifier {
       _erro = _mensagemErro(e);
       notifyListeners();
       return false;
+    }
+  }
+
+  /// Busca rápida para autocomplete — retorna até [limite] materiais sem
+  /// alterar o estado da lista principal nem disparar notifyListeners.
+  Future<List<MaterialModel>> buscarSugestoes(String busca, {int limite = 10}) async {
+    try {
+      final lista = await _repo.listar(busca: busca);
+      return lista.take(limite).toList();
+    } catch (_) {
+      return [];
     }
   }
 
