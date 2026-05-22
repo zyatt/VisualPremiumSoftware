@@ -62,6 +62,7 @@ model Material {
   status          StatusEstoque @default(OK)
   estoqueConfirmado Boolean     @default(false)
   ativo           Boolean       @default(true)
+  especifico      Boolean       @default(false)   // quando true, o material exige descrição personalizada na OC
 
   // Último valor de custo pago (atualizado ao finalizar uma OC)
   ultimoValorPago   Decimal?    @db.Decimal(10, 2)
@@ -93,9 +94,10 @@ model HistoricoPrecoMaterial {
   materialId      Int
   ordemCompraId   Int
   fornecedorId    Int
-  precoUnitario   Decimal  @db.Decimal(10, 2)
+  precoUnitario   Decimal? @db.Decimal(10, 2)
   precoM2         Decimal? @db.Decimal(10, 2)
   quantidade      Decimal  @db.Decimal(10, 3)
+  usarM2          Boolean  @default(false)
   criadoEm        DateTime @default(now())
 
   material    Material    @relation(fields: [materialId], references: [id], onDelete: Cascade)
@@ -240,6 +242,7 @@ model OrdemCompraItem {
   id              Int      @id @default(autoincrement())
   ordemCompraId   Int
   materialId      Int
+  descricaoItem   String?  // descrição personalizada do item na OC (ex: "Tinta Branca Fosca 18L"); não afeta o estoque
   numeroOS        String   // obrigatório: vincular item a uma OS
   quantidade      Decimal  @db.Decimal(10, 3)
   precoUnitario   Decimal  @db.Decimal(10, 2)
@@ -287,8 +290,9 @@ model MovimentacaoEstoque {
   precoUnitario   Decimal?         @db.Decimal(10, 2)
   precoM2         Decimal?
   observacao      String?
+  descricaoItem  String?
+  
   criadoEm        DateTime         @default(now())
-
   material    Material     @relation(fields: [materialId], references: [id])
   relacaoOS   RelacaoOS    @relation(fields: [relacaoOSId], references: [id])
   ordemCompra OrdemCompra? @relation(fields: [ordemCompraId], references: [id])

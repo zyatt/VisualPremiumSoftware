@@ -1,5 +1,40 @@
 const prisma = require('../utils/prisma');
 
+/**
+ * Normaliza valores de preço: converte 0 para null (ausência de informação)
+ */
+function _normalizarPreco(valor) {
+  if (valor == null) return null;
+  const num = Number(valor);
+  return num > 0 ? num : null;
+}
+
+/**
+ * Normaliza o campo numerosOS independente do formato recebido:
+ * - undefined / null            → []
+ * - "OS-001"                   → ["OS-001"]
+ * - ["OS-001", "OS-002"]       → ["OS-001", "OS-002"]
+ * - [{ numeroOS: "OS-001" }]   → ["OS-001"]
+ */
+function _normalizarNumerosOS(numerosOS) {
+  if (!numerosOS) return [];
+  if (typeof numerosOS === 'string') return numerosOS.trim() ? [numerosOS.trim()] : [];
+  if (!Array.isArray(numerosOS)) return [];
+  return numerosOS
+    .map((n) => (typeof n === 'object' && n !== null ? n.numeroOS : n))
+    .map((n) => String(n).trim())
+    .filter(Boolean);
+}
+
+function _calcularStatus(quantidade, estoqueMinimo, ativo) {
+  if (!ativo) return 'INATIVO';
+  const q = Number(quantidade);
+  const min = Number(estoqueMinimo);
+  if (q > min) return 'OK';
+  if (q === min) return 'LIMITE';
+  return 'CRITICO';
+}
+
 async function listar(status) {
   const where = {};
   if (status) where.status = status;
@@ -9,7 +44,16 @@ async function listar(status) {
       fornecedor: { select: { id: true, nomeFantasia: true } },
       usuario:    { select: { id: true, nome: true } },
       itens: {
-        include: { material: { select: { id: true, nome: true, unidade: true } } },
+        include: { 
+          material: { 
+            select: { 
+              id: true, 
+              nome: true, 
+              unidade: true,
+              especifico: true,
+            } 
+          } 
+        },
       },
       numerosOS: true,
     },
@@ -48,14 +92,11 @@ async function criar(data, usuarioId) {
     ordemData.data = new Date(ordemData.data);
   }
 
-  // Garante que campos NOT NULL sem default nunca cheguem como undefined/null
   if (!ordemData.fornecedorId) {
     throw { status: 400, message: 'Campo obrigatório ausente: fornecedorId' };
   }
-  // requisitante é NOT NULL no banco mas não obrigatório no fluxo de conversão de orçamento
+  
   ordemData.requisitante = ordemData.requisitante?.trim() || 'Não informado';
-
-  // Normaliza campos opcionais para evitar undefined no Prisma
   ordemData.formaPagamento = ordemData.formaPagamento ?? null;
   ordemData.prazoPagamento = ordemData.prazoPagamento ?? null;
   ordemData.observacoes    = ordemData.observacoes    ?? null;
@@ -83,6 +124,7 @@ async function criar(data, usuarioId) {
         ? {
             create: itens.map((item) => ({
               materialId:         item.materialId,
+              descricaoItem:      item.descricaoItem?.trim() || null,
               numeroOS:           item.numeroOS,
               quantidade:         item.quantidade,
               precoUnitario:      item.precoUnitario,
@@ -96,28 +138,22 @@ async function criar(data, usuarioId) {
         : undefined,
     },
     include: {
-      itens:     { include: { material: true } },
+      itens:     { 
+        include: { 
+          material: {
+            select: {
+              id: true,
+              nome: true,
+              unidade: true,
+              especifico: true,
+            }
+          }
+        } 
+      },
       numerosOS: true,
       fornecedor: true,
     },
   });
-}
-
-/**
- * Normaliza o campo numerosOS independente do formato recebido:
- * - undefined / null            → []
- * - "OS-001"                   → ["OS-001"]
- * - ["OS-001", "OS-002"]       → ["OS-001", "OS-002"]
- * - [{ numeroOS: "OS-001" }]   → ["OS-001"]
- */
-function _normalizarNumerosOS(numerosOS) {
-  if (!numerosOS) return [];
-  if (typeof numerosOS === 'string') return numerosOS.trim() ? [numerosOS.trim()] : [];
-  if (!Array.isArray(numerosOS)) return [];
-  return numerosOS
-    .map((n) => (typeof n === 'object' && n !== null ? n.numeroOS : n))
-    .map((n) => String(n).trim())
-    .filter(Boolean);
 }
 
 async function atualizar(id, data) {
@@ -140,11 +176,12 @@ async function atualizar(id, data) {
 
   if (Array.isArray(itens)) {
     await prisma.ordemCompraItem.deleteMany({ where: { ordemCompraId: id } });
-    if (itens.length) {
+    if (itens.length){
       await prisma.ordemCompraItem.createMany({
         data: itens.map((item) => ({
           ordemCompraId: id,
           materialId:         item.materialId,
+          descricaoItem:      item.descricaoItem?.trim() || null,
           numeroOS:           item.numeroOS,
           quantidade:         item.quantidade,
           precoUnitario:      item.precoUnitario,
@@ -166,7 +203,16 @@ async function adicionarItem(ordemCompraId, itemData) {
   const precoTotal = Number(itemData.quantidade) * Number(itemData.precoUnitario);
   const item = await prisma.ordemCompraItem.create({
     data: { ...itemData, ordemCompraId, precoTotal },
-    include: { material: true },
+    include: { 
+      material: {
+        select: {
+          id: true,
+          nome: true,
+          unidade: true,
+          especifico: true,
+        }
+      }
+    },
   });
   await recalcularTotal(ordemCompraId);
   return item;
@@ -196,20 +242,15 @@ async function recalcularTotal(ordemCompraId) {
   await prisma.ordemCompra.update({ where: { id: ordemCompraId }, data: { valorTotal } });
 }
 
-function _calcularStatus(quantidade, estoqueMinimo, ativo) {
-  if (!ativo) return 'INATIVO';
-  const q = Number(quantidade);
-  const min = Number(estoqueMinimo);
-  if (q > min) return 'OK';
-  if (q === min) return 'LIMITE';
-  return 'CRITICO';
-}
-
 async function finalizar(id) {
   const ordem = await prisma.ordemCompra.findUnique({
     where: { id },
     include: {
-      itens:     true,
+      itens: {
+        include: {
+          material: true,
+        }
+      },
       fornecedor: { select: { id: true, nomeFantasia: true } },
     },
   });
@@ -220,28 +261,47 @@ async function finalizar(id) {
     throw { status: 400, message: 'Não é possível finalizar uma OC sem itens' };
   }
 
+  const itensSemOS = ordem.itens.filter(item => !item.numeroOS || item.numeroOS.trim() === '');
+  if (itensSemOS.length > 0) {
+    throw { 
+      status: 400, 
+      message: `${itensSemOS.length} ${itensSemOS.length === 1 ? 'item não possui' : 'itens não possuem'} número de OS atribuído. Edite a ordem e atribua uma OS para todos os itens antes de finalizar.` 
+    };
+  }
+
   const finalizada = await prisma.ordemCompra.update({
     where: { id },
     data: { status: 'FINALIZADO' },
   });
 
   for (const item of ordem.itens) {
+    const numeroOSLimpo = item.numeroOS.trim();
+    if (!numeroOSLimpo) {
+      throw { status: 400, message: `Item "${item.material?.nome || item.materialId}" sem número de OS` };
+    }
+
     await prisma.relacaoOS.upsert({
-      where:  { numeroOS: item.numeroOS },
-      create: { numeroOS: item.numeroOS },
+      where:  { numeroOS: numeroOSLimpo },
+      create: { numeroOS: numeroOSLimpo },
       update: {},
     });
-    const relacaoOS = await prisma.relacaoOS.findUnique({ where: { numeroOS: item.numeroOS } });
+    const relacaoOS = await prisma.relacaoOS.findUnique({ where: { numeroOS: numeroOSLimpo } });
+
+    // Normaliza preços: 0 vira null
+    const precoUnitarioValor = _normalizarPreco(item.precoUnitario);
+    const precoM2Valor = _normalizarPreco(item.precoMetroQuadrado);
 
     await prisma.movimentacaoEstoque.create({
       data: {
         materialId:    item.materialId,
         tipo:          'ENTRADA',
         quantidade:    item.quantidade,
-        numeroOS:      item.numeroOS,
+        numeroOS:      numeroOSLimpo,
         relacaoOSId:   relacaoOS.id,
         ordemCompraId: id,
-        precoUnitario: item.precoUnitario,
+        precoUnitario: precoUnitarioValor,
+        precoM2:       precoM2Valor,
+        descricaoItem: item.descricaoItem ?? null,
         observacao:    `Entrada via OC #${id}`,
       },
     });
@@ -250,13 +310,9 @@ async function finalizar(id) {
     const novaQuantidade = Number(material.quantidade) + Number(item.quantidade);
     const status = _calcularStatus(novaQuantidade, material.estoqueMinimo, material.ativo);
 
-    const novoUltimoValorPago   = Number(item.precoUnitario) > 0
-      ? item.precoUnitario
-      : material.ultimoValorPago;
-
-    const novoUltimoValorPagoM2 = item.precoMetroQuadrado != null && Number(item.precoMetroQuadrado) > 0
-      ? item.precoMetroQuadrado
-      : material.ultimoValorPagoM2;
+    // Atualiza custos apenas se houver valores válidos (> 0)
+    const novoUltimoValorPago = precoUnitarioValor ?? material.ultimoValorPago;
+    const novoUltimoValorPagoM2 = precoM2Valor ?? material.ultimoValorPagoM2;
 
     await prisma.material.update({
       where: { id: item.materialId },
@@ -268,18 +324,18 @@ async function finalizar(id) {
       },
     });
 
-    if (Number(item.precoUnitario) > 0) {
-      await prisma.historicoPrecoMaterial.create({
-        data: {
-          materialId:    item.materialId,
-          ordemCompraId: id,
-          fornecedorId:  ordem.fornecedorId,
-          precoUnitario: item.precoUnitario,
-          precoM2:       item.precoMetroQuadrado ?? null,
-          quantidade:    item.quantidade,
-        },
-      });
-    }
+    // Cria histórico apenas se houver pelo menos um preço válido
+    await prisma.historicoPrecoMaterial.create({
+      data: {
+        materialId:    item.materialId,
+        ordemCompraId: id,
+        fornecedorId:  ordem.fornecedorId,
+        precoUnitario: precoUnitarioValor,
+        precoM2:       precoM2Valor,
+        quantidade:    item.quantidade,
+        usarM2:        item.usarM2 ?? false,
+      },
+    });
   }
 
   if (ordem.orcamentoId) {
@@ -317,6 +373,10 @@ async function reverter(id) {
       update: {},
     });
 
+    // Normaliza preços: 0 vira null
+    const precoUnitarioValor = _normalizarPreco(item.precoUnitario);
+    const precoM2Valor = _normalizarPreco(item.precoMetroQuadrado);
+
     await prisma.movimentacaoEstoque.create({
       data: {
         materialId:    item.materialId,
@@ -325,7 +385,9 @@ async function reverter(id) {
         numeroOS:      item.numeroOS,
         relacaoOSId:   relacaoOS.id,
         ordemCompraId: id,
-        precoUnitario: item.precoUnitario,
+        precoUnitario: precoUnitarioValor,
+        precoM2:       precoM2Valor,
+        descricaoItem: item.descricaoItem ?? null,
         observacao:    `Estorno via reversão OC #${id}`,
       },
     });
@@ -392,12 +454,10 @@ async function criarDeOrcamento(orcamentoId, dadosExtras, usuarioId) {
     numerosOS,
   } = dadosExtras;
 
-  // ── Validação dos campos NOT NULL sem default no schema ───────────────────────
   if (!fornecedorId) {
     throw { status: 400, message: 'Campo obrigatório ausente: fornecedorId' };
   }
 
-  // ── Determina o numeroOS padrão para os itens ─────────────────────────────────
   const osNormalizado = _normalizarNumerosOS(numerosOS);
   const numeroOSPadrao = dadosExtras.numeroOS
     || osNormalizado[0]
@@ -405,6 +465,7 @@ async function criarDeOrcamento(orcamentoId, dadosExtras, usuarioId) {
 
   const itens = orcamento.itens.map((item) => ({
     materialId:         item.materialId,
+    descricaoItem:      null,
     numeroOS:           item.numeroOS || numeroOSPadrao,
     quantidade:         item.quantidade,
     precoUnitario:      Number(item.precoUnitario) > 0 ? item.precoUnitario : 0,

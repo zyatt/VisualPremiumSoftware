@@ -7,6 +7,7 @@ class HistoricoPrecoModel {
   final double precoUnitario;
   final double? precoM2;
   final double quantidade;
+  final bool usarM2; 
   final DateTime criadoEm;
 
   final DateTime? dataOrdem;
@@ -20,6 +21,7 @@ class HistoricoPrecoModel {
     required this.precoUnitario,
     this.precoM2,
     required this.quantidade,
+    this.usarM2 = false,
     required this.criadoEm,
     this.dataOrdem,
   });
@@ -36,6 +38,7 @@ class HistoricoPrecoModel {
             ? double.tryParse(json['precoM2'].toString())
             : null,
         quantidade: double.tryParse(json['quantidade'].toString()) ?? 0,
+        usarM2: json['usarM2'] ?? false,
         criadoEm:   DateTime.parse(json['criadoEm']),
         dataOrdem:  json['ordemCompra']?['data'] != null
             ? DateTime.tryParse(json['ordemCompra']['data'].toString())
@@ -86,6 +89,7 @@ class MaterialModel {
   final String status;
   final bool estoqueConfirmado;
   final bool ativo;
+  final bool especifico;
 
   final double? ultimoValorPago;
 
@@ -113,6 +117,7 @@ class MaterialModel {
     required this.status,
     required this.estoqueConfirmado,
     required this.ativo,
+    required this.especifico,
     this.ultimoValorPago,
     this.ultimoValorPagoM2,
     this.precoMediano,
@@ -121,42 +126,42 @@ class MaterialModel {
     this.historicoPrecos = const [],
   });
 
-  factory MaterialModel.fromJson(Map<String, dynamic> json) => MaterialModel(
-        id:                 (json['id'] as num?)?.toInt() ?? 0,
-        nome:               json['nome'] ?? '',
-        unidade:            json['unidade'],
-        categoria:          json['categoria'],
-        medida:             json['medida'],
-        espessura:          json['espessura'],
-        identificador:      json['identificador'],
-        valor:              json['valor'] != null
-            ? double.tryParse(json['valor'].toString())
-            : null,
-        valorMetroQuadrado: json['valorMetroQuadrado'] != null
-            ? double.tryParse(json['valorMetroQuadrado'].toString())
-            : null,
-        quantidade:         double.tryParse(json['quantidade'].toString()) ?? 0,
-        estoqueMinimo:      double.tryParse(json['estoqueMinimo'].toString()) ?? 0,
-        status:             json['status'] ?? 'OK',
-        estoqueConfirmado:  json['estoqueConfirmado'] ?? false,
-        ativo:              json['ativo'] ?? true,
-        ultimoValorPago:    json['custoUltimaCompra'] != null
-            ? double.tryParse(json['custoUltimaCompra'].toString())
-            : null,
-        ultimoValorPagoM2:  json['custoM2UltimaCompra'] != null
-            ? double.tryParse(json['custoM2UltimaCompra'].toString())
-            : null,
-        precoMediano:       json['precoMediano'] != null
-            ? double.tryParse(json['precoMediano'].toString())
-            : null,
-        precoM2Mediano:     json['precoM2Mediano'] != null
-            ? double.tryParse(json['precoM2Mediano'].toString())
-            : null,
-        fornecedorMateriais: (json['fornecedorMateriais'] as List? ?? [])
-            .map((f) => FornecedorMaterialModel.fromJson(f as Map<String, dynamic>))
-            .toList(),
-        historicoPrecos: (json['historicoPrecos'] as List? ?? [])
-            .map((h) => HistoricoPrecoModel.fromJson(h as Map<String, dynamic>))
-            .toList(),
-      );
+  factory MaterialModel.fromJson(Map<String, dynamic> json) {
+    // Helper para parsing seguro de números que podem vir como null, string vazia, ou número
+    double? parseDoubleOrNull(dynamic value) {
+      if (value == null) return null;
+      if (value is num) return value.toDouble();
+      final str = value.toString().trim();
+      if (str.isEmpty) return null;
+      return double.tryParse(str);
+    }
+
+    return MaterialModel(
+      id:                 (json['id'] as num?)?.toInt() ?? 0,
+      nome:               json['nome'] ?? '',
+      unidade:            json['unidade'],
+      categoria:          json['categoria'],
+      medida:             json['medida'],
+      espessura:          json['espessura'],
+      identificador:      json['identificador'],
+      valor:              parseDoubleOrNull(json['valor']),
+      valorMetroQuadrado: parseDoubleOrNull(json['valorMetroQuadrado']),
+      quantidade:         double.tryParse(json['quantidade'].toString()) ?? 0,
+      estoqueMinimo:      double.tryParse(json['estoqueMinimo'].toString()) ?? 0,
+      status:             json['status'] ?? 'OK',
+      estoqueConfirmado:  json['estoqueConfirmado'] ?? false,
+      ativo:              json['ativo'] ?? true,
+      especifico:         json['especifico'] ?? false,
+      ultimoValorPago:    parseDoubleOrNull(json['custoUltimaCompra']),
+      ultimoValorPagoM2:  parseDoubleOrNull(json['custoM2UltimaCompra']),
+      precoMediano:       parseDoubleOrNull(json['precoMediano']),
+      precoM2Mediano:     parseDoubleOrNull(json['precoM2Mediano']),
+      fornecedorMateriais: (json['fornecedorMateriais'] as List? ?? [])
+          .map((f) => FornecedorMaterialModel.fromJson(f as Map<String, dynamic>))
+          .toList(),
+      historicoPrecos: (json['historicoPrecos'] as List? ?? [])
+          .map((h) => HistoricoPrecoModel.fromJson(h as Map<String, dynamic>))
+          .toList(),
+    );
+  }
 }

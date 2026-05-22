@@ -586,6 +586,18 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                                                 color: AppTheme.textPrimary,
                                               ),
                                             ),
+                                            if (item.descricaoItem != null &&
+                                                item.descricaoItem!.isNotEmpty) ...[
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                item.descricaoItem!,
+                                                style: const TextStyle(
+                                                  fontSize: 12,
+                                                  color: AppTheme.textSecondary,
+                                                  fontStyle: FontStyle.italic,
+                                                ),
+                                              ),
+                                            ],
                                             const SizedBox(height: 5),
                                             Wrap(
                                               spacing: 12,
@@ -873,6 +885,18 @@ class _HistoricoDetalhePage extends StatelessWidget {
                               color: statusColor),
                         ),
                       ]),
+                      if (item.descricaoItem != null &&
+                          item.descricaoItem!.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          item.descricaoItem!,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textSecondary,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 6),
                       Wrap(spacing: 12, runSpacing: 4, children: [
                         _itemChip(Icons.assignment_outlined,

@@ -1,5 +1,14 @@
 const prisma = require('../utils/prisma');
 
+/**
+ * Normaliza valores de preço: converte 0 para null (ausência de informação)
+ */
+function _normalizarPreco(valor) {
+  if (valor == null) return null;
+  const num = Number(valor);
+  return num > 0 ? num : null;
+}
+
 async function listarRelacoesOS(busca) {
   const where = {};
   if (busca) where.numeroOS = { contains: busca, mode: 'insensitive' };
@@ -34,7 +43,7 @@ async function buscarRelacaoOS(numeroOS) {
   });
 }
 
-async function registrarMovimentacao({ materialId, tipo, quantidade, numeroOS, precoUnitario, precoM2, observacao, ordemCompraId }) {
+async function registrarMovimentacao({ materialId, tipo, quantidade, numeroOS, precoUnitario, precoM2, observacao, ordemCompraId, descricaoItem }) {
   if (!['ENTRADA', 'SAIDA'].includes(tipo)) throw { status: 400, message: 'Tipo deve ser ENTRADA ou SAIDA' };
   if (!materialId || !quantidade || !numeroOS) throw { status: 400, message: 'materialId, quantidade e numeroOS são obrigatórios' };
 
@@ -52,17 +61,22 @@ async function registrarMovimentacao({ materialId, tipo, quantidade, numeroOS, p
     throw { status: 400, message: `Estoque insuficiente. Disponível: ${material.quantidade}` };
   }
 
+  // Normaliza os valores de preço: 0 vira null
+  const precoUnitarioValor = _normalizarPreco(precoUnitario);
+  const precoM2Valor = _normalizarPreco(precoM2);
+
   const movimentacao = await prisma.movimentacaoEstoque.create({
     data: {
       materialId,
       tipo,
       quantidade,
-      numeroOS:    String(numeroOS),
+      numeroOS,
       relacaoOSId: relacaoOS.id,
       ordemCompraId: ordemCompraId ?? null,
-      precoUnitario: precoUnitario ?? null,
-      precoM2:       precoM2 ?? null,
-      observacao:    observacao ?? null,
+      precoUnitario:  precoUnitarioValor,
+      precoM2:        precoM2Valor,
+      observacao:     observacao     ?? null,
+      descricaoItem:  descricaoItem  ?? null,
     },
     include: { material: true },
   });

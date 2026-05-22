@@ -2,35 +2,41 @@ class OrdemCompraItemModel {
   final int? id;
   final int materialId;
   final String materialNome;
+  final String? descricaoItem;   // descrição personalizada na OC (ex: "Tinta Branca Fosca 18L")
   final String numeroOS;
   final double quantidade;
   final double precoUnitario;
   final double? precoMetroQuadrado;
   final double precoTotal;
   final bool usarM2;
+  final bool materialEspecifico; // indica se o material exige descrição personalizada
 
   OrdemCompraItemModel({
     this.id,
     required this.materialId,
     required this.materialNome,
+    this.descricaoItem,
     required this.numeroOS,
     required this.quantidade,
     required this.precoUnitario,
     this.precoMetroQuadrado,
     required this.precoTotal,
     this.usarM2 = false,
+    this.materialEspecifico = false,
   });
 
   factory OrdemCompraItemModel.fromJson(Map<String, dynamic> json) => OrdemCompraItemModel(
     id:                 json['id'],
     materialId:         json['materialId'] ?? 0,
     materialNome:       json['material']?['nome'] ?? '',
+    descricaoItem:      json['descricaoItem'],
     numeroOS:           json['numeroOS'] ?? '',
     quantidade:         double.tryParse(json['quantidade']?.toString() ?? '0') ?? 0,
     precoUnitario:      double.tryParse(json['precoUnitario']?.toString() ?? '0') ?? 0,
     precoMetroQuadrado: json['precoMetroQuadrado'] != null ? double.tryParse(json['precoMetroQuadrado'].toString()) : null,
     precoTotal:         double.tryParse(json['precoTotal']?.toString() ?? '0') ?? 0,
     usarM2:             json['usarM2'] == true,
+    materialEspecifico: json['material']?['especifico'] == true,
   );
 }
 
@@ -80,8 +86,8 @@ class OrdemCompraModel {
     itens:          (json['itens'] as List? ?? [])
         .map((i) => OrdemCompraItemModel.fromJson(i as Map<String, dynamic>))
         .toList(),
-    numerosOS:      (json['numerosOS'] as List? ?? [])
-        .map((o) => o['numeroOS'].toString())
-        .toList(),
+    numerosOS: (json['numerosOS'] as List? ?? [])
+      .map((o) => o['numeroOS'].toString())
+      .toList(),
   );
 }

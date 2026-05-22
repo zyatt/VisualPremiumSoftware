@@ -19,6 +19,15 @@ function _throwDuplicado(medida, espessura) {
   };
 }
 
+/**
+ * Normaliza valores de preço: converte 0 para null (ausência de informação)
+ */
+function _normalizarPreco(valor) {
+  if (valor == null) return null;
+  const num = Number(valor);
+  return num > 0 ? num : null;
+}
+
 async function listar(filtros = {}) {
   const { busca, categoria, semCategoria, status, comFornecedor, id, medida, espessura, identificador, ativo } = filtros;
 
@@ -55,11 +64,6 @@ async function listar(filtros = {}) {
         where: { ativo: true },
         include: { fornecedor: { select: { id: true, nomeFantasia: true } } },
       },
-      historicoPrecos: {
-        orderBy: { criadoEm: 'desc' },
-        take: 1,
-        select: { precoUnitario: true, precoM2: true },
-      },
     },
     orderBy: [{ ativo: 'desc' }, { nome: 'asc' }],
   });
@@ -81,15 +85,16 @@ async function listar(filtros = {}) {
       return arr.length % 2 !== 0 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
     };
 
-    // Custo da última compra (registro mais recente do historicoPrecos)
-    const ultimoHistorico = m.historicoPrecos?.[0] ?? null;
+    // Normaliza custos: 0 vira null
+    const custoUltimaCompra = _normalizarPreco(m.ultimoValorPago);
+    const custoM2UltimaCompra = _normalizarPreco(m.ultimoValorPagoM2);
 
     return {
       ...m,
       precoMediano:        mediana(precos),
       precoM2Mediano:      mediana(precosM2),
-      custoUltimaCompra:   ultimoHistorico?.precoUnitario ? Number(ultimoHistorico.precoUnitario) : null,
-      custoM2UltimaCompra: ultimoHistorico?.precoM2       ? Number(ultimoHistorico.precoM2)       : null,
+      custoUltimaCompra,
+      custoM2UltimaCompra,
     };
   });
 }
@@ -129,6 +134,12 @@ async function criar(data) {
   if (duplicado) _throwDuplicado(medidaTrimmed, espessuraTrimmed);
 
   const status = calcularStatus(data.quantidade || 0, data.estoqueMinimo || 0, true);
+  data.especifico = data.especifico === true;
+  
+  // Garante que campos de custo sejam null (não 0) ao criar
+  data.ultimoValorPago = _normalizarPreco(data.ultimoValorPago);
+  data.ultimoValorPagoM2 = _normalizarPreco(data.ultimoValorPagoM2);
+  
   try {
     return await prisma.material.create({ data: { ...data, status } });
   } catch (e) {
@@ -159,6 +170,15 @@ async function atualizar(id, data) {
   const estoqueMinimo = data.estoqueMinimo ?? atual.estoqueMinimo;
   const ativo         = data.ativo        ?? atual.ativo;
   const status = calcularStatus(quantidade, estoqueMinimo, ativo);
+  
+  // Normaliza custos se fornecidos
+  if (data.ultimoValorPago !== undefined) {
+    data.ultimoValorPago = _normalizarPreco(data.ultimoValorPago);
+  }
+  if (data.ultimoValorPagoM2 !== undefined) {
+    data.ultimoValorPagoM2 = _normalizarPreco(data.ultimoValorPagoM2);
+  }
+  
   try {
     return await prisma.material.update({ where: { id }, data: { ...data, status } });
   } catch (e) {

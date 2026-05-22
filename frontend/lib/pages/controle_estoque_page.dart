@@ -181,18 +181,22 @@ class _ControleEstoquePageState extends State<ControleEstoquePage> {
                                     ?.copyWith(color: AppTheme.textHint),
                               ),
                             )
-                          : ListView.separated(
-                              itemCount: provider.relacoesOS.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 10),
-                              itemBuilder: (ctx, i) {
-                                final rel = provider.relacoesOS[i];
-                                return _RelacaoOSCard(
-                                  relacao: rel,
-                                  onTap: () => _abrirDetalhe(rel),
-                                );
-                              },
-                            ),
+                          : GridView.builder(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 200,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1,
+                ),
+                itemCount: provider.relacoesOS.length,
+                itemBuilder: (ctx, i) {
+                  final rel = provider.relacoesOS[i];
+                  return _RelacaoOSCard(
+                    relacao: rel,
+                    onTap: () => _abrirDetalhe(rel),
+                  );
+                },
+              ),
             ),
           ],
         ),
@@ -230,50 +234,54 @@ class _RelacaoOSCard extends StatelessWidget {
         relacao.movimentacoes.map((m) => m.materialNome).toSet().length;
 
     return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Ícone
               Container(
-                width: 44,
-                height: 44,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(Icons.folder_outlined,
-                    color: AppTheme.primary, size: 22),
+                    color: AppTheme.primary, size: 20),
               ),
-              const SizedBox(width: 14),
-
-              // Informações
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'OS ${relacao.numeroOS}',
-                      style: Theme.of(context).textTheme.titleLarge,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    int.tryParse(relacao.numeroOS) != null
+                    ? 'OS ${relacao.numeroOS}'
+                    : relacao.numeroOS,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary,
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '$materiaisUnicos '
-                      '${materiaisUnicos == 1 ? 'material' : 'materiais'} '
-                      '· $dataStr',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: AppTheme.textSecondary),
-                    ),
-                  ],
-                ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$materiaisUnicos '
+                    '${materiaisUnicos == 1 ? 'material' : 'materiais'}',
+                    style: const TextStyle(
+                        fontSize: 11, color: AppTheme.textSecondary),
+                  ),
+                  Text(
+                    dataStr,
+                    style: const TextStyle(
+                        fontSize: 11, color: AppTheme.textHint),
+                  ),
+                ],
               ),
-
-              const Icon(Icons.chevron_right, color: AppTheme.textHint),
             ],
           ),
         ),
@@ -293,6 +301,10 @@ class _RelacaoDetalhe extends StatefulWidget {
 }
 
 class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
+  String get _tituloOS => int.tryParse(widget.numeroOS) != null
+    ? 'OS ${widget.numeroOS}'
+    : widget.numeroOS;
+  
   @override
   void initState() {
     super.initState();
@@ -312,7 +324,7 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
       builder: (dialogCtx) => AlertDialog(
         title: const Text('Excluir OS'),
         content: Text(
-          'Deseja excluir a OS ${widget.numeroOS} e todas as suas '
+          'Deseja excluir "$_tituloOS" e todas as suas '
           'movimentações? Esta ação não pode ser desfeita.',
         ),
         actions: [
@@ -338,7 +350,7 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
       navigator.pop();
       messenger.showSnackBar(
         SnackBar(
-          content: Text('OS ${widget.numeroOS} excluída'),
+          content: Text('$_tituloOS excluída'),
           backgroundColor: AppTheme.error,
         ),
       );
@@ -367,7 +379,7 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
             Navigator.of(context).pop();
           },
         ),
-        title: Text('OS ${widget.numeroOS}'),
+        title: Text(_tituloOS),
         actions: [
           IconButton(
             icon: const Icon(Icons.delete_outline, color: AppTheme.error),
@@ -611,6 +623,17 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
+                          if ((_primeira.descricaoItem ?? '').isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              _primeira.descricaoItem!,
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.primary,
+                                  fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                           if (_subtitulo.isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
@@ -702,6 +725,17 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        if ((_primeira.descricaoItem ?? '').isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            _primeira.descricaoItem!,
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.primary,
+                                fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                         if (_subtitulo.isNotEmpty) ...[
                           const SizedBox(height: 2),
                           Text(
@@ -791,6 +825,26 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                             _primeira.materialNome,
                             style: Theme.of(ctx).textTheme.titleLarge,
                           ),
+                          if ((_primeira.descricaoItem ?? '').isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Row(
+                              children: [
+                                const Icon(Icons.label_outline,
+                                    size: 13, color: AppTheme.primary),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    _primeira.descricaoItem!,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: AppTheme.primary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                           if (_subtitulo.isNotEmpty)
                             Text(
                               _subtitulo,

@@ -369,31 +369,71 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
 
     if (!mounted) return;
 
-    // Adiciona diretamente, sem solicitar dados adicionais.
-    try {
-      final repo = OrdemCompraRepository();
-      final ocId = ocSelecionada['id'] as int;
+    // ── Verifica divergência de fornecedor e pede confirmação se necessário ─────
+    final fornecedorIdOrcamento = itens.first.fornecedorSelecionado!;
+    final fornecedorIdOC        = ocSelecionada['fornecedor']?['id'] as int?;
 
+    if (fornecedorIdOC != null && fornecedorIdOC != fornecedorIdOrcamento) {
+      final fornecedorNomeAtual =
+          ocSelecionada['fornecedor']?['nomeFantasia'] as String? ?? '—';
+      final fornecedorNomeNovo =
+          itens.first.precos[fornecedorIdOrcamento]?.fornecedorNome ?? '—';
+
+      final confirmar = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Substituir fornecedor?',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          content: Text(
+            'Esta OC está vinculada a "$fornecedorNomeAtual".\n\n'
+            'Ao continuar, o fornecedor será substituído por "$fornecedorNomeNovo".',
+            style: const TextStyle(fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Substituir e continuar'),
+            ),
+          ],
+        ),
+      );
+      if (confirmar != true) return;
+      if (!mounted) return;
+    }
+    // ────────────────────────────────────────────────────────────────────────────
+
+    try {
+      final repo  = OrdemCompraRepository();
+      final ocId  = ocSelecionada['id'] as int;
+
+      // 1. Adiciona os itens do orçamento à OC
       for (final item in itens) {
-        final fId = item.fornecedorSelecionado!;
-        final pf = item.precos[fId]!;
+        final fId   = item.fornecedorSelecionado!;
+        final pf    = item.precos[fId]!;
         final usarM2 = item.modoOrcamento == ModoOrcamento.metroQuadrado
             || (item.modoOrcamento == null && pf.precoM2 != null && pf.precoM2! > 0);
         await repo.adicionarItem(ocId, {
-          'materialId': item.materialId,
-          'numeroOS': 'OS-GERAL',
-          'quantidade': item.quantidade,
-          'precoUnitario': pf.preco ?? 0,
+          'materialId':         item.materialId,
+          'numeroOS':           'OS-GERAL',
+          'quantidade':         item.quantidade,
+          'precoUnitario':      pf.preco ?? 0,
           'precoMetroQuadrado': pf.precoM2,
-          'usarM2': usarM2,
+          'usarM2':             usarM2,
         });
       }
+
+      // 2. Substitui o fornecedor da OC pelo escolhido no orçamento
+      await repo.atualizar(ocId, {'fornecedorId': fornecedorIdOrcamento});
 
       if (mounted) {
         context.read<OrcamentoProvider>().limparAba();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Itens adicionados à OC #${ocSelecionada['id']} com sucesso!'),
+            content: Text('Itens adicionados à OC #$ocId com sucesso!'),
             backgroundColor: AppTheme.success,
           ),
         );

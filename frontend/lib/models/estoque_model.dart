@@ -12,6 +12,8 @@ class MovimentacaoModel {
   final double? precoUnitario;
   final double? precoM2;
   final String? observacao;
+  // Descrição personalizada do item na OC (preenchida p/ materiais específicos)
+  final String? descricaoItem;
   final DateTime criadoEm;
 
   MovimentacaoModel({
@@ -28,6 +30,7 @@ class MovimentacaoModel {
     this.precoUnitario,
     this.precoM2,
     this.observacao,
+    this.descricaoItem,
     required this.criadoEm,
   });
 
@@ -41,7 +44,7 @@ class MovimentacaoModel {
     materialEspessura:    json['material']?['espessura'],
     tipo:                 json['tipo'],
     quantidade:           double.tryParse(json['quantidade'].toString()) ?? 0,
-    numeroOS:             json['numeroOS'],
+    numeroOS:             json['numeroOS']?.toString() ?? '',
     precoUnitario:        json['precoUnitario'] != null
         ? double.tryParse(json['precoUnitario'].toString())
         : null,
@@ -49,6 +52,7 @@ class MovimentacaoModel {
         ? double.tryParse(json['precoM2'].toString())
         : null,
     observacao:           json['observacao'],
+    descricaoItem:        json['descricaoItem'],
     criadoEm:             DateTime.parse(json['criadoEm']),
   );
 }

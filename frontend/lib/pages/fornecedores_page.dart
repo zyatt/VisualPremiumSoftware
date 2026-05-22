@@ -1613,7 +1613,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
   void _selecionarMaterial(Map<String, dynamic> material) {
     final id           = material['id']           as int;
     final nome         = material['nome']         as String? ?? '';
-    final identificador = material['identificador'] as String?;
+    final identificador = material['Marca'] as String?;
     final medida       = material['medida']       as String?;
     final espessura    = material['espessura']    as String?;
 
@@ -1776,7 +1776,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                       child: TextFormField(
                         controller: _materialIdentificadorCtrl,
                         decoration: InputDecoration(
-                          labelText: 'Identificador',
+                          labelText: 'Marca',
                           isDense: true,
                           prefixIcon: const Icon(
                             Icons.qr_code_outlined,
@@ -1871,7 +1871,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                       itemCount: _sugestoes.length,
                       itemBuilder: (_, i) {
                         final m = _sugestoes[i];
-                        final identificador = m['identificador'] as String?;
+                        final identificador = m['Marca'] as String?;
                         final medida    = m['medida']    as String?;
                         final espessura = m['espessura'] as String?;
                         final detalhe = [
@@ -2647,7 +2647,7 @@ class _VincularPorMaterialDialogState
                         child: TextField(
                           controller: _materialIdentificadorCtrl,
                           decoration: InputDecoration(
-                            labelText: 'Identificador',
+                            labelText: 'Marca',
                             isDense: true,
                             prefixIcon: const Icon(Icons.qr_code_outlined,
                                 size: 16, color: AppTheme.textHint),

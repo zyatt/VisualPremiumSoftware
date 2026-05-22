@@ -221,10 +221,14 @@ function drawItensTable(doc, itens, startY) {
   itens.forEach((item, idx) => {
     const nome    = item.material?.nome ?? `Material ${item.materialId}`;
     const unidade = item.material?.unidade ?? '—';
+    const descricao = item.descricaoItem?.trim() || null;
 
     doc.font('Helvetica-Bold').fontSize(FONT_SZ);
-    const matH = doc.heightOfString(nome, { width: cols[0].w - cols[0].pad * 2 });
-    const rowH  = Math.max(20, matH + ROW_PAD_V * 2);
+    const matH  = doc.heightOfString(nome, { width: cols[0].w - cols[0].pad * 2 });
+    const descH = descricao
+      ? doc.font('Helvetica').fontSize(FONT_SZ - 0.5).heightOfString(descricao, { width: cols[0].w - cols[0].pad * 2 }) + 3
+      : 0;
+    const rowH  = Math.max(20, matH + descH + ROW_PAD_V * 2);
 
     if (y + rowH > PAGE_H - FOOTER_RESERVE) {
       drawFooter(doc, doc.bufferedPageRange().count);
@@ -243,6 +247,11 @@ function drawItensTable(doc, itens, startY) {
     doc.save();
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
        .text(nome, C0.x + C0.pad, tyMulti, { width: C0.w - C0.pad * 2, align: 'left', lineBreak: true });
+    if (descricao) {
+      const descY = tyMulti + matH + 2;
+      doc.font('Helvetica').fontSize(FONT_SZ - 0.5).fillColor(C.gray)
+         .text(descricao, C0.x + C0.pad, descY, { width: C0.w - C0.pad * 2, align: 'left', lineBreak: true });
+    }
     doc.restore();
 
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.black)

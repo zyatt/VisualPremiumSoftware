@@ -937,7 +937,22 @@ class _OrdemCompraDetalhePageState extends State<_OrdemCompraDetalhePage> {
               decoration: BoxDecoration(color: AppTheme.surfaceVariant, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppTheme.divider)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  Expanded(child: Text(item.materialNome, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.textPrimary))),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(item.materialNome, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.textPrimary)),
+                        if (item.descricaoItem != null && item.descricaoItem!.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              item.descricaoItem!,
+                              style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, fontStyle: FontStyle.italic),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                   Text('R\$ ${item.precoTotal.toStringAsFixed(2).replaceAll('.', ',')}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.primary)),
                 ]),
                 const SizedBox(height: 6),
@@ -953,17 +968,20 @@ class _OrdemCompraDetalhePageState extends State<_OrdemCompraDetalhePage> {
                           ? 'Qtd (m²): ${item.quantidade}'
                           : 'Qtd: ${item.quantidade}',
                     ),
-                    _itemChipDestaque(
+                   _itemChipDestaque(
                       Icons.attach_money,
-                      'Unitário: R\$ ${item.precoUnitario.toStringAsFixed(2).replaceAll('.', ',')}',
+                      item.precoUnitario > 0
+                          ? 'Unitário: R\$ ${item.precoUnitario.toStringAsFixed(2).replaceAll('.', ',')}'
+                          : 'Unitário: —',
                       ativo: !item.usarM2,
                     ),
-                    if (item.precoMetroQuadrado != null)
-                      _itemChipDestaque(
-                        Icons.square_foot,
-                        'm²: R\$ ${item.precoMetroQuadrado!.toStringAsFixed(2).replaceAll('.', ',')}',
-                        ativo: item.usarM2,
-                      ),
+                    _itemChipDestaque(
+                      Icons.square_foot,
+                      item.precoMetroQuadrado != null && item.precoMetroQuadrado! > 0
+                          ? 'm²: R\$ ${item.precoMetroQuadrado!.toStringAsFixed(2).replaceAll('.', ',')}'
+                          : 'm²: —',
+                      ativo: item.usarM2,
+                    ),
                   ],
                 ),
               ]),
@@ -1169,6 +1187,8 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     _itens = widget.ordem.itens.map((i) => _ItemRascunho(
       materialId: i.materialId,
       materialNome: i.materialNome,
+      descricaoItem: i.descricaoItem,
+      materialEspecifico: i.materialEspecifico,
       numeroOS: i.numeroOS,
       quantidade: i.quantidade,
       precoUnitario: i.precoUnitario,
@@ -1184,7 +1204,24 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 
   Future<void> _carregarFornecedor() async {
     final f = await context.read<FornecedorProvider>().buscarPorId(widget.ordem.fornecedorId);
-    if (mounted) setState(() => _fornecedor = f);
+    if (mounted) {
+      setState(() {
+        _fornecedor = f;
+        // Reavalia materialEspecifico com base no vínculo real do fornecedor,
+        // garantindo que itens específicos sem descrição prévia exibam o campo.
+        if (f != null) {
+          for (final item in _itens) {
+            final vinculo = f.materiais.cast<FornecedorMaterialVinculoModel?>().firstWhere(
+              (m) => m?.materialId == item.materialId,
+              orElse: () => null,
+            );
+            if (vinculo != null) {
+              item.materialEspecifico = vinculo.materialEspecifico;
+            }
+          }
+        }
+      });
+    }
   }
 
   @override
@@ -1204,7 +1241,12 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     );
     if (selected != null) {
       final completo = await provider.buscarPorId(selected.id);
-      if (mounted) setState(() => _fornecedor = completo ?? selected);
+      if (mounted) {
+        setState(() {
+        _fornecedor = completo ?? selected;
+        _itens.clear();
+      });
+      }
     }
   }
 
@@ -1219,18 +1261,18 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
   }
 
   void _adicionarItem(FornecedorMaterialVinculoModel vinculo) {
-    if (_itens.any((i) => i.materialId == vinculo.materialId)) return;
-    // Se há exatamente 1 OS cadastrada, preenche automaticamente
     final osAuto = _numerosOS.length == 1 ? _numerosOS.first : '';
     setState(() {
       _itens.add(_ItemRascunho(
-        materialId: vinculo.materialId,
-        materialNome: vinculo.descricaoCompleta,
-        numeroOS: osAuto,
-        quantidade: 1,
-        precoUnitario: vinculo.preco,
-        precoMetroQuadrado: vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
-        usarM2: false,
+        materialId:         vinculo.materialId,
+        materialNome:       vinculo.descricaoCompleta,
+        materialEspecifico: vinculo.materialEspecifico,
+        numeroOS:           osAuto,
+        quantidade:         1,
+        precoUnitario:      vinculo.preco,
+        precoMetroQuadrado:
+            vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
+        usarM2:             false,
       ));
     });
   }
@@ -1238,13 +1280,10 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
   void _removerItem(int idx) => setState(() => _itens.removeAt(idx));
 
   void _showAdicionarItem() {
-    final disponiveis = _materiaisDoFornecedor
-        .where((m) => !_itens.any((i) => i.materialId == m.materialId))
-        .toList();
     showDialog(
       context: context,
       builder: (_) => _MaterialPickerDialog(
-        materiais: disponiveis,
+        materiais: _materiaisDoFornecedor,
         onConfirmar: (lista) {
           for (final v in lista) {
             _adicionarItem(v);
@@ -1282,6 +1321,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         'numerosOS': _numerosOS,
         'itens': _itens.map((i) => {
           'materialId': i.materialId,
+          'descricaoItem': i.descricaoItem,
           'numeroOS': i.numeroOS,
           'quantidade': i.quantidade,
           'precoUnitario': i.precoUnitario,
@@ -1613,6 +1653,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 class ItemPreCarregadoOC {
   final int materialId;
   final String materialNome;
+  final bool materialEspecifico;
   final double quantidade;
   final double precoUnitario;
   final double? precoMetroQuadrado;
@@ -1621,6 +1662,7 @@ class ItemPreCarregadoOC {
   const ItemPreCarregadoOC({
     required this.materialId,
     required this.materialNome,
+    this.materialEspecifico = false,
     required this.quantidade,
     required this.precoUnitario,
     this.precoMetroQuadrado,
@@ -1676,7 +1718,8 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       _itens.add(_ItemRascunho(
         materialId:         item.materialId,
         materialNome:       item.materialNome,
-        numeroOS:           '', // usuário deve preencher
+        materialEspecifico: item.materialEspecifico,
+        numeroOS:           '',
         quantidade:         item.quantidade,
         precoUnitario:      item.precoUnitario,
         precoMetroQuadrado: item.precoMetroQuadrado,
@@ -1742,6 +1785,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         'itens': _itens
             .map((i) => {
                   'materialId': i.materialId,
+                  'descricaoItem': i.descricaoItem,
                   'numeroOS': i.numeroOS,
                   'quantidade': i.quantidade,
                   'precoUnitario': i.precoUnitario,
@@ -1771,19 +1815,19 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   }
 
   void _adicionarItem(FornecedorMaterialVinculoModel vinculo) {
-    if (_itens.any((i) => i.materialId == vinculo.materialId)) return;
     // Se há exatamente 1 OS cadastrada, preenche automaticamente
     final osAuto = _numerosOS.length == 1 ? _numerosOS.first : '';
     setState(() {
       _itens.add(_ItemRascunho(
-        materialId: vinculo.materialId,
-        materialNome: vinculo.descricaoCompleta,
-        numeroOS: osAuto,
-        quantidade: 1,
-        precoUnitario: vinculo.preco,
+        materialId:         vinculo.materialId,
+        materialNome:       vinculo.descricaoCompleta,
+        materialEspecifico: vinculo.materialEspecifico,
+        numeroOS:           osAuto,
+        quantidade:         1,
+        precoUnitario:      vinculo.preco,
         precoMetroQuadrado:
             vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
-        usarM2: false,
+        usarM2:             false,
       ));
     });
   }
@@ -1820,9 +1864,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   }
 
   void _showAdicionarItem() {
-    final disponiveis = _materiaisDoFornecedor
-        .where((m) => !_itens.any((i) => i.materialId == m.materialId))
-        .toList();
+    final disponiveis = _materiaisDoFornecedor;
     showDialog(
       context: context,
       builder: (_) => _MaterialPickerDialog(
@@ -2555,6 +2597,10 @@ class _OsInputSectionState extends State<_OsInputSection> {
 class _ItemRascunho {
   int materialId;
   String materialNome;
+  /// Indica se o material é específico (exige descrição personalizada na OC).
+  bool? materialEspecifico;
+  /// Descrição personalizada na OC (ex: "Tinta Branca Fosca 18L").
+  String? descricaoItem;
   String numeroOS;
   double quantidade;
   double precoUnitario;
@@ -2566,6 +2612,8 @@ class _ItemRascunho {
   _ItemRascunho({
     required this.materialId,
     required this.materialNome,
+    this.materialEspecifico,
+    this.descricaoItem,
     required this.numeroOS,
     required this.quantidade,
     this.precoUnitario = 0,
@@ -2607,6 +2655,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   late TextEditingController _qtdCtrl;
   late TextEditingController _precoCtrl;
   late TextEditingController _precoM2Ctrl;
+  late TextEditingController _descricaoCtrl;
 
   @override
   void initState() {
@@ -2618,6 +2667,8 @@ class _ItemFormCardState extends State<_ItemFormCard> {
         text: widget.item.precoUnitario.toStringAsFixed(2));
     _precoM2Ctrl = TextEditingController(
         text: widget.item.precoMetroQuadrado?.toStringAsFixed(2) ?? '');
+    _descricaoCtrl = TextEditingController(
+        text: widget.item.descricaoItem ?? '');
   }
 
   @override
@@ -2637,6 +2688,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     _qtdCtrl.dispose();
     _precoCtrl.dispose();
     _precoM2Ctrl.dispose();
+    _descricaoCtrl.dispose();
     super.dispose();
   }
 
@@ -2696,6 +2748,26 @@ class _ItemFormCardState extends State<_ItemFormCard> {
             ],
           ),
           const SizedBox(height: 8),
+          // ── Descrição adicional (somente para materiais específicos) ──────────
+          if (widget.item.materialEspecifico == true) ...[
+            const Text(
+              'Descrição adicional',
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 4),
+            TextFormField(
+              controller: _descricaoCtrl,
+              decoration: _deco('Ex: Tinta Branca Fosca 18L (opcional)'),
+              onChanged: (v) {
+                widget.item.descricaoItem = v.trim().isEmpty ? null : v.trim();
+                widget.onChanged();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
           if (widget.numerosOS.isNotEmpty) ...[
             const Text('OS',
                 style: TextStyle(
@@ -2861,16 +2933,17 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                     const SizedBox(height: 4),
                     TextFormField(
                       controller: _precoCtrl,
-                      decoration: _deco('0.00'),
-                      keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true),
+                      enabled: !widget.item.usarM2,  // ← adicionar
+                      decoration: _deco('0.00').copyWith(
+                        fillColor: widget.item.usarM2 ? AppTheme.divider : AppTheme.surface,  // ← adicionar
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                            RegExp(r'^\d*\.?\d*'))
+                        FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
                       ],
                       onChanged: (v) {
-                        widget.item.precoUnitario =
-                            double.tryParse(v) ?? 0;
+                        final valor = v.trim().isEmpty ? 0.0 : (double.tryParse(v) ?? 0.0);
+                        widget.item.precoUnitario = valor;
                         widget.onChanged();
                         setState(() {});
                       },
@@ -2899,16 +2972,17 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                     const SizedBox(height: 4),
                     TextFormField(
                       controller: _precoM2Ctrl,
-                      decoration: _deco(widget.item.usarM2 ? '0.00' : 'Opcional'),
-                      keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true),
+                      enabled: widget.item.usarM2,  // ← adicionar
+                      decoration: _deco('0.00').copyWith(
+                        fillColor: !widget.item.usarM2 ? AppTheme.divider : AppTheme.surface,  // ← adicionar
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                            RegExp(r'^\d*\.?\d*'))
+                        FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
                       ],
                       onChanged: (v) {
-                        widget.item.precoMetroQuadrado =
-                            v.isEmpty ? null : double.tryParse(v);
+                        final valor = v.trim().isEmpty ? null : double.tryParse(v);
+                        widget.item.precoMetroQuadrado = valor;
                         widget.onChanged();
                         setState(() {});
                       },
@@ -3136,7 +3210,8 @@ class _MaterialPickerDialog extends StatefulWidget {
 class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
   final _searchCtrl = TextEditingController();
   String _busca = '';
-  final Set<int> _selecionados = {};
+  // materialId → quantidade de cópias a adicionar
+  final Map<int, int> _quantidades = {};
 
   List<FornecedorMaterialVinculoModel> get _filtrados {
     if (_busca.isEmpty) return widget.materiais;
@@ -3146,10 +3221,16 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
         .toList();
   }
 
+  int get _totalItens => _quantidades.values.fold(0, (s, v) => s + v);
+
   void _confirmar() {
-    final escolhidos = widget.materiais
-        .where((m) => _selecionados.contains(m.materialId))
-        .toList();
+    final escolhidos = <FornecedorMaterialVinculoModel>[];
+    for (final m in widget.materiais) {
+      final qty = _quantidades[m.materialId] ?? 0;
+      for (var i = 0; i < qty; i++) {
+        escolhidos.add(m);
+      }
+    }
     widget.onConfirmar(escolhidos);
     Navigator.pop(context);
   }
@@ -3209,7 +3290,7 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
             ),
             const SizedBox(height: 8),
             // Contador de selecionados
-            if (_selecionados.isNotEmpty)
+            if (_totalItens > 0)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -3218,7 +3299,7 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  '${_selecionados.length} ${_selecionados.length == 1 ? 'material selecionado' : 'materiais selecionados'}',
+                  '$_totalItens ${_totalItens == 1 ? 'item selecionado' : 'itens selecionados'}',
                   style: const TextStyle(
                     color: AppTheme.primary,
                     fontWeight: FontWeight.w600,
@@ -3242,59 +3323,81 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                           const Divider(height: 1, color: AppTheme.divider),
                       itemBuilder: (_, i) {
                         final m = filtrados[i];
-                        final sel = _selecionados.contains(m.materialId);
-                        return InkWell(
-                          onTap: () => setState(() {
-                            if (sel) {
-                              _selecionados.remove(m.materialId);
-                            } else {
-                              _selecionados.add(m.materialId);
-                            }
-                          }),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 4, vertical: 10),
-                            child: Row(
-                              children: [
-                                Checkbox(
-                                  value: sel,
-                                  activeColor: AppTheme.primary,
-                                  onChanged: (_) => setState(() {
-                                    if (sel) {
-                                      _selecionados.remove(m.materialId);
-                                    } else {
-                                      _selecionados.add(m.materialId);
-                                    }
-                                  }),
+                        final qty = _quantidades[m.materialId] ?? 0;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      m.descricaoCompleta,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                        color: qty > 0
+                                            ? AppTheme.primary
+                                            : AppTheme.textPrimary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'R\$ ${m.preco.toStringAsFixed(2).replaceAll('.', ',')}${m.precoMetroQuadrado > 0 ? '  •  m²: R\$ ${m.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}' : ''}',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppTheme.textSecondary,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        m.descricaoCompleta,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 13,
-                                          color: sel
-                                              ? AppTheme.primary
-                                              : AppTheme.textPrimary,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        'R\$ ${m.preco.toStringAsFixed(2).replaceAll('.', ',')}${m.precoMetroQuadrado > 0 ? '  •  m²: R\$ ${m.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}' : ''}',
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          color: AppTheme.textSecondary,
-                                        ),
-                                      ),
-                                    ],
+                              ),
+                              // Controle de quantidade
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    onPressed: qty == 0
+                                        ? null
+                                        : () => setState(() {
+                                              final novo = qty - 1;
+                                              if (novo == 0) {
+                                                _quantidades.remove(m.materialId);
+                                              } else {
+                                                _quantidades[m.materialId] = novo;
+                                              }
+                                            }),
+                                    icon: const Icon(Icons.remove_circle_outline, size: 20),
+                                    color: qty == 0 ? AppTheme.textHint : AppTheme.error,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
                                   ),
-                                ),
-                              ],
-                            ),
+                                  SizedBox(
+                                    width: 28,
+                                    child: Text(
+                                      '$qty',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                        color: qty > 0 ? AppTheme.primary : AppTheme.textHint,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    onPressed: () => setState(() {
+                                      _quantidades[m.materialId] = qty + 1;
+                                    }),
+                                    icon: const Icon(Icons.add_circle_outline, size: 20),
+                                    color: AppTheme.primary,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         );
                       },
@@ -3310,12 +3413,12 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
               style: TextStyle(color: AppTheme.textSecondary)),
         ),
         FilledButton(
-          onPressed: _selecionados.isEmpty ? null : _confirmar,
+          onPressed: _totalItens == 0 ? null : _confirmar,
           style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
           child: Text(
-            _selecionados.isEmpty
+            _totalItens == 0
                 ? 'Adicionar'
-                : 'Adicionar (${_selecionados.length})',
+                : 'Adicionar ($_totalItens)',
           ),
         ),
       ],

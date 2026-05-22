@@ -738,7 +738,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   child: TextField(
                     controller: _identificadorCtrl,
                     decoration: const InputDecoration(
-                      hintText:   'Identificador...',
+                      hintText:   'Marca...',
                       prefixIcon: Icon(Icons.qr_code, color: AppTheme.textHint, size: 18),
                       isDense:    true,
                     ),
@@ -1269,7 +1269,7 @@ class _TabelaMateriais extends StatelessWidget {
 
   static const List<_ColDef> _cols = [
     _ColDef(label: 'ID',             fixed: 56),
-    _ColDef(label: 'Identificador',  flex: 0.7),
+    _ColDef(label: 'Marca',  flex: 0.7),
     _ColDef(label: 'Material',       flex: 2.0),
     _ColDef(label: 'Categoria',      flex: 1.0),
     _ColDef(label: 'Unidade',        flex: 0.9),
@@ -2009,12 +2009,14 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
   bool get _editando => widget.material != null;
   late bool _estoqueConfirmado;
+  late bool _especifico;
 
   @override
   void initState() {
     super.initState();
     final m        = widget.material;
     _estoqueConfirmado = m?.estoqueConfirmado ?? false;
+    _especifico        = m?.especifico ?? false;
     _nome          = TextEditingController(text: m?.nome ?? '');
     _identificador = TextEditingController(text: m?.identificador ?? '');
     _unidade       = TextEditingController(text: m?.unidade ?? '');
@@ -2052,6 +2054,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       'quantidade':    double.tryParse(_quantidade.text) ?? 0,
       'estoqueMinimo': double.tryParse(_estoqueMinimo.text) ?? 0,
       'estoqueConfirmado': _estoqueConfirmado,
+      'especifico': _especifico,
     };
 
     final provider = context.read<MaterialProvider>();
@@ -2133,8 +2136,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 TextFormField(
                   controller: _identificador,
                   decoration: const InputDecoration(
-                    labelText: 'Identificador',
-                    hintText: 'Ex: SKU-001, REF-A2...',
+                    labelText: 'Marca',
                   ),
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [_UpperCaseFormatter()],
@@ -2243,6 +2245,48 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                               _estoqueConfirmado
                                   ? 'A quantidade atual foi verificada fisicamente'
                                   : 'Quantidade ainda não verificada fisicamente',
+                              style: const TextStyle(
+                                  fontSize: 11, color: AppTheme.textHint),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () => setState(() => _especifico = !_especifico),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _especifico
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          size: 20,
+                          color: _especifico ? AppTheme.primary : AppTheme.textHint,
+                        ),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Material específico',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                color: _especifico
+                                    ? AppTheme.textPrimary
+                                    : AppTheme.textSecondary,
+                              ),
+                            ),
+                            Text(
+                              _especifico
+                                  ? 'Exigirá descrição personalizada na ordem de compra'
+                                  : 'Material genérico (sem descrição adicional na OC)',
                               style: const TextStyle(
                                   fontSize: 11, color: AppTheme.textHint),
                             ),
@@ -2432,8 +2476,10 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
   @override
   Widget build(BuildContext context) {
     final m = widget.material;
-    final temCusto   = m.ultimoValorPago   != null && m.ultimoValorPago!   > 0;
-    final temCustoM2 = m.ultimoValorPagoM2 != null && m.ultimoValorPagoM2! > 0;
+    final ultimoHistorico = _historico.isNotEmpty ? _historico.first : null;
+    final ultimoUsarM2 = ultimoHistorico?.usarM2 ?? false;
+    final temCusto   = !ultimoUsarM2 && m.ultimoValorPago   != null && m.ultimoValorPago!   > 0;
+    final temCustoM2 =  ultimoUsarM2 && m.ultimoValorPagoM2 != null && m.ultimoValorPagoM2! > 0;
 
     return AlertDialog(
       backgroundColor: AppTheme.surface,
@@ -2664,7 +2710,9 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                 SizedBox(
                                   width: 100,
                                   child: Text(
-                                    'R\$ ${h.precoUnitario.toStringAsFixed(2)}',
+                                    !h.usarM2 && h.precoUnitario > 0
+                                        ? 'R\$ ${h.precoUnitario.toStringAsFixed(2)}'
+                                        : '—',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
                                       fontSize: 13,
@@ -2680,7 +2728,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                 SizedBox(
                                   width: 100,
                                   child: Text(
-                                    h.precoM2 != null && h.precoM2! > 0
+                                    h.usarM2 && h.precoM2 != null && h.precoM2! > 0
                                         ? 'R\$ ${h.precoM2!.toStringAsFixed(2)}'
                                         : '—',
                                     textAlign: TextAlign.right,
