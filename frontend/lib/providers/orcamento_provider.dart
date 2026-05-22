@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
-// ─── Enums ────────────────────────────────────────────────────────────────────
+// ─── Enums ────────────────────────────────────
 
 enum ModoOrcamento { unitario, metroQuadrado }
 
@@ -37,6 +37,7 @@ class PrecoFornecedorData {
 }
 
 class ItemOrcamentoData {
+  final String itemId; // ID único para cada item (permite múltiplas instâncias do mesmo material)
   final int materialId;
   final String materialNome;
   final String? materialUnidade;
@@ -45,12 +46,15 @@ class ItemOrcamentoData {
   final String? materialEspessura;
   final String? materialIdentificador;
   final String? materialStatus;
+  final bool materialEspecifico; // indica se o material exige descrição personalizada
+  String? descricao; // descrição personalizada para materiais específicos
   double quantidade;
   Map<int, PrecoFornecedorData> precos;
   int? fornecedorSelecionado;
   ModoOrcamento? modoOrcamento;
 
   ItemOrcamentoData({
+    String? itemId,
     required this.materialId,
     required this.materialNome,
     this.materialUnidade,
@@ -59,13 +63,17 @@ class ItemOrcamentoData {
     this.materialEspessura,
     this.materialIdentificador,
     this.materialStatus,
+    this.materialEspecifico = false,
+    this.descricao,
     this.quantidade = 1,
     Map<int, PrecoFornecedorData>? precos,
     this.fornecedorSelecionado,
     this.modoOrcamento,
-  }) : precos = precos ?? {};
+  }) : itemId = itemId ?? const Uuid().v4(),
+       precos = precos ?? {};
 
   Map<String, dynamic> toJson() => {
+        'itemId': itemId,
         'materialId': materialId,
         'materialNome': materialNome,
         'materialUnidade': materialUnidade,
@@ -74,6 +82,8 @@ class ItemOrcamentoData {
         'materialEspessura': materialEspessura,
         'materialIdentificador': materialIdentificador,
         'materialStatus': materialStatus,
+        'materialEspecifico': materialEspecifico,
+        'descricao': descricao,
         'quantidade': quantidade,
         'precos': precos.map((k, v) => MapEntry(k.toString(), v.toJson())),
         'fornecedorSelecionado': fornecedorSelecionado,
@@ -82,6 +92,7 @@ class ItemOrcamentoData {
 
   factory ItemOrcamentoData.fromJson(Map<String, dynamic> j) =>
       ItemOrcamentoData(
+        itemId: j['itemId'] as String?,
         materialId: j['materialId'] as int,
         materialNome: j['materialNome'] as String,
         materialUnidade: j['materialUnidade'] as String?,
@@ -90,6 +101,8 @@ class ItemOrcamentoData {
         materialEspessura: j['materialEspessura'] as String?,
         materialIdentificador: j['materialIdentificador'] as String?,
         materialStatus: j['materialStatus'] as String?,
+        materialEspecifico: j['materialEspecifico'] as bool? ?? false,
+        descricao: j['descricao'] as String?,
         quantidade: (j['quantidade'] as num).toDouble(),
         precos: (j['precos'] as Map<String, dynamic>).map(
           (k, v) => MapEntry(
@@ -132,7 +145,7 @@ class OrcamentoTab {
       );
 }
 
-// ─── Histórico ────────────────────────────────────────────────────────────────
+// ─── Histórico ────────────────────────────────
 
 class OrcamentoHistoricoEntry {
   final String id;
@@ -173,7 +186,7 @@ class OrcamentoHistoricoEntry {
       );
 }
 
-// ─── Provider ─────────────────────────────────────────────────────────────────
+// ─── Provider ─────────────────────────────────
 
 class OrcamentoProvider extends ChangeNotifier {
   static const _kAbas = 'orcamento_abas';
@@ -257,7 +270,7 @@ class OrcamentoProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
-  // ── Abas ──────────────────────────────────────────────────────────────────────
+  // ── Abas ──────────────────────────────────────
 
   void _novaAba({bool notificar = true}) {
     final idx = _abas.length + 1;
@@ -292,26 +305,34 @@ class OrcamentoProvider extends ChangeNotifier {
 
   void adicionarItem(ItemOrcamentoData item) {
     if (tabAtual == null) return;
-    final idx = tabAtual!.itens
-        .indexWhere((i) => i.materialId == item.materialId);
-    if (idx >= 0) {
-      tabAtual!.itens[idx] = item;
-    } else {
-      tabAtual!.itens.add(item);
+    
+    // Para materiais específicos, sempre adiciona uma nova instância
+    // Para materiais normais, substitui se já existir
+    if (!item.materialEspecifico) {
+      final idx = tabAtual!.itens
+          .indexWhere((i) => i.materialId == item.materialId && !i.materialEspecifico);
+      if (idx >= 0) {
+        tabAtual!.itens[idx] = item;
+        _salvarAbas();
+        notifyListeners();
+        return;
+      }
     }
+    
+    tabAtual!.itens.add(item);
     _salvarAbas();
     notifyListeners();
   }
 
-  void removerItem(int materialId) {
-    tabAtual?.itens.removeWhere((i) => i.materialId == materialId);
+  void removerItem(String itemId) {
+    tabAtual?.itens.removeWhere((i) => i.itemId == itemId);
     _salvarAbas();
     notifyListeners();
   }
 
-  void atualizarItem(int materialId, ItemOrcamentoData dados) {
+  void atualizarItem(String itemId, ItemOrcamentoData dados) {
     if (tabAtual == null) return;
-    final idx = tabAtual!.itens.indexWhere((i) => i.materialId == materialId);
+    final idx = tabAtual!.itens.indexWhere((i) => i.itemId == itemId);
     if (idx >= 0) {
       tabAtual!.itens[idx] = dados;
       _salvarAbas();
@@ -319,18 +340,20 @@ class OrcamentoProvider extends ChangeNotifier {
     }
   }
 
-  void atualizarItemParcial(int materialId, {
+  void atualizarItemParcial(String itemId, {
     double? quantidade,
     int? fornecedorSelecionado,
     bool clearFornecedor = false,
     ModoOrcamento? modoOrcamento,
     Map<int, PrecoFornecedorData>? precos,
+    String? descricao,
   }) {
     if (tabAtual == null) return;
-    final idx = tabAtual!.itens.indexWhere((i) => i.materialId == materialId);
+    final idx = tabAtual!.itens.indexWhere((i) => i.itemId == itemId);
     if (idx < 0) return;
     final old = tabAtual!.itens[idx];
     tabAtual!.itens[idx] = ItemOrcamentoData(
+      itemId: old.itemId,
       materialId: old.materialId,
       materialNome: old.materialNome,
       materialUnidade: old.materialUnidade,
@@ -339,6 +362,8 @@ class OrcamentoProvider extends ChangeNotifier {
       materialEspessura: old.materialEspessura,
       materialIdentificador: old.materialIdentificador,
       materialStatus: old.materialStatus,
+      materialEspecifico: old.materialEspecifico,
+      descricao: descricao ?? old.descricao,
       quantidade: quantidade ?? old.quantidade,
       precos: precos ?? old.precos,
       fornecedorSelecionado: clearFornecedor
@@ -441,7 +466,7 @@ class OrcamentoProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────
 
   bool get podeGerarOrdem {
     if (tabAtual == null || tabAtual!.itens.isEmpty) return false;

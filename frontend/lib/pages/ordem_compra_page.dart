@@ -1653,20 +1653,22 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 class ItemPreCarregadoOC {
   final int materialId;
   final String materialNome;
-  final bool materialEspecifico;
   final double quantidade;
   final double precoUnitario;
+  final bool materialEspecifico;
   final double? precoMetroQuadrado;
   final bool usarM2;
+  final String? descricao;
 
-  const ItemPreCarregadoOC({
+  ItemPreCarregadoOC({
     required this.materialId,
     required this.materialNome,
-    this.materialEspecifico = false,
     required this.quantidade,
     required this.precoUnitario,
     this.precoMetroQuadrado,
     this.usarM2 = false,
+    this.descricao,
+    this.materialEspecifico = false,
   });
 }
 
@@ -1724,6 +1726,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         precoUnitario:      item.precoUnitario,
         precoMetroQuadrado: item.precoMetroQuadrado,
         usarM2:             item.usarM2,
+        descricaoItem:      item.descricao,
       ));
     }
   }

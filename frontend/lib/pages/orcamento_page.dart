@@ -14,16 +14,17 @@ import '../repositories/orcamento_repository.dart';
 import '../repositories/ordem_compra_repository.dart';
 import '../theme/app_theme.dart';
 import 'orcamento_historico_page.dart';
-import 'ordem_compra_page.dart';
+import 'ordem_compra_page.dart'; // Importa ItemPreCarregadoOC
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// ─── Helpers ──────────────────────────────────
 
 String _brl(double? v) {
   if (v == null || v == 0) return '—';
   return 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ─── Page ─────────────────────────────────────
 
 class OrcamentoPage extends StatefulWidget {
   const OrcamentoPage({super.key});
@@ -82,11 +83,18 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       if (!mounted) return;
       final todos = context.read<MaterialProvider>().materiais;
       final provider = context.read<OrcamentoProvider>();
-      final idsJaAdicionados =
-          provider.tabAtual?.itens.map((i) => i.materialId).toSet() ?? {};
+      
+      // Para materiais específicos, não filtra por ID (permite múltiplas instâncias)
+      // Para materiais normais, filtra os já adicionados
+      final idsNormaisJaAdicionados = provider.tabAtual?.itens
+          .where((i) => !i.materialEspecifico)
+          .map((i) => i.materialId)
+          .toSet() ?? {};
+      
       setState(() {
-        _resultadosBusca =
-            todos.where((m) => !idsJaAdicionados.contains(m.id)).toList();
+        _resultadosBusca = todos.where((m) => 
+          m.especifico || !idsNormaisJaAdicionados.contains(m.id)
+        ).toList();
       });
     } finally {
       if (mounted) setState(() => _buscando = false);
@@ -112,6 +120,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       materialEspessura: material.espessura,
       materialIdentificador: material.identificador,
       materialStatus: material.status,
+      materialEspecifico: material.especifico,
       precos: precos,
     ));
     _searchCtrl.clear();
@@ -150,7 +159,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
         novosPrecos[fId] = PrecoFornecedorData(fornecedorNome: f.nomeFantasia);
       }
     }
-    provider.atualizarItemParcial(item.materialId, precos: novosPrecos);
+    provider.atualizarItemParcial(item.itemId, precos: novosPrecos);
 
     final repo = FornecedorRepository();
     for (final fId in selecionados) {
@@ -189,7 +198,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       preco: result['preco'],
       precoM2: result['precoM2'],
     );
-    provider.atualizarItemParcial(item.materialId, precos: novosPrecos);
+    provider.atualizarItemParcial(item.itemId, precos: novosPrecos);
 
     setState(() => _salvandoPreco = true);
     try {
@@ -207,7 +216,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
     }
   }
 
-  // ── Gerar OC ─────────────────────────────────────────────────────────────────
+  // ── Gerar OC ─────────────────────────────────
 
   Future<void> _gerarOrdemCompra() async {
     final provider = context.read<OrcamentoProvider>();
@@ -238,10 +247,9 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       return;
     }
 
-    setState(() => _salvandoPreco = true); // reusa o indicador de loading
+    setState(() => _salvandoPreco = true);
 
     try {
-      // Serializa os dados da aba atual para enviar ao backend
       final dadosOrcamento = {
         'titulo': tab.titulo,
         'itens': tab.itens.map((item) => item.toJson()).toList(),
@@ -250,7 +258,6 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       final pdfBytes =
           await OrcamentoRepository().gerarPdf(dadosOrcamento);
 
-      // Nome de arquivo: orcamento(DD-MM-AAAA).pdf
       final hoje = DateTime.now();
       final dataStr =
           '${hoje.day.toString().padLeft(2, '0')}-'
@@ -293,33 +300,25 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
   }
 
   Future<void> _criarNovaOC(List<ItemOrcamentoData> itens) async {
-    // Em vez de criar a OC diretamente, navega para a tela de nova OC
-    // passando os materiais e quantidades do orçamento como pré-carga.
-    // O usuário preenche OS e demais dados antes de salvar.
-
-    // Resolve o FornecedorModel a partir do id selecionado no orçamento.
-    // Como _podeGerarOC garante que todos os itens têm o mesmo fornecedor,
-    // basta pegar o id do primeiro item.
     final fornecedorId = itens.first.fornecedorSelecionado!;
     final fornecedores = context.read<FornecedorProvider>().fornecedores;
     final FornecedorModel? fornecedorInicial = fornecedores.cast<FornecedorModel?>()
         .firstWhere((f) => f?.id == fornecedorId, orElse: () => null);
 
-    // Monta os itens pré-carregados a partir da seleção do orçamento.
     final itensPre = itens.map((item) {
       final fId = item.fornecedorSelecionado!;
       final pf = item.precos[fId]!;
-      // Usa modoOrcamento como fonte da verdade para usarM2; só recorre à
-      // existência do precoM2 como fallback quando o modo não foi definido.
       final usarM2 = item.modoOrcamento == ModoOrcamento.metroQuadrado
           || (item.modoOrcamento == null && pf.precoM2 != null && pf.precoM2! > 0);
       return ItemPreCarregadoOC(
         materialId:         item.materialId,
         materialNome:       item.materialNome,
+        materialEspecifico: item.materialEspecifico, // ← linha que faltava
         quantidade:         item.quantidade,
         precoUnitario:      pf.preco ?? 0,
         precoMetroQuadrado: pf.precoM2,
         usarM2:             usarM2,
+        descricao:          item.descricao,
       );
     }).toList();
 
@@ -369,7 +368,6 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
 
     if (!mounted) return;
 
-    // ── Verifica divergência de fornecedor e pede confirmação se necessário ─────
     final fornecedorIdOrcamento = itens.first.fornecedorSelecionado!;
     final fornecedorIdOC        = ocSelecionada['fornecedor']?['id'] as int?;
 
@@ -404,13 +402,11 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       if (confirmar != true) return;
       if (!mounted) return;
     }
-    // ────────────────────────────────────────────────────────────────────────────
 
     try {
       final repo  = OrdemCompraRepository();
       final ocId  = ocSelecionada['id'] as int;
 
-      // 1. Adiciona os itens do orçamento à OC
       for (final item in itens) {
         final fId   = item.fornecedorSelecionado!;
         final pf    = item.precos[fId]!;
@@ -423,10 +419,11 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
           'precoUnitario':      pf.preco ?? 0,
           'precoMetroQuadrado': pf.precoM2,
           'usarM2':             usarM2,
+          if (item.descricao != null && item.descricao!.isNotEmpty)
+            'descricaoItem':    item.descricao, // envia descrição se existir
         });
       }
 
-      // 2. Substitui o fornecedor da OC pelo escolhido no orçamento
       await repo.atualizar(ocId, {'fornecedorId': fornecedorIdOrcamento});
 
       if (mounted) {
@@ -515,6 +512,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
 
   Map<int, Map<String, dynamic>> _calcularTotaisPorFornecedor(
       List<ItemOrcamentoData> itens) {
+    final int totalMateriais = itens.length;
     final Map<int, Map<String, dynamic>> totais = {};
     for (final item in itens) {
       for (final entry in item.precos.entries) {
@@ -523,26 +521,28 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
         if (!totais.containsKey(fId)) {
           totais[fId] = {
             'nome': pf.fornecedorNome,
-            'total': 0.0,   // sempre soma unitário, independente do modo
-            'totalM2': 0.0, // sempre soma m², independente do modo
-            'totalEfetivo': 0.0, // mantido por compatibilidade (= total unitário)
+            'total': 0.0,
+            'totalM2': 0.0,
+            'totalEfetivo': 0.0,
             'materiais': 0,
+            'materiaisComPreco': 0,
+            'totalMateriais': totalMateriais,
             'temTodosPrecos': true,
           };
         }
         totais[fId]!['materiais'] = (totais[fId]!['materiais'] as int) + 1;
 
-        // Total unitário: sempre soma preco * quantidade (não depende do modo)
         if (pf.preco != null) {
           totais[fId]!['total'] =
               (totais[fId]!['total'] as double) + pf.preco! * item.quantidade;
           totais[fId]!['totalEfetivo'] =
               (totais[fId]!['totalEfetivo'] as double) + pf.preco! * item.quantidade;
+          totais[fId]!['materiaisComPreco'] =
+              (totais[fId]!['materiaisComPreco'] as int) + 1;
         } else {
           totais[fId]!['temTodosPrecos'] = false;
         }
 
-        // Total m²: sempre soma precoM2 * quantidade (não depende do modo)
         if (pf.precoM2 != null) {
           totais[fId]!['totalM2'] =
               (totais[fId]!['totalM2'] as double) + pf.precoM2! * item.quantidade;
@@ -576,8 +576,16 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
 
   bool _podeGerarOC(List<ItemOrcamentoData> itens) {
     if (itens.isEmpty) return false;
-    // Todos devem ter fornecedor selecionado E deve ser o MESMO fornecedor
     if (!itens.every((i) => i.fornecedorSelecionado != null)) return false;
+    
+    // Verifica se materiais específicos têm descrição
+    for (final item in itens) {
+      if (item.materialEspecifico && 
+          (item.descricao == null || item.descricao!.trim().isEmpty)) {
+        return false;
+      }
+    }
+    
     final ids = itens.map((i) => i.fornecedorSelecionado!).toSet();
     return ids.length == 1;
   }
@@ -590,7 +598,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
         .length;
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────────
+  // ── Build ─────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -663,7 +671,6 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
           ],
         ),
         const Spacer(),
-        // Botão Histórico
         OutlinedButton.icon(
           onPressed: () => Navigator.of(context).push(
             MaterialPageRoute(
@@ -691,7 +698,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
     );
   }
 
-  // ── Abas ──────────────────────────────────────────────────────────────────────
+  // ── Abas ──────────────────────────────────────
 
   Widget _buildAbas(OrcamentoProvider provider) {
     return SizedBox(
@@ -779,7 +786,6 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
             ),
           ),
           const SizedBox(width: 8),
-          // Botão adicionar aba
           Tooltip(
             message: 'Novo orçamento',
             child: InkWell(
@@ -995,18 +1001,41 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                             ]
                                 .where(
                                     (s) => s != null && s.isNotEmpty)
-                                .join(' · ');
-                            return ListTile(
+                                .join(' · ');return ListTile(
                               dense: true,
                               contentPadding:
                                   const EdgeInsets.symmetric(
                                       horizontal: 14, vertical: 2),
-                              title: Text(
-                                m.nome,
-                                style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.textPrimary),
+                              title: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      m.nome,
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.textPrimary),
+                                    ),
+                                  ),
+                                  if (m.especifico)
+                                    Container(
+                                      margin: const EdgeInsets.only(left: 6),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.primary.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Text(
+                                        'Específico',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppTheme.primary,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                               subtitle: sub.isNotEmpty
                                   ? Text(sub,
@@ -1037,8 +1066,10 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                   return _MaterialChip(
                     nome: item.materialNome,
                     selecionado: selecionado,
+                    especifico: item.materialEspecifico,
+                    descricao: item.descricao,
                     onRemover: () =>
-                        provider.removerItem(item.materialId),
+                        provider.removerItem(item.itemId),
                   );
                 }).toList(),
               ),
@@ -1054,6 +1085,12 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
     final podeGerar = _podeGerarOC(itens);
     final fornsSel = _fornecedoresSelecionados(itens);
+    
+    // Verifica se há materiais específicos sem descrição
+    final materiaisEspecificosSemDescricao = itens
+        .where((i) => i.materialEspecifico && 
+                     (i.descricao == null || i.descricao!.trim().isEmpty))
+        .length;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1096,7 +1133,6 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Salvar
                 OutlinedButton.icon(
                   onPressed: _salvarOrcamento,
                   icon: const Icon(Icons.save_outlined, size: 15),
@@ -1110,7 +1146,6 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                 ),
                 const SizedBox(width: 8),
 
-                // Descartar
                 OutlinedButton.icon(
                   onPressed: _descartarOrcamento,
                   icon: const Icon(Icons.delete_outline, size: 15),
@@ -1154,7 +1189,9 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                 Tooltip(
                   message: podeGerar
                       ? 'Gerar Ordem de Compra'
-                      : 'Selecione o MESMO fornecedor para todos os materiais',
+                      : materiaisEspecificosSemDescricao > 0
+                          ? 'Preencha a descrição dos materiais específicos'
+                          : 'Selecione o MESMO fornecedor para todos os materiais',
                   child: FilledButton.icon(
                     onPressed: podeGerar ? _gerarOrdemCompra : null,
                     icon: const Icon(Icons.shopping_cart_checkout, size: 16),
@@ -1215,30 +1252,30 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
     );
   }
 
-  // ── Conteúdo ──────────────────────────────────────────────────────────────────
+  // ── Conteúdo ──────────────────────────────────
 
   Widget _buildConteudo(
       OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
     return ListView(
       children: [
+        if (_todosFornecedoresIds(itens).isNotEmpty) ...[
+          _buildTabelaComparativa(provider, itens),
+          const SizedBox(height: 16),
+        ],
         ...itens.asMap().entries.map(
             (e) => _buildItemCard(provider, e.key, e.value, itens)),
-        const SizedBox(height: 16),
-        if (_todosFornecedoresIds(itens).isNotEmpty)
-          _buildTabelaComparativa(provider, itens),
         const SizedBox(height: 24),
       ],
     );
   }
 
-  // ── Item card ─────────────────────────────────────────────────────────────────
+  // ── Item card ─────────────────────────────────
 
   Widget _buildItemCard(OrcamentoProvider provider, int index,
       ItemOrcamentoData item, List<ItemOrcamentoData> todosItens) {
     final usarM2 = item.modoOrcamento == ModoOrcamento.metroQuadrado;
     final allFornIds = item.precos.keys.toList();
 
-    // Calcular menores preços antes do sort para usá-los na ordenação
     final menorPreco = allFornIds
         .map((id) => item.precos[id]?.preco)
         .whereType<double>()
@@ -1281,7 +1318,6 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Cabeçalho do card
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
             decoration: const BoxDecoration(
@@ -1306,13 +1342,29 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        item.materialNome,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.materialNome,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          if (item.materialEspecifico)
+                            Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                            ),
+                        ],
                       ),
                       if ([
                         item.materialCategoria,
@@ -1339,7 +1391,6 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                     ],
                   ),
                 ),
-                // Quantidade
                 Row(
                   children: [
                     const Text('Quantidade',
@@ -1352,7 +1403,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                       child: _QuantidadeField(
                         value: item.quantidade,
                         onChanged: (v) => provider
-                            .atualizarItemParcial(item.materialId,
+                            .atualizarItemParcial(item.itemId,
                                 quantidade: v),
                       ),
                     ),
@@ -1430,11 +1481,36 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                   constraints: const BoxConstraints(
                       minWidth: 28, minHeight: 28),
                   onPressed: () =>
-                      provider.removerItem(item.materialId),
+                      provider.removerItem(item.itemId),
                 ),
               ],
             ),
           ),
+
+          // Campo de descrição para materiais específicos
+          if (item.materialEspecifico)
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.03),
+                border: const Border(
+                  bottom: BorderSide(color: AppTheme.divider),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 8),
+                  _DescricaoField(
+                    valorInicial: item.descricao,
+                    onChanged: (v) => provider.atualizarItemParcial(
+                      item.itemId,
+                      descricao: v,
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           if (allFornIds.isEmpty)
             const Padding(
@@ -1475,7 +1551,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                         selecionado: item.modoOrcamento ==
                             ModoOrcamento.unitario,
                         onTap: () => provider.atualizarItemParcial(
-                          item.materialId,
+                          item.itemId,
                           modoOrcamento: item.modoOrcamento ==
                                   ModoOrcamento.unitario
                               ? null
@@ -1489,7 +1565,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                         selecionado: item.modoOrcamento ==
                             ModoOrcamento.metroQuadrado,
                         onTap: () => provider.atualizarItemParcial(
-                          item.materialId,
+                          item.itemId,
                           modoOrcamento: item.modoOrcamento ==
                                   ModoOrcamento.metroQuadrado
                               ? null
@@ -1557,7 +1633,6 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                   const Divider(height: 1, color: AppTheme.divider),
                   ...allFornIds.map((fId) {
                     final pf = item.precos[fId]!;
-                    // Destaque verde independente do modo ativo
                     final isMenorPreco =
                         menorPreco != null &&
                         pf.preco != null &&
@@ -1579,7 +1654,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                       isSelected: isSelected,
                       modoOrcamento: item.modoOrcamento!,
                       onSelect: () => provider.atualizarItemParcial(
-                        item.materialId,
+                        item.itemId,
                         fornecedorSelecionado: isSelected ? null : fId,
                         clearFornecedor: isSelected,
                       ),
@@ -1727,7 +1802,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                             fontWeight: FontWeight.w600,
                             color: AppTheme.textSecondary))),
                 SizedBox(
-                    width: 80,
+                    width: 100,
                     child: Text('Materiais',
                         style: TextStyle(
                             fontSize: 11,
@@ -1779,6 +1854,8 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
               total: total,
               totalM2: totalM2,
               materiais: mats,
+              materiaisComPreco: t['materiaisComPreco'] as int,
+              totalMateriais: t['totalMateriais'] as int,
               isMelhor: isMelhor,
               isMelhorM2: isMelhorM2,
               diff: diff,
@@ -1888,16 +1965,71 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
   }
 }
 
+// ─── Campo de descrição com controller persistente ───────────────────────────
+
+class _DescricaoField extends StatefulWidget {
+  final String? valorInicial;
+  final ValueChanged<String> onChanged;
+
+  const _DescricaoField({
+    required this.valorInicial,
+    required this.onChanged,
+  });
+
+  @override
+  State<_DescricaoField> createState() => _DescricaoFieldState();
+}
+
+class _DescricaoFieldState extends State<_DescricaoField> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.valorInicial);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _ctrl,
+      maxLines: 2,
+      decoration: InputDecoration(
+        hintText: 'Especificação do material',
+        isDense: true,
+        filled: true,
+        fillColor: AppTheme.surface,
+        errorText: _ctrl.text.trim().isEmpty ? 'Descrição obrigatória' : null,
+      ),
+      style: const TextStyle(fontSize: 13),
+      onChanged: (v) {
+        setState(() {}); // atualiza o errorText
+        widget.onChanged(v);
+      },
+    );
+  }
+}
+
 // ─── Sub-widgets (reutilizados) ───────────────────────────────────────────────
 
 class _MaterialChip extends StatelessWidget {
   final String nome;
   final bool selecionado;
+  final bool especifico;
+  final String? descricao;
   final VoidCallback onRemover;
 
   const _MaterialChip({
     required this.nome,
     required this.selecionado,
+    required this.especifico,
+    this.descricao,
     required this.onRemover,
   });
 
@@ -1925,14 +2057,48 @@ class _MaterialChip extends StatelessWidget {
               child:
                   Icon(Icons.check_circle, size: 11, color: AppTheme.statusOk),
             ),
-          Text(
-            nome,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color:
-                  selecionado ? AppTheme.statusOk : AppTheme.primary,
-            ),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    nome,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color:
+                          selecionado ? AppTheme.statusOk : AppTheme.primary,
+                    ),
+                  ),
+                  if (especifico) ...[
+                    const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              if (especifico && descricao != null && descricao!.isNotEmpty)
+                Text(
+                  descricao!,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: selecionado 
+                        ? AppTheme.statusOk.withValues(alpha: 0.8)
+                        : AppTheme.primary.withValues(alpha: 0.8),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+            ],
           ),
           const SizedBox(width: 4),
           GestureDetector(
@@ -2263,6 +2429,8 @@ class _TabelaComparativaRow extends StatelessWidget {
   final double total;
   final double totalM2;
   final int materiais;
+  final int materiaisComPreco;
+  final int totalMateriais;
   final bool isMelhor;
   final bool isMelhorM2;
   final double? diff;
@@ -2275,6 +2443,8 @@ class _TabelaComparativaRow extends StatelessWidget {
     required this.total,
     required this.totalM2,
     required this.materiais,
+    required this.materiaisComPreco,
+    required this.totalMateriais,
     required this.isMelhor,
     required this.isMelhorM2,
     this.diff,
@@ -2284,6 +2454,9 @@ class _TabelaComparativaRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cobreTotal = materiais >= totalMateriais;
+    final temPrecoTotal = materiaisComPreco >= totalMateriais;
+
     return Container(
       padding:
           const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -2344,12 +2517,66 @@ class _TabelaComparativaRow extends StatelessWidget {
               ],
             ),
           ),
+          // ── Coluna Materiais ─────────────────────────────
           SizedBox(
-            width: 80,
-            child: Text('$materiais mat.',
-                style: const TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.textSecondary)),
+            width: 100,
+            child: Tooltip(
+              message: cobreTotal
+                  ? temPrecoTotal
+                      ? 'Cobre todos os $totalMateriais materiais com preço'
+                      : 'Cobre todos os $totalMateriais materiais, mas ${ materiais - materiaisComPreco} sem preço'
+                  : 'Cobre apenas $materiais de $totalMateriais materiais — total parcial',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        cobreTotal
+                            ? (temPrecoTotal
+                                ? Icons.check_circle_outline
+                                : Icons.warning_amber_rounded)
+                            : Icons.remove_circle_outline,
+                        size: 13,
+                        color: cobreTotal
+                            ? (temPrecoTotal
+                                ? AppTheme.statusOk
+                                : AppTheme.warning)
+                            : AppTheme.statusCritico,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$materiais/$totalMateriais',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: cobreTotal
+                              ? AppTheme.textPrimary
+                              : AppTheme.statusCritico,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (!cobreTotal)
+                    Text(
+                      'incompleto',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppTheme.statusCritico.withValues(alpha: 0.8),
+                      ),
+                    )
+                  else if (!temPrecoTotal)
+                    Text(
+                      '${materiais - materiaisComPreco} sem preço',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppTheme.warning.withValues(alpha: 0.9),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ),
           SizedBox(
             width: 130,
@@ -2404,7 +2631,7 @@ class _TabelaComparativaRow extends StatelessWidget {
   }
 }
 
-// ─── Diálogos ─────────────────────────────────────────────────────────────────
+// ─── Diálogos ─────────────────────────────────
 
 class _DialogVincularFornecedores extends StatefulWidget {
   final List<FornecedorModel> fornecedores;
@@ -2728,7 +2955,6 @@ class _DialogOpcaoOC extends StatelessWidget {
   }
 }
 
-
 class _DialogSelecionarOC extends StatelessWidget {
   final List<dynamic> ocs;
   const _DialogSelecionarOC({required this.ocs});
@@ -2762,7 +2988,6 @@ class _DialogSelecionarOC extends StatelessWidget {
                       horizontal: 12, vertical: 10),
                   child: Row(
                     children: [
-                      // Número grande e destacado
                       Container(
                         width: 56,
                         height: 56,

@@ -200,7 +200,9 @@ async function atualizar(id, data) {
 }
 
 async function adicionarItem(ordemCompraId, itemData) {
-  const precoTotal = Number(itemData.quantidade) * Number(itemData.precoUnitario);
+  const precoTotal = itemData.usarM2 && Number(itemData.precoMetroQuadrado) > 0
+    ? Number(itemData.quantidade) * Number(itemData.precoMetroQuadrado)
+    : Number(itemData.quantidade) * Number(itemData.precoUnitario);
   const item = await prisma.ordemCompraItem.create({
     data: { ...itemData, ordemCompraId, precoTotal },
     include: { 
