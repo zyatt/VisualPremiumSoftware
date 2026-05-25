@@ -35,6 +35,7 @@ CREATE TABLE "materiais" (
     "categoria" TEXT,
     "medida" TEXT,
     "espessura" TEXT,
+    "identificador" TEXT,
     "valor" DECIMAL(10,2),
     "valorMetroQuadrado" DECIMAL(10,2),
     "quantidade" DECIMAL(10,3) NOT NULL DEFAULT 0,
@@ -42,6 +43,7 @@ CREATE TABLE "materiais" (
     "status" "StatusEstoque" NOT NULL DEFAULT 'OK',
     "estoqueConfirmado" BOOLEAN NOT NULL DEFAULT false,
     "ativo" BOOLEAN NOT NULL DEFAULT true,
+    "especifico" BOOLEAN NOT NULL DEFAULT false,
     "ultimoValorPago" DECIMAL(10,2),
     "ultimoValorPagoM2" DECIMAL(10,2),
     "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -56,9 +58,10 @@ CREATE TABLE "historico_precos_material" (
     "materialId" INTEGER NOT NULL,
     "ordemCompraId" INTEGER NOT NULL,
     "fornecedorId" INTEGER NOT NULL,
-    "precoUnitario" DECIMAL(10,2) NOT NULL,
+    "precoUnitario" DECIMAL(10,2),
     "precoM2" DECIMAL(10,2),
     "quantidade" DECIMAL(10,3) NOT NULL,
+    "usarM2" BOOLEAN NOT NULL DEFAULT false,
     "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "historico_precos_material_pkey" PRIMARY KEY ("id")
@@ -152,6 +155,7 @@ CREATE TABLE "ordem_compra_itens" (
     "id" SERIAL NOT NULL,
     "ordemCompraId" INTEGER NOT NULL,
     "materialId" INTEGER NOT NULL,
+    "descricaoItem" TEXT,
     "numeroOS" TEXT NOT NULL,
     "quantidade" DECIMAL(10,3) NOT NULL,
     "precoUnitario" DECIMAL(10,2) NOT NULL,
@@ -186,6 +190,7 @@ CREATE TABLE "movimentacoes_estoque" (
     "precoUnitario" DECIMAL(10,2),
     "precoM2" DECIMAL(65,30),
     "observacao" TEXT,
+    "descricaoItem" TEXT,
     "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "movimentacoes_estoque_pkey" PRIMARY KEY ("id")

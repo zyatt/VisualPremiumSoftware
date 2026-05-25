@@ -269,8 +269,10 @@ enum TipoMovimentacao {
 // Relação/agrupador por número de OS
 model RelacaoOS {
   id           Int      @id @default(autoincrement())
-  numeroOS     String   @unique // chave principal da relação
+  numeroOS     String   @unique
   descricao    String?
+  // 'EM_ANDAMENTO' | 'FECHADA'
+  status       String   @default("EM_ANDAMENTO")
   criadoEm     DateTime @default(now())
   atualizadoEm DateTime @updatedAt
 

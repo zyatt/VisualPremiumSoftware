@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../models/material_model.dart';
@@ -14,7 +16,8 @@ import '../repositories/orcamento_repository.dart';
 import '../repositories/ordem_compra_repository.dart';
 import '../theme/app_theme.dart';
 import 'orcamento_historico_page.dart';
-import 'ordem_compra_page.dart'; // Importa ItemPreCarregadoOC
+import '../models/ordem_compra_model.dart';
+import 'ordem_compra_page.dart'; // Importa ItemPreCarregadoOC e NovaOrdemCompraPage
 
 
 // ─── Helpers ──────────────────────────────────
@@ -39,8 +42,17 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
   bool _salvandoPreco = false;
   bool _mostrarResultados = false;
 
-  final _searchCtrl = TextEditingController();
-  final _searchFocus = FocusNode();
+  // Campos de busca avançada de materiais
+  final _searchIdCtrl     = TextEditingController();
+  final _searchNomeCtrl   = TextEditingController();
+  final _searchMarcaCtrl  = TextEditingController();
+  final _searchMedidaCtrl = TextEditingController();
+  final _searchEspCtrl    = TextEditingController();
+  Timer? _debounceMatBusca;
+
+  // Modo de ordenação da tabela de totais por fornecedor
+  // 'unitario' ordena por total unitário, 'm2' ordena por total m²
+  String _ordemTotais = 'unitario';
 
   @override
   void initState() {
@@ -48,53 +60,76 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FornecedorProvider>().carregar();
     });
-    _searchFocus.addListener(() {
-      if (!_searchFocus.hasFocus) {
-        Future.delayed(const Duration(milliseconds: 150), () {
-          if (mounted) setState(() => _mostrarResultados = false);
-        });
-      }
-    });
   }
 
   @override
   void dispose() {
-    _searchCtrl.dispose();
-    _searchFocus.dispose();
+    _debounceMatBusca?.cancel();
+    _searchIdCtrl.dispose();
+    _searchNomeCtrl.dispose();
+    _searchMarcaCtrl.dispose();
+    _searchMedidaCtrl.dispose();
+    _searchEspCtrl.dispose();
     super.dispose();
   }
 
   // ── Busca de materiais ────────────────────────────────────────────────────────
 
-  Future<void> _buscarMateriais(String query) async {
-    if (query.trim().isEmpty) {
+  void _agendarBuscaMateriais() {
+    _debounceMatBusca?.cancel();
+    _debounceMatBusca = Timer(
+      const Duration(milliseconds: 400),
+      _executarBuscaMateriais,
+    );
+  }
+
+  Future<void> _executarBuscaMateriais() async {
+    final id     = _searchIdCtrl.text.trim();
+    final nome   = _searchNomeCtrl.text.trim();
+    final marca  = _searchMarcaCtrl.text.trim();
+    final medida = _searchMedidaCtrl.text.trim();
+    final esp    = _searchEspCtrl.text.trim();
+
+    final algumFiltro = id.isNotEmpty || nome.isNotEmpty || marca.isNotEmpty ||
+        medida.isNotEmpty || esp.isNotEmpty;
+
+    if (!algumFiltro) {
       setState(() {
-        _resultadosBusca = [];
+        _resultadosBusca   = [];
         _mostrarResultados = false;
       });
       return;
     }
+
     setState(() {
-      _buscando = true;
+      _buscando          = true;
       _mostrarResultados = true;
     });
+
     try {
-      await context.read<MaterialProvider>().carregar(busca: query.trim());
+      await context.read<MaterialProvider>().carregar(
+        busca:         nome.isNotEmpty  ? nome  : '',
+        id:            id.isNotEmpty    ? id    : '',
+        identificador: marca.isNotEmpty ? marca : '',
+        medida:        medida.isNotEmpty ? medida : '',
+        espessura:     esp.isNotEmpty   ? esp   : '',
+      );
       if (!mounted) return;
-      final todos = context.read<MaterialProvider>().materiais;
+      final todos    = context.read<MaterialProvider>().materiais;
       final provider = context.read<OrcamentoProvider>();
-      
+
       // Para materiais específicos, não filtra por ID (permite múltiplas instâncias)
       // Para materiais normais, filtra os já adicionados
       final idsNormaisJaAdicionados = provider.tabAtual?.itens
-          .where((i) => !i.materialEspecifico)
-          .map((i) => i.materialId)
-          .toSet() ?? {};
-      
+              .where((i) => !i.materialEspecifico)
+              .map((i) => i.materialId)
+              .toSet() ??
+          {};
+
       setState(() {
-        _resultadosBusca = todos.where((m) => 
-          m.especifico || !idsNormaisJaAdicionados.contains(m.id)
-        ).toList();
+        _resultadosBusca = todos
+            .where((m) => m.especifico || !idsNormaisJaAdicionados.contains(m.id))
+            .toList();
       });
     } finally {
       if (mounted) setState(() => _buscando = false);
@@ -123,9 +158,13 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       materialEspecifico: material.especifico,
       precos: precos,
     ));
-    _searchCtrl.clear();
+    _searchIdCtrl.clear();
+    _searchNomeCtrl.clear();
+    _searchMarcaCtrl.clear();
+    _searchMedidaCtrl.clear();
+    _searchEspCtrl.clear();
     setState(() {
-      _resultadosBusca = [];
+      _resultadosBusca   = [];
       _mostrarResultados = false;
     });
   }
@@ -322,7 +361,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       );
     }).toList();
 
-    final criou = await Navigator.of(context).push<bool>(
+    final resultado = await Navigator.of(context).push<dynamic>(
       MaterialPageRoute(
         builder: (_) => NovaOrdemCompraPage(
           itensPreCarregados: itensPre,
@@ -331,14 +370,17 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       ),
     );
 
-    if (criou == true && mounted) {
-      context.read<OrcamentoProvider>().limparAba();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Ordem de compra criada com sucesso!'),
-          backgroundColor: AppTheme.success,
-        ),
-      );
+    if (resultado == null || !mounted) return;
+
+    // Limpa o orçamento pois a OC foi criada com sucesso
+    context.read<OrcamentoProvider>().limparAba();
+
+    // Navega para Ordem de Compra via GoRouter (troca rota ativa no menu)
+    // e passa o ID da OC criada para que a página abra os detalhes automaticamente
+    if (resultado is OrdemCompraModel) {
+      context.go('/ordem-compra', extra: resultado.id);
+    } else {
+      context.go('/ordem-compra');
     }
   }
 
@@ -908,41 +950,139 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
             ),
           ),
 
+          // ── Campos de busca avançada ──────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: TextField(
-              controller: _searchCtrl,
-              focusNode: _searchFocus,
-              decoration: InputDecoration(
-                hintText: 'Buscar material para adicionar...',
-                prefixIcon: _buscando
-                    ? const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppTheme.primary),
+            child: Column(
+              children: [
+                // Linha 1: ID + Nome
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ID
+                    SizedBox(
+                      width: 110,
+                      child: TextField(
+                        controller: _searchIdCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'ID',
+                          prefixIcon: const Icon(Icons.tag,
+                              size: 16, color: AppTheme.textHint),
+                          isDense: true,
+                          suffixIcon: _buscando && _searchIdCtrl.text.isNotEmpty
+                              ? const Padding(
+                                  padding: EdgeInsets.all(10),
+                                  child: SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppTheme.primary),
+                                  ),
+                                )
+                              : null,
                         ),
-                      )
-                    : const Icon(Icons.search,
-                        size: 18, color: AppTheme.textHint),
-                suffixIcon: _searchCtrl.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.close, size: 16),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          setState(() {
-                            _resultadosBusca = [];
-                            _mostrarResultados = false;
-                          });
-                        },
-                      )
-                    : null,
-                isDense: true,
-              ),
-              onChanged: _buscarMateriais,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        onChanged: (_) => _agendarBuscaMateriais(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Nome
+                    Expanded(
+                      child: TextField(
+                        controller: _searchNomeCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Nome do material',
+                          prefixIcon: _buscando && _searchNomeCtrl.text.isNotEmpty
+                              ? const Padding(
+                                  padding: EdgeInsets.all(10),
+                                  child: SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppTheme.primary),
+                                  ),
+                                )
+                              : const Icon(Icons.search,
+                                  size: 18, color: AppTheme.textHint),
+                          isDense: true,
+                        ),
+                        onChanged: (_) => _agendarBuscaMateriais(),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // Linha 2: Marca + Medida + Espessura + Limpar
+                Row(
+                  children: [
+                    // Marca (identificador)
+                    Expanded(
+                      child: TextField(
+                        controller: _searchMarcaCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Marca',
+                          prefixIcon: Icon(Icons.branding_watermark_outlined,
+                              size: 16, color: AppTheme.textHint),
+                          isDense: true,
+                        ),
+                        onChanged: (_) => _agendarBuscaMateriais(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Medida
+                    Expanded(
+                      child: TextField(
+                        controller: _searchMedidaCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Medida',
+                          prefixIcon: Icon(Icons.straighten_outlined,
+                              size: 16, color: AppTheme.textHint),
+                          isDense: true,
+                        ),
+                        onChanged: (_) => _agendarBuscaMateriais(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Espessura
+                    Expanded(
+                      child: TextField(
+                        controller: _searchEspCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Espessura',
+                          prefixIcon: Icon(Icons.layers_outlined,
+                              size: 16, color: AppTheme.textHint),
+                          isDense: true,
+                        ),
+                        onChanged: (_) => _agendarBuscaMateriais(),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    // Limpar filtros
+                    IconButton(
+                      tooltip: 'Limpar filtros',
+                      icon: const Icon(Icons.filter_alt_off,
+                          size: 18, color: AppTheme.textHint),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () {
+                        _searchIdCtrl.clear();
+                        _searchNomeCtrl.clear();
+                        _searchMarcaCtrl.clear();
+                        _searchMedidaCtrl.clear();
+                        _searchEspCtrl.clear();
+                        setState(() {
+                          _resultadosBusca   = [];
+                          _mostrarResultados = false;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
 
@@ -1726,14 +1866,25 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
     final totais = _calcularTotaisPorFornecedor(itens);
     if (totais.isEmpty) return const SizedBox.shrink();
 
+    final ordenarPorM2 = _ordemTotais == 'm2';
+
     final sortedIds = totais.keys.toList()
       ..sort((a, b) {
-        final ta = totais[a]!['totalEfetivo'] as double;
-        final tb = totais[b]!['totalEfetivo'] as double;
-        if (ta == 0 && tb == 0) return 0;
-        if (ta == 0) return 1;
-        if (tb == 0) return -1;
-        return ta.compareTo(tb);
+        if (ordenarPorM2) {
+          final ta = totais[a]!['totalM2'] as double;
+          final tb = totais[b]!['totalM2'] as double;
+          if (ta == 0 && tb == 0) return 0;
+          if (ta == 0) return 1;
+          if (tb == 0) return -1;
+          return ta.compareTo(tb);
+        } else {
+          final ta = totais[a]!['totalEfetivo'] as double;
+          final tb = totais[b]!['totalEfetivo'] as double;
+          if (ta == 0 && tb == 0) return 0;
+          if (ta == 0) return 1;
+          if (tb == 0) return -1;
+          return ta.compareTo(tb);
+        }
       });
 
     final valoresEfetivos = sortedIds
@@ -1753,6 +1904,15 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
         ? valoresM2Validos.reduce((a, b) => a < b ? a : b)
         : null;
 
+    // ID do melhor fornecedor no modo atual (para destaque no rodapé)
+    final bestIdAtual = ordenarPorM2
+        ? (menorTotalM2 != null
+            ? sortedIds.firstWhere(
+                (id) => (totais[id]!['totalM2'] as double) == menorTotalM2,
+                orElse: () => sortedIds.first)
+            : null)
+        : (menorTotal != null ? sortedIds.first : null);
+
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.surface,
@@ -1763,6 +1923,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── Cabeçalho com seletor de modo ───────────────────────────────
           Container(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
             decoration: BoxDecoration(
@@ -1770,11 +1931,12 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(12)),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.bar_chart, size: 16, color: AppTheme.primary),
-                SizedBox(width: 8),
-                Text(
+                const Icon(Icons.bar_chart,
+                    size: 16, color: AppTheme.primary),
+                const SizedBox(width: 8),
+                const Text(
                   'Totais por Fornecedor',
                   style: TextStyle(
                     fontSize: 14,
@@ -1782,50 +1944,132 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                     color: AppTheme.primary,
                   ),
                 ),
-                SizedBox(width: 8),
-                Text(
+                const SizedBox(width: 8),
+                const Text(
                   '— soma dos valores em todos os materiais',
                   style: TextStyle(
                       fontSize: 12, color: AppTheme.textSecondary),
                 ),
+                const Spacer(),
+                // ── Seletor Unitário / m² ───────────────────────────────
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.divider),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _OrdemTotaisBtn(
+                        label: 'Unitário',
+                        icon: Icons.straighten,
+                        ativo: !ordenarPorM2,
+                        onTap: () {
+                          setState(() => _ordemTotais = 'unitario');
+                          for (final item in itens) {
+                            provider.atualizarItemParcial(
+                              item.itemId,
+                              modoOrcamento: ModoOrcamento.unitario,
+                            );
+                          }
+                        },
+                      ),
+                      Container(
+                          width: 1,
+                          height: 24,
+                          color: AppTheme.divider),
+                      _OrdemTotaisBtn(
+                        label: 'm²',
+                        icon: Icons.square_foot,
+                        ativo: ordenarPorM2,
+                        onTap: () {
+                          setState(() => _ordemTotais = 'm2');
+                          for (final item in itens) {
+                            provider.atualizarItemParcial(
+                              item.itemId,
+                              modoOrcamento: ModoOrcamento.metroQuadrado,
+                            );
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+
+          // ── Cabeçalho das colunas ────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Row(
               children: [
-                Expanded(
+                const Expanded(
                     child: Text('Fornecedor',
                         style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
                             color: AppTheme.textSecondary))),
-                SizedBox(
+                const SizedBox(
                     width: 100,
                     child: Text('Materiais',
                         style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
                             color: AppTheme.textSecondary))),
+                // Total Unitário — destaca se for o modo ativo
                 SizedBox(
-                    width: 130,
-                    child: Text('Total Unitário',
+                  width: 130,
+                  child: Row(
+                    children: [
+                      Text(
+                        'Total Unitário',
                         style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textSecondary))),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: !ordenarPorM2
+                              ? AppTheme.primary
+                              : AppTheme.textSecondary,
+                        ),
+                      ),
+                      if (!ordenarPorM2) ...[
+                        const SizedBox(width: 4),
+                        const Icon(Icons.arrow_upward,
+                            size: 10, color: AppTheme.primary),
+                      ],
+                    ],
+                  ),
+                ),
+                // Total m² — destaca se for o modo ativo
                 SizedBox(
-                    width: 130,
-                    child: Text('Total m²',
+                  width: 130,
+                  child: Row(
+                    children: [
+                      Text(
+                        'Total m²',
                         style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textSecondary))),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: ordenarPorM2
+                              ? AppTheme.primary
+                              : AppTheme.textSecondary,
+                        ),
+                      ),
+                      if (ordenarPorM2) ...[
+                        const SizedBox(width: 4),
+                        const Icon(Icons.arrow_upward,
+                            size: 10, color: AppTheme.primary),
+                      ],
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
           const Divider(height: 1, color: AppTheme.divider),
+
+          // ── Linhas ───────────────────────────────────────────────────────
           ...sortedIds.asMap().entries.map((entry) {
             final rank = entry.key;
             final fId = entry.value;
@@ -1835,18 +2079,30 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
             final totalEfetivo = t['totalEfetivo'] as double;
             final mats = t['materiais'] as int;
             final temTodos = t['temTodosPrecos'] as bool;
-            final isMelhor =
-                menorTotal != null && totalEfetivo == menorTotal && totalEfetivo > 0;
+
+            final isMelhor = menorTotal != null &&
+                totalEfetivo == menorTotal &&
+                totalEfetivo > 0;
             final isMelhorM2 = menorTotalM2 != null &&
                 totalM2 == menorTotalM2 &&
                 totalM2 > 0;
-            final diff = (menorTotal != null && totalEfetivo > 0 && !isMelhor)
-                ? totalEfetivo - menorTotal
-                : null;
+
+            final diff =
+                (menorTotal != null && totalEfetivo > 0 && !isMelhor)
+                    ? totalEfetivo - menorTotal
+                    : null;
             final diffM2 =
                 (menorTotalM2 != null && totalM2 > 0 && !isMelhorM2)
                     ? totalM2 - menorTotalM2
                     : null;
+
+            final isDestaque =
+                ordenarPorM2 ? isMelhorM2 : isMelhor;
+
+            final itensComEsteForn =
+                itens.where((i) => i.precos.containsKey(fId)).toList();
+            final isSelecionadoEmTodos = itensComEsteForn.isNotEmpty &&
+                itensComEsteForn.every((i) => i.fornecedorSelecionado == fId);
 
             return _TabelaComparativaRow(
               rank: rank + 1,
@@ -1858,11 +2114,27 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
               totalMateriais: t['totalMateriais'] as int,
               isMelhor: isMelhor,
               isMelhorM2: isMelhorM2,
+              isDestaqueAtual: isDestaque,
+              isSelecionadoEmTodos: isSelecionadoEmTodos,
               diff: diff,
               diffM2: diffM2,
               temTodosPrecos: temTodos,
+              ordenarPorM2: ordenarPorM2,
+              onSelectAll: () {
+                for (final item in itens) {
+                  if (item.precos.containsKey(fId)) {
+                    provider.atualizarItemParcial(
+                      item.itemId,
+                      fornecedorSelecionado: isSelecionadoEmTodos ? null : fId,
+                      clearFornecedor: isSelecionadoEmTodos,
+                    );
+                  }
+                }
+              },
             );
           }),
+
+          // ── Rodapé: melhor no modo atual ─────────────────────────────────
           if ((menorTotal != null && menorTotal > 0) ||
               (menorTotalM2 != null && menorTotalM2 > 0))
             Container(
@@ -1874,7 +2146,9 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (menorTotal != null && menorTotal > 0)
+                  if (!ordenarPorM2 &&
+                      menorTotal != null &&
+                      menorTotal > 0)
                     Row(
                       children: [
                         const Icon(Icons.star_rounded,
@@ -1901,11 +2175,13 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                         ),
                       ],
                     ),
-                  if (menorTotalM2 != null && menorTotalM2 > 0) ...[
-                    const SizedBox(height: 6),
+                  if (ordenarPorM2 &&
+                      menorTotalM2 != null &&
+                      menorTotalM2 > 0 &&
+                      bestIdAtual != null)
                     Row(
                       children: [
-                        const Icon(Icons.square_foot,
+                        const Icon(Icons.star_rounded,
                             size: 16, color: AppTheme.primary),
                         const SizedBox(width: 6),
                         RichText(
@@ -1917,16 +2193,8 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                               const TextSpan(
                                   text: 'Melhor total m²: '),
                               TextSpan(
-                                text: () {
-                                  final bestId = sortedIds.firstWhere(
-                                    (id) =>
-                                        (totais[id]!['totalM2']
-                                            as double) ==
-                                        menorTotalM2,
-                                    orElse: () => sortedIds.first,
-                                  );
-                                  return '${totais[bestId]!['nome']} com ${_brl(menorTotalM2)}';
-                                }(),
+                                text:
+                                    '${totais[bestIdAtual]!['nome']} com ${_brl(menorTotalM2)}',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w700,
                                   color: AppTheme.primary,
@@ -1937,10 +2205,10 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                         ),
                       ],
                     ),
-                  ],
                 ],
               ),
             ),
+
           if (!_podeGerarOC(itens) && itens.isNotEmpty)
             Container(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -2313,14 +2581,42 @@ class _FornecedorRow extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                fornecedorNome,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight:
-                      isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: AppTheme.textPrimary,
-                ),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      fornecedorNome,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight:
+                            isSelected ? FontWeight.w600 : FontWeight.w500,
+                        color: isSelected
+                            ? AppTheme.primary
+                            : AppTheme.textPrimary,
+                      ),
+                    ),
+                  ),
+                  if (isSelected)
+                    Container(
+                      margin: const EdgeInsets.only(left: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                            color: AppTheme.primary.withValues(alpha: 0.4)),
+                      ),
+                      child: const Text(
+                        'Selecionado',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             SizedBox(
@@ -2433,9 +2729,13 @@ class _TabelaComparativaRow extends StatelessWidget {
   final int totalMateriais;
   final bool isMelhor;
   final bool isMelhorM2;
+  final bool isDestaqueAtual;
+  final bool isSelecionadoEmTodos;
+  final bool ordenarPorM2;
   final double? diff;
   final double? diffM2;
   final bool temTodosPrecos;
+  final VoidCallback onSelectAll;
 
   const _TabelaComparativaRow({
     required this.rank,
@@ -2447,9 +2747,13 @@ class _TabelaComparativaRow extends StatelessWidget {
     required this.totalMateriais,
     required this.isMelhor,
     required this.isMelhorM2,
+    required this.isDestaqueAtual,
+    required this.isSelecionadoEmTodos,
+    required this.ordenarPorM2,
     this.diff,
     this.diffM2,
     required this.temTodosPrecos,
+    required this.onSelectAll,
   });
 
   @override
@@ -2457,66 +2761,113 @@ class _TabelaComparativaRow extends StatelessWidget {
     final cobreTotal = materiais >= totalMateriais;
     final temPrecoTotal = materiaisComPreco >= totalMateriais;
 
-    return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        border: Border(
-          top: BorderSide(color: AppTheme.divider),
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Row(
-              children: [
-                if (isMelhor)
-                  const Padding(
-                    padding: EdgeInsets.only(right: 6),
-                    child: Icon(Icons.emoji_events,
-                        size: 16, color: AppTheme.statusOk),
-                  )
-                else
-                  Container(
-                    width: 20,
-                    height: 20,
-                    margin: const EdgeInsets.only(right: 8),
-                    alignment: Alignment.center,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: AppTheme.surfaceVariant,
-                    ),
-                    child: Text(
-                      '$rank°',
-                      style: const TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary),
-                    ),
-                  ),
-                Flexible(
-                  child: Text(
-                    nome,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-                if (!temTodosPrecos)
-                  const Padding(
-                    padding: EdgeInsets.only(left: 4),
-                    child: Tooltip(
-                      message:
-                          'Valor de algum material não informado',
-                      child: Icon(Icons.warning_amber_rounded,
-                          size: 13, color: AppTheme.warning),
-                    ),
-                  ),
-              ],
-            ),
+    return GestureDetector(
+      onTap: onSelectAll,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelecionadoEmTodos
+              ? AppTheme.primary.withValues(alpha: 0.06)
+              : isDestaqueAtual
+                  ? AppTheme.statusOk.withValues(alpha: 0.05)
+                  : null,
+          border: Border(
+            top: const BorderSide(color: AppTheme.divider),
+            left: isSelecionadoEmTodos
+                ? const BorderSide(color: AppTheme.primary, width: 3)
+                : BorderSide.none,
           ),
+        ),
+        child: Row(
+          children: [
+            // ── Radio ────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Icon(
+                isSelecionadoEmTodos
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                size: 18,
+                color: isSelecionadoEmTodos
+                    ? AppTheme.primary
+                    : AppTheme.textHint,
+              ),
+            ),
+            Expanded(
+              child: Row(
+                children: [
+                  if (isDestaqueAtual && !isSelecionadoEmTodos)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 6),
+                      child: Icon(Icons.emoji_events,
+                          size: 16, color: AppTheme.statusOk),
+                    )
+                  else if (!isSelecionadoEmTodos)
+                    Container(
+                      width: 20,
+                      height: 20,
+                      margin: const EdgeInsets.only(right: 8),
+                      alignment: Alignment.center,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppTheme.surfaceVariant,
+                      ),
+                      child: Text(
+                        '$rank°',
+                        style: const TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textSecondary),
+                      ),
+                    ),
+                  Flexible(
+                    child: Text(
+                      nome,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: (isDestaqueAtual || isSelecionadoEmTodos)
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        color: isSelecionadoEmTodos
+                            ? AppTheme.primary
+                            : isDestaqueAtual
+                                ? AppTheme.statusOk
+                                : AppTheme.textPrimary,
+                      ),
+                    ),
+                  ),
+                  if (isSelecionadoEmTodos)
+                    Container(
+                      margin: const EdgeInsets.only(left: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                            color: AppTheme.primary.withValues(alpha: 0.4)),
+                      ),
+                      child: const Text(
+                        'Selecionado',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    ),
+                  if (!temTodosPrecos)
+                    const Padding(
+                      padding: EdgeInsets.only(left: 4),
+                      child: Tooltip(
+                        message: 'Valor de algum material não informado',
+                        child: Icon(Icons.warning_amber_rounded,
+                            size: 13, color: AppTheme.warning),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           // ── Coluna Materiais ─────────────────────────────
           SizedBox(
             width: 100,
@@ -2578,6 +2929,7 @@ class _TabelaComparativaRow extends StatelessWidget {
               ),
             ),
           ),
+          // ── Coluna Total Unitário ─────────────────────────
           SizedBox(
             width: 130,
             child: Column(
@@ -2588,14 +2940,15 @@ class _TabelaComparativaRow extends StatelessWidget {
                   total > 0 ? _brl(total) : '—',
                   style: TextStyle(
                     fontSize: 13,
-                    fontWeight:
-                        isMelhor ? FontWeight.w700 : FontWeight.w500,
-                    color: isMelhor
+                    fontWeight: (isMelhor && !ordenarPorM2) ? FontWeight.w700 : FontWeight.w500,
+                    color: (isMelhor && !ordenarPorM2)
                         ? AppTheme.statusOk
-                        : AppTheme.textPrimary,
+                        : (!ordenarPorM2
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary),
                   ),
                 ),
-                if (diff != null)
+                if (diff != null && !ordenarPorM2)
                   Text('+${_brl(diff)}',
                       style: const TextStyle(
                           fontSize: 11,
@@ -2603,6 +2956,7 @@ class _TabelaComparativaRow extends StatelessWidget {
               ],
             ),
           ),
+          // ── Coluna Total m² ───────────────────────────────
           SizedBox(
             width: 130,
             child: Column(
@@ -2613,11 +2967,15 @@ class _TabelaComparativaRow extends StatelessWidget {
                   totalM2 > 0 ? _brl(totalM2) : '—',
                   style: TextStyle(
                     fontSize: 13,
-                    fontWeight: isMelhorM2 ? FontWeight.w700 : FontWeight.w500,
-                    color: isMelhorM2 ? AppTheme.statusOk : AppTheme.textPrimary,
+                    fontWeight: (isMelhorM2 && ordenarPorM2) ? FontWeight.w700 : FontWeight.w500,
+                    color: (isMelhorM2 && ordenarPorM2)
+                        ? AppTheme.statusOk
+                        : (ordenarPorM2
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary),
                   ),
                 ),
-                if (diffM2 != null)
+                if (diffM2 != null && ordenarPorM2)
                   Text('+${_brl(diffM2)}',
                       style: const TextStyle(
                           fontSize: 11,
@@ -2627,7 +2985,8 @@ class _TabelaComparativaRow extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ),  // Container
+    );  // GestureDetector
   }
 }
 
@@ -2951,6 +3310,57 @@ class _DialogOpcaoOC extends StatelessWidget {
           child: const Text('Criar nova OC'),
         ),
       ],
+    );
+  }
+}
+
+// ── Botão de ordenação de totais (Unitário / m²) ──────────────────────────────
+
+class _OrdemTotaisBtn extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool ativo;
+  final VoidCallback onTap;
+
+  const _OrdemTotaisBtn({
+    required this.label,
+    required this.icon,
+    required this.ativo,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(7),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: ativo ? AppTheme.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 14,
+              color: ativo ? Colors.white : AppTheme.textSecondary,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: ativo ? Colors.white : AppTheme.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -15,7 +15,10 @@ import '../theme/app_theme.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 class OrdemCompraPage extends StatefulWidget {
-  const OrdemCompraPage({super.key});
+  /// Quando informado, abre automaticamente os detalhes desta OC ao entrar na página.
+  final int? ocIdParaAbrir;
+
+  const OrdemCompraPage({super.key, this.ocIdParaAbrir});
 
   @override
   State<OrdemCompraPage> createState() => _OrdemCompraPageState();
@@ -31,8 +34,26 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<OrdemCompraProvider>().carregar();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final provider = context.read<OrdemCompraProvider>();
+      await provider.carregar();
+      if (!mounted) return;
+
+      // Se veio do orçamento com um ID de OC, abre os detalhes automaticamente
+      final idAlvo = widget.ocIdParaAbrir;
+      if (idAlvo != null) {
+        final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
+        final raw = todas.cast<dynamic>().firstWhere(
+          (o) {
+            final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
+            return m.id == idAlvo;
+          },
+          orElse: () => null,
+        );
+        if (raw != null && mounted) {
+          _verDetalhes(context, raw);
+        }
+      }
     });
   }
 
@@ -53,10 +74,11 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
   }
 
   Future<void> _abrirCriacaoOC() async {
-    final criou = await Navigator.of(context).push<bool>(
+    final resultado = await Navigator.of(context).push<dynamic>(
       MaterialPageRoute(builder: (_) => const NovaOrdemCompraPage()),
     );
-    if (criou == true && mounted) {
+    // resultado pode ser OrdemCompraModel (novo fluxo) ou bool true (fallback)
+    if (resultado != null && mounted) {
       context.read<OrdemCompraProvider>().carregar();
     }
   }
@@ -231,7 +253,7 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
         ? ordem
         : OrdemCompraModel.fromJson(ordem as Map<String, dynamic>);
     final recarregar = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => _OrdemCompraDetalhePage(ordem: model)),
+      MaterialPageRoute(builder: (_) => OrdemCompraDetalhePage(ordem: model)),
     );
     if (recarregar == true && mounted) {
       // ignore: use_build_context_synchronously
@@ -763,14 +785,14 @@ class _OcCardState extends State<_OcCard> {
 // PÁGINA DE DETALHE DA OC
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _OrdemCompraDetalhePage extends StatefulWidget {
+class OrdemCompraDetalhePage extends StatefulWidget {
   final OrdemCompraModel ordem;
-  const _OrdemCompraDetalhePage({required this.ordem});
+  const OrdemCompraDetalhePage({super.key, required this.ordem});
   @override
-  State<_OrdemCompraDetalhePage> createState() => _OrdemCompraDetalhePageState();
+  State<OrdemCompraDetalhePage> createState() => OrdemCompraDetalhePageState();
 }
 
-class _OrdemCompraDetalhePageState extends State<_OrdemCompraDetalhePage> {
+class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
   late OrdemCompraModel _ordem;
   bool _processando = false;
 
@@ -1797,14 +1819,47 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                 })
             .toList(),
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Ordem de compra criada com sucesso!'),
-              backgroundColor: AppTheme.success),
+
+      if (!mounted) return;
+
+      // Recarrega a lista para obter o model da OC recém-criada
+      final provider = context.read<OrdemCompraProvider>();
+      await provider.carregar();
+
+      if (!mounted) return;
+
+      OrdemCompraModel? ocCriada;
+      // Busca pelo ID esperado (carregado antes de salvar)
+      if (_proximoId != null) {
+        final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
+        final raw = todas.cast<dynamic>().firstWhere(
+          (o) {
+            if (o == null) return false;
+            final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
+            return m.id == _proximoId;
+          },
+          orElse: () => null,
         );
-        Navigator.of(context).pop(true);
+        if (raw != null) {
+          ocCriada = raw is OrdemCompraModel
+              ? raw
+              : OrdemCompraModel.fromJson(raw as Map<String, dynamic>);
+        }
       }
+      // Fallback: a mais recente em andamento
+      ocCriada ??= provider.emAndamento.isNotEmpty
+          ? (provider.emAndamento.first is OrdemCompraModel
+              ? provider.emAndamento.first as OrdemCompraModel
+              : OrdemCompraModel.fromJson(provider.emAndamento.first as Map<String, dynamic>))
+          : null;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Ordem de compra criada com sucesso!'),
+            backgroundColor: AppTheme.success),
+      );
+      // Retorna o OrdemCompraModel para que o chamador possa navegar para detalhes
+      Navigator.of(context).pop(ocCriada ?? true);
     } catch (e) {
       _showErro(e.toString());
     } finally {

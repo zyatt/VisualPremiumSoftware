@@ -174,13 +174,21 @@ function drawTotalBox(doc, y, valorTotal) {
 }
 
 function drawItensTable(doc, itens, startY) {
+  // Detecta quais colunas de preco sao necessarias baseado no usarM2 de cada item
+  const temUnitario = itens.some(i => !i.usarM2);
+  const temM2       = itens.some(i =>  i.usarM2);
+
+  // Se so um tipo existe, a largura da coluna omitida e redistribuida
+  const extraUnit = !temUnitario ? 78 : 0;
+  const extraM2   = !temM2       ? 68 : 0;
+
   const cols = [
-    { key: 'material',   label: 'MATERIAL',    w: 155, hAlign: 'left',   cAlign: 'left',   pad: 5 },
-    { key: 'qtd',        label: 'QTD',         w: 100, hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'unidade',    label: 'UNIDADE',     w: 44,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'precoUnit',  label: 'PREÇO UNIT.', w: 78,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'precoM2',    label: 'PREÇO M²',    w: 68,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'precoTotal', label: 'TOTAL',       w: 78,  hAlign: 'center', cAlign: 'right',  pad: 5 },
+    { key: 'material',   label: 'MATERIAL',    w: 155,                hAlign: 'left',   cAlign: 'left',   pad: 5 },
+    { key: 'qtd',        label: 'QTD',         w: 100,                hAlign: 'center', cAlign: 'center', pad: 3 },
+    { key: 'unidade',    label: 'UNIDADE',     w: 44,                 hAlign: 'center', cAlign: 'center', pad: 3 },
+    ...(temUnitario ? [{ key: 'precoUnit',  label: 'PREÇO UNIT.', w: 78 + extraM2, hAlign: 'center', cAlign: 'center', pad: 3 }] : []),
+    ...(temM2       ? [{ key: 'precoM2',    label: 'PREÇO M²',    w: 68 + extraUnit, hAlign: 'center', cAlign: 'center', pad: 3 }] : []),
+    { key: 'precoTotal', label: 'TOTAL',       w: 78,                 hAlign: 'center', cAlign: 'right',  pad: 5 },
   ];
 
   let cx = MARGIN;
@@ -242,7 +250,12 @@ function drawItensTable(doc, itens, startY) {
     const tySingle = y + (rowH - FONT_SZ) / 2;
     const tyMulti  = y + ROW_PAD_V;
 
-    const [C0, C1, C2, C3, C4, C5] = cols;
+    const C0 = cols.find(c => c.key === 'material');
+    const C1 = cols.find(c => c.key === 'qtd');
+    const C2 = cols.find(c => c.key === 'unidade');
+    const C3 = cols.find(c => c.key === 'precoUnit');
+    const C4 = cols.find(c => c.key === 'precoM2');
+    const C5 = cols.find(c => c.key === 'precoTotal');
 
     doc.save();
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
@@ -262,14 +275,20 @@ function drawItensTable(doc, itens, startY) {
        .text(unidade, C2.x + C2.pad, tySingle,
              { width: C2.w - C2.pad * 2, align: 'center', lineBreak: false });
 
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(formatCurrency(item.precoUnitario), C3.x + C3.pad, tySingle,
-             { width: C3.w - C3.pad * 2, align: 'center', lineBreak: false });
+    // Coluna PRECO UNIT. — renderiza so se o item for unitario (e a coluna existir)
+    if (C3 && !item.usarM2) {
+      doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
+         .text(formatCurrency(item.precoUnitario), C3.x + C3.pad, tySingle,
+               { width: C3.w - C3.pad * 2, align: 'center', lineBreak: false });
+    }
 
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(item.precoMetroQuadrado != null ? formatCurrency(item.precoMetroQuadrado) : '—',
-             C4.x + C4.pad, tySingle,
-             { width: C4.w - C4.pad * 2, align: 'center', lineBreak: false });
+    // Coluna PRECO M2 — renderiza so se o item for m2 (e a coluna existir)
+    if (C4 && item.usarM2) {
+      doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
+         .text(item.precoMetroQuadrado != null ? formatCurrency(item.precoMetroQuadrado) : '—',
+               C4.x + C4.pad, tySingle,
+               { width: C4.w - C4.pad * 2, align: 'center', lineBreak: false });
+    }
 
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
        .text(formatCurrency(item.precoTotal), C5.x + C5.pad, tySingle,
@@ -395,7 +414,6 @@ const ordemCompraPdfService = {
         ['Data',                formatDate(oc.data)],
         ['Fornecedor',          oc.fornecedor?.nomeFantasia ?? oc.fornecedor?.nome ?? '—'],
         ['Requisitante',        oc.requisitante || '—'],
-        ['Empresa',             oc.empresa || '—'],
         ['Forma de Pagamento',  oc.formaPagamento || '—'],
         ['Prazo de Pagamento',  oc.prazoPagamento || '—'],
       ];

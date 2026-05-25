@@ -1613,7 +1613,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
   void _selecionarMaterial(Map<String, dynamic> material) {
     final id           = material['id']           as int;
     final nome         = material['nome']         as String? ?? '';
-    final identificador = material['Marca'] as String?;
+    final identificador = material['identificador'] as String?;
     final medida       = material['medida']       as String?;
     final espessura    = material['espessura']    as String?;
 

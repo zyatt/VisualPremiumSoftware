@@ -2,6 +2,11 @@ import 'package:flutter/foundation.dart';
 import '../models/estoque_model.dart';
 import '../repositories/estoque_repository.dart';
 
+String _mensagemErro(Object e) {
+  final raw = e.toString();
+  return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+}
+
 class EstoqueProvider extends ChangeNotifier {
   final EstoqueRepository _repo = EstoqueRepository();
 
@@ -17,6 +22,9 @@ class EstoqueProvider extends ChangeNotifier {
   bool _carregandoDetalhe = false;
   bool get carregandoDetalhe => _carregandoDetalhe;
 
+  bool _fechandoOS = false;
+  bool get fechandoOS => _fechandoOS;
+
   String? _erro;
   String? get erro => _erro;
 
@@ -27,7 +35,7 @@ class EstoqueProvider extends ChangeNotifier {
     try {
       _relacoesOS = await _repo.listarRelacoesOS(busca: busca);
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
     } finally {
       _carregando = false;
       notifyListeners();
@@ -40,7 +48,7 @@ class EstoqueProvider extends ChangeNotifier {
     try {
       _relacaoSelecionada = await _repo.buscarRelacaoOS(numeroOS);
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
     } finally {
       _carregandoDetalhe = false;
       notifyListeners();
@@ -76,22 +84,18 @@ class EstoqueProvider extends ChangeNotifier {
       await carregarRelacoesOS();
       return true;
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
   }
 
-  /// Remove uma movimentação específica pelo [movimentacaoId].
-  /// Após remover, recarrega o detalhe da [numeroOS] e a lista geral.
   Future<bool> removerMovimentacao({
     required int movimentacaoId,
     required String numeroOS,
   }) async {
     try {
       await _repo.removerMovimentacao(movimentacaoId);
-      // Recarrega detalhe: se a OS ainda existe, atualiza; se foi excluída,
-      // relacaoSelecionada ficará null (tratado pelo backend retornando 404).
       try {
         _relacaoSelecionada = await _repo.buscarRelacaoOS(numeroOS);
       } catch (_) {
@@ -101,13 +105,12 @@ class EstoqueProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
   }
 
-  /// Exclui a RelacaoOS inteira (e todas as movimentações vinculadas) pelo [numeroOS].
   Future<bool> excluirRelacaoOS(String numeroOS) async {
     try {
       await _repo.excluirRelacaoOS(numeroOS);
@@ -116,9 +119,30 @@ class EstoqueProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _erro = e.toString();
+      _erro = _mensagemErro(e);
       notifyListeners();
       return false;
+    }
+  }
+
+  /// Fecha a OS: muda status para FECHADA no backend e remove da lista
+  /// de controle de estoque. A OS passa a aparecer só na página de relatórios.
+  Future<bool> fecharOS(String numeroOS) async {
+    _fechandoOS = true;
+    notifyListeners();
+    try {
+      await _repo.fecharOS(numeroOS);
+      _relacaoSelecionada = null;
+      await carregarRelacoesOS();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      notifyListeners();
+      return false;
+    } finally {
+      _fechandoOS = false;
+      notifyListeners();
     }
   }
 }

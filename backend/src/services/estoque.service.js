@@ -1,196 +1,195 @@
 const prisma = require('../utils/prisma');
 
-/**
- * Normaliza valores de preço: converte 0 para null (ausência de informação)
- */
-function _normalizarPreco(valor) {
-  if (valor == null) return null;
-  const num = Number(valor);
-  return num > 0 ? num : null;
-}
+// ── include reutilizável ──────────────────────────────────────────────────────
+const _includeMovimentacoes = {
+  movimentacoes: {
+    include: {
+      material: {
+        select: {
+          id: true, nome: true, unidade: true,
+          identificador: true, medida: true, espessura: true,
+        },
+      },
+    },
+    orderBy: { criadoEm: 'desc' },
+  },
+};
 
-async function listarRelacoesOS(busca) {
-  const where = {};
+// ── Controle de Estoque: apenas OS EM_ANDAMENTO ───────────────────────────────
+async function listarEmAndamento(busca) {
+  const where = { status: 'EM_ANDAMENTO' };
   if (busca) where.numeroOS = { contains: busca, mode: 'insensitive' };
 
   return prisma.relacaoOS.findMany({
     where,
-    include: {
-      movimentacoes: {
-        include: {
-          material: { select: { id: true, nome: true, unidade: true, identificador: true, medida: true, espessura: true } },
-          ordemCompra: { select: { id: true } },
-        },
-        orderBy: { criadoEm: 'desc' },
-      },
-    },
+    include: _includeMovimentacoes,
     orderBy: { atualizadoEm: 'desc' },
   });
 }
 
-async function buscarRelacaoOS(numeroOS) {
+async function buscarPorNumeroOS(numeroOS) {
   return prisma.relacaoOS.findUnique({
     where: { numeroOS },
-    include: {
-      movimentacoes: {
-        include: {
-          material: { select: { id: true, nome: true, unidade: true, categoria: true, identificador: true, medida: true, espessura: true } },
-          ordemCompra: { select: { id: true } },
-        },
-        orderBy: { criadoEm: 'desc' },
-      },
-    },
+    include: _includeMovimentacoes,
   });
 }
 
-async function registrarMovimentacao({ materialId, tipo, quantidade, numeroOS, precoUnitario, precoM2, observacao, ordemCompraId, descricaoItem }) {
-  if (!['ENTRADA', 'SAIDA'].includes(tipo)) throw { status: 400, message: 'Tipo deve ser ENTRADA ou SAIDA' };
-  if (!materialId || !quantidade || !numeroOS) throw { status: 400, message: 'materialId, quantidade e numeroOS são obrigatórios' };
-
-  const relacaoOS = await prisma.relacaoOS.upsert({
-    where: { numeroOS: String(numeroOS) },
-    create: { numeroOS: String(numeroOS) },
-    update: { atualizadoEm: new Date() },
-  });
-
+// ── Registrar movimentação ────────────────────────────────────────────────────
+async function registrarMovimentacao({
+  materialId, tipo, quantidade, numeroOS,
+  precoUnitario, precoM2, observacao, ordemCompraId, descricaoItem,
+}) {
   const material = await prisma.material.findUnique({ where: { id: materialId } });
   if (!material) throw { status: 404, message: 'Material não encontrado' };
-  if (!material.ativo) throw { status: 400, message: 'Material inativo' };
 
-  if (tipo === 'SAIDA' && Number(material.quantidade) < Number(quantidade)) {
-    throw { status: 400, message: `Estoque insuficiente. Disponível: ${material.quantidade}` };
+  // Verifica se OS não está fechada
+  const relacaoExistente = await prisma.relacaoOS.findUnique({ where: { numeroOS } });
+  if (relacaoExistente?.status === 'FECHADA') {
+    throw { status: 400, message: `A OS ${numeroOS} está fechada e não aceita novas movimentações` };
   }
-
-  // Normaliza os valores de preço: 0 vira null
-  const precoUnitarioValor = _normalizarPreco(precoUnitario);
-  const precoM2Valor = _normalizarPreco(precoM2);
-
-  const movimentacao = await prisma.movimentacaoEstoque.create({
-    data: {
-      materialId,
-      tipo,
-      quantidade,
-      numeroOS,
-      relacaoOSId: relacaoOS.id,
-      ordemCompraId: ordemCompraId ?? null,
-      precoUnitario:  precoUnitarioValor,
-      precoM2:        precoM2Valor,
-      observacao:     observacao     ?? null,
-      descricaoItem:  descricaoItem  ?? null,
-    },
-    include: { material: true },
-  });
-
-  const delta = tipo === 'ENTRADA' ? Number(quantidade) : -Number(quantidade);
-  const novaQuantidade = Number(material.quantidade) + delta;
-
-  const min = Number(material.estoqueMinimo);
-  let status = 'OK';
-  if (!material.ativo) status = 'INATIVO';
-  else if (novaQuantidade < min) status = 'CRITICO';
-  else if (novaQuantidade === min) status = 'LIMITE';
-
-  await prisma.material.update({
-    where: { id: materialId },
-    data: {
-      quantidade: novaQuantidade,
-      status,
-      estoqueConfirmado: false,
-    },
-  });
 
   if (tipo === 'SAIDA') {
-    await prisma.relacaoOS.update({
-      where: { id: relacaoOS.id },
-      data: { atualizadoEm: new Date() },
-    });
+    const saldo = Number(material.quantidade);
+    if (saldo < quantidade) {
+      throw {
+        status: 400,
+        message: `Estoque insuficiente: disponível ${saldo} ${material.unidade ?? ''}`.trim(),
+      };
+    }
   }
+
+  const delta = tipo === 'ENTRADA' ? quantidade : -quantidade;
+
+  // Upsert da RelacaoOS (cria com EM_ANDAMENTO se não existir)
+  const relacao = await prisma.relacaoOS.upsert({
+    where:  { numeroOS },
+    create: { numeroOS, status: 'EM_ANDAMENTO' },
+    update: {},
+  });
+
+  const [movimentacao] = await prisma.$transaction([
+    prisma.movimentacaoEstoque.create({
+      data: {
+        materialId,
+        tipo,
+        quantidade,
+        numeroOS,
+        relacaoOSId:   relacao.id,
+        precoUnitario: precoUnitario ?? null,
+        precoM2:       precoM2 ?? null,
+        observacao:    observacao ?? null,
+        ordemCompraId: ordemCompraId ?? null,
+        descricaoItem: descricaoItem ?? null,
+      },
+    }),
+    prisma.material.update({
+      where: { id: materialId },
+      data:  { quantidade: { increment: delta } },
+    }),
+  ]);
+
+  // Recalcula e atualiza status do material
+  const atualizado = await prisma.material.findUnique({ where: { id: materialId } });
+  const novoStatus = _calcularStatus(atualizado.quantidade, atualizado.estoqueMinimo, atualizado.ativo);
+  await prisma.material.update({ where: { id: materialId }, data: { status: novoStatus } });
 
   return movimentacao;
 }
 
-async function listarMovimentacoesPorMaterial(materialId) {
-  return prisma.movimentacaoEstoque.findMany({
-    where: { materialId },
-    include: {
-      relacaoOS:  { select: { numeroOS: true } },
-      ordemCompra: { select: { id: true } },
-    },
-    orderBy: { criadoEm: 'desc' },
-  });
-}
-
+// ── Remover movimentação ──────────────────────────────────────────────────────
 async function removerMovimentacao(movimentacaoId) {
-  const mov = await prisma.movimentacaoEstoque.findUnique({
-    where: { id: movimentacaoId },
-    include: { material: true },
-  });
+  const mov = await prisma.movimentacaoEstoque.findUnique({ where: { id: movimentacaoId } });
   if (!mov) throw { status: 404, message: 'Movimentação não encontrada' };
 
-  // Reverte o saldo: ENTRADA vira -delta, SAIDA vira +delta
-  const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
-  const novaQuantidade = Math.max(0, Number(mov.material.quantidade) + delta);
-
-  const min = Number(mov.material.estoqueMinimo);
-  let status = 'OK';
-  if (!mov.material.ativo)       status = 'INATIVO';
-  else if (novaQuantidade < min) status = 'CRITICO';
-  else if (novaQuantidade === min) status = 'LIMITE';
-
-  await prisma.movimentacaoEstoque.delete({ where: { id: movimentacaoId } });
-
-  await prisma.material.update({
-    where: { id: mov.materialId },
-    data: { quantidade: novaQuantidade, status, estoqueConfirmado: false },
-  });
-
-  // Se a RelacaoOS ficou sem movimentações, remove-a automaticamente
-  const restantes = await prisma.movimentacaoEstoque.count({
-    where: { relacaoOSId: mov.relacaoOSId },
-  });
-  if (restantes === 0) {
-    await prisma.relacaoOS.delete({ where: { id: mov.relacaoOSId } });
+  // Verifica se OS não está fechada
+  const relacao = await prisma.relacaoOS.findUnique({ where: { numeroOS: mov.numeroOS } });
+  if (relacao?.status === 'FECHADA') {
+    throw { status: 400, message: 'Não é possível remover movimentações de uma OS fechada' };
   }
 
-  return { ok: true };
+  // Reverte o delta no material
+  const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
+
+  await prisma.$transaction([
+    prisma.movimentacaoEstoque.delete({ where: { id: movimentacaoId } }),
+    prisma.material.update({
+      where: { id: mov.materialId },
+      data:  { quantidade: { increment: delta } },
+    }),
+  ]);
+
+  // Recalcula status do material
+  const mat = await prisma.material.findUnique({ where: { id: mov.materialId } });
+  const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
+  await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
+
+  // Se a RelacaoOS ficou sem movimentações, exclui ela
+  const count = await prisma.movimentacaoEstoque.count({ where: { relacaoOSId: relacao.id } });
+  if (count === 0) {
+    await prisma.relacaoOS.delete({ where: { id: relacao.id } });
+    return { relacaoExcluida: true };
+  }
+
+  return { relacaoExcluida: false };
 }
 
+// ── Excluir RelacaoOS inteira ─────────────────────────────────────────────────
 async function excluirRelacaoOS(numeroOS) {
   const relacao = await prisma.relacaoOS.findUnique({
-    where: { numeroOS },
-    include: { movimentacoes: { include: { material: true } } },
+    where:   { numeroOS },
+    include: { movimentacoes: true },
   });
   if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
-
-  // Reverte o estoque de cada movimentação
-  for (const mov of relacao.movimentacoes) {
-    const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
-    const novaQuantidade = Math.max(0, Number(mov.material.quantidade) + delta);
-
-    const min = Number(mov.material.estoqueMinimo);
-    let status = 'OK';
-    if (!mov.material.ativo)       status = 'INATIVO';
-    else if (novaQuantidade < min) status = 'CRITICO';
-    else if (novaQuantidade === min) status = 'LIMITE';
-
-    await prisma.material.update({
-      where: { id: mov.materialId },
-      data: { quantidade: novaQuantidade, status, estoqueConfirmado: false },
-    });
+  if (relacao.status === 'FECHADA') {
+    throw { status: 400, message: 'Não é possível excluir uma OS fechada' };
   }
 
-  // Cascade: deleta movimentações e a relação
+  // Reverte todas as movimentações no estoque
+  for (const mov of relacao.movimentacoes) {
+    const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
+    await prisma.material.update({
+      where: { id: mov.materialId },
+      data:  { quantidade: { increment: delta } },
+    });
+    const mat = await prisma.material.findUnique({ where: { id: mov.materialId } });
+    const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
+    await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
+  }
+
   await prisma.movimentacaoEstoque.deleteMany({ where: { relacaoOSId: relacao.id } });
   await prisma.relacaoOS.delete({ where: { id: relacao.id } });
+}
 
-  return { ok: true };
+// ── Fechar OS ─────────────────────────────────────────────────────────────────
+async function fecharOS(numeroOS) {
+  const relacao = await prisma.relacaoOS.findUnique({ where: { numeroOS } });
+  if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
+  if (relacao.status === 'FECHADA') {
+    throw { status: 400, message: 'Esta OS já está fechada' };
+  }
+
+  return prisma.relacaoOS.update({
+    where:   { numeroOS },
+    data:    { status: 'FECHADA' },
+    include: _includeMovimentacoes,
+  });
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function _calcularStatus(quantidade, estoqueMinimo, ativo) {
+  if (!ativo) return 'INATIVO';
+  const q   = Number(quantidade);
+  const min = Number(estoqueMinimo);
+  if (q > min) return 'OK';
+  if (q === min) return 'LIMITE';
+  return 'CRITICO';
 }
 
 module.exports = {
-  listarRelacoesOS,
-  buscarRelacaoOS,
+  listarEmAndamento,
+  buscarPorNumeroOS,
   registrarMovimentacao,
-  listarMovimentacoesPorMaterial,
   removerMovimentacao,
   excluirRelacaoOS,
+  fecharOS,
 };

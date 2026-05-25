@@ -34,7 +34,7 @@ class AppRouter {
           GoRoute(path: '/estoque',          builder: (_, __) => const EstoquePage()),
           GoRoute(path: '/fornecedores',     builder: (_, __) => const FornecedoresPage()),
           GoRoute(path: '/orcamento',        builder: (_, __) => const OrcamentoPage()),
-          GoRoute(path: '/ordem-compra',     builder: (_, __) => const OrdemCompraPage()),
+          GoRoute(path: '/ordem-compra',     builder: (_, state) => OrdemCompraPage(ocIdParaAbrir: state.extra as int?)),
           GoRoute(path: '/controle-estoque', builder: (_, __) => const ControleEstoquePage()),
           GoRoute(path: '/historico',        builder: (_, __) => const HistoricoPage()),
           GoRoute(path: '/relatorio-os',     builder: (_, __) => const RelatorioOSPage()),

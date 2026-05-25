@@ -1,31 +1,55 @@
 import 'package:flutter/foundation.dart';
+import '../models/estoque_model.dart';
 import '../repositories/estoque_repository.dart';
+
+String _mensagemErro(Object e) {
+  final raw = e.toString();
+  return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+}
 
 class RelatorioOSProvider extends ChangeNotifier {
   final EstoqueRepository _repo = EstoqueRepository();
 
-  final List<dynamic> _relatorios = [];
-  List<dynamic> get relatorios => _relatorios;
+  List<RelacaoOSModel> _relatorios = [];
+  List<RelacaoOSModel> get relatorios => _relatorios;
 
-  dynamic _selecionado;
-  dynamic get selecionado => _selecionado;
+  RelacaoOSModel? _selecionado;
+  RelacaoOSModel? get selecionado => _selecionado;
 
   bool _carregando = false;
   bool get carregando => _carregando;
 
+  bool _carregandoDetalhe = false;
+  bool get carregandoDetalhe => _carregandoDetalhe;
+
   String? _erro;
   String? get erro => _erro;
 
-  Future<void> carregar() async {
+  Future<void> carregar({String? busca}) async {
     _carregando = true;
     _erro = null;
     notifyListeners();
-    
+    try {
+      _relatorios = await _repo.listarRelatoriosOS(busca: busca);
+    } catch (e) {
+      _erro = _mensagemErro(e);
+    } finally {
+      _carregando = false;
+      notifyListeners();
+    }
   }
 
-  void selecionar(dynamic relatorio) {
-    _selecionado = relatorio;
+  Future<void> selecionar(String numeroOS) async {
+    _carregandoDetalhe = true;
     notifyListeners();
+    try {
+      _selecionado = await _repo.buscarRelacaoOS(numeroOS);
+    } catch (e) {
+      _erro = _mensagemErro(e);
+    } finally {
+      _carregandoDetalhe = false;
+      notifyListeners();
+    }
   }
 
   void limparSelecao() {
