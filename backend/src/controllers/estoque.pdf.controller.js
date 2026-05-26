@@ -2,20 +2,22 @@ const pdfService = require('../services/estoque.pdf.service');
 
 const gerarPdf = async (req, res, next) => {
   try {
-    // categoria pode vir como query param: ?categoria=LONA ou TODAS / vazio
     const categoria = req.query.categoria || 'TODAS';
+    const status = req.query.status || 'TODOS';
 
-    const buffer = await pdfService.gerarPdf(categoria);
+    const buffer = await pdfService.gerarPdf(categoria, status);
 
-    // Nome do arquivo: estoque_TODAS.pdf  ou  estoque_LONA.pdf
     const nomeCategoria = categoria.toUpperCase().replace(/\s+/g, '_');
-    const filename = `estoque_${nomeCategoria}.pdf`;
+    const nomeStatus = status.toUpperCase().replace(/\s+/g, '_');
+
+    const filename = `estoque_${nomeCategoria}_${nomeStatus}.pdf`;
 
     res.set({
-      'Content-Type':        'application/pdf',
+      'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${filename}"`,
-      'Content-Length':      buffer.length,
+      'Content-Length': buffer.length,
     });
+
     res.end(buffer);
   } catch (e) {
     next(e);

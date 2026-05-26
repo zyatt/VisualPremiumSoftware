@@ -192,4 +192,37 @@ class MaterialProvider extends ChangeNotifier {
       return [];
     }
   }
+
+  Future<bool> excluirFilhoEspecifico(int materialId, int filhoId) async {
+    try {
+      await _repo.excluirFilhoEspecifico(materialId, filhoId);
+      await recarregar();
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> atualizarFilhoEspecifico(
+    int materialId,
+    int filhoId, {
+    String? descricao,
+    double? quantidade,
+  }) async {
+    try {
+      await _repo.atualizarFilhoEspecifico(
+        materialId, filhoId,
+        descricao:  descricao,
+        quantidade: quantidade,
+      );
+      await recarregar();
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      notifyListeners();
+      return false;
+    }
+  }
 }

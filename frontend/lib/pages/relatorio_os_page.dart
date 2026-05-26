@@ -5,7 +5,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../models/estoque_model.dart';
+import '../providers/estoque_provider.dart';
 import '../providers/relatorio_os_provider.dart';
+import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -20,8 +22,20 @@ String _fmtData(DateTime? dt) {
       '${dt.year}';
 }
 
-String _tituloOS(String numeroOS) =>
-    int.tryParse(numeroOS) != null ? 'OS $numeroOS' : numeroOS;
+/// Remove sufixos internos usados para distinguir OS textuais no banco:
+/// #OC... (ordem de compra), #S... (saída global), #E... (entrada global).
+String _limparNumeroOS(String numeroOS) {
+  final match = RegExp(r'#(OC|S|E)\d*').firstMatch(numeroOS);
+  if (match != null && match.start > 0) {
+    return numeroOS.substring(0, match.start);
+  }
+  return numeroOS;
+}
+
+String _tituloOS(String numeroOS) {
+  final n = _limparNumeroOS(numeroOS);
+  return int.tryParse(n) != null ? 'OS $n' : n;
+}
 
 const _corFechada = Color(0xFF4CAF50);
 
@@ -212,7 +226,12 @@ class _RelatorioOSCard extends StatelessWidget {
 
     final totalGeral = saidas.fold<double>(
       0,
-      (acc, m) => acc + (m.precoUnitario ?? 0) * m.quantidade,
+      (acc, m) {
+        final pu = m.precoUnitario ?? 0.0;
+        final pm = m.precoM2 ?? 0.0;
+        final p  = pu > 0 ? pu : (pm > 0 ? pm : 0.0);
+        return acc + p * m.quantidade;
+      },
     );
 
     final materiaisUnicos =
@@ -322,6 +341,7 @@ class _RelatorioDetalhe extends StatefulWidget {
 
 class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
   bool _gerandoPdf = false;
+  bool _revertendo = false;
 
   String get _titulo => _tituloOS(widget.numeroOS);
 
@@ -333,66 +353,145 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
     });
   }
 
+  // ── Reverter OS ──────────────────────────────────────────────────────────
+  Future<void> _confirmarReverterOS() async {
+  const corReverter = Color(0xFFED6C02);
+
+  final confirmar = await showDialog<bool>(
+    context: context,
+    builder: (dialogCtx) => AlertDialog(
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: corReverter.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.undo_rounded,
+              color: corReverter,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Text('Reverter OS'),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Deseja reverter "$_titulo" para Em Andamento?',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogCtx).pop(false),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton.icon(
+          onPressed: () => Navigator.of(dialogCtx).pop(true),
+          icon: const Icon(Icons.undo_rounded, size: 16),
+          label: const Text('Reverter OS'),
+        ),
+      ],
+    ),
+  );
+
+  if (confirmar != true) return;
+  if (!mounted) return;
+
+  final relProvider = context.read<RelatorioOSProvider>();
+  final estoqueProvider = context.read<EstoqueProvider>();
+  final navigator = Navigator.of(context);
+  final messenger = ScaffoldMessenger.of(context);
+
+  setState(() => _revertendo = true);
+
+  final ok = await relProvider.reverterOS(widget.numeroOS);
+
+  if (!mounted) return;
+
+  setState(() => _revertendo = false);
+
+  if (ok) {
+    estoqueProvider.carregarRelacoesOS();
+
+    navigator.pop();
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          '$_titulo revertida — disponível em Controle de Estoque',
+        ),
+        backgroundColor: corReverter,
+      ),
+    );
+  } else {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          relProvider.erro ?? 'Erro ao reverter OS',
+        ),
+        backgroundColor: AppTheme.error,
+      ),
+    );
+  }
+}
+
+  // ── Gera PDF via backend (mesmo esquema do Estoque) ──────────────────────
+
   Future<void> _gerarPDF() async {
-    final rel = context.read<RelatorioOSProvider>().selecionado;
-    if (rel == null) return;
-
     setState(() => _gerandoPdf = true);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Gerando PDF…'),
+        duration: Duration(seconds: 3),
+        backgroundColor: AppTheme.primary,
+      ),
+    );
+
     try {
-      final saidas =
-          rel.movimentacoes.where((m) => m.tipo == 'SAIDA').toList();
-      final totalGeral = saidas.fold<double>(
-        0,
-        (acc, m) => acc + (m.precoUnitario ?? 0) * m.quantidade,
-      );
+      // Chama o endpoint /:numeroOS/pdf — retorna os bytes do PDF
+      final bytes = await EstoqueRepository()
+          .baixarRelatorioOSPdf(widget.numeroOS);
 
-      final buffer = StringBuffer();
-      buffer.writeln('RELATÓRIO DE OS — ${_tituloOS(rel.numeroOS)}');
-      buffer.writeln('=' * 50);
-      buffer.writeln(
-          'Fechada em: ${_fmtData(rel.atualizadoEm ?? rel.criadoEm)}');
-      buffer.writeln('Gerado em : ${_fmtData(DateTime.now())}');
-      buffer.writeln('');
-      buffer.writeln('ITENS (saídas):');
-      buffer.writeln('-' * 50);
-
-      for (final m in saidas) {
-        final preco = m.precoUnitario ?? 0;
-        final total = preco * m.quantidade;
-        final qtdStr = m.quantidade % 1 == 0
-            ? m.quantidade.toStringAsFixed(0)
-            : m.quantidade.toStringAsFixed(2);
-        buffer.writeln(
-            '• ${m.materialNome} (${m.materialUnidade ?? ""}) — '
-            'Qtd: $qtdStr  '
-            'Unit: ${_brl(preco)}  '
-            'Total: ${_brl(total)}');
-        if (m.observacao != null && m.observacao!.isNotEmpty) {
-          buffer.writeln('  Obs: ${m.observacao}');
-        }
+      // Valida magic bytes PDF (%PDF)
+      if (bytes.length < 4 ||
+          bytes[0] != 0x25 ||
+          bytes[1] != 0x50 ||
+          bytes[2] != 0x44 ||
+          bytes[3] != 0x46) {
+        throw Exception(
+            'O servidor não retornou um PDF válido. Verifique o console do backend.');
       }
 
-      buffer.writeln('-' * 50);
-      buffer.writeln('TOTAL GERAL: ${_brl(totalGeral)}');
+      // Salva em arquivo temporário
+      final numeroLimpo =
+          _limparNumeroOS(widget.numeroOS).replaceAll(RegExp(r'\W'), '_');
+      final fileName = 'relatorio_os_$numeroLimpo.pdf';
+      final dir      = await getTemporaryDirectory();
+      final file     = File('${dir.path}${Platform.pathSeparator}$fileName');
+      await file.writeAsBytes(bytes, flush: true);
 
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File(
-          '${dir.path}/relatorio_os_${rel.numeroOS.replaceAll(RegExp(r"\W"), "_")}.txt');
-      await file.writeAsString(buffer.toString());
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Relatório salvo em: ${file.path}'),
-          backgroundColor: _corFechada,
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      // Abre com o programa padrão do SO
+      if (Platform.isWindows) {
+        await Process.run('cmd', ['/c', 'start', '', file.path]);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', [file.path]);
+      } else {
+        await Process.run('xdg-open', [file.path]);
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Erro ao gerar relatório: $e'),
+          content: Text('Erro ao gerar PDF: $e'),
           backgroundColor: AppTheme.error,
         ),
       );
@@ -442,7 +541,32 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
           ],
         ),
         actions: [
-          if (rel != null)
+          if (rel != null) ...[
+            // Botão Reverter OS
+            _revertendo
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Color(0xFFED6C02)),
+                    ),
+                  )
+                : TextButton.icon(
+                    onPressed: _confirmarReverterOS,
+                    icon: const Icon(Icons.undo_rounded,
+                        size: 18, color: Color(0xFFED6C02)),
+                    label: const Text(
+                      'Reverter OS',
+                      style: TextStyle(
+                        color: Color(0xFFED6C02),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+            const SizedBox(width: 4),
+            // Botão Gerar PDF
             _gerandoPdf
                 ? const Padding(
                     padding:
@@ -466,6 +590,7 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
                       ),
                     ),
                   ),
+          ],  // fecha if (rel != null)
         ],
       ),
       body: provider.carregandoDetalhe
@@ -496,12 +621,15 @@ class _RelatorioDetalheBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final saidas =
         rel.movimentacoes.where((m) => m.tipo == 'SAIDA').toList();
-    final entradas =
-        rel.movimentacoes.where((m) => m.tipo == 'ENTRADA').toList();
 
     final totalGeral = saidas.fold<double>(
       0,
-      (acc, m) => acc + (m.precoUnitario ?? 0) * m.quantidade,
+      (acc, m) {
+        final pu = m.precoUnitario ?? 0.0;
+        final pm = m.precoM2 ?? 0.0;
+        final p  = pu > 0 ? pu : (pm > 0 ? pm : 0.0);
+        return acc + p * m.quantidade;
+      },
     );
 
     return SingleChildScrollView(
@@ -517,13 +645,6 @@ class _RelatorioDetalheBody extends StatelessWidget {
                 label: 'Saídas',
                 valor: '${saidas.length}',
                 cor: AppTheme.error,
-              ),
-              const SizedBox(width: 12),
-              _SummaryCard(
-                icon: Icons.input_rounded,
-                label: 'Entradas',
-                valor: '${entradas.length}',
-                cor: AppTheme.success,
               ),
               const SizedBox(width: 12),
               _SummaryCard(
@@ -551,16 +672,6 @@ class _RelatorioDetalheBody extends StatelessWidget {
             movimentacoes: saidas,
             mostrarPreco: true,
           ),
-          if (entradas.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            _MovimentacaoSection(
-              titulo: 'Entradas de material',
-              icone: Icons.input_rounded,
-              cor: AppTheme.success,
-              movimentacoes: entradas,
-              mostrarPreco: false,
-            ),
-          ],
         ],
       ),
     );
@@ -720,9 +831,21 @@ class _MovimentacaoSection extends StatelessWidget {
                   ),
                   if (mostrarPreco) ...[
                     const SizedBox(
-                      width: 100,
+                      width: 90,
                       child: Text(
                         'Unit.',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(
+                      width: 90,
+                      child: Text(
+                        'M²',
                         textAlign: TextAlign.right,
                         style: TextStyle(
                           fontSize: 11,
@@ -763,9 +886,12 @@ class _MovimentacaoSection extends StatelessWidget {
 
             // Linhas
             ...List.generate(movimentacoes.length, (i) {
-              final m = movimentacoes[i];
-              final preco = m.precoUnitario ?? 0;
-              final total = preco * m.quantidade;
+              final m   = movimentacoes[i];
+              final pu  = (m.precoUnitario != null && m.precoUnitario! > 0) ? m.precoUnitario! : null;
+              final pm2 = (m.precoM2       != null && m.precoM2!       > 0) ? m.precoM2!       : null;
+              // Total usa o preço efetivo (pu tem prioridade; fallback pm2)
+              final precoEfetivo = pu ?? pm2 ?? 0.0;
+              final total = precoEfetivo * m.quantidade;
               final qtdStr = m.quantidade % 1 == 0
                   ? m.quantidade.toStringAsFixed(0)
                   : m.quantidade.toStringAsFixed(2);
@@ -801,6 +927,17 @@ class _MovimentacaoSection extends StatelessWidget {
                                       color: AppTheme.textSecondary),
                                   overflow: TextOverflow.ellipsis,
                                 ),
+                              if (m.descricaoItem != null &&
+                                  m.descricaoItem!.isNotEmpty)
+                                Text(
+                                  m.descricaoItem!,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               if (m.observacao != null &&
                                   m.observacao!.isNotEmpty)
                                 Text(
@@ -826,12 +963,22 @@ class _MovimentacaoSection extends StatelessWidget {
                                 color: AppTheme.textPrimary),
                           ),
                         ),
-                        // Preço (só em saídas)
+                        // Preço — colunas separadas Unit. | M² | Total
                         if (mostrarPreco) ...[
                           SizedBox(
-                            width: 100,
+                            width: 90,
                             child: Text(
-                              _brl(preco),
+                              pu != null ? _brl(pu) : '—',
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  color: AppTheme.textSecondary),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 90,
+                            child: Text(
+                              pm2 != null ? _brl(pm2) : '—',
                               textAlign: TextAlign.right,
                               style: const TextStyle(
                                   fontSize: 13,
@@ -889,11 +1036,12 @@ class _MovimentacaoSection extends StatelessWidget {
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      _brl(movimentacoes.fold(
-                        0,
-                        (acc, m) =>
-                            acc + (m.precoUnitario ?? 0) * m.quantidade,
-                      )),
+                      _brl(movimentacoes.fold(0.0, (acc, m) {
+                        final pu = m.precoUnitario ?? 0.0;
+                        final pm = m.precoM2 ?? 0.0;
+                        final p  = pu > 0 ? pu : (pm > 0 ? pm : 0.0);
+                        return acc + p * m.quantidade;
+                      })),
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,

@@ -56,4 +56,17 @@ class RelatorioOSProvider extends ChangeNotifier {
     _selecionado = null;
     notifyListeners();
   }
+
+  Future<bool> reverterOS(String numeroOS) async {
+    try {
+      await _repo.reverterOS(numeroOS);
+      _selecionado = null;
+      await carregar();
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      notifyListeners();
+      return false;
+    }
+  }
 }

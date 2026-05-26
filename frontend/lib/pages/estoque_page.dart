@@ -310,6 +310,114 @@ class _EstoquePageState extends State<EstoquePage> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DIALOG DE SELEÇÃO DE STATUS PARA EXPORTAR PDF
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ExportarPdfDialog extends StatefulWidget {
+  const _ExportarPdfDialog();
+
+  @override
+  State<_ExportarPdfDialog> createState() => _ExportarPdfDialogState();
+}
+
+class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
+  String _statusSelecionado = 'TODOS';
+
+  static const _opcoes = [
+    ('TODOS',   'Todos os status',   Icons.list_alt,          AppTheme.primary),
+    ('OK',      'OK',                Icons.check_circle,       Color(0xFF15803D)),
+    ('LIMITE',  'Limite',            Icons.warning_amber,      Color(0xFFD97706)),
+    ('CRITICO', 'Crítico',           Icons.error_outline,      Color(0xFFDC2626)),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.picture_as_pdf, color: AppTheme.primary, size: 22),
+          SizedBox(width: 10),
+          Text('Exportar PDF de Estoque'),
+        ],
+      ),
+      content: SizedBox(
+        width: 320,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Selecione quais materiais deseja incluir no relatório:',
+              style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            ..._opcoes.map((opcao) {
+              final (valor, label, icone, cor) = opcao;
+              final selecionado = _statusSelecionado == valor;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => setState(() => _statusSelecionado = valor),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                    decoration: BoxDecoration(
+                      color: selecionado
+                          ? cor.withValues(alpha: 0.10)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: selecionado
+                            ? cor
+                            : AppTheme.textHint.withValues(alpha: 0.25),
+                        width: selecionado ? 1.5 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(icone, size: 18, color: selecionado ? cor : AppTheme.textSecondary),
+                        const SizedBox(width: 10),
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: selecionado ? FontWeight.w700 : FontWeight.w400,
+                            color: selecionado ? cor : AppTheme.textPrimary,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (selecionado)
+                          Icon(Icons.check, size: 16, color: cor),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(null),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton.icon(
+          onPressed: () => Navigator.of(context).pop(_statusSelecionado),
+          icon: const Icon(Icons.download, size: 16),
+          label: const Text('Exportar'),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PÁGINA DE MATERIAIS POR CATEGORIA
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -510,31 +618,63 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   }
 
   Future<void> _exportarPdf() async {
+    // ── 1. Pedir ao usuário qual status deseja exportar ─────────────────────
+    final statusEscolhido = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        return const _ExportarPdfDialog();
+      },
+    );
+    if (statusEscolhido == null) return; // cancelou
+
+    // ── 2. Mostrar progresso ────────────────────────────────────────────────
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Gerando PDF…'),
-        duration: Duration(seconds: 2),
+        duration: Duration(seconds: 3),
         backgroundColor: AppTheme.primary,
       ),
     );
+
     final String? catParam = widget.categoriaId == _kCategoriaGeral
         ? null
         : widget.categoriaId == _kCategoriaSemCategoria
             ? ''
             : widget.categoriaId;
+
+    // 'TODOS' → não passa status (backend interpreta como sem filtro)
+    final String? statusParam =
+        statusEscolhido == 'TODOS' ? null : statusEscolhido;
+
     try {
-      final bytes    = await EstoqueRepository().baixarPdf(categoria: catParam);
+      final bytes = await EstoqueRepository().baixarPdf(
+        categoria: catParam,
+        status:    statusParam,
+      );
+
+      // Valida que a resposta é realmente um PDF
+      if (bytes.length < 4 ||
+          bytes[0] != 0x25 || bytes[1] != 0x50 ||
+          bytes[2] != 0x44 || bytes[3] != 0x46) {
+        throw Exception('O servidor não retornou um PDF válido. Verifique o console do backend.');
+      }
+
       final catLabel = widget.categoriaId == _kCategoriaGeral
           ? 'GERAL'
           : widget.categoriaId == _kCategoriaSemCategoria
               ? 'SEM_CATEGORIA'
               : widget.categoriaId.toUpperCase().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      final fileName = 'estoque_$catLabel.pdf';
-      final dir      = await getTemporaryDirectory();
-      final file     = File('${dir.path}${Platform.pathSeparator}$fileName');
+      final stLabel  = statusParam ?? 'TODOS';
+      final fileName = 'estoque_${catLabel}_$stLabel.pdf';
+
+      final dir  = await getTemporaryDirectory();
+      final file = File('${dir.path}${Platform.pathSeparator}$fileName');
       await file.writeAsBytes(bytes, flush: true);
+
       if (Platform.isWindows) {
-        await Process.run('explorer', [file.path]);
+        // 'start' abre com o programa padrão associado ao .pdf no Windows
+        await Process.run('cmd', ['/c', 'start', '', file.path]);
       } else if (Platform.isMacOS) {
         await Process.run('open', [file.path]);
       } else {
@@ -543,7 +683,10 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao gerar PDF: $e'), backgroundColor: AppTheme.error),
+        SnackBar(
+          content: Text('Erro ao gerar PDF: $e'),
+          backgroundColor: AppTheme.error,
+        ),
       );
     }
   }
@@ -738,7 +881,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   child: TextField(
                     controller: _identificadorCtrl,
                     decoration: const InputDecoration(
-                      hintText:   'Marca...',
+                      hintText:   'Identificador...',
                       prefixIcon: Icon(Icons.qr_code, color: AppTheme.textHint, size: 18),
                       isDense:    true,
                     ),
@@ -1259,17 +1402,17 @@ class _TabelaMateriais extends StatelessWidget {
   final void Function(MaterialModel) onEditar;
   final void Function(MaterialModel) onVerFornecedores;
   final void Function(MaterialModel) onVerHistoricoPrecos;
-
+ 
   const _TabelaMateriais({
     required this.materiais,
     required this.onEditar,
     required this.onVerFornecedores,
     required this.onVerHistoricoPrecos,
   });
-
+ 
   static const List<_ColDef> _cols = [
     _ColDef(label: 'ID',             fixed: 56),
-    _ColDef(label: 'Marca',  flex: 0.7),
+    _ColDef(label: 'Identificador',          flex: 0.7),
     _ColDef(label: 'Material',       flex: 2.0),
     _ColDef(label: 'Categoria',      flex: 1.0),
     _ColDef(label: 'Unidade',        flex: 0.9),
@@ -1277,13 +1420,13 @@ class _TabelaMateriais extends StatelessWidget {
     _ColDef(label: 'Espessura',      flex: 0.7),
     _ColDef(label: 'Estoque atual',  flex: 0.6),
     _ColDef(label: 'Estoque mínimo', flex: 0.6),
-    _ColDef(label: 'Valor Intermediário',          flex: 0.9),
-    _ColDef(label: 'Valor m² Intermediário',       flex: 0.9),
-    _ColDef(label: 'Custo (Últimas compras)',          flex: 0.9),
-    _ColDef(label: 'Custo m² (Últimas compras)',       flex: 0.9),
+    _ColDef(label: 'Valor Intermediário',       flex: 0.9),
+    _ColDef(label: 'Valor m² Intermediário',    flex: 0.9),
+    _ColDef(label: 'Custo (Últimas compras)',   flex: 0.9),
+    _ColDef(label: 'Custo m² (Últimas compras)',flex: 0.9),
     _ColDef(label: 'Status',         flex: 0.8),
   ];
-
+ 
   Widget _cabecalho() => Container(
         color: AppTheme.surfaceVariant,
         child: Row(
@@ -1307,22 +1450,22 @@ class _TabelaMateriais extends StatelessWidget {
           ],
         ),
       );
-
+ 
   static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
       ? SizedBox(width: col.fixed, child: child)
       : Expanded(flex: (col.flex! * 10).round(), child: child);
-
+ 
   @override
   Widget build(BuildContext context) {
-    final confirmados = materiais.where((m) => m.estoqueConfirmado).toList();
+    final confirmados = materiais.where((m) =>  m.estoqueConfirmado).toList();
     final naoConfirm  = materiais.where((m) => !m.estoqueConfirmado).toList();
-
+ 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
         _SectionHeader(
-          icon: Icons.pending_outlined,
+          icon:  Icons.pending_outlined,
           label: 'Aguardando confirmação de estoque',
           count: naoConfirm.length,
           color: AppTheme.warning,
@@ -1344,11 +1487,11 @@ class _TabelaMateriais extends StatelessWidget {
           ],
           const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
         ],
-
+ 
         const SizedBox(height: 24),
-
+ 
         _SectionHeader(
-          icon: Icons.verified_outlined,
+          icon:  Icons.verified_outlined,
           label: 'Estoque confirmado',
           count: confirmados.length,
           color: AppTheme.success,
@@ -1388,7 +1531,7 @@ class _LinhaMateria extends StatefulWidget {
   final void Function(MaterialModel) onEditar;
   final void Function(MaterialModel) onVerFornecedores;
   final void Function(MaterialModel) onVerHistoricoPrecos;
-
+ 
   const _LinhaMateria({
     required this.material,
     required this.cols,
@@ -1396,27 +1539,27 @@ class _LinhaMateria extends StatefulWidget {
     required this.onVerFornecedores,
     required this.onVerHistoricoPrecos,
   });
-
+ 
   @override
   State<_LinhaMateria> createState() => _LinhaMateriaState();
 }
-
+ 
 class _LinhaMateriaState extends State<_LinhaMateria> {
-  bool _hovered = false;
-
+  bool _hovered  = false;
+  bool _expandido = false; // apenas para materiais específicos
+ 
   void _onHover(PointerHoverEvent _) {
     if (!_hovered) setState(() => _hovered = true);
   }
-
+ 
   void _onExit(PointerExitEvent _) {
     if (_hovered) setState(() => _hovered = false);
   }
-
-
+ 
   static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
       ? SizedBox(width: col.fixed, child: child)
       : Expanded(flex: (col.flex! * 10).round(), child: child);
-
+ 
   static Widget _cell(String text, {bool inativo = false}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         child: Text(
@@ -1428,33 +1571,76 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
           ),
         ),
       );
-
-  @override
-  Widget build(BuildContext context) {
+ 
+  // ── Linha principal (pai) ──────────────────────────────────────────────────
+  Widget _buildLinhaRaiz(BuildContext context) {
     final m       = widget.material;
     final inativo = !m.ativo;
     final cols    = widget.cols;
-
+ 
     final bgColor = _hovered
         ? const Color(0xFFFF9800).withValues(alpha: 0.10)
         : inativo
             ? AppTheme.surfaceVariant.withValues(alpha: 0.4)
             : AppTheme.surface;
-
+ 
     Widget maybeOpacity(Widget child) =>
         inativo ? Opacity(opacity: 0.45, child: child) : child;
-
-    Widget valorCell(double? valor, bool temFornecedores) =>
-        _ValorCell(
+ 
+    Widget valorCell(double? valor, bool temFornecedores) => _ValorCell(
           valor: valor,
           temFornecedores: temFornecedores,
           onTap: () => widget.onVerFornecedores(m),
         );
-
+ 
+    // Coluna de "Estoque atual" para material específico:
+    // mostra a soma dos filhos + botão de seta para expandir/recolher
+    Widget estoqueAtualCell() {
+      if (m.especifico) {
+        final total = m.quantidadeTotal;
+        final label = total.toStringAsFixed(total % 1 == 0 ? 0 : 2);
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+              ),
+              const SizedBox(width: 4),
+              // Seta clicável separada para expandir/recolher
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _expandido = !_expandido),
+                child: Tooltip(
+                  message: _expandido ? 'Recolher variações' : 'Expandir variações',
+                  child: AnimatedRotation(
+                    turns: _expandido ? 0.5 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: const Icon(
+                      Icons.expand_more,
+                      size: 18,
+                      color: Color(0xFFE85D04),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+      return maybeOpacity(_cell(
+        m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2),
+        inativo: inativo,
+      ));
+    }
+ 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onHover: _onHover,
-      onExit: _onExit,
+      onExit:  _onExit,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => widget.onEditar(m),
@@ -1465,6 +1651,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                // ID
                 _colWrap(cols[0], maybeOpacity(Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
@@ -1479,62 +1666,92 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                   ),
                 ))),
                 _vDivider(),
+ 
+                // Identificador
                 _colWrap(cols[1], maybeOpacity(_cell(m.identificador ?? '—', inativo: inativo))),
                 _vDivider(),
+ 
+                // Nome
                 _colWrap(cols[2], maybeOpacity(Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                  child: Text(
-                    m.nome,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                      color: inativo ? AppTheme.textHint : AppTheme.textPrimary,
-                      decoration: inativo ? TextDecoration.lineThrough : null,
-                    ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          m.nome,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: inativo ? AppTheme.textHint : AppTheme.textPrimary,
+                            decoration: inativo ? TextDecoration.lineThrough : null,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ))),
                 _vDivider(),
+ 
+                // Categoria
                 _colWrap(cols[3], maybeOpacity(_cell(m.categoria ?? '—', inativo: inativo))),
                 _vDivider(),
+ 
+                // Unidade
                 _colWrap(cols[4], maybeOpacity(_cell(m.unidade ?? '—', inativo: inativo))),
                 _vDivider(),
+ 
+                // Medida
                 _colWrap(cols[5], maybeOpacity(_cell(m.medida ?? '—', inativo: inativo))),
                 _vDivider(),
+ 
+                // Espessura
                 _colWrap(cols[6], maybeOpacity(_cell(m.espessura ?? '—', inativo: inativo))),
                 _vDivider(),
-                _colWrap(cols[7], maybeOpacity(_cell(
-                  m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2),
-                  inativo: inativo,
-                ))),
+ 
+                // Estoque atual (com lógica especial para específico)
+                _colWrap(cols[7], estoqueAtualCell()),
                 _vDivider(),
+ 
+                // Estoque mínimo
                 _colWrap(cols[8], maybeOpacity(_cell(
                   m.estoqueMinimo.toStringAsFixed(m.estoqueMinimo % 1 == 0 ? 0 : 2),
                   inativo: inativo,
                 ))),
                 _vDivider(),
+ 
+                // Valor intermediário
                 _colWrap(cols[9], maybeOpacity(valorCell(
                   m.precoMediano,
                   m.fornecedorMateriais.isNotEmpty,
                 ))),
                 _vDivider(),
+ 
+                // Valor m² intermediário
                 _colWrap(cols[10], maybeOpacity(valorCell(
                   m.precoM2Mediano,
                   m.fornecedorMateriais.isNotEmpty,
                 ))),
                 _vDivider(),
+ 
+                // Custo última compra
                 _colWrap(cols[11], maybeOpacity(_CustoCell(
-                  valor:      m.ultimoValorPago,
+                  valor:       m.ultimoValorPago,
                   temHistorico: true,
-                  onTap:      () => widget.onVerHistoricoPrecos(m),
+                  onTap:       () => widget.onVerHistoricoPrecos(m),
                 ))),
                 _vDivider(),
+ 
+                // Custo m² última compra
                 _colWrap(cols[12], maybeOpacity(_CustoCell(
-                  valor:      m.ultimoValorPagoM2,
+                  valor:       m.ultimoValorPagoM2,
                   temHistorico: true,
-                  onTap:      () => widget.onVerHistoricoPrecos(m),
+                  onTap:       () => widget.onVerHistoricoPrecos(m),
                 ))),
                 _vDivider(),
+ 
+                // Status
                 _colWrap(cols[13], maybeOpacity(Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
@@ -1548,10 +1765,264 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
       ),
     );
   }
+ 
+  @override
+  Widget build(BuildContext context) {
+    final m = widget.material;
+ 
+    if (!m.especifico) {
+      // Comportamento original para materiais não-específicos
+      return _buildLinhaRaiz(context);
+    }
+ 
+    // Material específico: linha pai + filhos expansíveis
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildLinhaRaiz(context),
+ 
+        // Painel de filhos
+        AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeInOut,
+          child: _expandido
+              ? Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE85D04).withValues(alpha: 0.03),
+                    border: Border(
+                      left: BorderSide(
+                        color: const Color(0xFFE85D04).withValues(alpha: 0.4),
+                        width: 3,
+                      ),
+                      bottom: const BorderSide(
+                        color: AppTheme.divider,
+                        width: 0.8,
+                      ),
+                    ),
+                  ),
+                  child: m.filhosEspecificos.isEmpty
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+                          child: Text(
+                            'Nenhum estoque registrado ainda. '
+                            'Finalize uma Ordem de Compra com este material para criar entradas.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.textHint,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        )
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Divider(height: 0, thickness: 0.5, color: AppTheme.divider),
+                            for (int i = 0; i < m.filhosEspecificos.length; i++) ...[
+                              if (i > 0)
+                                const Divider(
+                                  height: 0,
+                                  thickness: 0.5,
+                                  color: AppTheme.divider,
+                                ),
+                              _LinhaFilhoEspecifico(
+                                filho:                m.filhosEspecificos[i],
+                                pai:                  m,
+                                cols:                 _TabelaMateriais._cols,
+                                onVerHistoricoPrecos: widget.onVerHistoricoPrecos,
+                              ),
+                            ],
+                          ],
+                        ),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+ 
+  static Widget _vDivider() => const VerticalDivider(
+        width: 1, thickness: 0.5, color: AppTheme.divider,
+      );
+}
+
+class _LinhaFilhoEspecifico extends StatefulWidget {
+  final EstoqueEspecificoModel filho;
+  final MaterialModel pai;
+  final List<_ColDef> cols;
+  final void Function(MaterialModel) onVerHistoricoPrecos;
+ 
+  const _LinhaFilhoEspecifico({
+    required this.filho,
+    required this.pai,
+    required this.cols,
+    required this.onVerHistoricoPrecos,
+  });
+ 
+  @override
+  State<_LinhaFilhoEspecifico> createState() => _LinhaFilhoEspecificoState();
+}
+ 
+class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
+  bool _hovered = false;
+ 
+  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
+      ? SizedBox(width: col.fixed, child: child)
+      : Expanded(flex: (col.flex! * 10).round(), child: child);
 
   static Widget _vDivider() => const VerticalDivider(
         width: 1, thickness: 0.5, color: AppTheme.divider,
       );
+
+  static Widget _emptyCell() => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        child: SizedBox.shrink(),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final filho = widget.filho;
+    final pai   = widget.pai;
+    final cols  = widget.cols;
+
+    final qtd      = filho.quantidade;
+    final qtdLabel = qtd.toStringAsFixed(qtd % 1 == 0 ? 0 : 2);
+
+    final Color qtdColor = qtd <= 0
+        ? AppTheme.error
+        : qtd < 3
+            ? AppTheme.warning
+            : AppTheme.success;
+
+    final bgColor = _hovered
+        ? const Color(0xFFE85D04).withValues(alpha: 0.06)
+        : Colors.transparent;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,          // <-- cursor de mão
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: GestureDetector(                    // <-- clique → dialog
+        behavior: HitTestBehavior.opaque,
+        onTap: () async {
+          await showDialog<bool>(
+            context: context,
+            builder: (_) => _EditarFilhoEspecificoDialog(
+              filho: filho,
+              pai:   pai,
+            ),
+          );
+          // O provider já recarrega internamente ao salvar;
+          // não precisa de ação extra aqui.
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          color: bgColor,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 44),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // col[0]: ID — ícone de sub-item
+                _colWrap(cols[0], Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                  child: Center(
+                    child: Icon(
+                      Icons.subdirectory_arrow_right,
+                      size: 16,
+                      color: const Color(0xFFE85D04).withValues(alpha: 0.6),
+                    ),
+                  ),
+                )),
+                _vDivider(),
+
+                // col[1]: Identificador — vazio
+                _colWrap(cols[1], _emptyCell()),
+                _vDivider(),
+
+                // col[2]: Nome → descrição do filho + ícones de ação no hover
+                _colWrap(cols[2], Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          filho.descricao,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontStyle: FontStyle.italic,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+                _vDivider(),
+
+                // col[3–6]: vazios
+                _colWrap(cols[3], _emptyCell()),
+                _vDivider(),
+                _colWrap(cols[4], _emptyCell()),
+                _vDivider(),
+                _colWrap(cols[5], _emptyCell()),
+                _vDivider(),
+                _colWrap(cols[6], _emptyCell()),
+                _vDivider(),
+
+                // col[7]: Estoque atual do filho
+                _colWrap(cols[7], Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                  child: Center(
+                    child: Text(
+                      qtdLabel,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: qtdColor,
+                      ),
+                    ),
+                  ),
+                )),
+                _vDivider(),
+
+                // col[8]: Estoque mínimo — vazio
+                _colWrap(cols[8], _emptyCell()),
+                _vDivider(),
+
+                // col[9–10]: vazios
+                _colWrap(cols[9],  _emptyCell()),
+                _vDivider(),
+                _colWrap(cols[10], _emptyCell()),
+                _vDivider(),
+
+                // col[11]: Custo última compra do filho
+                _colWrap(cols[11], _CustoCell(
+                  valor:        filho.ultimoValorPago,
+                  temHistorico: filho.ultimoValorPago != null,
+                  onTap:        () => widget.onVerHistoricoPrecos(pai),
+                )),
+                _vDivider(),
+
+                // col[12]: Custo m² última compra do filho
+                _colWrap(cols[12], _CustoCell(
+                  valor:        filho.ultimoValorPagoM2,
+                  temHistorico: filho.ultimoValorPagoM2 != null,
+                  onTap:        () => widget.onVerHistoricoPrecos(pai),
+                )),
+                _vDivider(),
+
+                // col[13]: Status — vazio
+                _colWrap(cols[13], _emptyCell()),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ValorCell extends StatefulWidget {
@@ -1982,6 +2453,267 @@ class _FornecedorPrecoRow extends StatelessWidget {
   }
 }
 
+class _EditarFilhoEspecificoDialog extends StatefulWidget {
+  final EstoqueEspecificoModel filho;
+  final MaterialModel pai;
+
+  const _EditarFilhoEspecificoDialog({
+    required this.filho,
+    required this.pai,
+  });
+
+  @override
+  State<_EditarFilhoEspecificoDialog> createState() =>
+      _EditarFilhoEspecificoDialogState();
+}
+
+class _EditarFilhoEspecificoDialogState extends State<_EditarFilhoEspecificoDialog> {
+  late final TextEditingController _descCtrl;
+  late final TextEditingController _qtdCtrl;
+  bool _salvando   = false;
+  bool _excluindo  = false;
+  String? _erro;
+
+  @override
+  void initState() {
+    super.initState();
+    _descCtrl   = TextEditingController(text: widget.filho.descricao);
+    _qtdCtrl = TextEditingController(
+      text: widget.filho.quantidade.toStringAsFixed(
+        widget.filho.quantidade % 1 == 0 ? 0 : 2,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _descCtrl.dispose();
+    _qtdCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _salvar() async {
+    final novaDesc = _descCtrl.text.trim();
+    if (novaDesc.isEmpty) {
+      setState(() => _erro = 'A descrição não pode ser vazia.');
+      return;
+    }
+    setState(() { _salvando = true; _erro = null; });
+
+    final novaQtd = double.tryParse(_qtdCtrl.text.replaceAll(',', '.'));
+
+    final ok = await context.read<MaterialProvider>().atualizarFilhoEspecifico(
+      widget.pai.id,
+      widget.filho.id,
+      descricao:  novaDesc != widget.filho.descricao ? novaDesc : null,
+      quantidade: novaQtd,
+    );
+
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pop(true);
+    } else {
+      setState(() {
+        _salvando = false;
+        _erro = context.read<MaterialProvider>().erro ?? 'Erro ao salvar.';
+      });
+    }
+  }
+
+  Future<void> _excluir() async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir variação'),
+        content: Text(
+          'Tem certeza que deseja excluir a variação "${widget.filho.descricao}"?\n\n'
+          'O estoque desta variação (${widget.filho.quantidade.toStringAsFixed(widget.filho.quantidade % 1 == 0 ? 0 : 2)} '
+          '${widget.pai.unidade ?? ''}) será removido permanentemente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+    setState(() { _excluindo = true; _erro = null; });
+
+    final ok = await context.read<MaterialProvider>().excluirFilhoEspecifico(
+      widget.pai.id,
+      widget.filho.id,
+    );
+
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pop(true);
+    } else {
+      setState(() {
+        _excluindo = false;
+        _erro = context.read<MaterialProvider>().erro ?? 'Erro ao excluir.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pai = widget.pai;
+
+    return AlertDialog(
+      title: Row(
+        children: [
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Editar variação', style: TextStyle(fontSize: 16)),
+                Text(
+                  pai.nome,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.normal,
+                    color: AppTheme.textSecondary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Estoque atual (somente leitura) ───────────────────────────
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE85D04).withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: const Color(0xFFE85D04).withValues(alpha: 0.25),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.inventory_2_outlined,
+                      size: 16, color: Color(0xFFE85D04)),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Estoque atual: ',
+                    style: TextStyle(
+                        fontSize: 13, color: AppTheme.textSecondary),
+                  ),
+                  Text(
+                    () {
+                      final q = widget.filho.quantidade;
+                      return '${q.toStringAsFixed(q % 1 == 0 ? 0 : 2)} ${pai.unidade ?? ''}';
+                    }(),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFFE85D04),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Quantidade em estoque',
+              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _qtdCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [_DecimalInputFormatter()],
+              decoration: InputDecoration(
+                hintText: '0',
+                isDense:  true,
+                suffixText: widget.pai.unidade ?? '',
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // ── Descrição ──────────────────────────────────────────────────
+            const Text(
+              'Descrição / nome da variação',
+              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _descCtrl,
+              autofocus:  true,
+              decoration: const InputDecoration(
+                hintText: 'Ex: Tinta Branca Fosca 18L',
+                isDense:  true,
+              ),
+              onSubmitted: (_) => _salvar(),
+            ),
+            const SizedBox(height: 16),
+
+            if (_erro != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _erro!,
+                style: const TextStyle(
+                    fontSize: 12, color: AppTheme.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        // Botão excluir (esquerda)
+        TextButton.icon(
+          onPressed: (_salvando || _excluindo) ? null : _excluir,
+          icon: _excluindo
+              ? const SizedBox(
+                  width: 14, height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.error),
+                )
+              : const Icon(Icons.delete_outline, size: 16, color: AppTheme.error),
+          label: const Text('Excluir', style: TextStyle(color: AppTheme.error)),
+        ),
+        const Spacer(),
+        TextButton(
+          onPressed: (_salvando || _excluindo) ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton.icon(
+          onPressed: (_salvando || _excluindo) ? null : _salvar,
+          icon: _salvando
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.save_outlined, size: 16),
+          label: const Text('Salvar'),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFE85D04),
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _MaterialFormDialog extends StatefulWidget {
   final MaterialModel? material;
   final void Function(MaterialModel)? onDesativar;
@@ -2136,7 +2868,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 TextFormField(
                   controller: _identificador,
                   decoration: const InputDecoration(
-                    labelText: 'Marca',
+                    labelText: 'Identificador',
                   ),
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [_UpperCaseFormatter()],
@@ -2419,18 +3151,20 @@ class _CustoCellState extends State<_CustoCell> {
                     padding: EdgeInsets.only(right: 0),
                   ),
                 Flexible(
-                  child: Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: showHover
-                      ? AppTheme.primary
-                      : hasValue
-                          ? AppTheme.textPrimary
-                          : AppTheme.textHint,
-                      fontWeight: hasValue ? FontWeight.w500 : FontWeight.normal,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: showHover
+                        ? AppTheme.primary
+                        : hasValue
+                            ? AppTheme.textPrimary
+                            : AppTheme.textHint,
+                        fontWeight: hasValue ? FontWeight.w500 : FontWeight.normal,
+                      ),
                     ),
                   ),
                 ),
@@ -2477,21 +3211,25 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
   Widget build(BuildContext context) {
     final m = widget.material;
     final ultimoHistorico = _historico.isNotEmpty ? _historico.first : null;
-    final ultimoUsarM2 = ultimoHistorico?.usarM2 ?? false;
-    final temCusto   = !ultimoUsarM2 && m.ultimoValorPago   != null && m.ultimoValorPago!   > 0;
-    final temCustoM2 =  ultimoUsarM2 && m.ultimoValorPagoM2 != null && m.ultimoValorPagoM2! > 0;
+    final ultimoUsarM2    = ultimoHistorico?.usarM2 ?? false;
+    // Usa o valor do próprio registro de histórico (já ordenado por criadoEm desc),
+    // evitando depender de material.ultimoValorPago que pode ficar desatualizado.
+    final ultimoCusto   = ultimoHistorico?.precoUnitario;
+    final ultimoCustoM2 = ultimoHistorico?.precoM2;
+    final temCusto   = !ultimoUsarM2 && ultimoCusto   != null && ultimoCusto   > 0;
+    final temCustoM2 =  ultimoUsarM2 && ultimoCustoM2 != null && ultimoCustoM2 > 0;
 
     return AlertDialog(
       backgroundColor: AppTheme.surface,
       title: Row(
         children: [
-          const Icon(Icons.history, size: 20, color: Color(0xFF9C27B0)),
+          const Icon(Icons.history, size: 20, color: Color(0xFFE85D04)),
           const SizedBox(width: 8),
           Expanded(child: Text('Histórico de Compras — ${m.nome}')),
         ],
       ),
       content: SizedBox(
-        width: 580,
+        width: 700,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2502,13 +3240,13 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF9C27B0).withValues(alpha: 0.06),
+                  color: const Color(0xFFE85D04).withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF9C27B0).withValues(alpha: 0.2)),
+                  border: Border.all(color: const Color(0xFFE85D04).withValues(alpha: 0.2)),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.payments_outlined, size: 16, color: Color(0xFF9C27B0)),
+                    const Icon(Icons.payments_outlined, size: 16, color: Color(0xFFE85D04)),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Wrap(
@@ -2529,9 +3267,9 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                     style: TextStyle(color: AppTheme.textSecondary),
                                   ),
                                   TextSpan(
-                                    text: 'R\$ ${m.ultimoValorPago!.toStringAsFixed(2)}',
+                                    text: 'R\$ ${ultimoCusto.toStringAsFixed(2)}',
                                     style: const TextStyle(
-                                      color: Color(0xFF9C27B0),
+                                      color: Color(0xFFE85D04),
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
@@ -2548,9 +3286,9 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                     style: TextStyle(color: AppTheme.textSecondary),
                                   ),
                                   TextSpan(
-                                    text: 'R\$ ${m.ultimoValorPagoM2!.toStringAsFixed(2)}',
+                                    text: 'R\$ ${ultimoCustoM2.toStringAsFixed(2)}',
                                     style: const TextStyle(
-                                      color: Color(0xFF9C27B0),
+                                      color: Color(0xFFE85D04),
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
@@ -2579,7 +3317,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                     ),
                   ),
                   SizedBox(
-                    width: 100,
+                    width: 80,
                     child: Text(
                       'OC #',
                       textAlign: TextAlign.center,
@@ -2588,7 +3326,16 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                     ),
                   ),
                   SizedBox(
-                    width: 100,
+                    width: 70,
+                    child: Text(
+                      'Qtd',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                          color: AppTheme.textSecondary),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 90,
                     child: Text(
                       'Custo unit.',
                       textAlign: TextAlign.right,
@@ -2597,7 +3344,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                     ),
                   ),
                   SizedBox(
-                    width: 100,
+                    width: 90,
                     child: Text(
                       'Custo m²',
                       textAlign: TextAlign.right,
@@ -2607,6 +3354,15 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                   ),
                   SizedBox(
                     width: 90,
+                    child: Text(
+                      'Total',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                          color: AppTheme.textSecondary),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 80,
                     child: Text(
                       'Data',
                       textAlign: TextAlign.right,
@@ -2620,7 +3376,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
             if (_carregando)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 32),
-                child: Center(child: CircularProgressIndicator(color: Color(0xFF9C27B0))),
+                child: Center(child: CircularProgressIndicator(color: Color(0xFFE85D04))),
               )
             else if (_erro != null)
               Padding(
@@ -2662,7 +3418,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
                             decoration: isUltimo
                                 ? BoxDecoration(
-                                    color: const Color(0xFF9C27B0).withValues(alpha: 0.05),
+                                    color: const Color(0xFFE85D04).withValues(alpha: 0.05),
                                     borderRadius: BorderRadius.circular(6),
                                   )
                                 : null,
@@ -2676,7 +3432,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                         const Tooltip(
                                           message: 'Custo atual (mais recente)',
                                           child: Icon(Icons.radio_button_checked,
-                                              size: 13, color: Color(0xFF9C27B0)),
+                                              size: 13, color: Color(0xFFE85D04)),
                                         ),
                                         const SizedBox(width: 4),
                                       ],
@@ -2699,7 +3455,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                   ),
                                 ),
                                 SizedBox(
-                                  width: 100,
+                                  width: 80,
                                   child: Text(
                                     h.ordemCompraId != null ? '#${h.ordemCompraId}' : '—',
                                     textAlign: TextAlign.center,
@@ -2708,7 +3464,22 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                   ),
                                 ),
                                 SizedBox(
-                                  width: 100,
+                                  width: 70,
+                                  child: Text(
+                                    h.quantidade.toStringAsFixed(
+                                        h.quantidade % 1 == 0 ? 0 : 2),
+                                    textAlign: TextAlign.right,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: isUltimo ? FontWeight.w700 : FontWeight.normal,
+                                      color: isUltimo
+                                          ? AppTheme.textPrimary
+                                          : AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 90,
                                   child: Text(
                                     !h.usarM2 && h.precoUnitario > 0
                                         ? 'R\$ ${h.precoUnitario.toStringAsFixed(2)}'
@@ -2720,13 +3491,13 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                           ? FontWeight.w700
                                           : FontWeight.normal,
                                       color: isUltimo
-                                          ? const Color(0xFF9C27B0)
+                                          ? const Color(0xFFE85D04)
                                           : AppTheme.textPrimary,
                                     ),
                                   ),
                                 ),
                                 SizedBox(
-                                  width: 100,
+                                  width: 90,
                                   child: Text(
                                     h.usarM2 && h.precoM2 != null && h.precoM2! > 0
                                         ? 'R\$ ${h.precoM2!.toStringAsFixed(2)}'
@@ -2735,7 +3506,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                     style: TextStyle(
                                       fontSize: 13,
                                       color: isUltimo
-                                          ? const Color(0xFF9C27B0)
+                                          ? const Color(0xFFE85D04)
                                           : AppTheme.textPrimary,
                                       fontWeight: isUltimo
                                           ? FontWeight.w700
@@ -2745,6 +3516,20 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                 ),
                                 SizedBox(
                                   width: 90,
+                                  child: Text(
+                                    'R\$ ${h.total.toStringAsFixed(2)}',
+                                    textAlign: TextAlign.right,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: isUltimo ? FontWeight.w700 : FontWeight.normal,
+                                      color: isUltimo
+                                          ? const Color(0xFFE85D04)
+                                          : AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 80,
                                   child: Text(
                                     dataStr,
                                     textAlign: TextAlign.right,

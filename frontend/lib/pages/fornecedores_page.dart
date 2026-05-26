@@ -1776,7 +1776,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                       child: TextFormField(
                         controller: _materialIdentificadorCtrl,
                         decoration: InputDecoration(
-                          labelText: 'Marca',
+                          labelText: 'Identificador',
                           isDense: true,
                           prefixIcon: const Icon(
                             Icons.qr_code_outlined,
@@ -1871,7 +1871,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                       itemCount: _sugestoes.length,
                       itemBuilder: (_, i) {
                         final m = _sugestoes[i];
-                        final identificador = m['Marca'] as String?;
+                        final identificador = m['Identificador'] as String?;
                         final medida    = m['medida']    as String?;
                         final espessura = m['espessura'] as String?;
                         final detalhe = [
@@ -2647,7 +2647,7 @@ class _VincularPorMaterialDialogState
                         child: TextField(
                           controller: _materialIdentificadorCtrl,
                           decoration: InputDecoration(
-                            labelText: 'Marca',
+                            labelText: 'Identificador',
                             isDense: true,
                             prefixIcon: const Icon(Icons.qr_code_outlined,
                                 size: 16, color: AppTheme.textHint),

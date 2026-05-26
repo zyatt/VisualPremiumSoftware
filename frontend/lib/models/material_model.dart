@@ -1,3 +1,40 @@
+// ── Filho de estoque específico ───────────────────────────────────────────────
+// Representa uma variação de um material específico (ex: "Tinta Branca Fosca 18L")
+// com sua própria quantidade em estoque.
+class EstoqueEspecificoModel {
+  final int id;
+  final int materialId;
+  final String descricao;
+  final double quantidade;
+  final double? ultimoValorPago;
+  final double? ultimoValorPagoM2;
+
+  EstoqueEspecificoModel({
+    required this.id,
+    required this.materialId,
+    required this.descricao,
+    required this.quantidade,
+    this.ultimoValorPago,
+    this.ultimoValorPagoM2,
+  });
+
+  factory EstoqueEspecificoModel.fromJson(Map<String, dynamic> json) =>
+      EstoqueEspecificoModel(
+        id:                (json['id'] as num?)?.toInt() ?? 0,
+        materialId:        (json['materialId'] as num?)?.toInt() ?? 0,
+        descricao:         json['descricao'] ?? '',
+        quantidade:        double.tryParse(json['quantidade'].toString()) ?? 0,
+        ultimoValorPago:   json['ultimoValorPago'] != null
+            ? double.tryParse(json['ultimoValorPago'].toString())
+            : null,
+        ultimoValorPagoM2: json['ultimoValorPagoM2'] != null
+            ? double.tryParse(json['ultimoValorPagoM2'].toString())
+            : null,
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 class HistoricoPrecoModel {
   final int id;
   final int materialId;
@@ -7,10 +44,14 @@ class HistoricoPrecoModel {
   final double precoUnitario;
   final double? precoM2;
   final double quantidade;
-  final bool usarM2; 
+  final bool usarM2;
   final DateTime criadoEm;
-
   final DateTime? dataOrdem;
+
+  double get total {
+    if (usarM2 && precoM2 != null && precoM2! > 0) return quantidade * precoM2!;
+    return quantidade * precoUnitario;
+  }
 
   HistoricoPrecoModel({
     required this.id,
@@ -38,7 +79,7 @@ class HistoricoPrecoModel {
             ? double.tryParse(json['precoM2'].toString())
             : null,
         quantidade: double.tryParse(json['quantidade'].toString()) ?? 0,
-        usarM2: json['usarM2'] ?? false,
+        usarM2:     json['usarM2'] ?? false,
         criadoEm:   DateTime.parse(json['criadoEm']),
         dataOrdem:  json['ordemCompra']?['data'] != null
             ? DateTime.tryParse(json['ordemCompra']['data'].toString())
@@ -92,15 +133,16 @@ class MaterialModel {
   final bool especifico;
 
   final double? ultimoValorPago;
-
   final double? ultimoValorPagoM2;
-
   final double? precoMediano;
   final double? precoM2Mediano;
 
   final List<FornecedorMaterialModel> fornecedorMateriais;
-
   final List<HistoricoPrecoModel> historicoPrecos;
+
+  /// Filhos de estoque (somente populado quando [especifico] == true).
+  /// Cada item representa uma variação comprada com sua própria quantidade.
+  final List<EstoqueEspecificoModel> filhosEspecificos;
 
   MaterialModel({
     required this.id,
@@ -124,10 +166,17 @@ class MaterialModel {
     this.precoM2Mediano,
     this.fornecedorMateriais = const [],
     this.historicoPrecos = const [],
+    this.filhosEspecificos = const [],
   });
 
+  /// Soma das quantidades dos filhos específicos.
+  /// Para materiais não-específicos retorna [quantidade] normalmente.
+  double get quantidadeTotal {
+    if (!especifico) return quantidade;
+    return filhosEspecificos.fold(0.0, (acc, f) => acc + f.quantidade);
+  }
+
   factory MaterialModel.fromJson(Map<String, dynamic> json) {
-    // Helper para parsing seguro de números que podem vir como null, string vazia, ou número
     double? parseDoubleOrNull(dynamic value) {
       if (value == null) return null;
       if (value is num) return value.toDouble();
@@ -161,6 +210,10 @@ class MaterialModel {
           .toList(),
       historicoPrecos: (json['historicoPrecos'] as List? ?? [])
           .map((h) => HistoricoPrecoModel.fromJson(h as Map<String, dynamic>))
+          .toList(),
+      // ▼ NOVO
+      filhosEspecificos: (json['estoquesEspecificos'] as List? ?? [])
+          .map((e) => EstoqueEspecificoModel.fromJson(e as Map<String, dynamic>))
           .toList(),
     );
   }

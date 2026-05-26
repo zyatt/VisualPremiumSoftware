@@ -43,6 +43,19 @@ const listarHistoricoPrecos = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+const atualizarFilhoEspecifico = async (req, res, next) => {
+  try {
+    res.json(await svc.atualizarFilhoEspecifico(+req.params.id, +req.params.filhoId, req.body));
+  } catch (e) { next(e); }
+};
+
+const excluirFilhoEspecifico = async (req, res, next) => {
+  try {
+    await svc.excluirFilhoEspecifico(+req.params.id, +req.params.filhoId);
+    res.status(204).send();
+  } catch (e) { next(e); }
+};
+
 module.exports = {
   listar,
   buscarPorId,
@@ -54,4 +67,6 @@ module.exports = {
   confirmarEstoque,
   listarCategorias,
   listarHistoricoPrecos,
+  atualizarFilhoEspecifico,
+  excluirFilhoEspecifico,
 };

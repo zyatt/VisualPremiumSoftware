@@ -1,6 +1,6 @@
-const PDFDocument = require('pdfkit');
-const prisma      = require('../utils/prisma');
-const path        = require('path');
+const PDFDocument  = require('pdfkit');
+const prisma       = require('../utils/prisma');
+const path         = require('path');
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value ?? 0);
@@ -50,15 +50,15 @@ function hline(doc, y, color = C.divider, lw = 0.5) {
 
 function statusLabel(status) {
   switch (status) {
-    case 'OK':      return { text: 'OK',      color: C.statusOk };
-    case 'LIMITE':  return { text: 'LIMITE',  color: C.statusLim };
-    case 'CRITICO': return { text: 'CRÍTICO', color: C.statusErr };
-    case 'INATIVO': return { text: 'INATIVO', color: C.lightGray };
-    default:        return { text: status,    color: C.gray };
+    case 'OK':      return { text: 'OK',      color: C.statusOk,  bg: '#DCFCE7' };
+    case 'LIMITE':  return { text: 'LIMITE',  color: C.statusLim, bg: '#DBEAFE' };
+    case 'CRITICO': return { text: 'CRÍTICO', color: C.statusErr, bg: '#FEE2E2' };
+    case 'INATIVO': return { text: 'INATIVO', color: C.lightGray, bg: '#F3F4F6' };
+    default:        return { text: status,    color: C.gray,      bg: '#F3F4F6' };
   }
 }
 
-function drawPageHeader(doc, categoria, logoPath) {
+function drawPageHeader(doc, categoria, status, logoPath) {
   const H = 70;
 
   fillRect(doc, 0, 0, PAGE_W, H, C.white);
@@ -107,7 +107,9 @@ function drawPageHeader(doc, categoria, logoPath) {
   doc.font('Helvetica-Bold').fontSize(7.5).fillColor(C.gray)
      .text('RELATÓRIO DE ESTOQUE', titleX, 14, { width: titleW, align: 'right', lineBreak: false });
 
-  const label = categoria && categoria !== 'TODAS' ? categoria : 'TODOS OS MATERIAIS';
+  const catLabel    = categoria && categoria !== 'TODAS' ? categoria : 'TODOS OS MATERIAIS';
+  const statusSufx  = (status && status !== 'TODOS') ? ` · ${status.toUpperCase()}` : '';
+  const label = `${catLabel}${statusSufx}`;
   doc.font('Helvetica-Bold').fontSize(11).fillColor(C.black)
      .text(label, titleX, 28, { width: titleW, align: 'right', lineBreak: false });
 
@@ -157,7 +159,7 @@ function drawMateriaisTable(doc, materiais, startY) {
   // Todas as colunas do sistema — total deve somar CONTENT_W (781.89)
   const cols = [
     { key: 'id',            label: 'ID',              w: 32,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'identificador', label: 'IDENT.',           w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
+    { key: 'identificador', label: 'MARCA',           w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'nome',          label: 'MATERIAL',        w: 120, hAlign: 'left',   cAlign: 'left',   pad: 4 },
     { key: 'unidade',       label: 'UNIDADE',         w: 42,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'medida',        label: 'MEDIDA',          w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
@@ -266,10 +268,7 @@ function drawMateriaisTable(doc, materiais, startY) {
 
     // Quantidade atual
     const c7 = get(cols[7]);
-    const qtdColor = mat.status === 'CRITICO' ? C.statusErr
-                   : mat.status === 'LIMITE'  ? C.statusLim
-                   : C.black;
-    doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(qtdColor)
+    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(formatNumber(mat.quantidade), c7.x, tySingle, { width: c7.w, align: 'center', lineBreak: false });
 
     // Valor intermediário (preço mediano)
@@ -301,7 +300,9 @@ function drawMateriaisTable(doc, materiais, startY) {
     const st = statusLabel(mat.status);
     const badgeH = 12;
     const badgeY = tySingle - 1;
-    doc.font('Helvetica-Bold').fontSize(5.5).fillColor(C.black)
+    const badgePadX = 3;
+    fillRect(doc, cols[12].x + badgePadX, badgeY, cols[12].w - badgePadX * 2, badgeH, st.bg);
+    doc.font('Helvetica-Bold').fontSize(5.5).fillColor(st.color)
        .text(st.text, c12.x + 2, badgeY + 3, { width: c12.w - 4, align: 'center', lineBreak: false });
 
     drawColDividers(y, rowH);
@@ -324,10 +325,14 @@ function drawFooter(doc, pageNum, pageTotal) {
 }
 
 const estoquePdfService = {
-  async gerarPdf(categoria) {
+  async gerarPdf(categoria, status = 'TODOS') {
     const where = { ativo: true };
     if (categoria && categoria !== 'TODAS') {
       where.categoria = { equals: categoria, mode: 'insensitive' };
+    }
+    const statusValidos = ['OK', 'LIMITE', 'CRITICO'];
+    if (status && status !== 'TODOS' && statusValidos.includes(status.toUpperCase())) {
+      where.status = status.toUpperCase();
     }
 
     const materiais = await prisma.material.findMany({
@@ -381,48 +386,103 @@ const estoquePdfService = {
       critico: materiaisEnriquecidos.filter((m) => m.status === 'CRITICO').length,
     };
 
-    return new Promise((resolve, reject) => {
-      // A4 Landscape
-      const doc    = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0, bufferPages: true });
-      const chunks = [];
+    const logoPath = path.join(__dirname, '../../../frontend/assets/images/logoPreta.png');
 
-      doc.on('data',  (chunk) => chunks.push(chunk));
-      doc.on('end',   () => resolve(Buffer.concat(chunks)));
-      doc.on('error', reject);
+    const statusLabel2 = (status && status !== 'TODOS') ? ` — ${status.toUpperCase()}` : '';
+    const label = categoria && categoria !== 'TODAS'
+      ? `Materiais — ${categoria}${statusLabel2} (${materiaisEnriquecidos.length})`
+      : `Todos os Materiais${statusLabel2} (${materiaisEnriquecidos.length})`;
 
-      const logoPath = path.join(__dirname, '../../../frontend/assets/images/logoPreta.png');
+    // ── Geração do PDF ───────────────────────────────────────────────────────
+    // Estratégia: gerar duas vezes.
+    //   1ª passagem (descartada): conta o total de páginas via evento 'pageAdded'.
+    //   2ª passagem (real): gera o PDF já sabendo o total, escreve footer correto.
+    // Isso evita bufferPages:true, que retém todos os chunks e não os emite via
+    // 'data' / pipe enquanto o documento está sendo construído (retorna 4 bytes).
 
-      drawPageHeader(doc, categoria, logoPath);
-      let y = 84;
+    function gerarDocumento(totalPaginas) {
+      return new Promise((resolve, reject) => {
+        const doc    = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0 });
+        const chunks = [];
+        let   pageNum = 1;
 
-      drawSectionHeader(doc, y, `Resumo do Estoque`);
-      y += 24;
-      y = drawSummaryBox(doc, y, totais);
-      y += 14;
+        doc.on('data',  (chunk) => chunks.push(chunk));
+        doc.on('end',   () => resolve(Buffer.concat(chunks)));
+        doc.on('error', reject);
 
-      const label = categoria && categoria !== 'TODAS'
-        ? `Materiais — ${categoria} (${materiaisEnriquecidos.length})`
-        : `Todos os Materiais (${materiaisEnriquecidos.length})`;
+        // A cada nova página adicionada: desenha o footer da página ANTERIOR
+        // (que já está fechada) e incrementa o contador.
+        doc.on('pageAdded', () => {
+          // Neste momento a página anterior ainda é a "ativa" — não: o PDFKit
+          // já mudou para a nova. Desenhamos o footer na nova página num segundo
+          // passo. Mais simples: incrementamos aqui e desenhamos antes do addPage.
+        });
 
-      drawSectionHeader(doc, y, label);
-      y += 24;
+        const desenharConteudo = () => {
+          drawPageHeader(doc, categoria, status, logoPath);
+          let y = 84;
 
+          drawSectionHeader(doc, y, 'Resumo do Estoque'); y += 24;
+          y = drawSummaryBox(doc, y, totais);             y += 14;
+          drawSectionHeader(doc, y, label);               y += 24;
+
+          if (materiaisEnriquecidos.length === 0) {
+            doc.font('Helvetica').fontSize(9).fillColor(C.gray)
+               .text('Nenhum material encontrado.', MARGIN, y, { width: CONTENT_W, align: 'center' });
+          } else {
+            drawMateriaisTable(doc, materiaisEnriquecidos, y);
+          }
+        };
+
+        if (totalPaginas === null) {
+          // 1ª passagem: conta páginas
+          doc.on('pageAdded', () => pageNum++);
+          desenharConteudo();
+          doc.end();
+        } else {
+          // 2ª passagem: gera com footers corretos
+          // Interceptamos addPage para desenhar footer na página que está sendo
+          // "virada" antes de abrir a próxima.
+          const origAddPage = doc.addPage.bind(doc);
+          doc.addPage = (...args) => {
+            drawFooter(doc, pageNum, totalPaginas);
+            pageNum++;
+            return origAddPage(...args);
+          };
+
+          desenharConteudo();
+          drawFooter(doc, pageNum, totalPaginas); // footer da última página
+          doc.end();
+        }
+      });
+    }
+
+    // 1ª passagem: descobre total de páginas
+    const bufCount = [];
+    const totalPaginas = await new Promise((resolve, reject) => {
+      const d = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0 });
+      let count = 1;
+      d.on('data',      () => {});
+      d.on('pageAdded', () => count++);
+      d.on('end',       () => resolve(count));
+      d.on('error',     reject);
+
+      drawPageHeader(d, categoria, status, logoPath);
+      let y2 = 84;
+      drawSectionHeader(d, y2, 'Resumo do Estoque'); y2 += 24;
+      y2 = drawSummaryBox(d, y2, totais);             y2 += 14;
+      drawSectionHeader(d, y2, label);               y2 += 24;
       if (materiaisEnriquecidos.length === 0) {
-        doc.font('Helvetica').fontSize(9).fillColor(C.gray)
-           .text('Nenhum material encontrado para esta categoria.', MARGIN, y,
-                 { width: CONTENT_W, align: 'center' });
+        d.font('Helvetica').fontSize(9).fillColor(C.gray)
+         .text('Nenhum material encontrado.', MARGIN, y2, { width: CONTENT_W, align: 'center' });
       } else {
-        drawMateriaisTable(doc, materiaisEnriquecidos, y);
+        drawMateriaisTable(d, materiaisEnriquecidos, y2);
       }
-
-      const range = doc.bufferedPageRange();
-      for (let i = 0; i < range.count; i++) {
-        doc.switchToPage(range.start + i);
-        drawFooter(doc, i + 1, range.count);
-      }
-
-      doc.end();
+      d.end();
     });
+
+    // 2ª passagem: gera o PDF real com footers
+    return gerarDocumento(totalPaginas);
   },
 };
 

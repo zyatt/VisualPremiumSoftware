@@ -16,5 +16,7 @@ router.patch('/:id/desativar',           authMiddleware, roleMiddleware(ESCRITA)
 router.patch('/:id/reativar',            authMiddleware, roleMiddleware(ESCRITA),  ctrl.reativar);
 router.patch('/:id/confirmar',           authMiddleware, roleMiddleware(ESCRITA),  ctrl.confirmarEstoque);
 router.delete('/:id',                    authMiddleware, roleMiddleware(EXCLUSAO), ctrl.excluir);
+router.patch('/:id/especificos/:filhoId', authMiddleware, roleMiddleware(ESCRITA),  ctrl.atualizarFilhoEspecifico);
+router.delete('/:id/especificos/:filhoId', authMiddleware, roleMiddleware(ESCRITA),  ctrl.excluirFilhoEspecifico);
 
 module.exports = router;

@@ -53,6 +53,18 @@ CREATE TABLE "materiais" (
 );
 
 -- CreateTable
+CREATE TABLE "estoque_especificos" (
+    "id" SERIAL NOT NULL,
+    "materialId" INTEGER NOT NULL,
+    "descricao" TEXT NOT NULL,
+    "quantidade" DECIMAL(10,3) NOT NULL DEFAULT 0,
+    "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "atualizadoEm" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "estoque_especificos_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "historico_precos_material" (
     "id" SERIAL NOT NULL,
     "materialId" INTEGER NOT NULL,
@@ -172,6 +184,7 @@ CREATE TABLE "relacoes_os" (
     "id" SERIAL NOT NULL,
     "numeroOS" TEXT NOT NULL,
     "descricao" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'EM_ANDAMENTO',
     "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "atualizadoEm" TIMESTAMP(3) NOT NULL,
 
@@ -203,6 +216,9 @@ CREATE UNIQUE INDEX "usuarios_username_key" ON "usuarios"("username");
 CREATE UNIQUE INDEX "materiais_nome_medida_espessura_key" ON "materiais"("nome", "medida", "espessura");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "estoque_especificos_materialId_descricao_key" ON "estoque_especificos"("materialId", "descricao");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "fornecedores_cnpj_key" ON "fornecedores"("cnpj");
 
 -- CreateIndex
@@ -210,6 +226,9 @@ CREATE UNIQUE INDEX "fornecedor_materiais_fornecedorId_materialId_key" ON "forne
 
 -- CreateIndex
 CREATE UNIQUE INDEX "relacoes_os_numeroOS_key" ON "relacoes_os"("numeroOS");
+
+-- AddForeignKey
+ALTER TABLE "estoque_especificos" ADD CONSTRAINT "estoque_especificos_materialId_fkey" FOREIGN KEY ("materialId") REFERENCES "materiais"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "historico_precos_material" ADD CONSTRAINT "historico_precos_material_materialId_fkey" FOREIGN KEY ("materialId") REFERENCES "materiais"("id") ON DELETE CASCADE ON UPDATE CASCADE;

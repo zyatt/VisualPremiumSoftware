@@ -13,6 +13,14 @@ class EstoqueProvider extends ChangeNotifier {
   List<RelacaoOSModel> _relacoesOS = [];
   List<RelacaoOSModel> get relacoesOS => _relacoesOS;
 
+  /// Retorna o conjunto de números de OS que já foram fechadas no controle
+  /// de estoque. Usado para bloquear a finalização de OCs que referenciam
+  /// essas OS.
+  Set<String> get numerosOSFechadas => _relacoesOS
+      .where((r) => r.estaFechada)
+      .map((r) => r.numeroOS)
+      .toSet();
+
   RelacaoOSModel? _relacaoSelecionada;
   RelacaoOSModel? get relacaoSelecionada => _relacaoSelecionada;
 
@@ -33,7 +41,7 @@ class EstoqueProvider extends ChangeNotifier {
     _erro = null;
     notifyListeners();
     try {
-      _relacoesOS = await _repo.listarRelacoesOS(busca: busca);
+      _relacoesOS = await _repo.listarTodasRelacoesOS(busca: busca);
     } catch (e) {
       _erro = _mensagemErro(e);
     } finally {
@@ -69,6 +77,7 @@ class EstoqueProvider extends ChangeNotifier {
     double? precoM2,
     String? observacao,
     int? ordemCompraId,
+    String? descricaoItem,
   }) async {
     try {
       await _repo.registrarMovimentacao(
@@ -80,6 +89,7 @@ class EstoqueProvider extends ChangeNotifier {
         precoM2:       precoM2,
         observacao:    observacao,
         ordemCompraId: ordemCompraId,
+        descricaoItem: descricaoItem,
       );
       await carregarRelacoesOS();
       return true;
@@ -111,9 +121,11 @@ class EstoqueProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> excluirRelacaoOS(String numeroOS) async {
+  /// Usa o [relacaoOSId] numérico — OS textuais podem ter múltiplas relações
+  /// com o mesmo numeroOS, então o id garante a relação correta.
+  Future<bool> excluirRelacaoOS(int relacaoOSId) async {
     try {
-      await _repo.excluirRelacaoOS(numeroOS);
+      await _repo.excluirRelacaoOS(relacaoOSId);
       _relacaoSelecionada = null;
       await carregarRelacoesOS();
       notifyListeners();
@@ -127,11 +139,11 @@ class EstoqueProvider extends ChangeNotifier {
 
   /// Fecha a OS: muda status para FECHADA no backend e remove da lista
   /// de controle de estoque. A OS passa a aparecer só na página de relatórios.
-  Future<bool> fecharOS(String numeroOS) async {
+  Future<bool> fecharOS(int relacaoOSId) async {
     _fechandoOS = true;
     notifyListeners();
     try {
-      await _repo.fecharOS(numeroOS);
+      await _repo.fecharOS(relacaoOSId);
       _relacaoSelecionada = null;
       await carregarRelacoesOS();
       notifyListeners();
@@ -143,6 +155,22 @@ class EstoqueProvider extends ChangeNotifier {
     } finally {
       _fechandoOS = false;
       notifyListeners();
+    }
+  }
+
+  /// Reverte a OS fechada: muda status para EM_ANDAMENTO no backend.
+  /// A OS volta ao controle de estoque e some da página de relatórios.
+  Future<bool> reverterOS(String numeroOS) async {
+    try {
+      await _repo.reverterOS(numeroOS);
+      _relacaoSelecionada = null;
+      await carregarRelacoesOS();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      notifyListeners();
+      return false;
     }
   }
 }

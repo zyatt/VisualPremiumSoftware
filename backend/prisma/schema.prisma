@@ -62,7 +62,7 @@ model Material {
   status          StatusEstoque @default(OK)
   estoqueConfirmado Boolean     @default(false)
   ativo           Boolean       @default(true)
-  especifico      Boolean       @default(false)   // quando true, o material exige descrição personalizada na OC
+  especifico      Boolean       @default(false)   // quando true, o estoque é gerenciado por filhos (EstoqueEspecifico)
 
   // Último valor de custo pago (atualizado ao finalizar uma OC)
   ultimoValorPago   Decimal?    @db.Decimal(10, 2)
@@ -78,17 +78,39 @@ model Material {
   movimentacoes        MovimentacaoEstoque[]
   orcamentoItens       OrcamentoItem[]
   historicoPrecos      HistoricoPrecoMaterial[]
+  // ▼ NOVO: filhos de estoque específico
+  estoquesEspecificos  EstoqueEspecifico[]
 
   @@unique([nome, medida, espessura])
   @@map("materiais")
 }
 
 // ============================================================
+// ESTOQUE DE MATERIAIS ESPECÍFICOS  ← NOVO
+// ============================================================
+// Cada linha representa uma variação comprada de um material específico.
+// A chave de negócio é (materialId, descricao): compras diferentes
+// com a mesma descrição acumulam quantidade na mesma linha.
+
+model EstoqueEspecifico {
+  id          Int      @id @default(autoincrement())
+  materialId  Int
+  descricao   String   // ex: "Tinta Branca Fosca 18L"
+  quantidade  Decimal  @default(0) @db.Decimal(10, 3)
+  criadoEm    DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+  ultimoValorPago   Decimal? @db.Decimal(10, 4)
+  ultimoValorPagoM2 Decimal? @db.Decimal(10, 4)
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([materialId, descricao])
+  @@map("estoque_especificos")
+}
+
+// ============================================================
 // HISTÓRICO DE PREÇOS DE CUSTO
 // ============================================================
 
-// Registra cada valor de custo pago por material ao finalizar uma OC.
-// Permite rastrear evolução de preços e qual fornecedor vendeu por qual valor.
 model HistoricoPrecoMaterial {
   id              Int      @id @default(autoincrement())
   materialId      Int
@@ -137,7 +159,7 @@ model FornecedorMaterial {
   id               Int       @id @default(autoincrement())
   fornecedorId     Int
   materialId       Int
-  preco            Decimal?  @db.Decimal(10, 2) // valor chapa
+  preco            Decimal?  @db.Decimal(10, 2)
   precoMetroQuadrado Decimal? @db.Decimal(10, 2)
   ativo            Boolean   @default(true)
   criadoEm         DateTime  @default(now())
@@ -177,9 +199,9 @@ model OrcamentoItem {
   id              Int      @id @default(autoincrement())
   orcamentoId     Int
   materialId      Int
-  fornecedorId    Int?     // fornecedor selecionado para este item
+  fornecedorId    Int?
   quantidade      Decimal  @default(1) @db.Decimal(10, 3)
-  precoUnitario   Decimal? @db.Decimal(10, 2) // preço no momento do orçamento
+  precoUnitario   Decimal? @db.Decimal(10, 2)
   criadoEm        DateTime @default(now())
 
   orcamento  Orcamento  @relation(fields: [orcamentoId], references: [id], onDelete: Cascade)
@@ -200,14 +222,14 @@ enum StatusOrdemCompra {
 }
 
 model OrdemCompra {
-  id              Int               @id @default(autoincrement()) // número da OC
+  id              Int               @id @default(autoincrement())
   data            DateTime          @default(now())
   fornecedorId    Int
   requisitante    String
   formaPagamento  String?
   prazoPagamento  String?
   observacoes     String?
-  empresa         String?           // para escolha de logo no PDF
+  empresa         String?
   status          StatusOrdemCompra @default(EM_ANDAMENTO)
   usuarioId       Int?
   orcamentoId     Int?
@@ -227,11 +249,10 @@ model OrdemCompra {
   @@map("ordens_compra")
 }
 
-// Números de OS vinculados a uma Ordem de Compra (1 OC -> N OS)
 model OrdemCompraOS {
   id            Int    @id @default(autoincrement())
   ordemCompraId Int
-  numeroOS      String // pode ser número ou palavra
+  numeroOS      String
 
   ordemCompra OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
 
@@ -242,12 +263,12 @@ model OrdemCompraItem {
   id              Int      @id @default(autoincrement())
   ordemCompraId   Int
   materialId      Int
-  descricaoItem   String?  // descrição personalizada do item na OC (ex: "Tinta Branca Fosca 18L"); não afeta o estoque
-  numeroOS        String   // obrigatório: vincular item a uma OS
+  descricaoItem   String?  // descrição personalizada; obrigatória quando material.especifico = true
+  numeroOS        String
   quantidade      Decimal  @db.Decimal(10, 3)
   precoUnitario   Decimal  @db.Decimal(10, 2)
   precoMetroQuadrado Decimal? @db.Decimal(10, 2)
-  usarM2          Boolean  @default(false)     // se true, precoTotal = qtd * precoMetroQuadrado
+  usarM2          Boolean  @default(false)
   precoTotal      Decimal  @db.Decimal(10, 2)
   criadoEm        DateTime @default(now())
 
@@ -266,12 +287,10 @@ enum TipoMovimentacao {
   SAIDA
 }
 
-// Relação/agrupador por número de OS
 model RelacaoOS {
   id           Int      @id @default(autoincrement())
   numeroOS     String   @unique
   descricao    String?
-  // 'EM_ANDAMENTO' | 'FECHADA'
   status       String   @default("EM_ANDAMENTO")
   criadoEm     DateTime @default(now())
   atualizadoEm DateTime @updatedAt
@@ -286,13 +305,13 @@ model MovimentacaoEstoque {
   materialId      Int
   tipo            String
   quantidade      Decimal          @db.Decimal(10, 3)
-  numeroOS        String           // referência ao numeroOS da RelacaoOS
+  numeroOS        String
   relacaoOSId     Int
-  ordemCompraId   Int?             // preenchido quando origem é uma OC finalizada
+  ordemCompraId   Int?
   precoUnitario   Decimal?         @db.Decimal(10, 2)
   precoM2         Decimal?
   observacao      String?
-  descricaoItem  String?
+  descricaoItem   String?          // preenchido quando material.especifico = true
   
   criadoEm        DateTime         @default(now())
   material    Material     @relation(fields: [materialId], references: [id])

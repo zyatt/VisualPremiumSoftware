@@ -82,4 +82,26 @@ class MaterialRepository {
         .map((e) => HistoricoPrecoModel.fromJson(e as Map<String, dynamic>))
         .toList();
   }
+
+  Future<void> excluirFilhoEspecifico(int materialId, int filhoId) async {
+    await ApiClient.delete('/materiais/$materialId/especificos/$filhoId');
+  }
+
+ Future<EstoqueEspecificoModel> atualizarFilhoEspecifico(
+    int materialId,
+    int filhoId, {
+    String? descricao,
+    double? ultimoValorPago,
+    double? ultimoValorPagoM2,
+    double? quantidade,           // ← NOVO
+  }) async {
+    final body = <String, dynamic>{};
+    if (descricao != null)         body['descricao']         = descricao;
+    if (ultimoValorPago != null)   body['ultimoValorPago']   = ultimoValorPago;
+    if (ultimoValorPagoM2 != null) body['ultimoValorPagoM2'] = ultimoValorPagoM2;
+    if (quantidade != null)        body['quantidade']        = quantidade;  // ← NOVO
+
+    final data = await ApiClient.patch('/materiais/$materialId/especificos/$filhoId', body);
+    return EstoqueEspecificoModel.fromJson(data);
+  }
 }

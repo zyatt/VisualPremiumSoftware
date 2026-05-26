@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../models/ordem_compra_model.dart';
 import '../models/fornecedor_model.dart';
 import '../providers/ordem_compra_provider.dart';
+import '../providers/estoque_provider.dart';
 import '../providers/fornecedor_provider.dart';
 import '../repositories/ordem_compra_repository.dart';
 import '../theme/app_theme.dart';
@@ -37,6 +38,10 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final provider = context.read<OrdemCompraProvider>();
       await provider.carregar();
+      // Garante que o status das OS está atualizado para o bloqueio de finalização
+      if (mounted) {
+        await context.read<EstoqueProvider>().carregarRelacoesOS();
+      }
       if (!mounted) return;
 
       // Se veio do orçamento com um ID de OC, abre os detalhes automaticamente
@@ -261,27 +266,88 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
     }
   }
 
+  /// Exibe dialog de bloqueio quando uma ou mais OS da OC já estão fechadas.
+  void _mostrarDialogOSFechada(BuildContext context, List<String> osBloqueadas) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(children: [
+          Icon(Icons.lock_outline, color: AppTheme.error, size: 22),
+          SizedBox(width: 8),
+          Text('OS Fechada', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w700)),
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Não é possível finalizar esta OC porque ${osBloqueadas.length == 1 ? 'a seguinte OS já foi fechada' : 'as seguintes OS já foram fechadas'} no controle de estoque:',
+              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: osBloqueadas.map((os) => Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.error.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppTheme.error.withValues(alpha: 0.4)),
+                ),
+                child: Text(os, style: const TextStyle(color: AppTheme.error, fontWeight: FontWeight.w700, fontSize: 13)),
+              )).toList(),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Para prosseguir, reabra essa OS no controle de estoque antes de finalizar a OC.',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _confirmarFinalizar(
       BuildContext context, OrdemCompraProvider provider, int id) {
-        final ordem = provider.emAndamento.firstWhere(
-    (o) {
-      final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
-      return m.id == id;
-    },
-    orElse: () => null,
-  );
-  if (ordem != null) {
-    final model = ordem is OrdemCompraModel ? ordem : OrdemCompraModel.fromJson(ordem as Map<String, dynamic>);
-    if (model.itens.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Não é possível finalizar uma OC sem itens.'),
-          backgroundColor: AppTheme.error,
-        ),
-      );
-      return;
+    final ordem = provider.emAndamento.firstWhere(
+      (o) {
+        final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
+        return m.id == id;
+      },
+      orElse: () => null,
+    );
+    if (ordem != null) {
+      final model = ordem is OrdemCompraModel ? ordem : OrdemCompraModel.fromJson(ordem as Map<String, dynamic>);
+      if (model.itens.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Não é possível finalizar uma OC sem itens.'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+        return;
+      }
+
+      // ── Verifica OS fechadas ──────────────────────────────────────────────
+      final osFechadas = context.read<EstoqueProvider>().numerosOSFechadas;
+      final osBloqueadas = model.numerosOS
+          .where((os) => osFechadas.contains(os))
+          .toList();
+      if (osBloqueadas.isNotEmpty) {
+        _mostrarDialogOSFechada(context, osBloqueadas);
+        return;
+      }
+      // ─────────────────────────────────────────────────────────────────────
     }
-  }
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -803,6 +869,64 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
   }
 
   Future<void> _confirmarFinalizar() async {
+    // ── Verifica OS fechadas antes de abrir o diálogo de confirmação ─────────
+    final osFechadas = context.read<EstoqueProvider>().numerosOSFechadas;
+    final osBloqueadas = _ordem.numerosOS
+        .where((os) => osFechadas.contains(os))
+        .toList();
+    if (osBloqueadas.isNotEmpty) {
+      if (!mounted) return;
+      showDialog(
+        // ignore: use_build_context_synchronously
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Row(children: [
+            Icon(Icons.lock_outline, color: AppTheme.error, size: 22),
+            SizedBox(width: 8),
+            Text('OS Fechada', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w700)),
+          ]),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Não é possível finalizar esta OC porque ${osBloqueadas.length == 1 ? 'a seguinte OS já foi fechada' : 'as seguintes OS já foram fechadas'} no controle de estoque:',
+                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: osBloqueadas.map((os) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.error.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: AppTheme.error.withValues(alpha: 0.4)),
+                  ),
+                  child: Text(os, style: const TextStyle(color: AppTheme.error, fontWeight: FontWeight.w700, fontSize: 13)),
+                )).toList(),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Para prosseguir, reabra essa OS no controle de estoque antes de finalizar a OC.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              ),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+              child: const Text('Entendido'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1330,6 +1454,29 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         return;
       }
     }
+    for (final item in _itens) {
+      if (item.usarM2) {
+        if (item.precoMetroQuadrado == null || item.precoMetroQuadrado! <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Preencha o preço m² de todos os itens.'),
+              backgroundColor: AppTheme.error,
+            ),
+          );
+          return;
+        }
+      } else {
+        if (item.precoUnitario <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Preencha o preço unitário de todos os itens.'),
+              backgroundColor: AppTheme.error,
+            ),
+          );
+          return;
+        }
+      }
+    }
     setState(() => _salvando = true);
     try {
       await context.read<OrdemCompraProvider>().atualizar(widget.ordem.id, {
@@ -1346,8 +1493,8 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           'descricaoItem': i.descricaoItem,
           'numeroOS': i.numeroOS,
           'quantidade': i.quantidade,
-          'precoUnitario': i.precoUnitario,
-          'precoMetroQuadrado': i.precoMetroQuadrado,
+          'precoUnitario': i.usarM2 ? null : i.precoUnitario,
+          'precoMetroQuadrado': i.usarM2 ? i.precoMetroQuadrado : null,
           'usarM2': i.usarM2,
         }).toList(),
       });
@@ -1789,6 +1936,19 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         return;
       }
     }
+    for (final item in _itens) {
+      if (item.usarM2) {
+        if (item.precoMetroQuadrado == null || item.precoMetroQuadrado! <= 0) {
+          _showErro('Preencha o preço m² de todos os itens.');
+          return;
+        }
+      } else {
+        if (item.precoUnitario <= 0) {
+          _showErro('Preencha o preço unitário de todos os itens.');
+          return;
+        }
+      }
+    }
 
     setState(() => _salvando = true);
     try {
@@ -1813,8 +1973,8 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                   'descricaoItem': i.descricaoItem,
                   'numeroOS': i.numeroOS,
                   'quantidade': i.quantidade,
-                  'precoUnitario': i.precoUnitario,
-                  'precoMetroQuadrado': i.precoMetroQuadrado,
+                  'precoUnitario': i.usarM2 ? null : i.precoUnitario,
+                  'precoMetroQuadrado': i.usarM2 ? i.precoMetroQuadrado : null,
                   'usarM2': i.usarM2,
                 })
             .toList(),
@@ -2818,7 +2978,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
             const SizedBox(height: 4),
             TextFormField(
               controller: _descricaoCtrl,
-              decoration: _deco('Ex: Tinta Branca Fosca 18L (opcional)'),
+              decoration: _deco('Descrição do material...'),
               onChanged: (v) {
                 widget.item.descricaoItem = v.trim().isEmpty ? null : v.trim();
                 widget.onChanged();

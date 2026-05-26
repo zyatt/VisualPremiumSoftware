@@ -19,9 +19,6 @@ function _throwDuplicado(medida, espessura) {
   };
 }
 
-/**
- * Normaliza valores de preço: converte 0 para null (ausência de informação)
- */
 function _normalizarPreco(valor) {
   if (valor == null) return null;
   const num = Number(valor);
@@ -45,14 +42,14 @@ async function listar(filtros = {}) {
     }
   }
   if (identificador) where.identificador = { contains: identificador, mode: 'insensitive' };
-  if (medida) where.medida = { contains: medida, mode: 'insensitive' };
-  if (espessura) where.espessura = { contains: espessura, mode: 'insensitive' };
+  if (medida)        where.medida        = { contains: medida,        mode: 'insensitive' };
+  if (espessura)     where.espessura     = { contains: espessura,     mode: 'insensitive' };
   if (semCategoria === 'true') {
     where.categoria = null;
   } else if (categoria) {
     where.categoria = { contains: categoria, mode: 'insensitive' };
   }
-  if (status) where.status = status;
+  if (status)              where.status = status;
   if (comFornecedor === 'true') {
     where.fornecedorMateriais = { some: { ativo: true } };
   }
@@ -64,9 +61,49 @@ async function listar(filtros = {}) {
         where: { ativo: true },
         include: { fornecedor: { select: { id: true, nomeFantasia: true } } },
       },
+      // ▼ NOVO: inclui filhos de estoque específico
+      estoquesEspecificos: {
+        orderBy: { descricao: 'asc' },
+      },
     },
     orderBy: [{ ativo: 'desc' }, { nome: 'asc' }],
   });
+
+  // Para materiais específicos, busca o último preço de ENTRADA por descricaoItem
+  const idsEspecificos = materiais.filter((m) => m.especifico).map((m) => m.id);
+  const ultimasMovimentacoes = idsEspecificos.length
+  ? await prisma.movimentacaoEstoque.findMany({
+      where: {
+        materialId:    { in: idsEspecificos },
+        tipo:          'ENTRADA',
+        descricaoItem: { not: null },
+        OR: [                          // ← era só precoUnitario: { not: null }
+          { precoUnitario: { not: null } },
+          { precoM2:       { not: null } },
+        ],
+      },
+      orderBy: { criadoEm: 'desc' },
+      select: {
+        materialId:    true,
+        descricaoItem: true,
+        precoUnitario: true,
+        precoM2:       true,
+      },
+    })
+  : [];
+
+  // Monta mapa: `${materialId}__${descricaoItem}` → { precoUnitario, precoM2 }
+  // Como está ordenado desc, o primeiro encontrado por chave é o mais recente
+  const precoFilhoMap = new Map();
+  for (const mov of ultimasMovimentacoes) {
+    const chave = `${mov.materialId}__${mov.descricaoItem}`;
+    if (!precoFilhoMap.has(chave)) {
+      precoFilhoMap.set(chave, {
+        ultimoValorPago:   mov.precoUnitario != null ? Number(mov.precoUnitario) : null,
+        ultimoValorPagoM2: mov.precoM2       != null ? Number(mov.precoM2)       : null,
+      });
+    }
+  }
 
   return materiais.map((m) => {
     const precos = m.fornecedorMateriais
@@ -85,14 +122,23 @@ async function listar(filtros = {}) {
       return arr.length % 2 !== 0 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
     };
 
-    // Normaliza custos: 0 vira null
-    const custoUltimaCompra = _normalizarPreco(m.ultimoValorPago);
+    const custoUltimaCompra   = _normalizarPreco(m.ultimoValorPago);
     const custoM2UltimaCompra = _normalizarPreco(m.ultimoValorPagoM2);
+
+    // Enriquece filhos específicos com o último custo de ENTRADA por descrição
+    const estoquesEspecificosEnriquecidos = m.especifico
+      ? m.estoquesEspecificos.map((filho) => {
+          const chave  = `${m.id}__${filho.descricao}`;
+          const precos = precoFilhoMap.get(chave) ?? { ultimoValorPago: null, ultimoValorPagoM2: null };
+          return { ...filho, ...precos };
+        })
+      : m.estoquesEspecificos;
 
     return {
       ...m,
-      precoMediano:        mediana(precos),
-      precoM2Mediano:      mediana(precosM2),
+      estoquesEspecificos:  estoquesEspecificosEnriquecidos,
+      precoMediano:         mediana(precos),
+      precoM2Mediano:       mediana(precosM2),
       custoUltimaCompra,
       custoM2UltimaCompra,
     };
@@ -100,7 +146,7 @@ async function listar(filtros = {}) {
 }
 
 async function buscarPorId(id) {
-  return prisma.material.findUnique({
+  let m = await prisma.material.findUnique({
     where: { id },
     include: {
       fornecedorMateriais: {
@@ -114,8 +160,59 @@ async function buscarPorId(id) {
           ordemCompra: { select: { id: true, data: true } },
         },
       },
+      // ▼ NOVO
+      estoquesEspecificos: {
+        orderBy: { descricao: 'asc' },
+      },
     },
   });
+
+  if (!m) return null;
+
+  // Enriquece filhos com o último preço de ENTRADA por descricaoItem
+  if (m.especifico && m.estoquesEspecificos?.length) {
+    const ultimasMovs = await prisma.movimentacaoEstoque.findMany({
+      where: {
+        materialId:    m.id,
+        tipo:          'ENTRADA',
+        descricaoItem: { not: null },
+        OR: [
+          { precoUnitario: { not: null } },
+          { precoM2:       { not: null } },
+        ],
+      },
+      orderBy: { criadoEm: 'desc' },
+      select: {
+        descricaoItem: true,
+        precoUnitario: true,
+        precoM2:       true,
+      },
+    });
+
+    const precoMap = new Map();
+    for (const mov of ultimasMovs) {
+      if (!precoMap.has(mov.descricaoItem)) {
+        precoMap.set(mov.descricaoItem, {
+          ultimoValorPago:   mov.precoUnitario != null ? Number(mov.precoUnitario) : null,
+          ultimoValorPagoM2: mov.precoM2       != null ? Number(mov.precoM2)       : null,
+        });
+      }
+    }
+
+    m = {
+      ...m,
+      estoquesEspecificos: m.estoquesEspecificos.map((filho) => ({
+        ...filho,
+        ...(precoMap.get(filho.descricao) ?? { ultimoValorPago: null, ultimoValorPagoM2: null }),
+      })),
+    };
+  }
+
+  return {
+    ...m,
+    custoUltimaCompra:   _normalizarPreco(m.ultimoValorPago),
+    custoM2UltimaCompra: _normalizarPreco(m.ultimoValorPagoM2),
+  };
 }
 
 async function criar(data) {
@@ -135,11 +232,10 @@ async function criar(data) {
 
   const status = calcularStatus(data.quantidade || 0, data.estoqueMinimo || 0, true);
   data.especifico = data.especifico === true;
-  
-  // Garante que campos de custo sejam null (não 0) ao criar
-  data.ultimoValorPago = _normalizarPreco(data.ultimoValorPago);
+
+  data.ultimoValorPago   = _normalizarPreco(data.ultimoValorPago);
   data.ultimoValorPagoM2 = _normalizarPreco(data.ultimoValorPagoM2);
-  
+
   try {
     return await prisma.material.create({ data: { ...data, status } });
   } catch (e) {
@@ -166,19 +262,18 @@ async function atualizar(id, data) {
 
   if (duplicado) _throwDuplicado(medidaTrimmed, espessuraTrimmed);
 
-  const quantidade    = data.quantidade   ?? atual.quantidade;
+  const quantidade    = data.quantidade    ?? atual.quantidade;
   const estoqueMinimo = data.estoqueMinimo ?? atual.estoqueMinimo;
-  const ativo         = data.ativo        ?? atual.ativo;
+  const ativo         = data.ativo         ?? atual.ativo;
   const status = calcularStatus(quantidade, estoqueMinimo, ativo);
-  
-  // Normaliza custos se fornecidos
+
   if (data.ultimoValorPago !== undefined) {
     data.ultimoValorPago = _normalizarPreco(data.ultimoValorPago);
   }
   if (data.ultimoValorPagoM2 !== undefined) {
     data.ultimoValorPagoM2 = _normalizarPreco(data.ultimoValorPagoM2);
   }
-  
+
   try {
     return await prisma.material.update({ where: { id }, data: { ...data, status } });
   } catch (e) {
@@ -249,13 +344,52 @@ async function listarCategorias() {
 
 async function listarHistoricoPrecos(materialId, limite = 50) {
   return prisma.historicoPrecoMaterial.findMany({
-    where: { materialId: Number(materialId) },
+    where:   { materialId: Number(materialId) },
     orderBy: { criadoEm: 'desc' },
-    take: limite,
+    take:    limite,
     include: {
       fornecedor:  { select: { id: true, nomeFantasia: true } },
       ordemCompra: { select: { id: true, data: true } },
     },
+  });
+}
+
+async function excluirFilhoEspecifico(materialId, filhoId) {
+  const filho = await prisma.estoqueEspecifico.findUnique({ where: { id: filhoId } });
+  if (!filho || filho.materialId !== materialId) {
+    throw { status: 404, message: 'Variação não encontrada' };
+  }
+  await prisma.estoqueEspecifico.delete({ where: { id: filhoId } });
+}
+
+async function atualizarFilhoEspecifico(materialId, filhoId, data) {
+  const filho = await prisma.estoqueEspecifico.findUnique({ where: { id: filhoId } });
+  if (!filho || filho.materialId !== materialId) {
+    throw { status: 404, message: 'Variação não encontrada' };
+  }
+
+  // Verifica duplicidade de descrição (se mudou)
+  const novaDesc = data.descricao?.trim();
+  if (novaDesc && novaDesc !== filho.descricao) {
+    const duplicado = await prisma.estoqueEspecifico.findUnique({
+      where: { materialId_descricao: { materialId, descricao: novaDesc } },
+    });
+    if (duplicado) throw { status: 409, message: `Já existe uma variação com a descrição "${novaDesc}"` };
+  }
+
+  const updateData = {};
+  if (novaDesc) updateData.descricao = novaDesc;
+    if (data.quantidade !== undefined) {
+    const novaQtd = Number(data.quantidade);
+    if (isNaN(novaQtd) || novaQtd < 0) {
+      throw { status: 400, message: 'Quantidade inválida' };
+    }
+    updateData.quantidade = novaQtd;
+  }
+
+  return prisma.estoqueEspecifico.update({
+    where: { id: filhoId },
+    data:  updateData,
   });
 }
 
@@ -271,4 +405,6 @@ module.exports = {
   confirmarEstoque,
   listarCategorias,
   listarHistoricoPrecos,
+  atualizarFilhoEspecifico,
+  excluirFilhoEspecifico,
 };

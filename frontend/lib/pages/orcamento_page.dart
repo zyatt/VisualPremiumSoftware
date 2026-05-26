@@ -45,7 +45,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
   // Campos de busca avançada de materiais
   final _searchIdCtrl     = TextEditingController();
   final _searchNomeCtrl   = TextEditingController();
-  final _searchMarcaCtrl  = TextEditingController();
+  final _searchIdentificadorCtrl = TextEditingController();
   final _searchMedidaCtrl = TextEditingController();
   final _searchEspCtrl    = TextEditingController();
   Timer? _debounceMatBusca;
@@ -67,7 +67,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
     _debounceMatBusca?.cancel();
     _searchIdCtrl.dispose();
     _searchNomeCtrl.dispose();
-    _searchMarcaCtrl.dispose();
+    _searchIdentificadorCtrl.dispose();
     _searchMedidaCtrl.dispose();
     _searchEspCtrl.dispose();
     super.dispose();
@@ -86,11 +86,11 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
   Future<void> _executarBuscaMateriais() async {
     final id     = _searchIdCtrl.text.trim();
     final nome   = _searchNomeCtrl.text.trim();
-    final marca  = _searchMarcaCtrl.text.trim();
+    final identificador = _searchIdentificadorCtrl.text.trim();
     final medida = _searchMedidaCtrl.text.trim();
     final esp    = _searchEspCtrl.text.trim();
 
-    final algumFiltro = id.isNotEmpty || nome.isNotEmpty || marca.isNotEmpty ||
+    final algumFiltro = id.isNotEmpty || nome.isNotEmpty || identificador.isNotEmpty ||
         medida.isNotEmpty || esp.isNotEmpty;
 
     if (!algumFiltro) {
@@ -110,7 +110,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       await context.read<MaterialProvider>().carregar(
         busca:         nome.isNotEmpty  ? nome  : '',
         id:            id.isNotEmpty    ? id    : '',
-        identificador: marca.isNotEmpty ? marca : '',
+        identificador: identificador.isNotEmpty ? identificador : '',
         medida:        medida.isNotEmpty ? medida : '',
         espessura:     esp.isNotEmpty   ? esp   : '',
       );
@@ -160,7 +160,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
     ));
     _searchIdCtrl.clear();
     _searchNomeCtrl.clear();
-    _searchMarcaCtrl.clear();
+    _searchIdentificadorCtrl.clear();
     _searchMedidaCtrl.clear();
     _searchEspCtrl.clear();
     setState(() {
@@ -1017,16 +1017,14 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                // Linha 2: Marca + Medida + Espessura + Limpar
                 Row(
                   children: [
-                    // Marca (identificador)
                     Expanded(
                       child: TextField(
-                        controller: _searchMarcaCtrl,
+                        controller: _searchIdentificadorCtrl,
                         decoration: const InputDecoration(
-                          labelText: 'Marca',
-                          prefixIcon: Icon(Icons.branding_watermark_outlined,
+                          labelText: 'Identificador',
+                          prefixIcon: Icon(Icons.qr_code_outlined,
                               size: 16, color: AppTheme.textHint),
                           isDense: true,
                         ),
@@ -1071,7 +1069,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
                       onPressed: () {
                         _searchIdCtrl.clear();
                         _searchNomeCtrl.clear();
-                        _searchMarcaCtrl.clear();
+                        _searchIdentificadorCtrl.clear();
                         _searchMedidaCtrl.clear();
                         _searchEspCtrl.clear();
                         setState(() {

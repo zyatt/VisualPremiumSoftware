@@ -59,8 +59,10 @@ async function dadosParaPDF(numeroOS) {
   const saidas = relacao.movimentacoes.filter((m) => m.tipo === 'SAIDA');
 
   const totalGeral = saidas.reduce((acc, m) => {
-    const preco = Number(m.precoUnitario || 0);
-    const qtd   = Number(m.quantidade);
+    const precoUnit = Number(m.precoUnitario || 0);
+    const precoM2   = Number(m.precoM2       || 0);
+    const preco     = precoUnit > 0 ? precoUnit : precoM2;
+    const qtd       = Number(m.quantidade);
     return acc + preco * qtd;
   }, 0);
 
@@ -70,18 +72,40 @@ async function dadosParaPDF(numeroOS) {
     status:    relacao.status,
     fechadaEm: relacao.atualizadoEm,
     geradoEm:  new Date(),
-    itens: saidas.map((m) => ({
-      material:      m.material.nome,
-      unidade:       m.material.unidade,
-      categoria:     m.material.categoria,
-      quantidade:    Number(m.quantidade),
-      precoUnitario: Number(m.precoUnitario || 0),
-      total:         Number(m.quantidade) * Number(m.precoUnitario || 0),
-      data:          m.criadoEm,
-      observacao:    m.observacao,
-    })),
+    itens: saidas.map((m) => {
+      const precoUnit = Number(m.precoUnitario || 0);
+      const precoM2v  = Number(m.precoM2       || 0);
+      const usarM2    = precoUnit === 0 && precoM2v > 0;
+      const preco     = usarM2 ? precoM2v : precoUnit;
+      return {
+        material:      m.material.nome,
+        unidade:       m.material.unidade,
+        categoria:     m.material.categoria,
+        quantidade:    Number(m.quantidade),
+        precoUnitario: preco,
+        usarM2,
+        total:         Number(m.quantidade) * preco,
+        data:          m.criadoEm,
+        observacao:    m.observacao,
+      };
+    }),
     totalGeral,
   };
 }
 
-module.exports = { listar, buscarPorNumeroOS, fecharOS, dadosParaPDF };
+// ── Reverter OS: muda status de FECHADA para EM_ANDAMENTO ────────────────────
+async function reverterOS(numeroOS) {
+  const relacao = await prisma.relacaoOS.findUnique({ where: { numeroOS } });
+  if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
+  if (relacao.status !== 'FECHADA') {
+    throw { status: 400, message: 'Esta OS não está fechada' };
+  }
+
+  return prisma.relacaoOS.update({
+    where:   { numeroOS },
+    data:    { status: 'EM_ANDAMENTO' },
+    include: _includeCompleto,
+  });
+}
+
+module.exports = { listar, buscarPorNumeroOS, fecharOS, reverterOS, dadosParaPDF };
