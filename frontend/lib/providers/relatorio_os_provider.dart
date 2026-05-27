@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import '../models/estoque_model.dart';
 import '../repositories/estoque_repository.dart';
@@ -25,12 +26,47 @@ class RelatorioOSProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
-  Future<void> carregar({String? busca}) async {
+  // ── Filtros ativos ────────────────────────────────────────────────────────
+  String? _buscaAtiva;
+  String? _materialIdAtivo;
+  String? _materialNomeAtivo;
+  String? _materialIdentificadorAtivo;
+  String? _materialMedidaAtiva;
+  String? _materialEspessuraAtiva;
+
+  bool get temFiltroMaterial =>
+      (_materialIdAtivo?.isNotEmpty ?? false) ||
+      (_materialNomeAtivo?.isNotEmpty ?? false) ||
+      (_materialIdentificadorAtivo?.isNotEmpty ?? false) ||
+      (_materialMedidaAtiva?.isNotEmpty ?? false) ||
+      (_materialEspessuraAtiva?.isNotEmpty ?? false);
+
+  Future<void> carregar({
+    String? busca,
+    String? materialId,
+    String? materialNome,
+    String? materialIdentificador,
+    String? materialMedida,
+    String? materialEspessura,
+  }) async {
+    _buscaAtiva                  = busca;
+    _materialIdAtivo             = materialId;
+    _materialNomeAtivo           = materialNome;
+    _materialIdentificadorAtivo  = materialIdentificador;
+    _materialMedidaAtiva         = materialMedida;
+    _materialEspessuraAtiva      = materialEspessura;
     _carregando = true;
     _erro = null;
     notifyListeners();
     try {
-      _relatorios = await _repo.listarRelatoriosOS(busca: busca);
+      _relatorios = await _repo.listarRelatoriosOS(
+        busca:                 busca,
+        materialId:            materialId,
+        materialNome:          materialNome,
+        materialIdentificador: materialIdentificador,
+        materialMedida:        materialMedida,
+        materialEspessura:     materialEspessura,
+      );
     } catch (e) {
       _erro = _mensagemErro(e);
     } finally {
@@ -38,6 +74,16 @@ class RelatorioOSProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Recarrega preservando todos os filtros ativos.
+  Future<void> recarregar() => carregar(
+        busca:                 _buscaAtiva,
+        materialId:            _materialIdAtivo,
+        materialNome:          _materialNomeAtivo,
+        materialIdentificador: _materialIdentificadorAtivo,
+        materialMedida:        _materialMedidaAtiva,
+        materialEspessura:     _materialEspessuraAtiva,
+      );
 
   Future<void> selecionar(String numeroOS) async {
     _carregandoDetalhe = true;
@@ -61,7 +107,7 @@ class RelatorioOSProvider extends ChangeNotifier {
     try {
       await _repo.reverterOS(numeroOS);
       _selecionado = null;
-      await carregar();
+      await recarregar();
       return true;
     } catch (e) {
       _erro = _mensagemErro(e);

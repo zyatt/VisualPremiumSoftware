@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "Role" AS ENUM ('ADMIN', 'GERENTE', 'COMPRADOR', 'ESTOQUISTA', 'VISUALIZADOR');
+CREATE TYPE "Role" AS ENUM ('ADMIN', 'GERENTE', 'COMPRADOR', 'ESTOQUISTA', 'VISUALIZADOR', 'PRODUCAO');
 
 -- CreateEnum
 CREATE TYPE "StatusEstoque" AS ENUM ('OK', 'LIMITE', 'CRITICO', 'INATIVO');
@@ -12,6 +12,9 @@ CREATE TYPE "StatusOrdemCompra" AS ENUM ('EM_ANDAMENTO', 'FINALIZADO', 'CANCELAD
 
 -- CreateEnum
 CREATE TYPE "TipoMovimentacao" AS ENUM ('ENTRADA', 'SAIDA');
+
+-- CreateEnum
+CREATE TYPE "StatusSolicitacaoProducao" AS ENUM ('ABERTA', 'EM_USO', 'FINALIZADA');
 
 -- CreateTable
 CREATE TABLE "usuarios" (
@@ -211,6 +214,35 @@ CREATE TABLE "movimentacoes_estoque" (
     CONSTRAINT "movimentacoes_estoque_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "solicitacoes_producao" (
+    "id" SERIAL NOT NULL,
+    "numeroOS" TEXT NOT NULL,
+    "materialId" INTEGER NOT NULL,
+    "descricaoItem" TEXT,
+    "quantidadeReservada" DECIMAL(10,3) NOT NULL,
+    "quantidadeUsada" DECIMAL(10,3) NOT NULL DEFAULT 0,
+    "status" "StatusSolicitacaoProducao" NOT NULL DEFAULT 'ABERTA',
+    "usuarioId" INTEGER NOT NULL,
+    "usuarioNome" TEXT NOT NULL,
+    "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "atualizadoEm" TIMESTAMP(3) NOT NULL,
+    "finalizadoEm" TIMESTAMP(3),
+
+    CONSTRAINT "solicitacoes_producao_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "baixas_producao" (
+    "id" SERIAL NOT NULL,
+    "solicitacaoId" INTEGER NOT NULL,
+    "quantidade" DECIMAL(10,3) NOT NULL,
+    "observacao" TEXT,
+    "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "baixas_producao_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "usuarios_username_key" ON "usuarios"("username");
 
@@ -282,3 +314,12 @@ ALTER TABLE "movimentacoes_estoque" ADD CONSTRAINT "movimentacoes_estoque_relaca
 
 -- AddForeignKey
 ALTER TABLE "movimentacoes_estoque" ADD CONSTRAINT "movimentacoes_estoque_ordemCompraId_fkey" FOREIGN KEY ("ordemCompraId") REFERENCES "ordens_compra"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "solicitacoes_producao" ADD CONSTRAINT "solicitacoes_producao_materialId_fkey" FOREIGN KEY ("materialId") REFERENCES "materiais"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "solicitacoes_producao" ADD CONSTRAINT "solicitacoes_producao_usuarioId_fkey" FOREIGN KEY ("usuarioId") REFERENCES "usuarios"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "baixas_producao" ADD CONSTRAINT "baixas_producao_solicitacaoId_fkey" FOREIGN KEY ("solicitacaoId") REFERENCES "solicitacoes_producao"("id") ON DELETE CASCADE ON UPDATE CASCADE;

@@ -13,6 +13,7 @@ import 'providers/orcamento_provider.dart';
 import 'providers/ordem_compra_provider.dart';
 import 'providers/historico_provider.dart';
 import 'providers/relatorio_os_provider.dart';
+import 'providers/producao_provider.dart';
 import 'utils/update_checker.dart';
 
 Future<void> main() async {
@@ -22,28 +23,18 @@ Future<void> main() async {
   runApp(const VisualPremiumApp());
 }
 
-class VisualPremiumApp extends StatefulWidget {
+class VisualPremiumApp extends StatelessWidget {
   const VisualPremiumApp({super.key});
 
   @override
-  State<VisualPremiumApp> createState() => _VisualPremiumAppState();
-}
-
-class _VisualPremiumAppState extends State<VisualPremiumApp> {
-  @override
-  void initState() {
-    super.initState();
-    // Verifica updates após build inicial
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      UpdateChecker.checkForUpdates(context);
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
+    // Criamos o UsuarioProvider aqui fora para passá-lo tanto ao
+    // MultiProvider quanto ao AppRouter (que precisa de refreshListenable).
+    final usuarioProvider = UsuarioProvider();
+
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => UsuarioProvider()),
+        ChangeNotifierProvider.value(value: usuarioProvider),
         ChangeNotifierProvider(create: (_) => MaterialProvider()),
         ChangeNotifierProvider(create: (_) => EstoqueProvider()),
         ChangeNotifierProvider(create: (_) => FornecedorProvider()),
@@ -51,6 +42,7 @@ class _VisualPremiumAppState extends State<VisualPremiumApp> {
         ChangeNotifierProvider(create: (_) => OrdemCompraProvider()),
         ChangeNotifierProvider(create: (_) => HistoricoProvider()),
         ChangeNotifierProvider(create: (_) => RelatorioOSProvider()),
+        ChangeNotifierProvider(create: (_) => ProducaoProvider()),
       ],
       child: MaterialApp.router(
         title: 'Visual Premium',
@@ -58,9 +50,9 @@ class _VisualPremiumAppState extends State<VisualPremiumApp> {
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
         themeMode: ThemeMode.dark,
-        routerConfig: AppRouter.router,
-
-        // ↓ adicionar isto
+        // Passa a mesma instância do provider para que o router possa
+        // usar refreshListenable e o redirect global funcione corretamente.
+        routerConfig: AppRouter.buildRouter(usuarioProvider),
         localizationsDelegates: const [
           GlobalMaterialLocalizations.delegate,
           GlobalWidgetsLocalizations.delegate,

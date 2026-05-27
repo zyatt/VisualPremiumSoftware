@@ -11,7 +11,8 @@ class AppShell extends StatelessWidget {
   final Widget child;
   const AppShell({super.key, required this.child});
 
-  static const _navItems = [
+  // Itens visíveis para todos os cargos (exceto PRODUCAO)
+  static const _navItemsGerais = [
     _NavItem(icon: Icons.home_rounded,             label: 'Início',             route: '/inicio'),
     _NavItem(icon: Icons.inventory_2_rounded,      label: 'Estoque',            route: '/estoque'),
     _NavItem(icon: Icons.people_rounded,           label: 'Fornecedores',       route: '/fornecedores'),
@@ -22,23 +23,52 @@ class AppShell extends StatelessWidget {
     _NavItem(icon: Icons.description_rounded,      label: 'Relatório OS',       route: '/relatorio-os'),
   ];
 
+  // Itens extras visíveis apenas para ADMIN (além dos gerais)
+  static const _navItemsAdmin = [
+    _NavItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção', route: '/producao'),
+  ];
+
+  // Único item visível para o cargo PRODUCAO
+  static const _navItemsProducao = [
+    _NavItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção', route: '/producao'),
+  ];
+
+  static bool isProducaoRole(String? role) {
+    if (role == null) return false;
+    final r = role.trim().toUpperCase();
+    return r == 'PRODUÇÃO' || r == 'PRODUCAO';
+  }
+
   @override
   Widget build(BuildContext context) {
     final location = GoRouterState.of(context).matchedLocation;
-    final isWide = MediaQuery.of(context).size.width >= 800;
+    final isWide   = MediaQuery.of(context).size.width >= 800;
+
+    final usuario    = context.watch<UsuarioProvider>().usuarioLogado;
+    final isProducao = isProducaoRole(usuario?.role);
+    final isAdmin    = usuario?.role.toUpperCase() == 'ADMIN';
+
+    final List<_NavItem> items;
+    if (isProducao) {
+      items = _navItemsProducao;
+    } else if (isAdmin) {
+      items = [..._navItemsGerais, ..._navItemsAdmin];
+    } else {
+      items = _navItemsGerais;
+    }
 
     return Scaffold(
       body: Row(
         children: [
           if (isWide)
-            _Sidebar(currentRoute: location, items: _navItems),
+            _Sidebar(currentRoute: location, items: items),
           Expanded(child: child),
         ],
       ),
       drawer: isWide
           ? null
           : Drawer(
-              child: _SidebarContent(currentRoute: location, items: _navItems),
+              child: _SidebarContent(currentRoute: location, items: items),
             ),
     );
   }
@@ -63,7 +93,7 @@ class _Sidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 190, // ← menor que o padrão de 220
+      width: 190,
       child: _SidebarContent(currentRoute: currentRoute, items: items),
     );
   }
@@ -99,7 +129,7 @@ class _SidebarContentState extends State<_SidebarContent> {
     final usuario = context.watch<UsuarioProvider>().usuarioLogado;
 
     return Container(
-      color: AppTheme.sidebar, // defina AppTheme.sidebar na sua AppTheme
+      color: AppTheme.sidebar,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

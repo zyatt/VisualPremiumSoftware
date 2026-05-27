@@ -4,23 +4,44 @@ const prisma = require('../utils/prisma');
 const _includeCompleto = {
   movimentacoes: {
     include: {
-      material: { select: { id: true, nome: true, unidade: true, categoria: true } },
+      material: { select: { id: true, nome: true, unidade: true, categoria: true, identificador: true, medida: true, espessura: true } },
     },
     orderBy: { criadoEm: 'asc' },
   },
 };
 
 // ── Listagem de relatórios (OS FECHADAS) ──────────────────────────────────────
-async function listar(busca) {
+async function listar({ busca, materialId, materialNome, materialIdentificador, materialMedida, materialEspessura } = {}) {
   const where = { status: 'FECHADA' };
+
   if (busca) where.numeroOS = { contains: busca, mode: 'insensitive' };
+
+  // Filtra OS que possuam ao menos uma movimentação cujo material satisfaça
+  // todos os critérios informados (AND dentro do some).
+  const filtroMaterial = {};
+  if (materialId)            filtroMaterial.id            = Number(materialId);
+  if (materialNome) {
+    const tokens = materialNome.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 1) {
+      filtroMaterial.nome = { contains: tokens[0], mode: 'insensitive' };
+    } else {
+      filtroMaterial.AND = tokens.map((t) => ({ nome: { contains: t, mode: 'insensitive' } }));
+    }
+  }
+  if (materialIdentificador) filtroMaterial.identificador = { contains: materialIdentificador, mode: 'insensitive' };
+  if (materialMedida)        filtroMaterial.medida        = { contains: materialMedida,        mode: 'insensitive' };
+  if (materialEspessura)     filtroMaterial.espessura     = { contains: materialEspessura,     mode: 'insensitive' };
+
+  if (Object.keys(filtroMaterial).length > 0) {
+    where.movimentacoes = { some: { material: filtroMaterial } };
+  }
 
   return prisma.relacaoOS.findMany({
     where,
     include: {
       movimentacoes: {
         include: {
-          material: { select: { id: true, nome: true, unidade: true, categoria: true } },
+          material: { select: { id: true, nome: true, unidade: true, categoria: true, identificador: true, medida: true, espessura: true } },
         },
         orderBy: { criadoEm: 'desc' },
       },
@@ -79,6 +100,9 @@ async function dadosParaPDF(numeroOS) {
       const preco     = usarM2 ? precoM2v : precoUnit;
       return {
         material:      m.material.nome,
+        identificador: m.material.identificador ?? null,
+        medida:        m.material.medida        ?? null,
+        espessura:     m.material.espessura     ?? null,
         unidade:       m.material.unidade,
         categoria:     m.material.categoria,
         quantidade:    Number(m.quantidade),

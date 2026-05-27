@@ -20,10 +20,36 @@ class EstoqueRepository {
 
   // ── Relatórios (FECHADA) ──────────────────────────────────────────────────
 
-  Future<List<RelacaoOSModel>> listarRelatoriosOS({String? busca}) async {
-    final path = busca != null && busca.isNotEmpty
-        ? '/relatorios-os?busca=${Uri.encodeComponent(busca)}'
-        : '/relatorios-os';
+  Future<List<RelacaoOSModel>> listarRelatoriosOS({
+    String? busca,
+    String? materialId,
+    String? materialNome,
+    String? materialIdentificador,
+    String? materialMedida,
+    String? materialEspessura,
+  }) async {
+    final params = <String>[];
+    if (busca != null && busca.isNotEmpty) {
+      params.add('busca=${Uri.encodeComponent(busca)}');
+    }
+    if (materialId != null && materialId.isNotEmpty) {
+      params.add('materialId=${Uri.encodeComponent(materialId)}');
+    }
+    if (materialNome != null && materialNome.isNotEmpty) {
+      params.add('materialNome=${Uri.encodeComponent(materialNome)}');
+    }
+    if (materialIdentificador != null && materialIdentificador.isNotEmpty) {
+      params.add('materialIdentificador=${Uri.encodeComponent(materialIdentificador)}');
+    }
+    if (materialMedida != null && materialMedida.isNotEmpty) {
+      params.add('materialMedida=${Uri.encodeComponent(materialMedida)}');
+    }
+    if (materialEspessura != null && materialEspessura.isNotEmpty) {
+      params.add('materialEspessura=${Uri.encodeComponent(materialEspessura)}');
+    }
+    final path = params.isEmpty
+        ? '/relatorios-os'
+        : '/relatorios-os?${params.join('&')}';
     final list = await ApiClient.getList(path);
     return list.map((e) => RelacaoOSModel.fromJson(e as Map<String, dynamic>)).toList();
   }
@@ -65,6 +91,16 @@ class EstoqueRepository {
   /// relações com o mesmo numeroOS, então o id garante a relação correta.
   Future<void> excluirRelacaoOS(int relacaoOSId) async {
     await ApiClient.delete('/estoque/$relacaoOSId');
+  }
+
+  /// Renomeia a OS: altera o numeroOS da RelacaoOS e de todas as suas movimentações.
+  /// Só permitido para OS em andamento.
+  Future<RelacaoOSModel> renomearOS(int relacaoOSId, String novoNumeroOS) async {
+    final data = await ApiClient.patch(
+      '/estoque/$relacaoOSId/renomear',
+      {'novoNumeroOS': novoNumeroOS},
+    );
+    return RelacaoOSModel.fromJson(data);
   }
 
   /// Fecha a OS: muda status para FECHADA no backend.

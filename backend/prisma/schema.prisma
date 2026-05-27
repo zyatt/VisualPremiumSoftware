@@ -19,6 +19,7 @@ enum Role {
   COMPRADOR   // Orçamento, Ordem de Compra, Histórico
   ESTOQUISTA  // Estoque, Controle de Estoque, Relatórios OS
   VISUALIZADOR // Somente leitura em todas as páginas
+  PRODUCAO // SOLICITAÇÕES DE MATERIAL
 }
 
 model Usuario {
@@ -30,6 +31,8 @@ model Usuario {
   ativo     Boolean  @default(true)
   criadoEm  DateTime @default(now())
   atualizadoEm DateTime @updatedAt
+
+  solicitacoesProducao SolicitacaoProducao[]
 
   ordens_compra OrdemCompra[]
 
@@ -80,6 +83,8 @@ model Material {
   historicoPrecos      HistoricoPrecoMaterial[]
   // ▼ NOVO: filhos de estoque específico
   estoquesEspecificos  EstoqueEspecifico[]
+
+  SolicitacoesProducao SolicitacaoProducao[]
 
   @@unique([nome, medida, espessura])
   @@map("materiais")
@@ -319,4 +324,53 @@ model MovimentacaoEstoque {
   ordemCompra OrdemCompra? @relation(fields: [ordemCompraId], references: [id])
 
   @@map("movimentacoes_estoque")
+}
+
+// ============================================================
+// PRODUÇÃO — SOLICITAÇÕES DE MATERIAL
+// ============================================================
+
+// Status do ciclo de vida de uma solicitação de produção:
+// ABERTA      → reserva feita, nenhuma baixa ainda
+// EM_USO      → já teve ao menos uma baixa parcial
+// FINALIZADA  → usuário encerrou; sobra devolvida ao estoque
+
+enum StatusSolicitacaoProducao {
+  ABERTA
+  EM_USO
+  FINALIZADA
+}
+
+model SolicitacaoProducao {
+  id           Int      @id @default(autoincrement())
+  numeroOS     String                            // OS informada pelo usuário
+  materialId   Int
+  descricaoItem String?                          // obrigatório p/ material.especifico
+  quantidadeReservada Decimal @db.Decimal(10, 3) // qtd retirada do estoque e em uso
+  quantidadeUsada     Decimal @default(0) @db.Decimal(10, 3) // soma das baixas
+  status       StatusSolicitacaoProducao @default(ABERTA)
+  usuarioId    Int
+  usuarioNome  String                            // desnormalizado para histórico
+  criadoEm    DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+  finalizadoEm DateTime?
+
+  material Material @relation(fields: [materialId], references: [id])
+  usuario  Usuario  @relation(fields: [usuarioId], references: [id])
+  baixas   BaixaProducao[]
+
+  @@map("solicitacoes_producao")
+}
+
+// Cada registro representa uma baixa parcial ou total feita pelo usuário
+model BaixaProducao {
+  id              Int      @id @default(autoincrement())
+  solicitacaoId   Int
+  quantidade      Decimal  @db.Decimal(10, 3)
+  observacao      String?
+  criadoEm        DateTime @default(now())
+
+  solicitacao SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+
+  @@map("baixas_producao")
 }

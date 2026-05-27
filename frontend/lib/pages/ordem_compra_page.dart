@@ -1031,7 +1031,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
         final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
         return m.id == _ordem.id;
       }, orElse: () => _ordem);
-      if (mounted) setState(() { _ordem = raw is OrdemCompraModel ? raw : OrdemCompraModel.fromJson(raw as Map<String, dynamic>); });
+      if (mounted) setState(() { _ordem = raw; });
     }
   }
 

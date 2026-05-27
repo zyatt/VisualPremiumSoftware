@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import '../models/estoque_model.dart';
 import '../repositories/estoque_repository.dart';
@@ -162,6 +163,22 @@ class EstoqueProvider extends ChangeNotifier {
     try {
       await _repo.excluirRelacaoOS(relacaoOSId);
       _relacaoSelecionada = null;
+      await carregarRelacoesOS();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Renomeia a OS: altera o numeroOS no backend e recarrega a lista.
+  Future<bool> renomearOS(int relacaoOSId, String novoNumeroOS) async {
+    try {
+      final atualizada = await _repo.renomearOS(relacaoOSId, novoNumeroOS);
+      // Atualiza a seleção com os dados atualizados (numeroOS novo)
+      _relacaoSelecionada = atualizada;
       await carregarRelacoesOS();
       notifyListeners();
       return true;

@@ -707,6 +707,110 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
     }
   }
 
+  // ── Renomear OS ────────────────────────────────────────────────────────────
+  Future<void> _abrirRenomearOS(BuildContext context, RelacaoOSModel rel) async {
+    final provider  = context.read<EstoqueProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    // Remove sufixo interno antes de exibir no campo
+    final nomeAtual = _numeroOSDisplay;
+    final ctrl = TextEditingController(text: nomeAtual);
+
+    final novoNome = await showDialog<String>(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setDlg) => AlertDialog(
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.edit_outlined,
+                      color: AppTheme.primary, size: 20),
+                ),
+                const SizedBox(width: 12),
+                const Text('Renomear OS'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Novo número / nome da OS:',
+                  style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: ctrl,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [_UpperCaseFormatter()],
+                  decoration: const InputDecoration(
+                    hintText: 'Ex: 1234 ou MANUTENCAO',
+                    isDense: true,
+                  ),
+                  onSubmitted: (v) {
+                    final nome = v.trim();
+                    if (nome.isNotEmpty && nome != nomeAtual) {
+                      Navigator.of(dialogCtx).pop(nome);
+                    }
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: () {
+                        final nome = ctrl.text.trim();
+                        if (nome.isEmpty) return;
+                        if (nome == nomeAtual) {
+                          Navigator.of(dialogCtx).pop();
+                          return;
+                        }
+                        Navigator.of(dialogCtx).pop(nome);
+                      },
+                icon: const Icon(Icons.check, size: 16),
+                label: const Text('Renomear'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    ctrl.dispose();
+    if (novoNome == null || novoNome.isEmpty || novoNome == nomeAtual) return;
+    if (!mounted) return;
+
+    final ok = await provider.renomearOS(rel.id, novoNome);
+    if (!mounted) return;
+
+    if (ok) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('OS renomeada para "$novoNome"'),
+          backgroundColor: AppTheme.primary,
+        ),
+      );
+    } else {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(provider.erro ?? 'Erro ao renomear OS'),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<EstoqueProvider>();
@@ -814,6 +918,13 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
               icon: const Icon(Icons.delete_outline, color: AppTheme.error),
               tooltip: 'Excluir OS',
               onPressed: () => _confirmarExcluirOS(context),
+            ),
+          // Botão renomear (só para OS em andamento)
+          if (rel != null && !rel.estaFechada)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, color: AppTheme.textSecondary),
+              tooltip: 'Renomear OS',
+              onPressed: () => _abrirRenomearOS(context, rel),
             ),
         ],
       ),

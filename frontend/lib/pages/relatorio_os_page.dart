@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
@@ -50,8 +52,40 @@ class RelatorioOSPage extends StatefulWidget {
   State<RelatorioOSPage> createState() => _RelatorioOSPageState();
 }
 
+// Formatter reutilizado do estoque: maiúsculas sem acentos
+class _UpperCaseFormatter extends TextInputFormatter {
+  static final _acentos = {
+    'À':'A','Á':'A','Â':'A','Ã':'A','à':'a','á':'a','â':'a','ã':'a',
+    'È':'E','É':'E','Ê':'E','è':'e','é':'e','ê':'e',
+    'Ì':'I','Í':'I','ì':'i','í':'i',
+    'Ò':'O','Ó':'O','Ô':'O','Õ':'O','ò':'o','ó':'o','ô':'o','õ':'o',
+    'Ù':'U','Ú':'U','Û':'U','ù':'u','ú':'u','û':'u',
+    'Ç':'C','ç':'c','Ñ':'N','ñ':'n',
+  };
+  static String _rem(String s) =>
+      s.split('').map((c) => _acentos[c] ?? c).join();
+
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue o, TextEditingValue n) {
+    final t = _rem(n.text).toUpperCase();
+    final sel = n.selection.copyWith(
+      baseOffset:   n.selection.baseOffset.clamp(0, t.length),
+      extentOffset: n.selection.extentOffset.clamp(0, t.length),
+    );
+    return n.copyWith(text: t, selection: sel);
+  }
+}
+
 class _RelatorioOSPageState extends State<RelatorioOSPage> {
-  final _buscaCtrl = TextEditingController();
+  // ── Controllers ───────────────────────────────────────────────────────────
+  final _buscaOSCtrl       = TextEditingController(); // busca por nº OS
+  final _materialIdCtrl    = TextEditingController();
+  final _materialNomeCtrl  = TextEditingController();
+  final _identificadorCtrl = TextEditingController();
+  final _medidaCtrl        = TextEditingController();
+  final _espessuraCtrl     = TextEditingController();
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -63,15 +97,59 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
 
   @override
   void dispose() {
-    _buscaCtrl.dispose();
+    _debounce?.cancel();
+    _buscaOSCtrl.dispose();
+    _materialIdCtrl.dispose();
+    _materialNomeCtrl.dispose();
+    _identificadorCtrl.dispose();
+    _medidaCtrl.dispose();
+    _espessuraCtrl.dispose();
     super.dispose();
   }
 
-  void _buscar(String v) {
-    context
-        .read<RelatorioOSProvider>()
-        .carregar(busca: v.trim().isEmpty ? null : v.trim());
+  void _aplicarFiltros() {
+    context.read<RelatorioOSProvider>().carregar(
+          busca:                 _buscaOSCtrl.text.trim().isEmpty
+              ? null
+              : _buscaOSCtrl.text.trim(),
+          materialId:            _materialIdCtrl.text.trim().isEmpty
+              ? null
+              : _materialIdCtrl.text.trim(),
+          materialNome:          _materialNomeCtrl.text.trim().isEmpty
+              ? null
+              : _materialNomeCtrl.text.trim(),
+          materialIdentificador: _identificadorCtrl.text.trim().isEmpty
+              ? null
+              : _identificadorCtrl.text.trim(),
+          materialMedida:        _medidaCtrl.text.trim().isEmpty
+              ? null
+              : _medidaCtrl.text.trim(),
+          materialEspessura:     _espessuraCtrl.text.trim().isEmpty
+              ? null
+              : _espessuraCtrl.text.trim(),
+        );
   }
+
+  void _onChanged(_) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), _aplicarFiltros);
+  }
+
+  void _limparFiltrosMaterial() {
+    _materialIdCtrl.clear();
+    _materialNomeCtrl.clear();
+    _identificadorCtrl.clear();
+    _medidaCtrl.clear();
+    _espessuraCtrl.clear();
+    _aplicarFiltros();
+  }
+
+  bool get _temFiltroMaterial =>
+      _materialIdCtrl.text.isNotEmpty ||
+      _materialNomeCtrl.text.isNotEmpty ||
+      _identificadorCtrl.text.isNotEmpty ||
+      _medidaCtrl.text.isNotEmpty ||
+      _espessuraCtrl.text.isNotEmpty;
 
   void _abrirDetalhe(RelacaoOSModel rel) {
     Navigator.of(context).push(
@@ -120,16 +198,139 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
             ),
             const SizedBox(height: 20),
 
-            // ── Barra de busca ──────────────────────────────────────
-            TextField(
-              controller: _buscaCtrl,
-              onChanged: _buscar,
-              decoration: const InputDecoration(
-                hintText: 'Buscar por número da OS...',
-                prefixIcon:
-                    Icon(Icons.search, color: AppTheme.textHint, size: 20),
-                isDense: true,
-              ),
+            // ── Filtro linha 1: busca OS + ID material ──────────────
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: TextField(
+                    controller: _buscaOSCtrl,
+                    onChanged: _onChanged,
+                    onSubmitted: (_) => _aplicarFiltros(),
+                    decoration: const InputDecoration(
+                      hintText: 'Buscar por número da OS...',
+                      prefixIcon: Icon(Icons.search,
+                          color: AppTheme.textHint, size: 20),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 120,
+                  child: TextField(
+                    controller: _materialIdCtrl,
+                    onChanged: _onChanged,
+                    onSubmitted: (_) => _aplicarFiltros(),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly
+                    ],
+                    decoration: const InputDecoration(
+                      hintText: 'ID mat...',
+                      prefixIcon: Icon(Icons.tag,
+                          color: AppTheme.textHint, size: 18),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Botão limpar filtros de material
+                StatefulBuilder(
+                  builder: (_, setBtn) {
+                    // Reconstrói o botão quando qualquer controller muda
+                    void listener() => setBtn(() {});
+                    _materialIdCtrl.addListener(listener);
+                    _materialNomeCtrl.addListener(listener);
+                    _identificadorCtrl.addListener(listener);
+                    _medidaCtrl.addListener(listener);
+                    _espessuraCtrl.addListener(listener);
+                    return IconButton.outlined(
+                      tooltip: 'Limpar filtros de material',
+                      icon: Icon(
+                        Icons.filter_alt_off,
+                        color: _temFiltroMaterial
+                            ? AppTheme.primary
+                            : Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                      ),
+                      onPressed: _temFiltroMaterial
+                          ? _limparFiltrosMaterial
+                          : null,
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // ── Filtro linha 2: nome, identificador, medida, espessura
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _materialNomeCtrl,
+                    onChanged: _onChanged,
+                    onSubmitted: (_) => _aplicarFiltros(),
+                    decoration: const InputDecoration(
+                      hintText: 'Nome do material...',
+                      prefixIcon: Icon(Icons.search,
+                          color: AppTheme.textHint, size: 18),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _identificadorCtrl,
+                    onChanged: _onChanged,
+                    onSubmitted: (_) => _aplicarFiltros(),
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    decoration: const InputDecoration(
+                      hintText: 'Identificador...',
+                      prefixIcon: Icon(Icons.qr_code,
+                          color: AppTheme.textHint, size: 18),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _medidaCtrl,
+                    onChanged: _onChanged,
+                    onSubmitted: (_) => _aplicarFiltros(),
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    decoration: const InputDecoration(
+                      hintText: 'Medida...',
+                      prefixIcon: Icon(Icons.straighten,
+                          color: AppTheme.textHint, size: 18),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _espessuraCtrl,
+                    onChanged: _onChanged,
+                    onSubmitted: (_) => _aplicarFiltros(),
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    decoration: const InputDecoration(
+                      hintText: 'Espessura...',
+                      prefixIcon: Icon(Icons.layers,
+                          color: AppTheme.textHint, size: 18),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
 
@@ -162,7 +363,9 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                                   ),
                                   const SizedBox(height: 12),
                                   Text(
-                                    'Nenhuma OS fechada',
+                                    provider.temFiltroMaterial
+                                        ? 'Nenhuma OS com este material'
+                                        : 'Nenhuma OS fechada',
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodyMedium
@@ -171,7 +374,9 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'As OS fechadas aparecerão aqui',
+                                    provider.temFiltroMaterial
+                                        ? 'Tente ajustar os filtros de material'
+                                        : 'As OS fechadas aparecerão aqui',
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodySmall
@@ -925,6 +1130,28 @@ class _MovimentacaoSection extends StatelessWidget {
                                   style: const TextStyle(
                                       fontSize: 11,
                                       color: AppTheme.textSecondary),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              // Identificador / medida / espessura
+                              if ([
+                                    m.materialIdentificador,
+                                    m.materialMedida,
+                                    m.materialEspessura,
+                                  ].any((v) => v != null && v.isNotEmpty))
+                                Text(
+                                  [
+                                    if ((m.materialIdentificador ?? '').isNotEmpty)
+                                      m.materialIdentificador!,
+                                    if ((m.materialMedida ?? '').isNotEmpty)
+                                      m.materialMedida!,
+                                    if ((m.materialEspessura ?? '').isNotEmpty)
+                                      m.materialEspessura!,
+                                  ].join(' · '),
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppTheme.textSecondary,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               if (m.descricaoItem != null &&

@@ -867,7 +867,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                 OutlinedButton.icon(
                   onPressed: _exportarPdf,
                   icon: const Icon(Icons.picture_as_pdf, size: 18),
-                  label: const Text('Exportar PDF'),
+                  label: const Text('Exportar Estoque (PDF)'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFFE85D04),
                     side: const BorderSide(color: Color(0xFFE85D04)),

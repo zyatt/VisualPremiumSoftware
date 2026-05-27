@@ -7,5 +7,10 @@ const removerMovimentacao   = async (req, res, next) => { try { res.json(await s
 const excluirRelacaoOS      = async (req, res, next) => { try { await svc.excluirRelacaoOS(+req.params.relacaoOSId); res.status(204).send(); } catch(e){next(e);} };
 const fecharOS              = async (req, res, next) => { try { res.json(await svc.fecharOS(+req.params.relacaoOSId)); } catch(e){next(e);} };
 const listarTodas = async (req, res, next) => { try { res.json(await svc.listarTodas(req.query.busca)); } catch(e){next(e);} };
+const renomearOS = async (req, res, next) => {
+  try {
+    res.json(await svc.renomearOS(Number(req.params.id), req.body.novoNumeroOS));
+  } catch (e) { next(e); }
+};
 
-module.exports = { listar, buscarPorNumeroOS, registrarMovimentacao, removerMovimentacao, excluirRelacaoOS, fecharOS, listarTodas };
+module.exports = { listar, buscarPorNumeroOS, registrarMovimentacao, removerMovimentacao, excluirRelacaoOS, fecharOS, listarTodas, renomearOS };

@@ -7,16 +7,16 @@ const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  const hash = await bcrypt.hash('admin123', 10);
+  const hash = await bcrypt.hash('producao123', 10);
 
   const usuario = await prisma.usuario.upsert({
-    where: { username: 'admin' },
+    where: { username: 'producao' },
     update: {},
     create: {
-      nome:     'Administrador',
-      username: 'admin',
+      nome:     'Produção',
+      username: 'producao',
       senha:    hash,
-      role:     'ADMIN',
+      role:     'PRODUCAO',
       ativo:    true,
     },
   });
