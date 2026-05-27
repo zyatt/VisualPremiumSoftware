@@ -159,7 +159,7 @@ function drawMateriaisTable(doc, materiais, startY) {
   // Todas as colunas do sistema — total deve somar CONTENT_W (781.89)
   const cols = [
     { key: 'id',            label: 'ID',              w: 32,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'identificador', label: 'MARCA',           w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
+    { key: 'identificador', label: 'IDENTIFICADOR',   w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'nome',          label: 'MATERIAL',        w: 120, hAlign: 'left',   cAlign: 'left',   pad: 4 },
     { key: 'unidade',       label: 'UNIDADE',         w: 42,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'medida',        label: 'MEDIDA',          w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
@@ -325,7 +325,7 @@ function drawFooter(doc, pageNum, pageTotal) {
 }
 
 const estoquePdfService = {
-  async gerarPdf(categoria, status = 'TODOS') {
+  async gerarPdf(categoria, status = 'TODOS', { busca, id, identificador, medida, espessura } = {}) {
     const where = { ativo: true };
     if (categoria && categoria !== 'TODAS') {
       where.categoria = { equals: categoria, mode: 'insensitive' };
@@ -334,6 +334,11 @@ const estoquePdfService = {
     if (status && status !== 'TODOS' && statusValidos.includes(status.toUpperCase())) {
       where.status = status.toUpperCase();
     }
+    if (busca)        where.nome          = { contains: busca, mode: 'insensitive' };
+    if (id)           where.id            = Number(id);
+    if (identificador) where.identificador = { contains: identificador, mode: 'insensitive' };
+    if (medida)       where.medida        = { contains: medida, mode: 'insensitive' };
+    if (espessura)    where.espessura     = { contains: espessura, mode: 'insensitive' };
 
     const materiais = await prisma.material.findMany({
       where,
@@ -389,9 +394,17 @@ const estoquePdfService = {
     const logoPath = path.join(__dirname, '../../../frontend/assets/images/logoPreta.png');
 
     const statusLabel2 = (status && status !== 'TODOS') ? ` — ${status.toUpperCase()}` : '';
+    const filtrosExtras = [
+      busca         && `Busca: "${busca}"`,
+      id            && `ID: ${id}`,
+      identificador && `Ident.: "${identificador}"`,
+      medida        && `Medida: ${medida}`,
+      espessura     && `Esp.: ${espessura}`,
+    ].filter(Boolean).join(' · ');
+    const filtrosSufx = filtrosExtras ? ` · ${filtrosExtras}` : '';
     const label = categoria && categoria !== 'TODAS'
-      ? `Materiais — ${categoria}${statusLabel2} (${materiaisEnriquecidos.length})`
-      : `Todos os Materiais${statusLabel2} (${materiaisEnriquecidos.length})`;
+      ? `Materiais — ${categoria}${statusLabel2}${filtrosSufx} (${materiaisEnriquecidos.length})`
+      : `Todos os Materiais${statusLabel2}${filtrosSufx} (${materiaisEnriquecidos.length})`;
 
     // ── Geração do PDF ───────────────────────────────────────────────────────
     // Estratégia: gerar duas vezes.

@@ -76,12 +76,36 @@ class EstoqueRepository {
 
   // ── PDF ───────────────────────────────────────────────────────────────────
 
-  Future<List<int>> baixarPdf({String? categoria, String? status}) async {
+  Future<List<int>> baixarPdf({
+    String? categoria,
+    String? status,
+    String? busca,
+    String? id,
+    String? identificador,
+    String? medida,
+    String? espessura,
+  }) async {
     final cat = (categoria == null || categoria.isEmpty) ? 'TODAS' : categoria;
     final st  = (status == null || status.isEmpty) ? 'TODOS' : status;
-    return ApiClient.getBytes(
+    final params = StringBuffer(
       '/estoque/pdf?categoria=${Uri.encodeComponent(cat)}&status=${Uri.encodeComponent(st)}',
     );
+    if (busca != null && busca.isNotEmpty) {
+      params.write('&busca=${Uri.encodeComponent(busca)}');
+    }
+    if (id != null && id.isNotEmpty) {
+      params.write('&id=${Uri.encodeComponent(id)}');
+    }
+    if (identificador != null && identificador.isNotEmpty) {
+      params.write('&identificador=${Uri.encodeComponent(identificador)}');
+    }
+    if (medida != null && medida.isNotEmpty) {
+      params.write('&medida=${Uri.encodeComponent(medida)}');
+    }
+    if (espessura != null && espessura.isNotEmpty) {
+      params.write('&espessura=${Uri.encodeComponent(espessura)}');
+    }
+    return ApiClient.getBytes(params.toString());
   }
 
   /// Reverte a OS: muda status de FECHADA para EM_ANDAMENTO.

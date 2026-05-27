@@ -123,22 +123,28 @@ class OrcamentoTab {
   final String id;
   String titulo;
   List<ItemOrcamentoData> itens;
+  /// ID do entry no histórico vinculado a esta aba.
+  /// Preenchido ao reabrir ou após o primeiro salvamento.
+  String? historicoId;
 
   OrcamentoTab({
     required this.id,
     required this.titulo,
     List<ItemOrcamentoData>? itens,
+    this.historicoId,
   }) : itens = itens ?? [];
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'titulo': titulo,
         'itens': itens.map((i) => i.toJson()).toList(),
+        'historicoId': historicoId,
       };
 
   factory OrcamentoTab.fromJson(Map<String, dynamic> j) => OrcamentoTab(
         id: j['id'] as String,
         titulo: j['titulo'] as String,
+        historicoId: j['historicoId'] as String?,
         itens: (j['itens'] as List)
             .map((i) => ItemOrcamentoData.fromJson(i as Map<String, dynamic>))
             .toList(),
@@ -297,6 +303,23 @@ class OrcamentoProvider extends ChangeNotifier {
   void renomearAba(int index, String titulo) {
     if (index < 0 || index >= _abas.length) return;
     _abas[index].titulo = titulo;
+    // Se a aba está vinculada a um entry do histórico, atualiza o título lá também
+    final hId = _abas[index].historicoId;
+    if (hId != null) {
+      final hIdx = _historico.indexWhere((e) => e.id == hId);
+      if (hIdx >= 0) {
+        final old = _historico[hIdx];
+        _historico[hIdx] = OrcamentoHistoricoEntry(
+          id:             old.id,
+          titulo:         titulo,
+          itens:          old.itens,
+          status:         old.status,
+          motivoDescarte: old.motivoDescarte,
+          criadoEm:       old.criadoEm,
+        );
+        _salvarHistorico();
+      }
+    }
     _salvarAbas();
     notifyListeners();
   }
@@ -322,6 +345,32 @@ class OrcamentoProvider extends ChangeNotifier {
     tabAtual!.itens.add(item);
     _salvarAbas();
     notifyListeners();
+  }
+
+  /// Cria uma nova aba e adiciona todos os [itens] de uma vez.
+  /// Retorna o índice da aba criada.
+  int adicionarItensEmLote(String tituloAba, List<ItemOrcamentoData> itens) {
+    _abas.add(OrcamentoTab(
+      id: _uuid.v4(),
+      titulo: tituloAba,
+      itens: [],
+    ));
+    _abaAtiva = _abas.length - 1;
+    final tab = tabAtual!;
+    for (final item in itens) {
+      if (!item.materialEspecifico) {
+        final idx = tab.itens
+            .indexWhere((i) => i.materialId == item.materialId && !i.materialEspecifico);
+        if (idx >= 0) {
+          tab.itens[idx] = item;
+          continue;
+        }
+      }
+      tab.itens.add(item);
+    }
+    _salvarAbas();
+    notifyListeners();
+    return _abaAtiva;
   }
 
   void removerItem(String itemId) {
@@ -385,16 +434,41 @@ class OrcamentoProvider extends ChangeNotifier {
 
   void salvarOrcamento() {
     if (tabAtual == null || tabAtual!.itens.isEmpty) return;
-    _historico.insert(
-      0,
-      OrcamentoHistoricoEntry(
-        id: _uuid.v4(),
-        titulo: tabAtual!.titulo,
-        itens: List<ItemOrcamentoData>.from(tabAtual!.itens),
-        status: StatusOrcamentoHistorico.salvo,
-        criadoEm: DateTime.now(),
-      ),
-    );
+
+    final hId = tabAtual!.historicoId;
+    final existeIdx = hId != null
+        ? _historico.indexWhere((e) => e.id == hId)
+        : -1;
+
+    if (existeIdx >= 0) {
+      // Sobrepõe o entry existente — atualiza itens e título, mantém criadoEm
+      final old = _historico[existeIdx];
+      _historico[existeIdx] = OrcamentoHistoricoEntry(
+        id:       old.id,
+        titulo:   tabAtual!.titulo,
+        itens:    List<ItemOrcamentoData>.from(tabAtual!.itens),
+        status:   StatusOrcamentoHistorico.salvo,
+        criadoEm: old.criadoEm,
+      );
+      // Move para o topo do histórico
+      final updated = _historico.removeAt(existeIdx);
+      _historico.insert(0, updated);
+    } else {
+      // Primeiro salvamento: cria novo entry e vincula o ID à aba
+      final novoId = _uuid.v4();
+      tabAtual!.historicoId = novoId;
+      _historico.insert(
+        0,
+        OrcamentoHistoricoEntry(
+          id:       novoId,
+          titulo:   tabAtual!.titulo,
+          itens:    List<ItemOrcamentoData>.from(tabAtual!.itens),
+          status:   StatusOrcamentoHistorico.salvo,
+          criadoEm: DateTime.now(),
+        ),
+      );
+    }
+
     _fecharAbaAtual();
     _salvarHistorico();
     notifyListeners();
@@ -423,11 +497,12 @@ class OrcamentoProvider extends ChangeNotifier {
   // ── Reabrir orçamento salvo ───────────────────────────────────────────────────
 
   void reabrirOrcamento(OrcamentoHistoricoEntry entry) {
-    // Cria nova aba com o conteúdo do histórico
+    // Cria nova aba com o conteúdo do histórico, vinculada ao entry original
     _abas.add(OrcamentoTab(
-      id: _uuid.v4(),
-      titulo: entry.titulo,
-      itens: List<ItemOrcamentoData>.from(entry.itens),
+      id:          _uuid.v4(),
+      titulo:      entry.titulo,
+      itens:       List<ItemOrcamentoData>.from(entry.itens),
+      historicoId: entry.id,
     ));
     _abaAtiva = _abas.length - 1;
     _salvarAbas();

@@ -60,6 +60,8 @@ CREATE TABLE "estoque_especificos" (
     "quantidade" DECIMAL(10,3) NOT NULL DEFAULT 0,
     "criadoEm" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "atualizadoEm" TIMESTAMP(3) NOT NULL,
+    "ultimoValorPago" DECIMAL(10,4),
+    "ultimoValorPagoM2" DECIMAL(10,4),
 
     CONSTRAINT "estoque_especificos_pkey" PRIMARY KEY ("id")
 );

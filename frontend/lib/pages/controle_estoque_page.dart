@@ -342,7 +342,10 @@ class _RelacaoOSCard extends StatelessWidget {
 
     final materiaisUnicos = relacao.movimentacoes.map((m) {
       final desc = m.descricaoItem?.trim() ?? '';
-      return desc.isNotEmpty ? '${m.materialNome}::$desc' : m.materialNome;
+      // Usa materialId (não nome) para distinguir corretamente materiais com
+      // mesmo nome mas medida/espessura diferentes. Para filhos específicos,
+      // adiciona a descrição do item para contar cada variação separadamente.
+      return desc.isNotEmpty ? '${m.materialId}::$desc' : '${m.materialId}';
     }).toSet().length;
 
     final corSt = _corStatus(relacao.status);
@@ -879,8 +882,6 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
     return desc.isNotEmpty ? '${mov.materialId}::$desc' : '${mov.materialId}';
   }
 
-  int? _materialExpandidoIdx; // índice na lista de entries
-
   @override
   Widget build(BuildContext context) {
     final materiaisMap = <String, List<MovimentacaoModel>>{};
@@ -915,16 +916,12 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
         final entry = entries[i];
         final movs  = List<MovimentacaoModel>.from(entry.value)
           ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
-        final aberto = _materialExpandidoIdx == i;
         return _MaterialGridCard(
           key: ValueKey(entry.key),
           movimentacoes: movs,
           numeroOS: widget.rel.numeroOS,
           // OS fechada: bloqueia ações de movimentação/remoção
           somenteLeitura: widget.rel.estaFechada,
-          aberto: aberto,
-          onTap: () => setState(
-              () => _materialExpandidoIdx = aberto ? null : i),
         );
       },
     );
@@ -936,17 +933,13 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
 class _MaterialGridCard extends StatefulWidget {
   final List<MovimentacaoModel> movimentacoes;
   final String numeroOS;
-  final bool aberto;
   final bool somenteLeitura;
-  final VoidCallback onTap;
 
   const _MaterialGridCard({
     super.key,
     required this.movimentacoes,
     required this.numeroOS,
-    required this.aberto,
     this.somenteLeitura = false,
-    required this.onTap,
   });
 
   @override
@@ -954,18 +947,6 @@ class _MaterialGridCard extends StatefulWidget {
 }
 
 class _MaterialGridCardState extends State<_MaterialGridCard> {
-  bool _painelAberto = false;
-
-  double get _totalEntradas => widget.movimentacoes
-      .where((m) => m.tipo == 'ENTRADA')
-      .fold(0.0, (acc, m) => acc + m.quantidade);
-
-  double get _totalSaidas => widget.movimentacoes
-      .where((m) => m.tipo == 'SAIDA')
-      .fold(0.0, (acc, m) => acc + m.quantidade);
-
-  double get _saldoLiquido => _totalEntradas - _totalSaidas;
-
   MovimentacaoModel get _primeira => widget.movimentacoes.first;
 
   String get _subtitulo {
@@ -1024,8 +1005,21 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
         ),
       );
     } else {
-      // Material normal: busca o preço atualizado do material no servidor
-      context.read<MaterialProvider>().buscarPorId(_primeira.materialId).then((mat) {
+      // Material normal: usa o preço da última movimentação já registrada
+      // nesta OS para este material — evita puxar o preço atualizado por uma
+      // OC posterior que nada tem a ver com esta OS.
+      final ultimaMovOS = widget.movimentacoes
+          .where((m) =>
+              m.materialId == _primeira.materialId &&
+              (m.precoUnitario != null && m.precoUnitario! > 0 ||
+               m.precoM2 != null && m.precoM2! > 0))
+          .fold<MovimentacaoModel?>(
+              null,
+              (prev, m) =>
+                  prev == null || m.criadoEm.isAfter(prev.criadoEm) ? m : prev);
+
+      if (ultimaMovOS != null) {
+        // Preço já existe nas movimentações desta OS → usa diretamente
         if (!context.mounted) return;
         showDialog(
           context: context,
@@ -1035,11 +1029,29 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
             materialNome:  _primeira.materialNome,
             numeroOS:      widget.numeroOS,
             descricaoItem: null,
-            precoUnitario: mat?.ultimoValorPago   ?? _primeira.precoUnitario,
-            precoM2:       mat?.ultimoValorPagoM2 ?? _primeira.precoM2,
+            precoUnitario: ultimaMovOS.precoUnitario,
+            precoM2:       ultimaMovOS.precoM2,
           ),
         );
-      });
+      } else {
+        // Nenhuma movimentação com preço nesta OS ainda → busca o mais recente
+        // disponível no servidor (fallback seguro para primeira movimentação)
+        context.read<MaterialProvider>().buscarPorId(_primeira.materialId).then((mat) {
+          if (!context.mounted) return;
+          showDialog(
+            context: context,
+            builder: (_) => _MovimentacaoItemDialog(
+              tipo:          tipo,
+              materialId:    _primeira.materialId,
+              materialNome:  _primeira.materialNome,
+              numeroOS:      widget.numeroOS,
+              descricaoItem: null,
+              precoUnitario: mat?.ultimoValorPago   ?? _primeira.precoUnitario,
+              precoM2:       mat?.ultimoValorPagoM2 ?? _primeira.precoM2,
+            ),
+          );
+        });
+      }
     }
   }
 
@@ -1087,123 +1099,16 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
     );
   }
 
+
   @override
   Widget build(BuildContext context) {
-    final unidade    = _primeira.materialUnidade;
-    final saldoColor = _saldoLiquido > 0
-        ? AppTheme.success
-        : _saldoLiquido < 0
-            ? AppTheme.error
-            : AppTheme.textSecondary;
-
-    if (!widget.aberto) {
-      return Card(
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: widget.onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _primeira.materialNome,
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleLarge
-                                ?.copyWith(fontWeight: FontWeight.w700),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          if ((_primeira.descricaoItem ?? '').isNotEmpty) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              _primeira.descricaoItem!,
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  color: AppTheme.primary,
-                                  fontWeight: FontWeight.w600),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                          if (_subtitulo.isNotEmpty) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              _subtitulo,
-                              style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppTheme.textSecondary),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.expand_more,
-                        size: 18, color: AppTheme.textHint),
-                  ],
-                ),
-                const Spacer(),
-                Row(
-                  children: [
-                    _MiniChip(
-                      icon: Icons.arrow_downward,
-                      valor: _formatQtd(_totalEntradas, null),
-                      cor: AppTheme.success,
-                    ),
-                    const SizedBox(width: 6),
-                    _MiniChip(
-                      icon: Icons.arrow_upward,
-                      valor: _formatQtd(_totalSaidas, null),
-                      cor: AppTheme.error,
-                    ),
-                    const SizedBox(width: 6),
-                    _MiniChip(
-                      icon: Icons.balance,
-                      valor: _formatQtd(_saldoLiquido, null),
-                      cor: saldoColor,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                _UltimoPrecoRow(movimentacoes: widget.movimentacoes),
-                const SizedBox(height: 4),
-                Text(
-                  '${widget.movimentacoes.length} '
-                  '${widget.movimentacoes.length == 1 ? 'movimentação' : 'movimentações'}',
-                  style: const TextStyle(
-                      fontSize: 11, color: AppTheme.textHint),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (widget.aberto && mounted && !_painelAberto) {
-        _painelAberto = true;
-        _mostrarPainel(context);
-      }
-    });
+    final unidade = _primeira.materialUnidade;
+    final totais  = _TotaisMovimentacao.calcular(widget.movimentacoes);
 
     return Card(
       clipBehavior: Clip.antiAlias,
-      color: AppTheme.primary.withValues(alpha: 0.08),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: AppTheme.primary, width: 1.5),
-      ),
       child: InkWell(
-        onTap: widget.onTap,
+        onTap: () => _mostrarPainel(context),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
@@ -1217,10 +1122,10 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                       children: [
                         Text(
                           _primeira.materialNome,
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.primary,
-                              ),
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1249,42 +1154,20 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  const Icon(Icons.expand_less,
-                      size: 18, color: AppTheme.primary),
+                  const Icon(Icons.expand_more,
+                      size: 18, color: AppTheme.textHint),
                 ],
               ),
-              if (unidade != null) ...[
-                const SizedBox(height: 2),
-                Text(unidade,
-                    style: const TextStyle(
-                        fontSize: 11, color: AppTheme.textSecondary)),
-              ],
               const Spacer(),
-              Row(
-                children: [
-                  _MiniChip(
-                      icon: Icons.arrow_downward,
-                      valor: _formatQtd(_totalEntradas, null),
-                      cor: AppTheme.success),
-                  const SizedBox(width: 6),
-                  _MiniChip(
-                      icon: Icons.arrow_upward,
-                      valor: _formatQtd(_totalSaidas, null),
-                      cor: AppTheme.error),
-                  const SizedBox(width: 6),
-                  _MiniChip(
-                      icon: Icons.balance,
-                      valor: _formatQtd(_saldoLiquido, null),
-                      cor: saldoColor),
-                ],
-              ),
-              const SizedBox(height: 4),
               _UltimoPrecoRow(movimentacoes: widget.movimentacoes),
               const SizedBox(height: 6),
+              _TotaisResumoMini(totais: totais, unidade: unidade),
+              const SizedBox(height: 4),
               Text(
                 '${widget.movimentacoes.length} '
                 '${widget.movimentacoes.length == 1 ? 'movimentação' : 'movimentações'}',
-                style: const TextStyle(fontSize: 11, color: AppTheme.textHint),
+                style: const TextStyle(
+                    fontSize: 11, color: AppTheme.textHint),
               ),
             ],
           ),
@@ -1333,19 +1216,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
               if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
             });
           }
-
-          final totalEntradas = movsAtuais
-              .where((m) => m.tipo == 'ENTRADA')
-              .fold(0.0, (acc, m) => acc + m.quantidade);
-          final totalSaidas = movsAtuais
-              .where((m) => m.tipo == 'SAIDA')
-              .fold(0.0, (acc, m) => acc + m.quantidade);
-          final saldoLiquido = totalEntradas - totalSaidas;
-          final saldoColor = saldoLiquido > 0
-              ? AppTheme.success
-              : saldoLiquido < 0
-                  ? AppTheme.error
-                  : AppTheme.textSecondary;
 
           return Dialog(
             insetPadding:
@@ -1409,41 +1279,20 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                           icon: const Icon(Icons.close),
                           onPressed: () {
                             Navigator.of(ctx).pop();
-                            widget.onTap();
                           },
                         ),
                       ],
                     ),
                     const SizedBox(height: 14),
 
-                    Row(
-                      children: [
-                        _ResumoChip(
-                          label: 'Entradas',
-                          valor: _formatQtd(totalEntradas, unidade),
-                          cor: AppTheme.success,
-                          icone: Icons.arrow_downward,
-                        ),
-                        const SizedBox(width: 8),
-                        _ResumoChip(
-                          label: 'Saídas',
-                          valor: _formatQtd(totalSaidas, unidade),
-                          cor: AppTheme.error,
-                          icone: Icons.arrow_upward,
-                        ),
-                        const SizedBox(width: 8),
-                        _ResumoChip(
-                          label: 'Saldo',
-                          valor: _formatQtd(saldoLiquido, unidade),
-                          cor: saldoColor,
-                          icone: Icons.balance,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
                     _UltimoPrecoRow(
                       movimentacoes: movsAtuais,
                       expanded: true,
+                    ),
+                    const SizedBox(height: 10),
+                    _TotaisResumoCompleto(
+                      movimentacoes: movsAtuais,
+                      unidade: unidade,
                     ),
                     const SizedBox(height: 16),
 
@@ -1455,7 +1304,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                             child: OutlinedButton.icon(
                               onPressed: () {
                                 Navigator.of(ctx).pop();
-                                widget.onTap();
                                 _abrirMovimentacao(context, 'ENTRADA');
                               },
                               icon: const Icon(Icons.add,
@@ -1475,7 +1323,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                             child: OutlinedButton.icon(
                               onPressed: () {
                                 Navigator.of(ctx).pop();
-                                widget.onTap();
                                 _abrirMovimentacao(context, 'SAIDA');
                               },
                               icon: const Icon(Icons.remove,
@@ -1564,8 +1411,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       ),
     );
 
-    if (mounted && widget.aberto) widget.onTap();
-    if (mounted) _painelAberto = false;
   }
 }
 
@@ -1614,13 +1459,7 @@ class _UltimoPrecoRow extends StatelessWidget {
       chips.add(_PrecoBadge(label: 'M²', valor: _brl(pm2)));
     }
 
-    return Row(
-      children: [
-        const Icon(Icons.price_check, size: 11, color: AppTheme.textSecondary),
-        const SizedBox(width: 3),
-        ...chips,
-      ],
-    );
+    return Row(children: chips);
   }
 }
 
@@ -1664,87 +1503,208 @@ class _PrecoBadge extends StatelessWidget {
   }
 }
 
-// ─── Mini chip ────────────────────────────────────────────────────────────────
+// ─── Totais de entrada/saída ──────────────────────────────────────────────────
 
-class _MiniChip extends StatelessWidget {
-  final IconData icon;
-  final String valor;
-  final Color cor;
+class _TotaisMovimentacao {
+  final double qtdEntrada;
+  final double qtdSaida;
+  final double valorEntrada;
+  final double valorSaida;
 
-  const _MiniChip({required this.icon, required this.valor, required this.cor});
+  const _TotaisMovimentacao({
+    required this.qtdEntrada,
+    required this.qtdSaida,
+    required this.valorEntrada,
+    required this.valorSaida,
+  });
+
+  static String _brl(double v) =>
+      'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
+
+  String get qtdEntradaStr => qtdEntrada == qtdEntrada.truncate()
+      ? qtdEntrada.toStringAsFixed(0)
+      : qtdEntrada.toStringAsFixed(2);
+
+  String get qtdSaidaStr => qtdSaida == qtdSaida.truncate()
+      ? qtdSaida.toStringAsFixed(0)
+      : qtdSaida.toStringAsFixed(2);
+
+  String get valorEntradaStr => _brl(valorEntrada);
+  String get valorSaidaStr   => _brl(valorSaida);
+
+  static _TotaisMovimentacao calcular(List<MovimentacaoModel> movs) {
+    double qtdE = 0, qtdS = 0, valE = 0, valS = 0;
+    for (final m in movs) {
+      final pm2 = m.precoM2;
+      final pu  = m.precoUnitario;
+      // Usa preço m² quando disponível, senão unitário
+      final preco = (pm2 != null && pm2 > 0) ? pm2 : (pu ?? 0.0);
+      if (m.tipo == 'ENTRADA') {
+        qtdE += m.quantidade;
+        valE += m.quantidade * preco;
+      } else {
+        qtdS += m.quantidade;
+        valS += m.quantidade * preco;
+      }
+    }
+    return _TotaisMovimentacao(
+      qtdEntrada: qtdE, qtdSaida: qtdS,
+      valorEntrada: valE, valorSaida: valS,
+    );
+  }
+}
+
+/// Chips compactos exibidos no card fechado.
+class _TotaisResumoMini extends StatelessWidget {
+  final _TotaisMovimentacao totais;
+  final String? unidade;
+  const _TotaisResumoMini({required this.totais, required this.unidade});
 
   @override
   Widget build(BuildContext context) {
+    final unStr      = unidade ?? '';
+    final temEntrada = totais.qtdEntrada > 0;
+    final temSaida   = totais.qtdSaida   > 0;
+    if (!temEntrada && !temSaida) return const SizedBox.shrink();
+
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        if (temEntrada)
+          _TotalChip(
+            icon: Icons.arrow_upward,
+            cor: AppTheme.success,
+            qtd: '${totais.qtdEntradaStr}${unStr.isNotEmpty ? ' $unStr' : ''}',
+            valor: totais.valorEntradaStr,
+          ),
+        if (temSaida)
+          _TotalChip(
+            icon: Icons.arrow_downward,
+            cor: AppTheme.error,
+            qtd: '${totais.qtdSaidaStr}${unStr.isNotEmpty ? ' $unStr' : ''}',
+            valor: totais.valorSaidaStr,
+          ),
+      ],
+    );
+  }
+}
+
+/// Bloco expandido exibido no modal de detalhe do material.
+class _TotaisResumoCompleto extends StatelessWidget {
+  final List<MovimentacaoModel> movimentacoes;
+  final String? unidade;
+  const _TotaisResumoCompleto({required this.movimentacoes, required this.unidade});
+
+  @override
+  Widget build(BuildContext context) {
+    final totais     = _TotaisMovimentacao.calcular(movimentacoes);
+    final unStr      = unidade ?? '';
+    final temEntrada = totais.qtdEntrada > 0;
+    final temSaida   = totais.qtdSaida   > 0;
+    if (!temEntrada && !temSaida) return const SizedBox.shrink();
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: cor.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(6),
+        color: AppTheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 11, color: cor),
-          const SizedBox(width: 3),
-          Text(valor,
-              style: TextStyle(
-                  fontSize: 11, fontWeight: FontWeight.w600, color: cor)),
+          if (temEntrada)
+            Expanded(
+              child: _TotalLinha(
+                icon: Icons.arrow_upward,
+                cor: AppTheme.success,
+                label: 'Entrada total',
+                qtd: '${totais.qtdEntradaStr}${unStr.isNotEmpty ? ' $unStr' : ''}',
+                valor: totais.valorEntradaStr,
+              ),
+            ),
+          if (temEntrada && temSaida)
+            Container(
+              width: 1,
+              height: 36,
+              margin: const EdgeInsets.symmetric(horizontal: 10),
+              color: AppTheme.divider,
+            ),
+          if (temSaida)
+            Expanded(
+              child: _TotalLinha(
+                icon: Icons.arrow_downward,
+                cor: AppTheme.error,
+                label: 'Saída total',
+                qtd: '${totais.qtdSaidaStr}${unStr.isNotEmpty ? ' $unStr' : ''}',
+                valor: totais.valorSaidaStr,
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-// ─── Chip resumo ──────────────────────────────────────────────────────────────
-
-class _ResumoChip extends StatelessWidget {
-  final String label;
-  final String valor;
+class _TotalChip extends StatelessWidget {
+  final IconData icon;
   final Color cor;
-  final IconData icone;
-
-  const _ResumoChip({
-    required this.label,
-    required this.valor,
-    required this.cor,
-    required this.icone,
-  });
+  final String qtd;
+  final String valor;
+  const _TotalChip({required this.icon, required this.cor, required this.qtd, required this.valor});
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: cor.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: cor.withValues(alpha: 0.25)),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: cor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: cor.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 9, color: cor),
+          const SizedBox(width: 3),
+          Text(qtd,    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: cor)),
+          const SizedBox(width: 3),
+          Text(valor,  style: TextStyle(fontSize: 9,  fontWeight: FontWeight.w500, color: cor.withValues(alpha: 0.8))),
+        ],
+      ),
+    );
+  }
+}
+
+class _TotalLinha extends StatelessWidget {
+  final IconData icon;
+  final Color cor;
+  final String label;
+  final String qtd;
+  final String valor;
+  const _TotalLinha({required this.icon, required this.cor, required this.label, required this.qtd, required this.valor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(5),
+          decoration: BoxDecoration(
+            color: cor.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(icon, size: 13, color: cor),
         ),
-        child: Row(
+        const SizedBox(width: 8),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icone, size: 14, color: cor),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: cor,
-                            fontWeight: FontWeight.w600,
-                          )),
-                  Text(valor,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: cor,
-                            fontWeight: FontWeight.bold,
-                          ),
-                      overflow: TextOverflow.ellipsis),
-                ],
-              ),
-            ),
+            Text(label, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary, fontWeight: FontWeight.w500)),
+            Text(qtd,   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: cor)),
+            Text(valor, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cor.withValues(alpha: 0.75))),
           ],
         ),
-      ),
+      ],
     );
   }
 }
@@ -1771,7 +1731,7 @@ class _MovimentacaoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final isEntrada = mov.tipo == 'ENTRADA';
     final cor  = isEntrada ? AppTheme.success : AppTheme.error;
-    final icon = isEntrada ? Icons.arrow_downward : Icons.arrow_upward;
+    final icon = isEntrada ? Icons.arrow_upward : Icons.arrow_downward;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 6),

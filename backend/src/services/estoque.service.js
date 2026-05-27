@@ -90,32 +90,28 @@ async function registrarMovimentacao({
 
   // OS numérica → mescla na RelacaoOS existente; OS textual → reutiliza a aberta existente
   // ou cria nova se vier de movimentação manual sem relação prévia
-  const osEhNumerica   = /^\d+$/.test(numeroOS);
-  // OS "com sufixo" = já tem #OC..., #S... ou #E... → veio da AppBar de uma OS aberta
-  const osTemSufixo    = /#(OC|S|E)/.test(numeroOS);
+  const osEhNumerica = /^\d+$/.test(numeroOS);
+  // OS "com sufixo" = já tem #OC..., #S... ou #E... → veio de uma sessão com sufixo gerado pelo cliente
+  const osTemSufixo  = /#(OC|S|E)/.test(numeroOS);
   let relacao;
 
-  if (osEhNumerica) {
-    // OS numérica: sempre mescla (upsert garante uma única relação por número)
-    relacao = await prisma.relacaoOS.upsert({
-      where:  { numeroOS },
-      create: { numeroOS, status: 'EM_ANDAMENTO' },
-      update: {},
-    });
-  } else if (osTemSufixo) {
-    // OS textual com sufixo (#OC ou #S): veio do botão da AppBar de uma OS já
-    // aberta — mescla diretamente nessa relação (o sufixo garante unicidade)
+  if (osEhNumerica || osTemSufixo) {
+    // OS numérica ou com sufixo: upsert garante uma única relação por chave
     relacao = await prisma.relacaoOS.upsert({
       where:  { numeroOS },
       create: { numeroOS, status: 'EM_ANDAMENTO' },
       update: {},
     });
   } else {
-    // OS textual sem sufixo: botão global (Entrada ou Saída da tela principal)
-    // → sempre cria nova relação independente com sufixo de timestamp
+    // OS textual sem sufixo: o cliente deveria ter adicionado um sufixo antes de
+    // enviar o lote. Chegando aqui sem sufixo (chamada avulsa), cria uma relação
+    // nova com sufixo de timestamp para não misturar com outras relações dessa OS.
     const sufixo = tipo === 'SAIDA' ? `#S${Date.now()}` : `#E${Date.now()}`;
-    relacao = await prisma.relacaoOS.create({
-      data: { numeroOS: `${numeroOS}${sufixo}`, status: 'EM_ANDAMENTO' },
+    const numeroOSComSufixo = `${numeroOS}${sufixo}`;
+    relacao = await prisma.relacaoOS.upsert({
+      where:  { numeroOS: numeroOSComSufixo },
+      create: { numeroOS: numeroOSComSufixo, status: 'EM_ANDAMENTO' },
+      update: {},
     });
   }
 

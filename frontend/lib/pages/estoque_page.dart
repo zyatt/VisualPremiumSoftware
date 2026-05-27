@@ -3,10 +3,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../models/material_model.dart';
+import '../providers/estoque_provider.dart';
 import '../providers/material_provider.dart';
+import '../providers/orcamento_provider.dart';
 import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
 
@@ -691,6 +694,70 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     }
   }
 
+  // ── Orçar materiais filtrados ──────────────────────────────────────────────
+  Future<void> _orcarFiltrados() async {
+    final materiais = context.read<MaterialProvider>().materiais;
+    if (materiais.isEmpty) return;
+
+    // Monta os itens para o orçamento com os dados de preço de cada material
+    final itens = materiais.map((m) {
+      final precos = <int, PrecoFornecedorData>{};
+      for (final fm in m.fornecedorMateriais) {
+        precos[fm.fornecedorId] = PrecoFornecedorData(
+          fornecedorNome: fm.fornecedorNome,
+          preco:   fm.preco > 0 ? fm.preco : null,
+          precoM2: fm.precoMetroQuadrado > 0 ? fm.precoMetroQuadrado : null,
+        );
+      }
+      return ItemOrcamentoData(
+        materialId:            m.id,
+        materialNome:          m.nome,
+        materialUnidade:       m.unidade,
+        materialCategoria:     m.categoria,
+        materialMedida:        m.medida,
+        materialEspessura:     m.espessura,
+        materialIdentificador: m.identificador,
+        materialStatus:        m.status,
+        materialEspecifico:    m.especifico,
+        precos:                precos,
+      );
+    }).toList();
+
+    // Monta um título descritivo baseado nos filtros ativos
+    final partes = <String>[];
+    if (widget.categoriaId != _kCategoriaGeral &&
+        widget.categoriaId != _kCategoriaSemCategoria) {
+      partes.add(widget.categoriaLabel);
+    }
+    if (_medidaCtrl.text.trim().isNotEmpty) {
+      partes.add(_medidaCtrl.text.trim());
+    }
+    if (_espessuraCtrl.text.trim().isNotEmpty) {
+      partes.add(_espessuraCtrl.text.trim());
+    }
+    if (_buscaCtrl.text.trim().isNotEmpty) {
+      partes.add(_buscaCtrl.text.trim());
+    }
+    final titulo = partes.isNotEmpty
+        ? 'Orç. ${partes.join(' · ')}'
+        : 'Orç. ${widget.categoriaLabel}';
+
+    if (!mounted) return;
+    context.read<OrcamentoProvider>().adicionarItensEmLote(titulo, itens);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${itens.length} material(is) adicionado(s) ao orçamento "$titulo".'),
+        backgroundColor: AppTheme.success,
+        action: SnackBarAction(
+          label: 'Ver orçamento',
+          textColor: Colors.white,
+          onPressed: () => context.go('/orcamento'),
+        ),
+      ),
+    );
+  }
+
   // ── BUILD ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -767,6 +834,36 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   ],
                 ),
                 const Spacer(),
+                Consumer<MaterialProvider>(
+                  builder: (_, mp, __) {
+                    final temMateriais = !mp.carregando && mp.materiais.isNotEmpty;
+                    return Tooltip(
+                      message: temMateriais
+                          ? 'Criar orçamento com os ${mp.materiais.length} material(is) filtrado(s)'
+                          : 'Nenhum material filtrado',
+                      child: OutlinedButton.icon(
+                        onPressed: temMateriais ? _orcarFiltrados : null,
+                        icon: const Icon(Icons.request_quote, size: 18),
+                        label: Text(
+                          temMateriais
+                              ? 'Orçar filtrados (${mp.materiais.length})'
+                              : 'Orçar filtrados',
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF1E88E5),
+                          side: BorderSide(
+                            color: temMateriais
+                                ? const Color(0xFF1E88E5)
+                                : AppTheme.textHint,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(width: 12),
                 OutlinedButton.icon(
                   onPressed: _exportarPdf,
                   icon: const Icon(Icons.picture_as_pdf, size: 18),
@@ -1904,11 +2001,23 @@ class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
       child: GestureDetector(                    // <-- clique → dialog
         behavior: HitTestBehavior.opaque,
         onTap: () async {
+          // Verifica se a descrição deste filho está em uso em alguma OS em
+          // andamento. Impede renomear uma variação que já foi movimentada
+          // e ainda está aberta no Controle de Estoque.
+          final estoqueProvider = context.read<EstoqueProvider>();
+          final descricaoBloqueada = estoqueProvider.relacoesOS
+              .where((r) => r.status == 'EM_ANDAMENTO')
+              .any((r) => r.movimentacoes.any((m) =>
+                  m.materialId == filho.materialId &&
+                  (m.descricaoItem?.toUpperCase().trim() ==
+                      filho.descricao.toUpperCase().trim())));
+
           await showDialog<bool>(
             context: context,
             builder: (_) => _EditarFilhoEspecificoDialog(
-              filho: filho,
-              pai:   pai,
+              filho:              filho,
+              pai:                pai,
+              descricaoBloqueada: descricaoBloqueada,
             ),
           );
           // O provider já recarrega internamente ao salvar;
@@ -2456,10 +2565,12 @@ class _FornecedorPrecoRow extends StatelessWidget {
 class _EditarFilhoEspecificoDialog extends StatefulWidget {
   final EstoqueEspecificoModel filho;
   final MaterialModel pai;
+  final bool descricaoBloqueada;
 
   const _EditarFilhoEspecificoDialog({
     required this.filho,
     required this.pai,
+    this.descricaoBloqueada = false,
   });
 
   @override
@@ -2496,6 +2607,13 @@ class _EditarFilhoEspecificoDialogState extends State<_EditarFilhoEspecificoDial
     final novaDesc = _descCtrl.text.trim();
     if (novaDesc.isEmpty) {
       setState(() => _erro = 'A descrição não pode ser vazia.');
+      return;
+    }
+    // Garante que a descrição não mudou se estiver bloqueada por OS em andamento
+    if (widget.descricaoBloqueada &&
+        novaDesc.toUpperCase() != widget.filho.descricao.toUpperCase()) {
+      setState(() => _erro =
+          'Não é possível renomear uma variação com OS em andamento.');
       return;
     }
     setState(() { _salvando = true; _erro = null; });
@@ -2654,15 +2772,57 @@ class _EditarFilhoEspecificoDialogState extends State<_EditarFilhoEspecificoDial
               style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
             ),
             const SizedBox(height: 6),
-            TextField(
-              controller: _descCtrl,
-              autofocus:  true,
-              decoration: const InputDecoration(
-                hintText: 'Ex: Tinta Branca Fosca 18L',
-                isDense:  true,
+            if (widget.descricaoBloqueada) ...[
+              // Campo somente leitura — há OS em andamento usando esta variação
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.textHint.withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.divider),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.lock_outline, size: 15, color: AppTheme.textHint),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        widget.filho.descricao,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              onSubmitted: (_) => _salvar(),
-            ),
+              const SizedBox(height: 6),
+              const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, size: 13, color: AppTheme.textHint),
+                  SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      'Este material possui OS em andamento. O nome não pode ser alterado.',
+                      style: TextStyle(fontSize: 11, color: AppTheme.textHint),
+                    ),
+                  ),
+                ],
+              ),
+            ] else ...[
+              TextField(
+                controller: _descCtrl,
+                autofocus:  true,
+                decoration: const InputDecoration(
+                  hintText: 'Ex: Tinta Branca Fosca 18L',
+                  isDense:  true,
+                ),
+                onSubmitted: (_) => _salvar(),
+              ),
+            ],
             const SizedBox(height: 16),
 
             if (_erro != null) ...[

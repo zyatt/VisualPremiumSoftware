@@ -100,6 +100,41 @@ class EstoqueProvider extends ChangeNotifier {
     }
   }
 
+  /// Igual a [registrarMovimentacao] mas NÃO chama [carregarRelacoesOS] ao
+  /// final. Use quando for registrar múltiplas movimentações em sequência e
+  /// quiser recarregar apenas uma vez ao final (evita criar RelacaoOS
+  /// duplicadas por race condition entre chamadas consecutivas).
+  Future<bool> registrarMovimentacaoSilencioso({
+    required int materialId,
+    required String tipo,
+    required double quantidade,
+    required String numeroOS,
+    double? precoUnitario,
+    double? precoM2,
+    String? observacao,
+    int? ordemCompraId,
+    String? descricaoItem,
+  }) async {
+    try {
+      await _repo.registrarMovimentacao(
+        materialId:    materialId,
+        tipo:          tipo,
+        quantidade:    quantidade,
+        numeroOS:      numeroOS,
+        precoUnitario: precoUnitario,
+        precoM2:       precoM2,
+        observacao:    observacao,
+        ordemCompraId: ordemCompraId,
+        descricaoItem: descricaoItem,
+      );
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<bool> removerMovimentacao({
     required int movimentacaoId,
     required String numeroOS,

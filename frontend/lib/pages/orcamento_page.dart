@@ -499,13 +499,17 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
       );
       return;
     }
+    final jaExiste = provider.tabAtual!.historicoId != null &&
+        provider.historico.any((e) => e.id == provider.tabAtual!.historicoId);
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Salvar Orçamento',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
         content: Text(
-          'O orçamento "${provider.tabAtual!.titulo}" será salvo no histórico e esta aba será fechada.',
+          jaExiste
+              ? 'O orçamento "${provider.tabAtual!.titulo}" já existe no histórico e será atualizado.'
+              : 'O orçamento "${provider.tabAtual!.titulo}" será salvo no histórico e esta aba será fechada.',
           style: const TextStyle(fontSize: 13),
         ),
         actions: [
@@ -515,7 +519,7 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppTheme.success),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Salvar'),
+            child: Text(jaExiste ? 'Atualizar' : 'Salvar'),
           ),
         ],
       ),
@@ -524,8 +528,10 @@ class _OrcamentoPageState extends State<OrcamentoPage> {
     provider.salvarOrcamento();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Orçamento salvo no histórico!'),
+        SnackBar(
+          content: Text(jaExiste
+              ? 'Orçamento atualizado no histórico!'
+              : 'Orçamento salvo no histórico!'),
           backgroundColor: AppTheme.success,
         ),
       );
