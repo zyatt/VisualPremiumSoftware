@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/orcamento_provider.dart';
+import '../repositories/orcamento_repository.dart';
 import '../theme/app_theme.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -20,6 +21,40 @@ String _dataFormatada(DateTime dt) {
   return '$d/$m/$a às $h:$min';
 }
 
+String _statusLabel(String status) {
+  switch (status) {
+    case 'ABERTO':
+      return 'Salvo';
+    case 'AGUARDANDO_APROVACAO':
+      return 'Aguardando Aprovação';
+    case 'APROVADO':
+      return 'Aprovado';
+    case 'NAO_APROVADO':
+      return 'Não Aprovado';
+    case 'CANCELADO':
+      return 'Cancelado';
+    default:
+      return status;
+  }
+}
+
+Color _statusColor(String status) {
+  switch (status) {
+    case 'ABERTO':
+      return AppTheme.success;
+    case 'AGUARDANDO_APROVACAO':
+      return AppTheme.warning;
+    case 'APROVADO':
+      return AppTheme.success;
+    case 'NAO_APROVADO':
+      return AppTheme.warning;
+    case 'CANCELADO':
+      return AppTheme.error;
+    default:
+      return AppTheme.textSecondary;
+  }
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 class OrcamentoHistoricoPage extends StatefulWidget {
@@ -34,16 +69,141 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
+  bool _carregando = true;
+  String? _erro;
+  List<dynamic> _salvos = [];
+  List<dynamic> _aprovados = [];
+  List<dynamic> _rejeitados = [];
+  List<dynamic> _cancelados = [];
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
+    _carregar();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  Future<void> _carregar() async {
+    setState(() {
+      _carregando = true;
+      _erro = null;
+    });
+    try {
+      final repo = OrcamentoRepository();
+      final todos = await repo.listarHistorico();
+      if (!mounted) return;
+      setState(() {
+        _salvos = todos
+            .where((o) =>
+                o['status'] == 'ABERTO' ||
+                o['status'] == 'AGUARDANDO_APROVACAO')
+            .toList();
+        _aprovados =
+            todos.where((o) => o['status'] == 'APROVADO').toList();
+        _rejeitados =
+            todos.where((o) => o['status'] == 'NAO_APROVADO').toList();
+        _cancelados =
+            todos.where((o) => o['status'] == 'CANCELADO').toList();
+      });
+    } catch (e) {
+      if (mounted) setState(() => _erro = e.toString());
+    } finally {
+      if (mounted) setState(() => _carregando = false);
+    }
+  }
+
+  // Reabrir orçamento salvo (ABERTO) para edição
+  Future<void> _reabrirOrcamento(Map<String, dynamic> orc) async {
+    setState(() => _carregando = true);
+    try {
+      final repo = OrcamentoRepository();
+      final orcamentoCompleto = await repo.buscarPorId(orc['id'] as int);
+      if (!mounted) return;
+
+      final itens = (orcamentoCompleto['itens'] as List? ?? []);
+      final Map<String, ItemOrcamentoData> itensPorChave = {};
+
+      for (final item in itens) {
+        final materialId = item['materialId'] as int;
+        final materialData = item['material'] as Map<String, dynamic>?;
+        final fornecedorId = item['fornecedorId'] as int?;
+        final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
+        final especifico = materialData?['especifico'] as bool? ?? false;
+
+        final chave = especifico ? 'esp_${item['id']}' : 'mat_$materialId';
+
+        if (!itensPorChave.containsKey(chave)) {
+          itensPorChave[chave] = ItemOrcamentoData(
+            materialId: materialId,
+            materialNome: materialData?['nome'] as String? ?? '',
+            materialUnidade: materialData?['unidade'] as String?,
+            materialCategoria: materialData?['categoria'] as String?,
+            materialMedida: materialData?['medida'] as String?,
+            materialEspessura: materialData?['espessura'] as String?,
+            materialIdentificador: materialData?['identificador'] as String?,
+            materialEspecifico: especifico,
+            descricao: item['descricaoItem'] as String?,
+            quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
+            precos: {},
+            modoOrcamento: (item['usarM2'] as bool? ?? false)
+                ? ModoOrcamento.metroQuadrado
+                : ModoOrcamento.unitario,
+          );
+        }
+
+        if (fornecedorId != null && fornecedorData != null) {
+          itensPorChave[chave]!.precos[fornecedorId] =
+              PrecoFornecedorData(
+            fornecedorNome:
+                fornecedorData['nomeFantasia'] as String? ?? '',
+            preco: item['precoUnitario'] != null
+                ? double.tryParse(item['precoUnitario'].toString())
+                : null,
+            precoM2: item['precoM2'] != null
+                ? double.tryParse(item['precoM2'].toString())
+                : null,
+          );
+
+          if (item['selecionado'] as bool? ?? false) {
+            itensPorChave[chave]!.fornecedorSelecionado = fornecedorId;
+          }
+        }
+      }
+
+      final provider = context.read<OrcamentoProvider>();
+      provider.adicionarItensEmLote(
+        orcamentoCompleto['titulo'] as String? ??
+            'Orçamento #${orc['id']}',
+        itensPorChave.values.toList(),
+      );
+      provider.setServidorIdTab(orc['id'] as int);
+
+      if (!mounted) return;
+      Navigator.of(context).pop({'reabrirServidorId': orc['id'] as int});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Orçamento #${orc['id']} carregado para edição.'),
+          backgroundColor: AppTheme.success,
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao reabrir orçamento: $e'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+        setState(() => _carregando = false);
+      }
+    }
   }
 
   @override
@@ -55,7 +215,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
+            // ── Cabeçalho ────────────────────────────────────────────────────
             Row(
               children: [
                 IconButton(
@@ -81,115 +241,147 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                           ?.copyWith(color: AppTheme.textPrimary),
                     ),
                     const SizedBox(height: 2),
-                    Consumer<OrcamentoProvider>(
-                      builder: (_, p, __) {
-                        final total = p.historicoSalvos.length +
-                            p.historicoDescartados.length;
-                        return Text(
-                          '$total ${total == 1 ? 'orçamento' : 'orçamentos'} no histórico',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(color: AppTheme.textSecondary),
-                        );
-                      },
+                    Text(
+                      '${_salvos.length + _aprovados.length + _rejeitados.length + _cancelados.length} '
+                      '${(_salvos.length + _aprovados.length + _rejeitados.length + _cancelados.length) == 1 ? 'orçamento' : 'orçamentos'} no histórico',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: AppTheme.textSecondary),
                     ),
                   ],
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: _carregar,
+                  icon: const Icon(Icons.refresh,
+                      size: 18, color: AppTheme.textSecondary),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.surface,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppTheme.divider),
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 20),
 
-            // ── Abas ───────────────────────────────────────────────────────
-            Consumer<OrcamentoProvider>(
-              builder: (_, p, __) {
-                return Container(
-                  decoration: const BoxDecoration(
-                    color: AppTheme.surface,
-                    border:
-                        Border(bottom: BorderSide(color: AppTheme.divider)),
-                  ),
-                  child: TabBar(
-                    controller: _tabController,
-                    labelColor: AppTheme.primary,
-                    unselectedLabelColor: AppTheme.textSecondary,
-                    indicatorColor: AppTheme.primary,
-                    indicatorWeight: 2,
-                    labelStyle: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 13),
-                    tabs: [
-                      Tab(text: 'Salvos (${p.historicoSalvos.length})'),
-                      Tab(
-                          text:
-                              'Cancelados (${p.historicoDescartados.length})'),
-                    ],
-                  ),
-                );
-              },
+            // ── Abas ─────────────────────────────────────────────────────────
+            Container(
+              decoration: const BoxDecoration(
+                color: AppTheme.surface,
+                border: Border(
+                    bottom: BorderSide(color: AppTheme.divider)),
+              ),
+              child: TabBar(
+                controller: _tabController,
+                labelColor: AppTheme.primary,
+                unselectedLabelColor: AppTheme.textSecondary,
+                indicatorColor: AppTheme.primary,
+                indicatorWeight: 2,
+                labelStyle: const TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 13),
+                tabs: [
+                  Tab(text: 'Salvos (${_salvos.length})'),
+                  Tab(text: 'Aprovados (${_aprovados.length})'),
+                  Tab(text: 'Rejeitados (${_rejeitados.length})'),
+                  Tab(text: 'Cancelados (${_cancelados.length})'),
+                ],
+              ),
             ),
 
-            // ── Conteúdo ───────────────────────────────────────────────────
+            // ── Conteúdo ──────────────────────────────────────────────────────
             Expanded(
-              child: Consumer<OrcamentoProvider>(
-                builder: (context, provider, _) {
-                  return TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _OrcamentoLista(
-                        entradas: provider.historicoSalvos,
-                        tipo: StatusOrcamentoHistorico.salvo,
-                        emptyMessage: 'Nenhum orçamento salvo',
-                        emptyIcon: Icons.save_outlined,
-                        onReabrir: (entry) {
-                          provider.reabrirOrcamento(entry);
-                          Navigator.of(context).pop();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                  'Orçamento "${entry.titulo}" reaberto em nova aba.'),
-                              backgroundColor: AppTheme.success,
+              child: _carregando
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                          color: AppTheme.primary))
+                  : _erro != null
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.error_outline,
+                                  size: 48, color: AppTheme.error),
+                              const SizedBox(height: 16),
+                              Text('Erro: $_erro',
+                                  style: const TextStyle(
+                                      color: AppTheme.error)),
+                              const SizedBox(height: 12),
+                              FilledButton.icon(
+                                onPressed: _carregar,
+                                icon: const Icon(Icons.refresh, size: 16),
+                                label: const Text('Tentar novamente'),
+                                style: FilledButton.styleFrom(
+                                    backgroundColor: AppTheme.primary),
+                              ),
+                            ],
+                          ),
+                        )
+                      : TabBarView(
+                          controller: _tabController,
+                          children: [
+                            // ── Salvos ────────────────────────────────────
+                            _buildLista(
+                              lista: _salvos,
+                              emptyMessage: 'Nenhum orçamento salvo',
+                              emptyIcon: Icons.save_outlined,
+                              emptyColor: AppTheme.success,
+                              itemBuilder: (orc) =>
+                                  _OrcamentoHistoricoCard(
+                                orcamento: orc,
+                                onReabrir: () => _reabrirOrcamento(orc),
+                              ),
                             ),
-                          );
-                        },
-                      ),
-                      _OrcamentoLista(
-                        entradas: provider.historicoDescartados,
-                        tipo: StatusOrcamentoHistorico.descartado,
-                        emptyMessage: 'Nenhum orçamento cancelado',
-                        emptyIcon: Icons.delete_outline,
-                      ),
-                    ],
-                  );
-                },
-              ),
+
+                            // ── Aprovados ─────────────────────────────────
+                            _buildLista(
+                              lista: _aprovados,
+                              emptyMessage: 'Nenhum orçamento aprovado',
+                              emptyIcon: Icons.check_circle_outline,
+                              emptyColor: AppTheme.success,
+                              itemBuilder: (orc) =>
+                                  _OrcamentoHistoricoCard(orcamento: orc),
+                            ),
+
+                            // ── Rejeitados ────────────────────────────────
+                            _buildLista(
+                              lista: _rejeitados,
+                              emptyMessage: 'Nenhum orçamento rejeitado',
+                              emptyIcon: Icons.cancel_outlined,
+                              emptyColor: AppTheme.warning,
+                              itemBuilder: (orc) =>
+                                  _OrcamentoHistoricoCard(orcamento: orc),
+                            ),
+
+                            // ── Cancelados ────────────────────────────────
+                            _buildLista(
+                              lista: _cancelados,
+                              emptyMessage: 'Nenhum orçamento cancelado',
+                              emptyIcon: Icons.delete_outline,
+                              emptyColor: AppTheme.error,
+                              itemBuilder: (orc) =>
+                                  _OrcamentoHistoricoCard(orcamento: orc),
+                            ),
+                          ],
+                        ),
             ),
           ],
         ),
       ),
     );
   }
-}
 
-// ─── Lista ────────────────────────────────────────────────────────────────────
-
-class _OrcamentoLista extends StatelessWidget {
-  final List<OrcamentoHistoricoEntry> entradas;
-  final StatusOrcamentoHistorico tipo;
-  final String emptyMessage;
-  final IconData emptyIcon;
-  final void Function(OrcamentoHistoricoEntry)? onReabrir;
-
-  const _OrcamentoLista({
-    required this.entradas,
-    required this.tipo,
-    required this.emptyMessage,
-    required this.emptyIcon,
-    this.onReabrir,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (entradas.isEmpty) {
+  Widget _buildLista({
+    required List<dynamic> lista,
+    required String emptyMessage,
+    required IconData emptyIcon,
+    required Color emptyColor,
+    required Widget Function(Map<String, dynamic>) itemBuilder,
+  }) {
+    if (lista.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -198,10 +390,10 @@ class _OrcamentoLista extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.08),
+                color: emptyColor.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Icon(emptyIcon, size: 36, color: AppTheme.primary),
+              child: Icon(emptyIcon, size: 36, color: emptyColor),
             ),
             const SizedBox(height: 20),
             Text(
@@ -217,51 +409,45 @@ class _OrcamentoLista extends StatelessWidget {
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.only(top: 16, bottom: 24),
-      itemCount: entradas.length,
+      padding: const EdgeInsets.only(top: 16),
+      itemCount: lista.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, i) {
-        final entry = entradas[i];
-        return _OrcamentoCard(
-          entry: entry,
-          onReabrir: onReabrir != null ? () => onReabrir!(entry) : null,
-          onVerDetalhes: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => _OrcamentoDetalhePage(entry: entry),
-            ),
-          ),
-        );
-      },
+      itemBuilder: (ctx, i) =>
+          itemBuilder(lista[i] as Map<String, dynamic>),
     );
   }
 }
 
-// ─── Card ─────────────────────────────────────────────────────────────────────
+// ─── Card do histórico ────────────────────────────────────────────────────────
 
-class _OrcamentoCard extends StatelessWidget {
-  final OrcamentoHistoricoEntry entry;
+class _OrcamentoHistoricoCard extends StatefulWidget {
+  final Map<String, dynamic> orcamento;
   final VoidCallback? onReabrir;
-  final VoidCallback onVerDetalhes;
 
-  const _OrcamentoCard({
-    required this.entry,
-    required this.onVerDetalhes,
+  const _OrcamentoHistoricoCard({
+    required this.orcamento,
     this.onReabrir,
   });
 
   @override
+  State<_OrcamentoHistoricoCard> createState() =>
+      _OrcamentoHistoricoCardState();
+}
+
+class _OrcamentoHistoricoCardState
+    extends State<_OrcamentoHistoricoCard> {
+  bool _expandido = false;
+
+  @override
   Widget build(BuildContext context) {
-    final salvo = entry.status == StatusOrcamentoHistorico.salvo;
-    final statusColor = salvo ? AppTheme.success : AppTheme.error;
-    final statusLabel = salvo ? 'Salvo' : 'Cancelado';
-    final statusIcon =
-        salvo ? Icons.check_circle_outline : Icons.cancel_outlined;
-    final fornecedores = <String>{};
-    for (final item in entry.itens) {
-      for (final pf in item.precos.values) {
-        fornecedores.add(pf.fornecedorNome);
-      }
-    }
+    final orc = widget.orcamento;
+    final status = orc['status'] as String? ?? 'ABERTO';
+    final titulo = orc['titulo'] as String? ?? 'Orçamento #${orc['id']}';
+    final criadoEm = orc['criadoEm'] != null
+        ? DateTime.tryParse(orc['criadoEm'].toString())
+        : null;
+    final itens = (orc['itens'] as List? ?? []);
+    final motivoRejeicao = orc['motivoRejeicao'] as String?;
 
     return Container(
       decoration: BoxDecoration(
@@ -272,717 +458,269 @@ class _OrcamentoCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Cabeçalho
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-            decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.05),
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(12)),
-              border: Border(
-                bottom: BorderSide(
-                    color: statusColor.withValues(alpha: 0.15)),
-              ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child:
-                      Icon(statusIcon, size: 18, color: statusColor),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        entry.titulo,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      Text(
-                        _dataFormatada(entry.criadoEm),
-                        style: const TextStyle(
-                            fontSize: 11, color: AppTheme.textHint),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(statusIcon, size: 12, color: statusColor),
-                      const SizedBox(width: 4),
-                      Text(
-                        statusLabel,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: statusColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Corpo
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    _Stat(
-                      icon: Icons.inventory_2_outlined,
-                      label: 'Materiais',
-                      value: '${entry.itens.length}',
-                    ),
-                    const SizedBox(width: 24),
-                    _Stat(
-                      icon: Icons.store_outlined,
-                      label: 'Fornecedores',
-                      value: '${fornecedores.length}',
-                    ),
-                  ],
-                ),
-
-                // Motivo descarte
-                if (!salvo && entry.motivoDescarte != null) ...[
-                  const SizedBox(height: 12),
+          // ── Cabeçalho do card ───────────────────────────────────────────
+          InkWell(
+            onTap: () => setState(() => _expandido = !_expandido),
+            borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(12)),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  // Ícone de status
                   Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
-                      color: AppTheme.error.withValues(alpha: 0.06),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                          color:
-                              AppTheme.error.withValues(alpha: 0.2)),
+                      color: _statusColor(status).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Row(
+                    child: Icon(
+                      status == 'ABERTO'
+                          ? Icons.save_outlined
+                          : Icons.cancel_outlined,
+                      size: 20,
+                      color: _statusColor(status),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.info_outline,
-                            size: 14, color: AppTheme.error),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Motivo do cancelamento',
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                titulo,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.textPrimary,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: _statusColor(status)
+                                    .withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                _statusLabel(status),
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
-                                  color: AppTheme.error,
+                                  color: _statusColor(status),
                                 ),
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                entry.motivoDescarte!,
-                                style: const TextStyle(
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Text(
+                              '${itens.length} ${itens.length == 1 ? 'material' : 'materiais'}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            if (criadoEm != null) ...[
+                              const Text(
+                                ' · ',
+                                style: TextStyle(
                                     fontSize: 12,
                                     color: AppTheme.textSecondary),
                               ),
+                              Text(
+                                _dataFormatada(criadoEm),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ),
                             ],
-                          ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: 12),
-
-                // Ações
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    IconButton(
-                      onPressed: () async {
-                        final confirmar = await showDialog<bool>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('Excluir orçamento',
-                                style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700)),
-                            content: Text(
-                              'Deseja excluir permanentemente "${entry.titulo}" do histórico?',
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                            actions: [
-                              TextButton(
-                                  onPressed: () =>
-                                      Navigator.pop(ctx, false),
-                                  child: const Text('Cancelar')),
-                              FilledButton(
-                                style: FilledButton.styleFrom(
-                                    backgroundColor: AppTheme.error),
-                                onPressed: () =>
-                                    Navigator.pop(ctx, true),
-                                child: const Text('Excluir'),
+                        // Motivo de cancelamento
+                        if (status == 'CANCELADO' &&
+                            motivoRejeicao != null &&
+                            motivoRejeicao.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.info_outline,
+                                  size: 12, color: AppTheme.error),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  'Motivo: $motivoRejeicao',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppTheme.error,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
                               ),
                             ],
                           ),
-                        );
-                        if (confirmar == true && context.mounted) {
-                          context
-                              .read<OrcamentoProvider>()
-                              .excluirDoHistorico(entry.id);
-                        }
-                      },
-                      icon: const Icon(Icons.delete_outline,
-                          size: 18, color: AppTheme.error),
-                      style: IconButton.styleFrom(
-                        backgroundColor:
-                            AppTheme.error.withValues(alpha: 0.08),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Botão reabrir (só para salvos)
+                  if (widget.onReabrir != null) ...[
+                    FilledButton.icon(
+                      onPressed: widget.onReabrir,
+                      icon: const Icon(Icons.edit_outlined, size: 14),
+                      label: const Text('Editar',
+                          style: TextStyle(fontSize: 12)),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                       ),
-                      tooltip: 'Excluir do histórico',
                     ),
                     const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: onVerDetalhes,
-                      icon: const Icon(Icons.visibility_outlined,
-                          size: 14),
-                      label: const Text('Ver detalhes',
-                          style: TextStyle(fontSize: 12)),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.textSecondary,
-                        side:
-                            const BorderSide(color: AppTheme.divider),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                      ),
-                    ),
-                    if (onReabrir != null) ...[
-                      const SizedBox(width: 8),
-                      FilledButton.icon(
-                        onPressed: onReabrir,
-                        icon: const Icon(Icons.open_in_new, size: 14),
-                        label: const Text('Reabrir',
-                            style: TextStyle(fontSize: 12)),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                        ),
-                      ),
-                    ],
                   ],
-                ),
-              ],
+                  // Chevron expandir
+                  AnimatedRotation(
+                    turns: _expandido ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: const Icon(Icons.keyboard_arrow_down,
+                        size: 20, color: AppTheme.textHint),
+                  ),
+                ],
+              ),
             ),
           ),
+
+          // ── Itens expandidos ────────────────────────────────────────────
+          if (_expandido && itens.isNotEmpty) ...[
+            const Divider(height: 1, color: AppTheme.divider),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Materiais cotados',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...itens.map((item) => _buildItemRow(
+                      item as Map<String, dynamic>)),
+                ],
+              ),
+            ),
+          ],
+          if (_expandido && itens.isEmpty) ...[
+            const Divider(height: 1, color: AppTheme.divider),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Nenhum material neste orçamento.',
+                style: TextStyle(
+                    fontSize: 12, color: AppTheme.textHint),
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
-}
 
-// ─── Stat widget ──────────────────────────────────────────────────────────────
-
-class _Stat extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _Stat(
-      {required this.icon, required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 12, color: AppTheme.textHint),
-            const SizedBox(width: 4),
-            Text(label,
-                style: const TextStyle(
-                    fontSize: 11, color: AppTheme.textHint)),
-          ],
-        ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Detalhe page ─────────────────────────────────────────────────────────────
-
-class _OrcamentoDetalhePage extends StatelessWidget {
-  final OrcamentoHistoricoEntry entry;
-
-  const _OrcamentoDetalhePage({required this.entry});
-
-  @override
-  Widget build(BuildContext context) {
-    final salvo = entry.status == StatusOrcamentoHistorico.salvo;
-    final statusColor = salvo ? AppTheme.success : AppTheme.error;
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Cabeçalho ────────────────────────────────────────────────
-            Row(
-              children: [
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back_ios_new,
-                      size: 18, color: AppTheme.textSecondary),
-                  style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        entry.titulo,
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineMedium
-                            ?.copyWith(color: AppTheme.textPrimary),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _dataFormatada(entry.criadoEm),
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(color: AppTheme.textSecondary),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    salvo ? 'Salvo' : 'Cancelado',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: statusColor,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Consumer<OrcamentoProvider>(
-                  builder: (context, provider, _) => IconButton(
-                    onPressed: () async {
-                      final confirmar = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Excluir orçamento',
-                              style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700)),
-                          content: Text(
-                            'Deseja excluir permanentemente "${entry.titulo}" do histórico?',
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                          actions: [
-                            TextButton(
-                                onPressed: () =>
-                                    Navigator.pop(ctx, false),
-                                child: const Text('Cancelar')),
-                            FilledButton(
-                              style: FilledButton.styleFrom(
-                                  backgroundColor: AppTheme.error),
-                              onPressed: () =>
-                                  Navigator.pop(ctx, true),
-                              child: const Text('Excluir'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (confirmar == true && context.mounted) {
-                        provider.excluirDoHistorico(entry.id);
-                        Navigator.of(context).pop();
-                      }
-                    },
-                    icon: const Icon(Icons.delete_outline,
-                        size: 18, color: AppTheme.error),
-                    style: IconButton.styleFrom(
-                      backgroundColor:
-                          AppTheme.error.withValues(alpha: 0.08),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                    ),
-                    tooltip: 'Excluir do histórico',
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // ── Motivo descarte ─────────────────────────────────────────
-            if (!salvo && entry.motivoDescarte != null) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: AppTheme.error.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                      color: AppTheme.error.withValues(alpha: 0.2)),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.info_outline,
-                        size: 16, color: AppTheme.error),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Motivo do cancelamento',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.error,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            entry.motivoDescarte!,
-                            style: const TextStyle(
-                                fontSize: 13,
-                                color: AppTheme.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-
-            // ── Resumo ─────────────────────────────────────────────────
-            Container(
-              padding: const EdgeInsets.all(14),
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppTheme.divider),
-              ),
-              child: Row(
-                children: [
-                  _Stat(
-                    icon: Icons.inventory_2_outlined,
-                    label: 'Materiais',
-                    value: '${entry.itens.length}',
-                  ),
-                  if (salvo) ...[
-                    const Spacer(),
-                    Consumer<OrcamentoProvider>(
-                      builder: (context, provider, _) =>
-                          FilledButton.icon(
-                        onPressed: () {
-                          provider.reabrirOrcamento(entry);
-                          Navigator.of(context)
-                            ..pop()
-                            ..pop();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                  'Orçamento "${entry.titulo}" reaberto em nova aba.'),
-                              backgroundColor: AppTheme.success,
-                            ),
-                          );
-                        },
-                        icon:
-                            const Icon(Icons.open_in_new, size: 14),
-                        label: const Text('Reabrir em nova aba',
-                            style: TextStyle(fontSize: 12)),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-
-            // ── Lista de itens ─────────────────────────────────────────
-            Expanded(
-              child: entry.itens.isEmpty
-                  ? const Center(
-                      child: Text(
-                          'Nenhum material neste orçamento.',
-                          style:
-                              TextStyle(color: AppTheme.textHint)))
-                  : ListView.separated(
-                      itemCount: entry.itens.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: 10),
-                      itemBuilder: (context, i) {
-                        final item = entry.itens[i];
-                        return _DetalheItemCard(item: item);
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Item card de detalhe ─────────────────────────────────────────────────────
-
-class _DetalheItemCard extends StatelessWidget {
-  final ItemOrcamentoData item;
-
-  const _DetalheItemCard({required this.item});
-
-  @override
-  Widget build(BuildContext context) {
-    final fIds = item.precos.keys.toList();
-    fIds.sort((a, b) {
-      final pa = item.precos[a]?.preco ?? double.infinity;
-      final pb = item.precos[b]?.preco ?? double.infinity;
-      return pa.compareTo(pb);
-    });
-
-    final menorPreco = fIds
-        .map((id) => item.precos[id]?.preco)
-        .whereType<double>()
-        .fold<double?>(
-            null, (min, v) => min == null || v < min ? v : min);
+  Widget _buildItemRow(Map<String, dynamic> item) {
+    final materialNome =
+        (item['material'] as Map<String, dynamic>?)?['nome'] as String? ??
+            'Material #${item['materialId']}';
+    final quantidade =
+        double.tryParse(item['quantidade']?.toString() ?? '1') ?? 1;
+    final precoUnitario = item['precoUnitario'] != null
+        ? double.tryParse(item['precoUnitario'].toString())
+        : null;
+    final fornecedorNome =
+        (item['fornecedor'] as Map<String, dynamic>?)?['nomeFantasia']
+            as String?;
+    final selecionado = item['selecionado'] as bool? ?? false;
 
     return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
+        color: selecionado
+            ? AppTheme.primary.withValues(alpha: 0.05)
+            : AppTheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: selecionado
+              ? AppTheme.primary.withValues(alpha: 0.2)
+              : AppTheme.divider,
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-            decoration: const BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius:
-                  BorderRadius.vertical(top: Radius.circular(12)),
-            ),
-            child: Row(
+          if (selecionado)
+            const Icon(Icons.check_circle,
+                size: 13, color: AppTheme.primary)
+          else
+            const Icon(Icons.circle_outlined,
+                size: 13, color: AppTheme.textHint),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 30,
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(7),
-                  ),
-                  child: const Icon(Icons.inventory_2_outlined,
-                      size: 15, color: AppTheme.primary),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.materialNome,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      if (item.descricao != null &&
-                          item.descricao!.trim().isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          item.descricao!,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppTheme.textSecondary,
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
                 Text(
-                  'Qtd: ${item.quantidade % 1 == 0 ? item.quantidade.toInt() : item.quantidade}'
-                  '${item.materialUnidade != null ? ' ${item.materialUnidade}' : ''}',
+                  materialNome,
                   style: const TextStyle(
-                      fontSize: 12, color: AppTheme.textSecondary),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
                 ),
+                if (fornecedorNome != null)
+                  Text(
+                    fornecedorNome,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
               ],
             ),
           ),
-          if (fIds.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: Text('Sem fornecedores vinculados.',
-                  style:
-                      TextStyle(fontSize: 12, color: AppTheme.textHint)),
-            )
-          else
-            ...fIds.map((fId) {
-              final pf = item.precos[fId]!;
-              final isSelecionado =
-                  item.fornecedorSelecionado == fId;
-              final isMelhorPreco =
-                  pf.preco != null && pf.preco == menorPreco;
-
-              return Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: isSelecionado
-                      ? AppTheme.primary.withValues(alpha: 0.05)
-                      : null,
-                  border: Border(
-                    bottom: BorderSide(
-                        color:
-                            AppTheme.divider.withValues(alpha: 0.5)),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                'Qtd: ${quantidade % 1 == 0 ? quantidade.toInt() : quantidade}',
+                style: const TextStyle(
+                    fontSize: 11, color: AppTheme.textSecondary),
+              ),
+              if (precoUnitario != null)
+                Text(
+                  _brl(precoUnitario),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
                   ),
                 ),
-                child: Row(
-                  children: [
-                    if (isSelecionado)
-                      const Icon(Icons.check_circle,
-                          size: 14, color: AppTheme.primary)
-                    else
-                      const Icon(Icons.circle_outlined,
-                          size: 14, color: AppTheme.textHint),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        pf.fornecedorNome,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: isSelecionado
-                              ? FontWeight.w700
-                              : FontWeight.w400,
-                          color: isSelecionado
-                              ? AppTheme.primary
-                              : AppTheme.textSecondary,
-                        ),
-                      ),
-                    ),
-                    if (isMelhorPreco && fIds.length > 1)
-                      Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color:
-                              AppTheme.success.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Text(
-                          'Menor preço',
-                          style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.success),
-                        ),
-                      ),
-                    Text(
-                      pf.preco != null
-                          ? _brl(pf.preco! * item.quantidade)
-                          : '—',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: isMelhorPreco
-                            ? AppTheme.success
-                            : AppTheme.textPrimary,
-                      ),
-                    ),
-                    if (pf.preco != null) ...[
-                      const SizedBox(width: 4),
-                      Text(
-                        '(${_brl(pf.preco)}/un)',
-                        style: const TextStyle(
-                            fontSize: 10, color: AppTheme.textHint),
-                      ),
-                    ],
-                    if (pf.precoM2 != null) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          '${_brl(pf.precoM2)}/m²',
-                          style: const TextStyle(
-                              fontSize: 10,
-                              color: AppTheme.primary,
-                              fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              );
-            }),
+            ],
+          ),
         ],
       ),
     );

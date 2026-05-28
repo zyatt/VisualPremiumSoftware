@@ -3,9 +3,9 @@ const ctrl    = require('../controllers/ordemCompra.controller');
 const pdfCtrl = require('../controllers/ordemCompra.pdf.controller');
 const { authMiddleware, roleMiddleware } = require('../middlewares/auth.middleware');
 
-const LEITURA  = ['ADMIN','GERENTE','COMPRADOR','ESTOQUISTA','VISUALIZADOR'];
-const ESCRITA  = ['ADMIN','GERENTE','COMPRADOR'];
-const EXCLUSAO = ['ADMIN','GERENTE'];
+const LEITURA  = ['ADMIN','GERENTE','COMPRAS'];
+const ESCRITA  = ['ADMIN','GERENTE','COMPRAS'];
+const EXCLUSAO = ['ADMIN','GERENTE','COMPRAS'];
 
 router.get('/',                                       authMiddleware, roleMiddleware(LEITURA),  ctrl.listar);
 router.get('/proximo-id',                             authMiddleware, roleMiddleware(LEITURA),  ctrl.proximoId);

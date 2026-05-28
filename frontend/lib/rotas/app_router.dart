@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../pages/admin_page.dart';
 import '../pages/login_page.dart';
 import '../pages/inicio_page.dart';
 import '../pages/estoque_page.dart';
@@ -51,26 +52,34 @@ class AppRouter {
           return naLogin ? null : '/login';
         }
 
+        final roleUp     = usuario.role.trim().toUpperCase();
         final isProducao = AppShell.isProducaoRole(usuario.role);
-        final isAdmin    = usuario.role.toUpperCase() == 'ADMIN';
+        final isAdmin    = roleUp == 'ADMIN';
+        final isGerente  = roleUp == 'GERENTE';
+        final isCompras  = roleUp == 'COMPRAS';
 
-        // Logado na tela de login
+        // Logado na tela de login → redireciona para home do cargo
         if (naLogin) {
           return isProducao ? '/producao' : '/inicio';
         }
 
-        // ADMIN acessa tudo — sem restrições de rota
-        if (isAdmin) return null;
+        // ADMIN e GERENTE acessam tudo
+        if (isAdmin || isGerente) return null;
 
-        // PRODUCAO puro tentando acessar rotas gerais
+        // PRODUCAO: só acessa /producao
         if (isProducao && _rotasGerais.any((r) => path.startsWith(r))) {
           return '/producao';
         }
-
-        // Usuário comum tentando acessar produção
-        if (!isProducao && path.startsWith('/producao')) {
-          return '/inicio';
+        if (isProducao && path.startsWith('/admin')) {
+          return '/producao';
         }
+
+        // COMPRAS: não acessa /producao nem /admin
+        if (isCompras && path.startsWith('/producao')) return '/inicio';
+        if (isCompras && path.startsWith('/admin'))    return '/inicio';
+
+        // Qualquer outro role não-produção tentando acessar /producao
+        if (!isProducao && path.startsWith('/producao')) return '/inicio';
 
         return null;
       },
@@ -91,14 +100,14 @@ class AppRouter {
             GoRoute(path: '/estoque',          builder: (_, __) => const EstoquePage()),
             GoRoute(path: '/fornecedores',     builder: (_, __) => const FornecedoresPage()),
             GoRoute(path: '/orcamento',        builder: (_, __) => const OrcamentoPage()),
-            GoRoute(
-              path: '/ordem-compra',
-              builder: (_, state) => OrdemCompraPage(ocIdParaAbrir: state.extra as int?),
-            ),
+            GoRoute(path: '/ordem-compra',     builder: (_, state) => OrdemCompraPage(ocIdParaAbrir: state.extra as int?)),
             GoRoute(path: '/controle-estoque', builder: (_, __) => const ControleEstoquePage()),
             GoRoute(path: '/historico',        builder: (_, __) => const HistoricoPage()),
             GoRoute(path: '/relatorio-os',     builder: (_, __) => const RelatorioOSPage()),
             GoRoute(path: '/producao',         builder: (_, __) => const ProducaoPage()),
+            GoRoute(path: '/admin',            builder: (_, __) => const AdminPage()),
+
+
           ],
         ),
       ],

@@ -14,20 +14,18 @@ datasource db {
 // ============================================================
 
 enum Role {
-  ADMIN       // Acesso total: todas as páginas e ações
-  GERENTE     // Acesso total exceto gerenciamento de usuários
-  COMPRADOR   // Orçamento, Ordem de Compra, Histórico
-  ESTOQUISTA  // Estoque, Controle de Estoque, Relatórios OS
-  VISUALIZADOR // Somente leitura em todas as páginas
-  PRODUCAO // SOLICITAÇÕES DE MATERIAL
+  ADMIN    // Acesso total: todas as páginas e ações, incluindo administração
+  GERENTE  // Acesso total: todas as páginas (exceto página de Admin)
+  COMPRAS  // Acesso a todas as páginas exceto Admin e Produção
+  PRODUCAO // Acesso somente à página de Produção
 }
 
 model Usuario {
   id        Int      @id @default(autoincrement())
   nome      String
   username  String   @unique
-  senha     String   // bcrypt hash
-  role      Role     @default(VISUALIZADOR)
+  senha     String
+  role      Role     @default(COMPRAS)
   ativo     Boolean  @default(true)
   criadoEm  DateTime @default(now())
   atualizadoEm DateTime @updatedAt
@@ -35,6 +33,9 @@ model Usuario {
   solicitacoesProducao SolicitacaoProducao[]
 
   ordens_compra OrdemCompra[]
+
+  orcamentosCriados   Orcamento[] @relation("OrcamentoCriador")
+  orcamentosAprovados Orcamento[] @relation("AprovadorOrcamento")
 
   @@map("usuarios")
 }
@@ -183,6 +184,9 @@ model FornecedorMaterial {
 
 enum StatusOrcamento {
   ABERTO
+  AGUARDANDO_APROVACAO
+  APROVADO
+  NAO_APROVADO
   CONVERTIDO // virou Ordem de Compra
   CANCELADO
 }
@@ -191,9 +195,18 @@ model Orcamento {
   id          Int             @id @default(autoincrement())
   titulo      String          @default("Orçamento")
   status      StatusOrcamento @default(ABERTO)
+  
+  // Campos de aprovação
+  criadorId      Int?
+  aprovadorId    Int?
+  aprovadoEm     DateTime?
+  motivoRejeicao String?
+  
   criadoEm   DateTime         @default(now())
   atualizadoEm DateTime       @updatedAt
 
+  criador     Usuario?        @relation("OrcamentoCriador",   fields: [criadorId], references: [id])
+  aprovador   Usuario?        @relation("AprovadorOrcamento", fields: [aprovadorId], references: [id])
   itens       OrcamentoItem[]
   ordens      OrdemCompra[]
 
@@ -207,12 +220,18 @@ model OrcamentoItem {
   fornecedorId    Int?
   quantidade      Decimal  @default(1) @db.Decimal(10, 3)
   precoUnitario   Decimal? @db.Decimal(10, 2)
+  precoM2         Decimal? @db.Decimal(10, 2)   // preço por m² deste fornecedor
+  usarM2          Boolean  @default(false)       // modo escolhido pelo usuário p/ este item
+  selecionado     Boolean  @default(false)       // true = fornecedor escolhido para compra
+  descricaoItem   String?  
   criadoEm        DateTime @default(now())
 
-  orcamento  Orcamento  @relation(fields: [orcamentoId], references: [id], onDelete: Cascade)
-  material   Material   @relation(fields: [materialId], references: [id])
+  orcamento  Orcamento   @relation(fields: [orcamentoId], references: [id], onDelete: Cascade)
+  material   Material    @relation(fields: [materialId], references: [id])
   fornecedor Fornecedor? @relation(fields: [fornecedorId], references: [id])
 
+  // Uma linha por (orçamento, material, fornecedor)
+  @@unique([orcamentoId, materialId, fornecedorId])
   @@map("orcamento_itens")
 }
 

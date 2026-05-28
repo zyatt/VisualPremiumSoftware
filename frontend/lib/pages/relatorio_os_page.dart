@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -130,9 +130,12 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
         );
   }
 
-  void _onChanged(_) {
+  void _onChanged(String _) {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), _aplicarFiltros);
+    _debounce = Timer(
+      const Duration(milliseconds: 400),
+      _aplicarFiltros,
+    );
   }
 
   void _limparFiltrosMaterial() {

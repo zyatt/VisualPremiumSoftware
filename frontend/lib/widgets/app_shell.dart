@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -11,21 +11,30 @@ class AppShell extends StatelessWidget {
   final Widget child;
   const AppShell({super.key, required this.child});
 
-  // Itens visíveis para todos os cargos (exceto PRODUCAO)
-  static const _navItemsGerais = [
-    _NavItem(icon: Icons.home_rounded,             label: 'Início',             route: '/inicio'),
-    _NavItem(icon: Icons.inventory_2_rounded,      label: 'Estoque',            route: '/estoque'),
-    _NavItem(icon: Icons.people_rounded,           label: 'Fornecedores',       route: '/fornecedores'),
-    _NavItem(icon: Icons.request_quote_rounded,    label: 'Orçamento',          route: '/orcamento'),
-    _NavItem(icon: Icons.shopping_cart_rounded,    label: 'Ordem de Compra',    route: '/ordem-compra'),
-    _NavItem(icon: Icons.sync_alt_rounded,         label: 'Controle Estoque',   route: '/controle-estoque'),
-    _NavItem(icon: Icons.history_rounded,          label: 'Histórico',          route: '/historico'),
-    _NavItem(icon: Icons.description_rounded,      label: 'Relatório OS',       route: '/relatorio-os'),
+  // Itens visíveis para ADMIN e GERENTE (acesso total)
+  static const _navItemsCompleto = [
+    _NavItem(icon: Icons.home_rounded,                    label: 'Início',           route: '/inicio'),
+    _NavItem(icon: Icons.inventory_2_rounded,             label: 'Estoque',          route: '/estoque'),
+    _NavItem(icon: Icons.people_rounded,                  label: 'Fornecedores',     route: '/fornecedores'),
+    _NavItem(icon: Icons.request_quote_rounded,           label: 'Orçamento',        route: '/orcamento'),
+    _NavItem(icon: Icons.shopping_cart_rounded,           label: 'Ordem de Compra',  route: '/ordem-compra'),
+    _NavItem(icon: Icons.sync_alt_rounded,                label: 'Controle Estoque', route: '/controle-estoque'),
+    _NavItem(icon: Icons.history_rounded,                 label: 'Histórico',        route: '/historico'),
+    _NavItem(icon: Icons.description_rounded,             label: 'Relatório OS',     route: '/relatorio-os'),
+    _NavItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção',         route: '/producao'),
+    _NavItem(icon: Icons.admin_panel_settings_rounded,    label: 'Admin',            route: '/admin'),
   ];
 
-  // Itens extras visíveis apenas para ADMIN (além dos gerais)
-  static const _navItemsAdmin = [
-    _NavItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção', route: '/producao'),
+  // Itens para COMPRAS (sem Produção e sem Admin)
+  static const _navItemsCompras = [
+    _NavItem(icon: Icons.home_rounded,             label: 'Início',           route: '/inicio'),
+    _NavItem(icon: Icons.inventory_2_rounded,      label: 'Estoque',          route: '/estoque'),
+    _NavItem(icon: Icons.people_rounded,           label: 'Fornecedores',     route: '/fornecedores'),
+    _NavItem(icon: Icons.request_quote_rounded,    label: 'Orçamento',        route: '/orcamento'),
+    _NavItem(icon: Icons.shopping_cart_rounded,    label: 'Ordem de Compra',  route: '/ordem-compra'),
+    _NavItem(icon: Icons.sync_alt_rounded,         label: 'Controle Estoque', route: '/controle-estoque'),
+    _NavItem(icon: Icons.history_rounded,          label: 'Histórico',        route: '/historico'),
+    _NavItem(icon: Icons.description_rounded,      label: 'Relatório OS',     route: '/relatorio-os'),
   ];
 
   // Único item visível para o cargo PRODUCAO
@@ -46,15 +55,18 @@ class AppShell extends StatelessWidget {
 
     final usuario    = context.watch<UsuarioProvider>().usuarioLogado;
     final isProducao = isProducaoRole(usuario?.role);
-    final isAdmin    = usuario?.role.toUpperCase() == 'ADMIN';
+    final roleUp     = usuario?.role.trim().toUpperCase() ?? '';
+    final isAdmin    = roleUp == 'ADMIN';
+    final isGerente  = roleUp == 'GERENTE';
 
     final List<_NavItem> items;
     if (isProducao) {
       items = _navItemsProducao;
-    } else if (isAdmin) {
-      items = [..._navItemsGerais, ..._navItemsAdmin];
+    } else if (isAdmin || isGerente) {
+      items = _navItemsCompleto;
     } else {
-      items = _navItemsGerais;
+      // COMPRAS e qualquer outro role não-produção
+      items = _navItemsCompras;
     }
 
     return Scaffold(

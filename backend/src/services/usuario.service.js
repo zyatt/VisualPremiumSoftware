@@ -42,7 +42,7 @@ async function atualizar(id, data) {
 }
 
 async function remover(id) {
-  return prisma.usuario.update({ where: { id }, data: { ativo: false } });
+  return prisma.usuario.delete({ where: { id } });
 }
 
 module.exports = { login, listar, criar, atualizar, remover };

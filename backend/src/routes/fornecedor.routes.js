@@ -2,8 +2,8 @@ const router = require('express').Router();
 const ctrl = require('../controllers/fornecedor.controller');
 const { authMiddleware, roleMiddleware } = require('../middlewares/auth.middleware');
 
-const LEITURA = ['ADMIN', 'GERENTE', 'COMPRADOR', 'ESTOQUISTA', 'VISUALIZADOR'];
-const ESCRITA = ['ADMIN', 'GERENTE', 'COMPRADOR'];
+const LEITURA = ['ADMIN', 'GERENTE', 'COMPRAS'];
+const ESCRITA = ['ADMIN', 'GERENTE', 'COMPRAS'];
 const ADMIN   = ['ADMIN', 'GERENTE'];
 
 router.get('/',                        authMiddleware, roleMiddleware(LEITURA), ctrl.listar);

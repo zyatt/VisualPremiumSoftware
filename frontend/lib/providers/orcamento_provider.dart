@@ -8,8 +8,6 @@ import 'package:uuid/uuid.dart';
 
 enum ModoOrcamento { unitario, metroQuadrado }
 
-enum StatusOrcamentoHistorico { salvo, descartado }
-
 // ─── Data classes ─────────────────────────────────────────────────────────────
 
 class PrecoFornecedorData {
@@ -38,7 +36,7 @@ class PrecoFornecedorData {
 }
 
 class ItemOrcamentoData {
-  final String itemId; // ID único para cada item (permite múltiplas instâncias do mesmo material)
+  final String itemId;
   final int materialId;
   final String materialNome;
   final String? materialUnidade;
@@ -47,8 +45,8 @@ class ItemOrcamentoData {
   final String? materialEspessura;
   final String? materialIdentificador;
   final String? materialStatus;
-  final bool materialEspecifico; // indica se o material exige descrição personalizada
-  String? descricao; // descrição personalizada para materiais específicos
+  final bool materialEspecifico;
+  String? descricao;
   double quantidade;
   Map<int, PrecoFornecedorData> precos;
   int? fornecedorSelecionado;
@@ -124,81 +122,42 @@ class OrcamentoTab {
   final String id;
   String titulo;
   List<ItemOrcamentoData> itens;
-  /// ID do entry no histórico vinculado a esta aba.
-  /// Preenchido ao reabrir ou após o primeiro salvamento.
-  String? historicoId;
+
+  /// ID do orçamento no servidor (preenchido ao criar ou reabrir do servidor).
+  /// Enquanto for null, o orçamento ainda não existe no banco.
+  int? servidorId;
 
   OrcamentoTab({
     required this.id,
     required this.titulo,
     List<ItemOrcamentoData>? itens,
-    this.historicoId,
+    this.servidorId,
   }) : itens = itens ?? [];
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'titulo': titulo,
         'itens': itens.map((i) => i.toJson()).toList(),
-        'historicoId': historicoId,
+        'servidorId': servidorId,
       };
 
   factory OrcamentoTab.fromJson(Map<String, dynamic> j) => OrcamentoTab(
         id: j['id'] as String,
         titulo: j['titulo'] as String,
-        historicoId: j['historicoId'] as String?,
+        servidorId: j['servidorId'] as int?,
         itens: (j['itens'] as List)
             .map((i) => ItemOrcamentoData.fromJson(i as Map<String, dynamic>))
             .toList(),
-      );
-}
-
-// ─── Histórico ────────────────────────────────
-
-class OrcamentoHistoricoEntry {
-  final String id;
-  final String titulo;
-  final List<ItemOrcamentoData> itens;
-  final StatusOrcamentoHistorico status;
-  final String? motivoDescarte;
-  final DateTime criadoEm;
-
-  OrcamentoHistoricoEntry({
-    required this.id,
-    required this.titulo,
-    required this.itens,
-    required this.status,
-    this.motivoDescarte,
-    required this.criadoEm,
-  });
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'titulo': titulo,
-        'itens': itens.map((i) => i.toJson()).toList(),
-        'status': status.name,
-        'motivoDescarte': motivoDescarte,
-        'criadoEm': criadoEm.toIso8601String(),
-      };
-
-  factory OrcamentoHistoricoEntry.fromJson(Map<String, dynamic> j) =>
-      OrcamentoHistoricoEntry(
-        id: j['id'] as String,
-        titulo: j['titulo'] as String,
-        itens: (j['itens'] as List)
-            .map((i) => ItemOrcamentoData.fromJson(i as Map<String, dynamic>))
-            .toList(),
-        status: StatusOrcamentoHistorico.values.byName(j['status'] as String),
-        motivoDescarte: j['motivoDescarte'] as String?,
-        criadoEm: DateTime.parse(j['criadoEm'] as String),
       );
 }
 
 // ─── Provider ─────────────────────────────────
+// NOTA: o histórico de orçamentos (salvos/cancelados) foi movido para o
+// servidor. O provider agora só gerencia a aba em edição (rascunho local).
 
 class OrcamentoProvider extends ChangeNotifier {
   static const _kAbas = 'orcamento_abas';
   static const _kAbaAtiva = 'orcamento_aba_ativa';
-  static const _kHistorico = 'orcamento_historico';
 
   final _uuid = const Uuid();
 
@@ -210,15 +169,6 @@ class OrcamentoProvider extends ChangeNotifier {
 
   OrcamentoTab? get tabAtual =>
       _abas.isEmpty ? null : _abas[_abaAtiva];
-
-  final List<OrcamentoHistoricoEntry> _historico = [];
-  List<OrcamentoHistoricoEntry> get historico => List.unmodifiable(_historico);
-
-  List<OrcamentoHistoricoEntry> get historicoSalvos =>
-      _historico.where((e) => e.status == StatusOrcamentoHistorico.salvo).toList();
-
-  List<OrcamentoHistoricoEntry> get historicoDescartados =>
-      _historico.where((e) => e.status == StatusOrcamentoHistorico.descartado).toList();
 
   bool _carregado = false;
   bool get carregado => _carregado;
@@ -232,26 +182,15 @@ class OrcamentoProvider extends ChangeNotifier {
   Future<void> _carregar() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-
-      // Abas
       final abasJson = prefs.getString(_kAbas);
       if (abasJson != null) {
         final lista = jsonDecode(abasJson) as List;
         _abas.addAll(lista.map(
           (j) => OrcamentoTab.fromJson(j as Map<String, dynamic>),
         ));
-        _abaAtiva = prefs.getInt(_kAbaAtiva) ?? 0;
-        if (_abaAtiva >= _abas.length) _abaAtiva = 0;
       }
-
-      // Histórico
-      final histJson = prefs.getString(_kHistorico);
-      if (histJson != null) {
-        final lista = jsonDecode(histJson) as List;
-        _historico.addAll(lista.map(
-          (j) => OrcamentoHistoricoEntry.fromJson(j as Map<String, dynamic>),
-        ));
-      }
+      _abaAtiva = prefs.getInt(_kAbaAtiva) ?? 0;
+      if (_abaAtiva >= _abas.length) _abaAtiva = 0;
     } catch (_) {}
 
     if (_abas.isEmpty) _novaAba(notificar: false);
@@ -265,15 +204,6 @@ class OrcamentoProvider extends ChangeNotifier {
       await prefs.setString(
           _kAbas, jsonEncode(_abas.map((a) => a.toJson()).toList()));
       await prefs.setInt(_kAbaAtiva, _abaAtiva);
-    } catch (_) {}
-  }
-
-  Future<void> _salvarHistorico() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-          _kHistorico,
-          jsonEncode(_historico.map((h) => h.toJson()).toList()));
     } catch (_) {}
   }
 
@@ -304,23 +234,13 @@ class OrcamentoProvider extends ChangeNotifier {
   void renomearAba(int index, String titulo) {
     if (index < 0 || index >= _abas.length) return;
     _abas[index].titulo = titulo;
-    // Se a aba está vinculada a um entry do histórico, atualiza o título lá também
-    final hId = _abas[index].historicoId;
-    if (hId != null) {
-      final hIdx = _historico.indexWhere((e) => e.id == hId);
-      if (hIdx >= 0) {
-        final old = _historico[hIdx];
-        _historico[hIdx] = OrcamentoHistoricoEntry(
-          id:             old.id,
-          titulo:         titulo,
-          itens:          old.itens,
-          status:         old.status,
-          motivoDescarte: old.motivoDescarte,
-          criadoEm:       old.criadoEm,
-        );
-        _salvarHistorico();
-      }
-    }
+    _salvarAbas();
+    notifyListeners();
+  }
+
+  void setServidorIdTab(int? id) {
+    if (tabAtual == null) return;
+    tabAtual!.servidorId = id;
     _salvarAbas();
     notifyListeners();
   }
@@ -329,12 +249,16 @@ class OrcamentoProvider extends ChangeNotifier {
 
   void adicionarItem(ItemOrcamentoData item) {
     if (tabAtual == null) return;
-    
-    // Para materiais específicos, sempre adiciona uma nova instância
-    // Para materiais normais, substitui se já existir
+
+    // Deduplica apenas para materiais não-específicos adicionados manualmente
+    // (sem itemId pré-existente), usando materialId como chave.
+    // Itens restaurados do servidor já chegam com itemId próprio e NÃO devem
+    // ser colapsados — cada combinação (material + fornecedor) é uma linha distinta.
     if (!item.materialEspecifico) {
-      final idx = tabAtual!.itens
-          .indexWhere((i) => i.materialId == item.materialId && !i.materialEspecifico);
+      final idx = tabAtual!.itens.indexWhere(
+        (i) => i.itemId == item.itemId ||
+               (i.materialId == item.materialId && !i.materialEspecifico),
+      );
       if (idx >= 0) {
         tabAtual!.itens[idx] = item;
         _salvarAbas();
@@ -342,33 +266,23 @@ class OrcamentoProvider extends ChangeNotifier {
         return;
       }
     }
-    
+
     tabAtual!.itens.add(item);
     _salvarAbas();
     notifyListeners();
   }
 
   /// Cria uma nova aba e adiciona todos os [itens] de uma vez.
-  /// Retorna o índice da aba criada.
+  /// Os itens já chegam agrupados por material (cada ItemOrcamentoData contém
+  /// o mapa de precos por fornecedor), portanto NÃO há deduplicação por
+  /// materialId aqui — cada item da lista é distinto por itemId.
   int adicionarItensEmLote(String tituloAba, List<ItemOrcamentoData> itens) {
     _abas.add(OrcamentoTab(
       id: _uuid.v4(),
       titulo: tituloAba,
-      itens: [],
+      itens: List.of(itens), // cópia direta, sem deduplicação
     ));
     _abaAtiva = _abas.length - 1;
-    final tab = tabAtual!;
-    for (final item in itens) {
-      if (!item.materialEspecifico) {
-        final idx = tab.itens
-            .indexWhere((i) => i.materialId == item.materialId && !i.materialEspecifico);
-        if (idx >= 0) {
-          tab.itens[idx] = item;
-          continue;
-        }
-      }
-      tab.itens.add(item);
-    }
     _salvarAbas();
     notifyListeners();
     return _abaAtiva;
@@ -427,101 +341,22 @@ class OrcamentoProvider extends ChangeNotifier {
 
   void limparAba() {
     tabAtual?.itens.clear();
+    if (tabAtual != null) tabAtual!.servidorId = null;
     _salvarAbas();
     notifyListeners();
   }
 
-  // ── Salvar orçamento no histórico ─────────────────────────────────────────────
+  // ── Fechar aba após salvar/cancelar ───────────────────────────────────────────
+  // Chamado pela page após confirmar a operação no servidor.
 
-  void salvarOrcamento() {
-    if (tabAtual == null || tabAtual!.itens.isEmpty) return;
-
-    final hId = tabAtual!.historicoId;
-    final existeIdx = hId != null
-        ? _historico.indexWhere((e) => e.id == hId)
-        : -1;
-
-    if (existeIdx >= 0) {
-      // Sobrepõe o entry existente — atualiza itens e título, mantém criadoEm
-      final old = _historico[existeIdx];
-      _historico[existeIdx] = OrcamentoHistoricoEntry(
-        id:       old.id,
-        titulo:   tabAtual!.titulo,
-        itens:    List<ItemOrcamentoData>.from(tabAtual!.itens),
-        status:   StatusOrcamentoHistorico.salvo,
-        criadoEm: old.criadoEm,
-      );
-      // Move para o topo do histórico
-      final updated = _historico.removeAt(existeIdx);
-      _historico.insert(0, updated);
-    } else {
-      // Primeiro salvamento: cria novo entry e vincula o ID à aba
-      final novoId = _uuid.v4();
-      tabAtual!.historicoId = novoId;
-      _historico.insert(
-        0,
-        OrcamentoHistoricoEntry(
-          id:       novoId,
-          titulo:   tabAtual!.titulo,
-          itens:    List<ItemOrcamentoData>.from(tabAtual!.itens),
-          status:   StatusOrcamentoHistorico.salvo,
-          criadoEm: DateTime.now(),
-        ),
-      );
-    }
-
+  void fecharAbaAposOperacao() {
     _fecharAbaAtual();
-    _salvarHistorico();
     notifyListeners();
   }
-
-  // ── Descartar orçamento ───────────────────────────────────────────────────────
-
-  void descartarOrcamento(String motivo) {
-    if (tabAtual == null) return;
-    _historico.insert(
-      0,
-      OrcamentoHistoricoEntry(
-        id: _uuid.v4(),
-        titulo: tabAtual!.titulo,
-        itens: List<ItemOrcamentoData>.from(tabAtual!.itens),
-        status: StatusOrcamentoHistorico.descartado,
-        motivoDescarte: motivo.trim().isEmpty ? 'Não informado' : motivo.trim(),
-        criadoEm: DateTime.now(),
-      ),
-    );
-    _fecharAbaAtual();
-    _salvarHistorico();
-    notifyListeners();
-  }
-
-  // ── Reabrir orçamento salvo ───────────────────────────────────────────────────
-
-  void reabrirOrcamento(OrcamentoHistoricoEntry entry) {
-    // Cria nova aba com o conteúdo do histórico, vinculada ao entry original
-    _abas.add(OrcamentoTab(
-      id:          _uuid.v4(),
-      titulo:      entry.titulo,
-      itens:       List<ItemOrcamentoData>.from(entry.itens),
-      historicoId: entry.id,
-    ));
-    _abaAtiva = _abas.length - 1;
-    _salvarAbas();
-    notifyListeners();
-  }
-
-  // ── Excluir do histórico ──────────────────────────────────────────────────────
-
-  void excluirDoHistorico(String id) {
-    _historico.removeWhere((e) => e.id == id);
-    _salvarHistorico();
-    notifyListeners();
-  }
-
-  // ── Fechar aba ────────────────────────────────────────────────────────────────
 
   void _fecharAbaAtual() {
     if (_abas.length == 1) {
+      // Mantém sempre ao menos uma aba vazia (sem servidorId)
       _abas[0] = OrcamentoTab(id: _uuid.v4(), titulo: 'Orçamento 1');
     } else {
       _abas.removeAt(_abaAtiva);
@@ -537,6 +372,20 @@ class OrcamentoProvider extends ChangeNotifier {
     } else {
       _abas.removeAt(index);
       if (_abaAtiva >= _abas.length) _abaAtiva = _abas.length - 1;
+    }
+    _salvarAbas();
+    notifyListeners();
+  }
+
+  /// Inicia uma nova aba de edição SEM criar nada no servidor ainda.
+  /// O servidorId será preenchido apenas ao salvar ou enviar para aprovação.
+  void novoOrcamento(String titulo) {
+    if (_abas.isEmpty) {
+      _abas.add(OrcamentoTab(id: _uuid.v4(), titulo: titulo));
+      _abaAtiva = 0;
+    } else {
+      // Substitui a aba atual (que deve estar vazia)
+      _abas[_abaAtiva] = OrcamentoTab(id: _uuid.v4(), titulo: titulo);
     }
     _salvarAbas();
     notifyListeners();

@@ -1,14 +1,3 @@
-// producao.routes.js
-// IMPORTANTE: este router deve ser montado em app.js como:
-//   const producaoRoutes = require('./routes/producao.routes');
-//   app.use('/api/producao', producaoRoutes);
-//
-// Isso faz os endpoints ficarem em:
-//   GET  /api/producao/materiais
-//   GET  /api/producao/categorias
-//   GET  /api/producao/solicitacoes
-//   POST /api/producao/solicitacoes
-//   etc.
 const router = require('express').Router();
 const ctrl   = require('../controllers/producao.controller');
 const { authMiddleware, roleMiddleware } = require('../middlewares/auth.middleware');

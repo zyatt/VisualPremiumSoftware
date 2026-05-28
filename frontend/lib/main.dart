@@ -14,7 +14,7 @@ import 'providers/ordem_compra_provider.dart';
 import 'providers/historico_provider.dart';
 import 'providers/relatorio_os_provider.dart';
 import 'providers/producao_provider.dart';
-import 'utils/update_checker.dart';
+//import 'utils/update_checker.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

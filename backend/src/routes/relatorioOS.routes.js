@@ -3,8 +3,8 @@ const ctrl    = require('../controllers/relatorioOS.controller');
 const pdfCtrl = require('../controllers/relatorioOS.pdf.controller');
 const { authMiddleware, roleMiddleware } = require('../middlewares/auth.middleware');
 
-const LEITURA   = ['ADMIN', 'GERENTE', 'COMPRADOR', 'ESTOQUISTA', 'VISUALIZADOR'];
-const RELATORIO = ['ADMIN', 'GERENTE', 'ESTOQUISTA'];
+const LEITURA   = ['ADMIN', 'GERENTE', 'COMPRAS'];
+const RELATORIO = ['ADMIN', 'GERENTE', 'COMPRAS'];
 
 router.get('/',                          authMiddleware, roleMiddleware(LEITURA),   ctrl.listar);
 router.get('/:numeroOS',                 authMiddleware, roleMiddleware(LEITURA),   ctrl.buscarPorNumeroOS);

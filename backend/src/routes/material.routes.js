@@ -2,9 +2,9 @@ const router = require('express').Router();
 const ctrl = require('../controllers/material.controller');
 const { authMiddleware, roleMiddleware } = require('../middlewares/auth.middleware');
 
-const LEITURA  = ['ADMIN','GERENTE','COMPRADOR','ESTOQUISTA','VISUALIZADOR'];
-const ESCRITA  = ['ADMIN','GERENTE','ESTOQUISTA'];
-const EXCLUSAO = ['ADMIN','GERENTE'];
+const LEITURA  = ['ADMIN','GERENTE','COMPRAS'];
+const ESCRITA  = ['ADMIN','GERENTE','COMPRAS'];
+const EXCLUSAO = ['ADMIN','GERENTE','COMPRAS'];
 
 router.get('/categorias',                authMiddleware, roleMiddleware(LEITURA),  ctrl.listarCategorias);
 router.get('/',                          authMiddleware, roleMiddleware(LEITURA),  ctrl.listar);
