@@ -28,17 +28,18 @@ class VisualPremiumApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Criamos o UsuarioProvider aqui fora para passá-lo tanto ao
-    // MultiProvider quanto ao AppRouter (que precisa de refreshListenable).
     final usuarioProvider = UsuarioProvider();
+    final orcamentoProvider = OrcamentoProvider();
+
+    usuarioProvider.setOrcamentoProvider(orcamentoProvider);
 
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: usuarioProvider),
+        ChangeNotifierProvider.value(value: orcamentoProvider),
         ChangeNotifierProvider(create: (_) => MaterialProvider()),
         ChangeNotifierProvider(create: (_) => EstoqueProvider()),
         ChangeNotifierProvider(create: (_) => FornecedorProvider()),
-        ChangeNotifierProvider(create: (_) => OrcamentoProvider()),
         ChangeNotifierProvider(create: (_) => OrdemCompraProvider()),
         ChangeNotifierProvider(create: (_) => HistoricoProvider()),
         ChangeNotifierProvider(create: (_) => RelatorioOSProvider()),

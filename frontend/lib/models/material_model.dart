@@ -95,6 +95,9 @@ class FornecedorMaterialModel {
   final double precoMetroQuadrado;
   final bool ativo;
 
+  /// True quando o preço de referência é por m²; false quando é por unidade.
+  bool get usarM2 => precoMetroQuadrado > 0;
+
   FornecedorMaterialModel({
     required this.id,
     required this.fornecedorId,
@@ -109,8 +112,12 @@ class FornecedorMaterialModel {
         id:                 (json['id'] as num?)?.toInt() ?? 0,
         fornecedorId:       (json['fornecedorId'] as num?)?.toInt() ?? 0,
         fornecedorNome:     json['fornecedor']?['nomeFantasia'] ?? '',
-        preco:              double.tryParse(json['preco'].toString()) ?? 0,
-        precoMetroQuadrado: double.tryParse(json['precoMetroQuadrado'].toString()) ?? 0,
+        preco:              json['preco'] != null
+            ? double.tryParse(json['preco'].toString()) ?? 0
+            : 0,
+        precoMetroQuadrado: json['precoMetroQuadrado'] != null
+            ? double.tryParse(json['precoMetroQuadrado'].toString()) ?? 0
+            : 0,
         ativo:              json['ativo'] ?? true,
       );
 }

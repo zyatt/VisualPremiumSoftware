@@ -197,11 +197,18 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                   ],
                 ),
                 const Spacer(),
+                IconButton(
+                  onPressed: () => context.read<RelatorioOSProvider>().carregar(),
+                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppTheme.divider),
+                  ),
+                ),
               ],
             ),
-            const SizedBox(height: 20),
-
-            // ── Filtro linha 1: busca OS + ID material ──────────────
             Row(
               children: [
                 Expanded(

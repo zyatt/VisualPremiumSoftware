@@ -179,6 +179,16 @@ class _EstoquePageState extends State<EstoquePage> {
                   ],
                 ),
                 const Spacer(),
+                IconButton(
+                  onPressed: () => context.read<MaterialProvider>().carregarCategorias(),
+                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppTheme.divider),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 20),
@@ -450,7 +460,8 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
   final _espessuraCtrl     = TextEditingController();
-  String _statusFiltro     = '';
+  String _statusFiltro         = '';
+  bool   _somenteFornecedor    = false;
   Timer? _debounceTimer;
 
   static const int _itensPorPagina = 50;
@@ -490,6 +501,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
           identificador: _identificadorCtrl.text.trim(),
           medida:        _medidaCtrl.text.trim(),
           espessura:     _espessuraCtrl.text.trim(),
+          // somenteFornecedor é filtrado localmente pelo _somenteFornecedor bool
         );
   }
 
@@ -885,6 +897,17 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   ),
                 ),
+                const SizedBox(width: 12),
+                IconButton(
+                  onPressed: _aplicarFiltros,
+                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppTheme.divider),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 20),
@@ -952,6 +975,32 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Com fornecedor'),
+                  avatar: Icon(
+                    Icons.store_outlined,
+                    size: 16,
+                    color: _somenteFornecedor ? AppTheme.primary : AppTheme.textHint,
+                  ),
+                  selected: _somenteFornecedor,
+                  onSelected: (v) {
+                    setState(() => _somenteFornecedor = v);
+                    _aplicarFiltros();
+                  },
+                  selectedColor: AppTheme.primary.withValues(alpha: 0.12),
+                  checkmarkColor: AppTheme.primary,
+                  labelStyle: TextStyle(
+                    fontSize: 13,
+                    color: _somenteFornecedor ? AppTheme.primary : AppTheme.textSecondary,
+                    fontWeight: _somenteFornecedor ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                  side: BorderSide(
+                    color: _somenteFornecedor
+                        ? AppTheme.primary
+                        : AppTheme.textHint.withValues(alpha: 0.4),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 IconButton.outlined(
                   tooltip: 'Limpar filtros',
                   icon: Icon(Icons.filter_alt_off, color: scheme.onSurfaceVariant),
@@ -961,7 +1010,10 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     _identificadorCtrl.clear();
                     _medidaCtrl.clear();
                     _espessuraCtrl.clear();
-                    setState(() => _statusFiltro = '');
+                    setState(() {
+                      _statusFiltro      = '';
+                      _somenteFornecedor = false;
+                    });
                     context.read<MaterialProvider>().carregar(
                           categoria: _categoriaParaProvider(),
                         );
@@ -2562,6 +2614,140 @@ class _FornecedorPrecoRow extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Row clicável do painel lateral de fornecedores no _MaterialFormDialog
+// Ao clicar fecha o dialog e navega para a página de orçamento com o material
+// ─────────────────────────────────────────────────────────────────────────────
+class _FornecedorPainelRow extends StatefulWidget {
+  final FornecedorMaterialModel fm;
+  final MaterialModel           material;
+  final bool                    isMediano;
+  final bool                    showDivider;
+
+  const _FornecedorPainelRow({
+    required this.fm,
+    required this.material,
+    required this.isMediano,
+    required this.showDivider,
+  });
+
+  @override
+  State<_FornecedorPainelRow> createState() => _FornecedorPainelRowState();
+}
+
+class _FornecedorPainelRowState extends State<_FornecedorPainelRow> {
+  bool _hovered = false;
+
+  void _irParaOrcamento() {
+    // Fecha o dialog primeiro
+    Navigator.of(context, rootNavigator: true).pop(false);
+    // Adiciona o material ao orçamento via provider e navega
+    context.read<OrcamentoProvider>().adicionarMaterialDireto(
+      material:   widget.material,
+      fornecedor: widget.fm,
+    );
+    context.go('/orcamento');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fm = widget.fm;
+    final temPrecoUnit = fm.preco > 0;
+    final temPrecoM2   = fm.precoMetroQuadrado > 0;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onHover: (_) { if (!_hovered) setState(() => _hovered = true); },
+          onExit:  (_) { if (_hovered)  setState(() => _hovered = false); },
+          child: GestureDetector(
+            onTap: _irParaOrcamento,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              color: _hovered
+                  ? AppTheme.primary.withValues(alpha: 0.07)
+                  : Colors.transparent,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              child: Row(
+                children: [
+                  // Nome do fornecedor
+                  Expanded(
+                    child: Row(
+                      children: [
+                        if (widget.isMediano) ...[
+                          const Tooltip(
+                            message: 'Preço mediano',
+                            child: Icon(Icons.show_chart,
+                                size: 12, color: AppTheme.primary),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
+                        Expanded(
+                          child: Text(
+                            fm.fornecedorNome.isEmpty ? '—' : fm.fornecedorNome,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _hovered
+                                  ? AppTheme.primary
+                                  : AppTheme.textPrimary,
+                              fontWeight: widget.isMediano
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Preço unitário
+                  SizedBox(
+                    width: 68,
+                    child: Text(
+                      temPrecoUnit
+                          ? 'R\$ ${fm.preco.toStringAsFixed(2)}'
+                          : '—',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: temPrecoUnit
+                            ? (_hovered ? AppTheme.primary : AppTheme.textPrimary)
+                            : AppTheme.textHint,
+                        fontWeight: temPrecoUnit ? FontWeight.w500 : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                  // Preço m²
+                  SizedBox(
+                    width: 68,
+                    child: Text(
+                      temPrecoM2
+                          ? 'R\$ ${fm.precoMetroQuadrado.toStringAsFixed(2)}'
+                          : '—',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: temPrecoM2
+                            ? (_hovered ? AppTheme.primary : AppTheme.textPrimary)
+                            : AppTheme.textHint,
+                        fontWeight: temPrecoM2 ? FontWeight.w500 : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (widget.showDivider)
+          const Divider(height: 0, thickness: 0.4, color: AppTheme.divider),
+      ],
+    );
+  }
+}
+
 class _EditarFilhoEspecificoDialog extends StatefulWidget {
   final EstoqueEspecificoModel filho;
   final MaterialModel pai;
@@ -2973,289 +3159,464 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(_editando ? 'Editar Material' : 'Novo Material'),
-      content: SizedBox(
-        width: 560,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (_erroDialog != null) ...[
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.error.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.error.withValues(alpha: 0.4)),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Icon(Icons.error_outline, color: AppTheme.error, size: 18),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            _erroDialog!,
-                            style: const TextStyle(
-                              color: AppTheme.error,
-                              fontSize: 13,
-                            ),
-                          ),
+    final material      = widget.material;
+    final fornecedores  = material?.fornecedorMateriais ?? <FornecedorMaterialModel>[];
+    final temFornecedor = _editando && fornecedores.isNotEmpty;
+
+    // ── Painel de formulário (sempre presente) ────────────────────────────
+    Widget formPanel = Form(
+      key: _formKey,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_erroDialog != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.error.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.error.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.error_outline, color: AppTheme.error, size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _erroDialog!,
+                        style: const TextStyle(
+                          color: AppTheme.error,
+                          fontSize: 13,
                         ),
-                        GestureDetector(
-                          onTap: () => setState(() => _erroDialog = null),
-                          child: const Icon(Icons.close, color: AppTheme.error, size: 16),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-                TextFormField(
-                  controller: _nome,
-                  decoration: const InputDecoration(labelText: 'Nome *'),
+                    GestureDetector(
+                      onTap: () => setState(() => _erroDialog = null),
+                      child: const Icon(Icons.close, color: AppTheme.error, size: 16),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            TextFormField(
+              controller: _nome,
+              decoration: const InputDecoration(labelText: 'Nome *'),
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [_UpperCaseFormatter()],
+              onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
+              validator: (v) =>
+                  v == null || v.trim().isEmpty ? 'Nome é obrigatório' : null,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _identificador,
+              decoration: const InputDecoration(
+                labelText: 'Identificador',
+              ),
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [_UpperCaseFormatter()],
+            ),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(
+                child: TextFormField(
+                  controller: _categoria,
+                  decoration: const InputDecoration(labelText: 'Categoria'),
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [_UpperCaseFormatter()],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextFormField(
+                  controller: _unidade,
+                  decoration: const InputDecoration(labelText: 'Unidade'),
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [_UpperCaseFormatter()],
+                ),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(
+                child: TextFormField(
+                  controller: _medida,
+                  decoration: const InputDecoration(labelText: 'Medida'),
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [_UpperCaseFormatter()],
                   onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
-                  validator: (v) =>
-                      v == null || v.trim().isEmpty ? 'Nome é obrigatório' : null,
                 ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _identificador,
-                  decoration: const InputDecoration(
-                    labelText: 'Identificador',
-                  ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextFormField(
+                  controller: _espessura,
+                  decoration: const InputDecoration(labelText: 'Espessura'),
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [_UpperCaseFormatter()],
+                  onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                 ),
-                const SizedBox(height: 12),
-                Row(children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _categoria,
-                      decoration: const InputDecoration(labelText: 'Categoria'),
-                      textCapitalization: TextCapitalization.characters,
-                      inputFormatters: [_UpperCaseFormatter()],
+              ),
+            ]),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(
+                child: TextFormField(
+                  controller: _quantidade,
+                  decoration: const InputDecoration(labelText: 'Quantidade'),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_DecimalInputFormatter()],
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty || double.tryParse(v) == null)
+                          ? 'Número inválido'
+                          : null,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextFormField(
+                  controller: _estoqueMinimo,
+                  decoration:
+                      const InputDecoration(labelText: 'Estoque mínimo'),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_DecimalInputFormatter()],
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty || double.tryParse(v) == null)
+                          ? 'Número inválido'
+                          : null,
+                ),
+              ),
+            ]),
+            const SizedBox(height: 16),
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => setState(() => _estoqueConfirmado = !_estoqueConfirmado),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      _estoqueConfirmado
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      size: 20,
+                      color: _estoqueConfirmado ? AppTheme.success : AppTheme.textHint,
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _unidade,
-                      decoration: const InputDecoration(labelText: 'Unidade'),
-                      textCapitalization: TextCapitalization.characters,
-                      inputFormatters: [_UpperCaseFormatter()],
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 12),
-                Row(children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _medida,
-                      decoration: const InputDecoration(labelText: 'Medida'),
-                      textCapitalization: TextCapitalization.characters,
-                      inputFormatters: [_UpperCaseFormatter()],
-                      onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _espessura,
-                      decoration: const InputDecoration(labelText: 'Espessura'),
-                      textCapitalization: TextCapitalization.characters,
-                      inputFormatters: [_UpperCaseFormatter()],
-                      onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 12),
-                Row(children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _quantidade,
-                      decoration: const InputDecoration(labelText: 'Quantidade'),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [_DecimalInputFormatter()],
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty || double.tryParse(v) == null)
-                              ? 'Número inválido'
-                              : null,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _estoqueMinimo,
-                      decoration:
-                          const InputDecoration(labelText: 'Estoque mínimo'),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [_DecimalInputFormatter()],
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty || double.tryParse(v) == null)
-                              ? 'Número inválido'
-                              : null,
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 16),
-                InkWell(
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: () => setState(() => _estoqueConfirmado = !_estoqueConfirmado),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                    child: Row(
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
+                        Text(
+                          'Estoque confirmado',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: _estoqueConfirmado
+                                ? AppTheme.textPrimary
+                                : AppTheme.textSecondary,
+                          ),
+                        ),
+                        Text(
                           _estoqueConfirmado
-                              ? Icons.check_circle
-                              : Icons.radio_button_unchecked,
-                          size: 20,
-                          color: _estoqueConfirmado ? AppTheme.success : AppTheme.textHint,
-                        ),
-                        const SizedBox(width: 10),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Estoque confirmado',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: _estoqueConfirmado
-                                    ? AppTheme.textPrimary
-                                    : AppTheme.textSecondary,
-                              ),
-                            ),
-                            Text(
-                              _estoqueConfirmado
-                                  ? 'A quantidade atual foi verificada fisicamente'
-                                  : 'Quantidade ainda não verificada fisicamente',
-                              style: const TextStyle(
-                                  fontSize: 11, color: AppTheme.textHint),
-                            ),
-                          ],
+                              ? 'A quantidade atual foi verificada fisicamente'
+                              : 'Quantidade ainda não verificada fisicamente',
+                          style: const TextStyle(
+                              fontSize: 11, color: AppTheme.textHint),
                         ),
                       ],
                     ),
-                  ),
+                  ],
                 ),
-                const SizedBox(height: 4),
-                InkWell(
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: () => setState(() => _especifico = !_especifico),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                    child: Row(
+              ),
+            ),
+            const SizedBox(height: 4),
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => setState(() => _especifico = !_especifico),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      _especifico
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      size: 20,
+                      color: _especifico ? AppTheme.primary : AppTheme.textHint,
+                    ),
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          _especifico
-                              ? Icons.check_circle
-                              : Icons.radio_button_unchecked,
-                          size: 20,
-                          color: _especifico ? AppTheme.primary : AppTheme.textHint,
+                        Text(
+                          'Material específico',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: _especifico
+                                ? AppTheme.textPrimary
+                                : AppTheme.textSecondary,
+                          ),
                         ),
-                        const SizedBox(width: 10),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Material específico',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: _especifico
-                                    ? AppTheme.textPrimary
-                                    : AppTheme.textSecondary,
-                              ),
-                            ),
-                            Text(
-                              _especifico
-                                  ? 'Exigirá descrição personalizada na ordem de compra'
-                                  : 'Material genérico (sem descrição adicional na OC)',
-                              style: const TextStyle(
-                                  fontSize: 11, color: AppTheme.textHint),
-                            ),
-                          ],
+                        Text(
+                          _especifico
+                              ? 'Exigirá descrição personalizada na ordem de compra'
+                              : 'Material genérico (sem descrição adicional na OC)',
+                          style: const TextStyle(
+                              fontSize: 11, color: AppTheme.textHint),
                         ),
                       ],
                     ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-        ),
-      ),
-      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      actions: [
-        Row(
-          children: [
-            if (_editando) ...[
-              if (widget.material!.ativo && widget.onDesativar != null)
-                TextButton.icon(
-                  onPressed: _salvando
-                      ? null
-                      : () {
-                          Navigator.of(context, rootNavigator: true).pop(false);
-                          widget.onDesativar!(widget.material!);
-                        },
-                  icon: const Icon(Icons.block, size: 16),
-                  label: const Text('Desativar'),
-                  style: TextButton.styleFrom(foregroundColor: AppTheme.warning),
-                ),
-              if (!widget.material!.ativo && widget.onReativar != null)
-                TextButton.icon(
-                  onPressed: _salvando
-                      ? null
-                      : () {
-                          Navigator.of(context, rootNavigator: true).pop(false);
-                          widget.onReativar!(widget.material!);
-                        },
-                  icon: const Icon(Icons.restore, size: 16),
-                  label: const Text('Reativar'),
-                  style: TextButton.styleFrom(foregroundColor: AppTheme.success),
-                ),
-              if (!widget.material!.ativo && widget.onExcluir != null)
-                TextButton.icon(
-                  onPressed: _salvando
-                      ? null
-                      : () {
-                          Navigator.of(context, rootNavigator: true).pop(false);
-                          widget.onExcluir!(widget.material!);
-                        },
-                  icon: const Icon(Icons.delete_outline, size: 16),
-                  label: const Text('Excluir'),
-                  style: TextButton.styleFrom(foregroundColor: AppTheme.error),
-                ),
-            ],
-            const Spacer(),
-            TextButton(
-              onPressed: _salvando ? null : () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-            const SizedBox(width: 8),
-            FilledButton(
-              onPressed: _salvando ? null : _salvar,
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-              child: _salvando
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : Text(_editando ? 'Salvar' : 'Criar'),
+              ),
             ),
           ],
         ),
-      ],
+      ),
+    );
+
+    // ── Painel lateral de fornecedores (apenas no modo edição) ────────────
+    Widget? fornecedorPanel;
+    if (temFornecedor) {
+      final ordenados = [...fornecedores]
+        ..sort((a, b) => a.preco.compareTo(b.preco));
+
+      fornecedorPanel = Container(
+        width: 260,
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant.withValues(alpha: 0.5),
+          borderRadius: const BorderRadius.only(
+            topRight:    Radius.circular(12),
+            bottomRight: Radius.circular(12),
+          ),
+          border: Border(
+            left: BorderSide(color: AppTheme.divider.withValues(alpha: 0.6)),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Cabeçalho do painel
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+              child: Row(
+                children: [
+                  const Icon(Icons.store_outlined, size: 16, color: AppTheme.textSecondary),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Fornecedores (${fornecedores.length})',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+
+            // Cabeçalho das colunas
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Row(
+                children: const [
+                  Expanded(
+                    child: Text(
+                      'Fornecedor',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
+                          color: AppTheme.textHint),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 68,
+                    child: Text(
+                      'Unit.',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
+                          color: AppTheme.textHint),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 68,
+                    child: Text(
+                      'm²',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
+                          color: AppTheme.textHint),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 0, thickness: 0.5, color: AppTheme.divider),
+
+            // Lista de fornecedores clicáveis
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(ordenados.length, (i) {
+                    final fm = ordenados[i];
+                    final isMediano = material!.precoMediano != null &&
+                        fm.preco == material.precoMediano;
+
+                    return _FornecedorPainelRow(
+                      fm:           fm,
+                      material:     material,
+                      isMediano:    isMediano,
+                      showDivider:  i < ordenados.length - 1,
+                    );
+                  }),
+                ),
+              ),
+            ),
+
+            // Dica de clique
+            const Padding(
+              padding: EdgeInsets.fromLTRB(12, 8, 12, 12),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 12, color: AppTheme.textHint),
+                  SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      'Clique em um fornecedor para criar um orçamento com este material.',
+                      style: TextStyle(fontSize: 10, color: AppTheme.textHint),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // ── Dialog com layout condicional ─────────────────────────────────────
+    return Dialog(
+      backgroundColor: AppTheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth:  temFornecedor ? 840 : 560,
+          maxHeight: 680,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ── Título ────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
+              child: Row(
+                children: [
+                  Text(
+                    _editando ? 'Editar Material' : 'Novo Material',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, size: 20),
+                    tooltip: 'Fechar',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Divider(height: 0),
+
+            // ── Corpo: formulário + painel lateral ────────────────────────
+            Flexible(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Formulário
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                      child: formPanel,
+                    ),
+                  ),
+                  // Painel lateral (se houver fornecedores)
+                  if (fornecedorPanel != null) fornecedorPanel,
+                ],
+              ),
+            ),
+
+            // ── Ações ─────────────────────────────────────────────────────
+            const Divider(height: 0),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Row(
+                children: [
+                  if (_editando) ...[
+                    if (widget.material!.ativo && widget.onDesativar != null)
+                      TextButton.icon(
+                        onPressed: _salvando
+                            ? null
+                            : () {
+                                Navigator.of(context, rootNavigator: true).pop(false);
+                                widget.onDesativar!(widget.material!);
+                              },
+                        icon: const Icon(Icons.block, size: 16),
+                        label: const Text('Desativar'),
+                        style: TextButton.styleFrom(foregroundColor: AppTheme.warning),
+                      ),
+                    if (!widget.material!.ativo && widget.onReativar != null)
+                      TextButton.icon(
+                        onPressed: _salvando
+                            ? null
+                            : () {
+                                Navigator.of(context, rootNavigator: true).pop(false);
+                                widget.onReativar!(widget.material!);
+                              },
+                        icon: const Icon(Icons.restore, size: 16),
+                        label: const Text('Reativar'),
+                        style: TextButton.styleFrom(foregroundColor: AppTheme.success),
+                      ),
+                    if (!widget.material!.ativo && widget.onExcluir != null)
+                      TextButton.icon(
+                        onPressed: _salvando
+                            ? null
+                            : () {
+                                Navigator.of(context, rootNavigator: true).pop(false);
+                                widget.onExcluir!(widget.material!);
+                              },
+                        icon: const Icon(Icons.delete_outline, size: 16),
+                        label: const Text('Excluir'),
+                        style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+                      ),
+                  ],
+                  const Spacer(),
+                  TextButton(
+                    onPressed: _salvando ? null : () => Navigator.pop(context),
+                    child: const Text('Cancelar'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: _salvando ? null : _salvar,
+                    style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                    child: _salvando
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : Text(_editando ? 'Salvar' : 'Criar'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

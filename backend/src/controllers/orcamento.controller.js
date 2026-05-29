@@ -76,6 +76,16 @@ const removerItem = async (req, res, next) => {
   }
 };
 
+// DELETE /orcamentos/:id/itens — remove TODOS os itens do orçamento de uma vez
+const limparItens = async (req, res, next) => {
+  try {
+    await svc.limparItens(+req.params.id);
+    res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+};
+
 const atualizarItem = async (req, res, next) => {
   try {
     res.json(await svc.atualizarItem(+req.params.itemId, req.body));
@@ -137,6 +147,7 @@ module.exports = {
   cancelar,
   adicionarItem,
   removerItem,
+  limparItens,
   atualizarItem,
   enviarParaAprovacao,
   aprovar,

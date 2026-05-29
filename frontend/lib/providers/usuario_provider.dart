@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:visual_premium/providers/orcamento_provider.dart';
 import '../models/usuario_model.dart';
 import '../repositories/usuario_repository.dart';
 import '../utils/api_client.dart';
 
 class UsuarioProvider extends ChangeNotifier {
   final UsuarioRepository _repo = UsuarioRepository();
+  OrcamentoProvider? _orcamentoProvider;
+
+  void setOrcamentoProvider(OrcamentoProvider p) {
+    _orcamentoProvider = p;
+  }
 
   UsuarioModel? _usuarioLogado;
   UsuarioModel? get usuarioLogado => _usuarioLogado;
@@ -23,14 +29,14 @@ class UsuarioProvider extends ChangeNotifier {
     _carregando = true;
     _erro = null;
     notifyListeners();
-
     try {
       final result = await _repo.login(username, senha);
-
       _token = result.token;
       _usuarioLogado = result.usuario;
-
       ApiClient.setToken(_token);
+
+      // Recarrega o estado do orçamento para este usuário
+      await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
 
       return true;
     } catch (e) {
@@ -45,8 +51,10 @@ class UsuarioProvider extends ChangeNotifier {
   void logout() {
     _usuarioLogado = null;
     _token = null;
-
     ApiClient.setToken(null);
+
+    // Limpa o estado do orçamento ao deslogar
+    _orcamentoProvider?.trocarUsuario(null);
 
     notifyListeners();
   }

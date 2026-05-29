@@ -17,6 +17,7 @@ router.patch('/:id',                     authMiddleware, roleMiddleware(ESCRITA)
 router.patch('/:id/cancelar',            authMiddleware, roleMiddleware(EXCLUSAO), ctrl.cancelar);
 
 router.post('/:id/itens',                authMiddleware, roleMiddleware(ESCRITA),  ctrl.adicionarItem);
+router.delete('/:id/itens',              authMiddleware, roleMiddleware(ESCRITA),  ctrl.limparItens);   // ← limpa todos de uma vez
 router.delete('/:id/itens/:itemId',      authMiddleware, roleMiddleware(ESCRITA),  ctrl.removerItem);
 router.patch('/:id/itens/:itemId',       authMiddleware, roleMiddleware(ESCRITA),  ctrl.atualizarItem);
 

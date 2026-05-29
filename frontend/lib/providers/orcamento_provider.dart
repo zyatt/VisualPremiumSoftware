@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
+import '../models/material_model.dart';
 
 // ─── Enums ────────────────────────────────────
 
@@ -156,10 +157,12 @@ class OrcamentoTab {
 // servidor. O provider agora só gerencia a aba em edição (rascunho local).
 
 class OrcamentoProvider extends ChangeNotifier {
-  static const _kAbas = 'orcamento_abas';
-  static const _kAbaAtiva = 'orcamento_aba_ativa';
+  // Chaves agora dependem do usuário — sem prefixo, sem dados de outro usuário
+  static String _kAbas(int userId)     => 'orcamento_abas_$userId';
+  static String _kAbaAtiva(int userId) => 'orcamento_aba_ativa_$userId';
 
   final _uuid = const Uuid();
+  int? _userId; // usuário atual
 
   final List<OrcamentoTab> _abas = [];
   List<OrcamentoTab> get abas => List.unmodifiable(_abas);
@@ -167,29 +170,45 @@ class OrcamentoProvider extends ChangeNotifier {
   int _abaAtiva = 0;
   int get abaAtiva => _abaAtiva;
 
-  OrcamentoTab? get tabAtual =>
-      _abas.isEmpty ? null : _abas[_abaAtiva];
+  OrcamentoTab? get tabAtual => _abas.isEmpty ? null : _abas[_abaAtiva];
 
   bool _carregado = false;
   bool get carregado => _carregado;
 
-  OrcamentoProvider() {
-    _carregar();
+  OrcamentoProvider();
+
+  // ── Chamado pelo main.dart ao logar/deslogar ──────────────────────────────
+  Future<void> trocarUsuario(int? userId) async {
+    if (_userId == userId) return; // mesmo usuário, não recarrega
+    _userId = userId;
+    _abas.clear();
+    _abaAtiva = 0;
+    _carregado = false;
+    notifyListeners();
+
+    if (userId != null) {
+      await _carregar();
+    } else {
+      // Deslogou: garante aba vazia sem persistir nada
+      _novaAba(notificar: false);
+      _carregado = true;
+      notifyListeners();
+    }
   }
 
-  // ── Persistência ─────────────────────────────────────────────────────────────
-
+  // ── Persistência ─────────────────────────────────────────────────────────
   Future<void> _carregar() async {
+    if (_userId == null) return;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final abasJson = prefs.getString(_kAbas);
+      final abasJson = prefs.getString(_kAbas(_userId!));
       if (abasJson != null) {
         final lista = jsonDecode(abasJson) as List;
-        _abas.addAll(lista.map(
-          (j) => OrcamentoTab.fromJson(j as Map<String, dynamic>),
-        ));
+        _abas.addAll(
+          lista.map((j) => OrcamentoTab.fromJson(j as Map<String, dynamic>)),
+        );
       }
-      _abaAtiva = prefs.getInt(_kAbaAtiva) ?? 0;
+      _abaAtiva = prefs.getInt(_kAbaAtiva(_userId!)) ?? 0;
       if (_abaAtiva >= _abas.length) _abaAtiva = 0;
     } catch (_) {}
 
@@ -199,14 +218,16 @@ class OrcamentoProvider extends ChangeNotifier {
   }
 
   Future<void> _salvarAbas() async {
+    if (_userId == null) return; // sem usuário, não persiste
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
-          _kAbas, jsonEncode(_abas.map((a) => a.toJson()).toList()));
-      await prefs.setInt(_kAbaAtiva, _abaAtiva);
+        _kAbas(_userId!),
+        jsonEncode(_abas.map((a) => a.toJson()).toList()),
+      );
+      await prefs.setInt(_kAbaAtiva(_userId!), _abaAtiva);
     } catch (_) {}
   }
-
   // ── Abas ──────────────────────────────────────
 
   void _novaAba({bool notificar = true}) {
@@ -389,6 +410,41 @@ class OrcamentoProvider extends ChangeNotifier {
     }
     _salvarAbas();
     notifyListeners();
+  }
+
+  // ── Adicionar material direto do estoque (com fornecedor pré-selecionado) ──
+  //
+  // Chamado quando o usuário clica em um fornecedor no painel lateral do
+  // _MaterialFormDialog. Monta o ItemOrcamentoData com TODOS os fornecedores
+  // do material, mas com o fornecedor clicado já pré-selecionado.
+  void adicionarMaterialDireto({
+    required MaterialModel material,
+    required FornecedorMaterialModel fornecedor,
+  }) {
+    // Monta o mapa de preços com TODOS os fornecedores do material
+    final precos = <int, PrecoFornecedorData>{};
+    for (final fm in material.fornecedorMateriais) {
+      precos[fm.fornecedorId] = PrecoFornecedorData(
+        fornecedorNome: fm.fornecedorNome,
+        preco:   fm.preco > 0 ? fm.preco : null,
+        precoM2: fm.precoMetroQuadrado > 0 ? fm.precoMetroQuadrado : null,
+      );
+    }
+
+    final item = ItemOrcamentoData(
+      materialId:            material.id,
+      materialNome:          material.nome,
+      materialUnidade:       material.unidade,
+      materialCategoria:     material.categoria,
+      materialMedida:        material.medida,
+      materialEspessura:     material.espessura,
+      materialIdentificador: material.identificador,
+      materialStatus:        material.status,
+      materialEspecifico:    material.especifico,
+      precos:                precos,
+      fornecedorSelecionado: fornecedor.fornecedorId,
+    );
+    adicionarItem(item);
   }
 
   // ── Helpers ───────────────────────────────────

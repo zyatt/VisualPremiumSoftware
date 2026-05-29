@@ -163,6 +163,17 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                         horizontal: 20, vertical: 12),
                   ),
                 ),
+                const SizedBox(width: 10),
+                IconButton(
+                  onPressed: () => context.read<EstoqueProvider>().carregarRelacoesOS(),
+                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppTheme.divider),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 20),
@@ -902,7 +913,7 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
                   : const Icon(Icons.lock_outline,
                       size: 18, color: _corEmAndamento),
               label: Text(
-                'Fechar OS',
+                'Finalizar OS',
                 style: TextStyle(
                   color: provider.fechandoOS
                       ? AppTheme.textHint

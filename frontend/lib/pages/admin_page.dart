@@ -231,6 +231,17 @@ class _UsuariosTabState extends State<_UsuariosTab> {
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               ),
             ),
+            const SizedBox(width: 10),
+            IconButton(
+              onPressed: _carregar,
+              icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+              tooltip: 'Atualizar',
+              style: IconButton.styleFrom(
+                backgroundColor: AppTheme.surface,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                side: const BorderSide(color: AppTheme.divider),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 16),

@@ -117,6 +117,13 @@ async function removerItem(orcamentoId, itemId) {
   return prisma.orcamentoItem.deleteMany({ where: { id: itemId, orcamentoId } });
 }
 
+// Remove TODOS os itens de um orçamento de uma só vez (operação atômica).
+// Usado pelo Flutter ao regravar o orçamento inteiro, evitando race conditions
+// do loop de deleteMany individual com catch silencioso.
+async function limparItens(orcamentoId) {
+  return prisma.orcamentoItem.deleteMany({ where: { orcamentoId } });
+}
+
 async function atualizarItem(itemId, data) {
   return prisma.orcamentoItem.update({ where: { id: itemId }, data });
 }
@@ -248,6 +255,7 @@ module.exports = {
   atualizar,
   adicionarItem,
   removerItem,
+  limparItens,
   atualizarItem,
   cancelar,
   enviarParaAprovacao,

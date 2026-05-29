@@ -63,6 +63,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   // true somente quando o orçamento foi reaberto com status AGUARDANDO_APROVACAO
   // (nesse caso faz sentido aprovar diretamente, em vez de reenviar)
   bool _orcamentoAguardandoAprovacao = false;
+
+  // true quando o orçamento reaberto já tem status APROVADO ou NAO_APROVADO
+  // (botão Enviar para Aprovação deve ficar bloqueado)
+  bool _orcamentoJaFinalizado = false;
   
   // Modo especial: gerar OC de orçamento aprovado
   bool _modoGerarOC = false;
@@ -107,6 +111,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   // ── Carregar orçamentos do servidor ──────────────────────────────────────────
 
   Future<void> _carregarOrcamentosServidor() async {
+    if (!mounted) return;
     setState(() {
       _carregandoAprovacao = true;
       _erroAprovacao = null;
@@ -215,14 +220,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       if (_orcamentoServidorId != null) {
         orcId = _orcamentoServidorId!;
         await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
-        final atual = await repo.buscarPorId(orcId);
-        final itensAtuais =
-            (atual['itens'] as List? ?? []).cast<Map<String, dynamic>>();
-        for (final item in itensAtuais) {
-          try {
-            await repo.removerItem(orcId, item['id'] as int);
-          } catch (_) {}
-        }
+        // Remove todos os itens de uma vez (atômico) — evita duplicatas
+        // causadas por falhas parciais no loop individual com catch silencioso.
+        await repo.limparItens(orcId);
       } else {
         final criado = await repo.criar(novoTitulo);
         orcId = criado['id'] as int;
@@ -280,6 +280,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         _modoGerarOC = false;
         _ignorarRestauracaoAba = false;
         _orcamentoAguardandoAprovacao = false;
+        _orcamentoJaFinalizado = false;
       });
       await _carregarOrcamentosServidor();
     } catch (e) {
@@ -454,7 +455,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
           final especifico = materialData?['especifico'] as bool? ?? false;
 
-          final chave = especifico ? 'esp_${item['id']}' : 'mat_$materialId';
+          final chave = especifico
+              ? 'esp_${materialId}_${(item['descricaoItem'] as String? ?? '').trim().toLowerCase()}'
+              : 'mat_$materialId';
           
           if (!itensPorChave.containsKey(chave)) {
             itensPorChave[chave] = ItemOrcamentoData(
@@ -546,9 +549,12 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
         final especifico = materialData?['especifico'] as bool? ?? false;
 
-        // Materiais específicos podem aparecer mais de uma vez com o mesmo
-        // materialId — cada ocorrência é um item independente.
-        final chave = especifico ? 'esp_${item['id']}' : 'mat_$materialId';
+        // Materiais específicos são agrupados por materialId + descricaoItem,
+        // pois cada combinação é um item distinto mas seus fornecedores devem
+        // aparecer juntos. Genéricos: agrupados por materialId.
+        final chave = especifico
+            ? 'esp_${materialId}_${(item['descricaoItem'] as String? ?? '').trim().toLowerCase()}'
+            : 'mat_$materialId';
 
         if (!itensPorChave.containsKey(chave)) {
           itensPorChave[chave] = ItemOrcamentoData(
@@ -596,12 +602,13 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
       provider.setServidorIdTab(orc['id'] as int);
 
+      final statusReaberto = orc['status'] as String? ?? '';
       setState(() {
         _modoEdicao = true;
         _ignorarRestauracaoAba = false;
         _orcamentoServidorId = orc['id'] as int;
-        _orcamentoAguardandoAprovacao =
-            (orc['status'] as String? ?? '') == 'AGUARDANDO_APROVACAO';
+        _orcamentoAguardandoAprovacao = statusReaberto == 'AGUARDANDO_APROVACAO';
+        _orcamentoJaFinalizado = statusReaberto == 'APROVADO' || statusReaberto == 'NAO_APROVADO';
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1118,15 +1125,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       if (tab.servidorId != null) {
         orcId = tab.servidorId!;
         await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
-
-        final atual = await repo.buscarPorId(orcId);
-        final itensAtuais =
-            (atual['itens'] as List? ?? []).cast<Map<String, dynamic>>();
-        for (final item in itensAtuais) {
-          try {
-            await repo.removerItem(orcId, item['id'] as int);
-          } catch (_) {}
-        }
+        // Remove todos os itens de uma vez (atômico) — evita duplicatas
+        // causadas por falhas parciais no loop individual com catch silencioso.
+        await repo.limparItens(orcId);
       } else {
         final criado = await repo.criar(novoTitulo);
         orcId = criado['id'] as int;
@@ -1165,22 +1166,32 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         }
       }
 
-      provider.fecharAbaAposOperacao();
-
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Orçamento #$orcId salvo com sucesso!'),
-          backgroundColor: AppTheme.success,
-        ),
-      );
+
+      // Atualiza estado local ANTES de fechar a aba para evitar que o título
+      // pisque de volta ao valor antigo (o provider ainda tem o título novo, mas
+      // o setState local precisa fechar o modo edição primeiro).
       setState(() {
         _modoEdicao = null;
         _orcamentoServidorId = null;
         _modoGerarOC = false;
         _ignorarRestauracaoAba = false;
         _orcamentoAguardandoAprovacao = false;
+        _orcamentoJaFinalizado = false;
+        _salvandoPreco = false;
       });
+
+      provider.fecharAbaAposOperacao();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Orçamento #$orcId salvo com sucesso!'),
+          backgroundColor: AppTheme.success,
+        ),
+      );
+
+      // Recarrega dados do servidor para refletir o título atualizado
+      await _carregarOrcamentosServidor();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1262,6 +1273,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         _modoGerarOC = false;
         _ignorarRestauracaoAba = false;
         _orcamentoAguardandoAprovacao = false;
+        _orcamentoJaFinalizado = false;
       });
     } catch (e) {
       if (mounted) {
@@ -1323,6 +1335,126 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     }
     return totais;
   }
+
+  Map<String, dynamic> _calcularOrcamentoOtimizado(List<ItemOrcamentoData> itens) {
+  final Map<int, List<Map<String, dynamic>>> sugestoesPorFornecedor = {};
+  double totalOtimizado = 0;
+  double totalOtimizadoM2 = 0;
+  int materiaisComSugestao = 0;
+
+  for (final item in itens) {
+    if (item.precos.isEmpty) continue;
+
+    // Encontra o menor preço unitário
+    double? menorPreco;
+    int? fornecedorMenorPreco;
+    for (final entry in item.precos.entries) {
+      final preco = entry.value.preco;
+      if (preco != null && (menorPreco == null || preco < menorPreco)) {
+        menorPreco = preco;
+        fornecedorMenorPreco = entry.key;
+      }
+    }
+
+    // Encontra o menor preço m²
+    double? menorPrecoM2;
+    int? fornecedorMenorPrecoM2;
+    for (final entry in item.precos.entries) {
+      final precoM2 = entry.value.precoM2;
+      if (precoM2 != null && (menorPrecoM2 == null || precoM2 < menorPrecoM2)) {
+        menorPrecoM2 = precoM2;
+        fornecedorMenorPrecoM2 = entry.key;
+      }
+    }
+
+    if (menorPreco != null && fornecedorMenorPreco != null) {
+      totalOtimizado += menorPreco * item.quantidade;
+      materiaisComSugestao++;
+
+      sugestoesPorFornecedor.putIfAbsent(fornecedorMenorPreco, () => []).add({
+        'itemId': item.itemId,
+        'materialNome': item.materialNome,
+        'quantidade': item.quantidade,
+        'preco': menorPreco,
+        'total': menorPreco * item.quantidade,
+        'modo': 'unitario',
+      });
+    }
+
+    if (menorPrecoM2 != null && fornecedorMenorPrecoM2 != null) {
+      totalOtimizadoM2 += menorPrecoM2 * item.quantidade;
+
+      if (fornecedorMenorPreco != fornecedorMenorPrecoM2) {
+        sugestoesPorFornecedor.putIfAbsent(fornecedorMenorPrecoM2, () => []).add({
+          'itemId': item.itemId,
+          'materialNome': item.materialNome,
+          'quantidade': item.quantidade,
+          'preco': menorPrecoM2,
+          'total': menorPrecoM2 * item.quantidade,
+          'modo': 'm2',
+        });
+      }
+    }
+  }
+
+  return {
+    'sugestoesPorFornecedor': sugestoesPorFornecedor,
+    'totalOtimizado': totalOtimizado,
+    'totalOtimizadoM2': totalOtimizadoM2,
+    'materiaisComSugestao': materiaisComSugestao,
+    'totalMateriais': itens.length,
+  };
+}
+
+void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
+  final provider = context.read<OrcamentoProvider>();
+  //final otimizado = _calcularOrcamentoOtimizado(itens);
+  //final sugestoes = otimizado['sugestoesPorFornecedor'] as Map<int, List<Map<String, dynamic>>>;
+  final ordenarPorM2 = _ordemTotais == 'm2';
+
+  for (final item in itens) {
+    if (item.precos.isEmpty) continue;
+
+    // Encontra o fornecedor com menor preço para este material
+    double? menorValor;
+    int? fornecedorEscolhido;
+    ModoOrcamento? modoEscolhido;
+
+    for (final entry in item.precos.entries) {
+      final fId = entry.key;
+      final pf = entry.value;
+
+      if (ordenarPorM2) {
+        if (pf.precoM2 != null && (menorValor == null || pf.precoM2! < menorValor)) {
+          menorValor = pf.precoM2;
+          fornecedorEscolhido = fId;
+          modoEscolhido = ModoOrcamento.metroQuadrado;
+        }
+      } else {
+        if (pf.preco != null && (menorValor == null || pf.preco! < menorValor)) {
+          menorValor = pf.preco;
+          fornecedorEscolhido = fId;
+          modoEscolhido = ModoOrcamento.unitario;
+        }
+      }
+    }
+
+    if (fornecedorEscolhido != null && modoEscolhido != null) {
+      provider.atualizarItemParcial(
+        item.itemId,
+        fornecedorSelecionado: fornecedorEscolhido,
+        modoOrcamento: modoEscolhido,
+      );
+    }
+  }
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Sugestão de orçamento otimizado aplicada!'),
+      backgroundColor: AppTheme.success,
+    ),
+  );
+}
 
   double? _mediaPreco(ItemOrcamentoData item) {
     final precos =
@@ -1548,55 +1680,100 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             ),
           ],
         ),
+
         const Spacer(),
+
         FilledButton.icon(
           onPressed: () {
             // Apenas inicializa a aba local — o servidor SÓ é chamado
             // ao salvar ou enviar para aprovação.
             context.read<OrcamentoProvider>().novoOrcamento('Novo Orçamento');
+
             setState(() {
               _modoEdicao = true;
-              _orcamentoServidorId = null; // ainda não existe no banco
+              _orcamentoServidorId = null;
               _modoGerarOC = false;
             });
           },
           icon: const Icon(Icons.add, size: 16),
-          label: const Text('Novo Orçamento', style: TextStyle(fontSize: 13)),
+          label: const Text(
+            'Novo Orçamento',
+            style: TextStyle(fontSize: 13),
+          ),
           style: FilledButton.styleFrom(
             backgroundColor: AppTheme.primary,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 12,
+            ),
           ),
         ),
+
         const SizedBox(width: 12),
+
         OutlinedButton.icon(
           onPressed: () async {
             final resultado = await Navigator.of(context).push<dynamic>(
               MaterialPageRoute(
-                  builder: (_) => const OrcamentoHistoricoPage()),
+                builder: (_) => const OrcamentoHistoricoPage(),
+              ),
             );
+
             if (!mounted) return;
-            if (resultado is Map && resultado['reabrirServidorId'] != null) {
+
+            if (resultado is Map &&
+                resultado['reabrirServidorId'] != null) {
               setState(() {
                 _modoEdicao = true;
-                _orcamentoServidorId = resultado['reabrirServidorId'] as int;
+                _orcamentoServidorId =
+                    resultado['reabrirServidorId'] as int;
                 _modoGerarOC = false;
               });
             }
           },
           icon: const Icon(Icons.history, size: 16),
-          label: const Text('Histórico', style: TextStyle(fontSize: 13)),
+          label: const Text(
+            'Histórico',
+            style: TextStyle(fontSize: 13),
+          ),
           style: OutlinedButton.styleFrom(
             foregroundColor: AppTheme.textSecondary,
             side: const BorderSide(color: AppTheme.divider),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 10,
+            ),
           ),
         ),
+
+        const SizedBox(width: 12),
+
+        IconButton(
+          onPressed: () => _carregarOrcamentosServidor(),
+          icon: const Icon(
+            Icons.refresh,
+            size: 18,
+            color: AppTheme.textSecondary,
+          ),
+          tooltip: 'Atualizar',
+          style: IconButton.styleFrom(
+            backgroundColor: AppTheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            side: const BorderSide(color: AppTheme.divider),
+          ),
+        ),
+
         if (_salvandoPreco) ...[
           const SizedBox(width: 12),
           const SizedBox(
             width: 18,
             height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary),
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: AppTheme.primary,
+            ),
           ),
         ],
       ],
@@ -1614,6 +1791,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
               _modoGerarOC = false;
               _ignorarRestauracaoAba = true;
               _orcamentoAguardandoAprovacao = false;
+        _orcamentoJaFinalizado = false;
             });
           },
           icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: AppTheme.textSecondary),
@@ -1714,7 +1892,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             ),
             const SizedBox(height: 8),
             TextButton.icon(
-              onPressed: _carregarOrcamentosServidor,
+              onPressed: () => _carregarOrcamentosServidor(),
               icon: const Icon(Icons.refresh, size: 15),
               label: const Text('Atualizar'),
               style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
@@ -1730,7 +1908,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             TextButton.icon(
-              onPressed: _carregarOrcamentosServidor,
+              onPressed: () => _carregarOrcamentosServidor(),
               icon: const Icon(Icons.refresh, size: 15),
               label: const Text('Atualizar', style: TextStyle(fontSize: 12)),
               style: TextButton.styleFrom(foregroundColor: AppTheme.textSecondary),
@@ -2167,6 +2345,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                         _modoGerarOC = false;
                         _ignorarRestauracaoAba = false;
                         _orcamentoAguardandoAprovacao = false;
+        _orcamentoJaFinalizado = false;
                       });
                       provider.limparAba();
                     },
@@ -2179,14 +2358,19 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                     ),
                   )
                 else
-                  OutlinedButton.icon(
-                    onPressed: itens.isEmpty ? null : _enviarParaAprovacao,
-                    icon: const Icon(Icons.send_outlined, size: 15),
-                    label: const Text('Enviar para Aprovação', style: TextStyle(fontSize: 12)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.warning,
-                      side: const BorderSide(color: AppTheme.warning),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  Tooltip(
+                    message: _orcamentoJaFinalizado
+                        ? 'Orçamento já aprovado/não aprovado. Reabra para reenviar.'
+                        : '',
+                    child: OutlinedButton.icon(
+                      onPressed: (itens.isEmpty || _orcamentoJaFinalizado) ? null : _enviarParaAprovacao,
+                      icon: const Icon(Icons.send_outlined, size: 15),
+                      label: const Text('Enviar para Aprovação', style: TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _orcamentoJaFinalizado ? AppTheme.textHint : AppTheme.warning,
+                        side: BorderSide(color: _orcamentoJaFinalizado ? AppTheme.divider : AppTheme.warning),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      ),
                     ),
                   ),
                 const SizedBox(width: 8),
@@ -2700,7 +2884,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   }
 
   Widget _buildTabelaComparativa(
-      OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
+    OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
     final totais = _calcularTotaisPorFornecedor(itens);
     if (totais.isEmpty) return const SizedBox.shrink();
 
@@ -3050,6 +3234,323 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                 ],
               ),
             ),
+            if (itens.isNotEmpty) ...[
+              const Divider(height: 1, color: AppTheme.divider),
+              _buildSugestaoOtimizada(provider, itens),
+            ],
+        ],
+      ),
+    );
+  }
+  Widget _buildSugestaoOtimizada(OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
+    final otimizado = _calcularOrcamentoOtimizado(itens);
+    final sugestoes = otimizado['sugestoesPorFornecedor'] as Map<int, List<Map<String, dynamic>>>;
+    final totalOtimizado = otimizado['totalOtimizado'] as double;
+    final totalOtimizadoM2 = otimizado['totalOtimizadoM2'] as double;
+    final materiaisComSugestao = otimizado['materiaisComSugestao'] as int;
+    final totalMateriais = otimizado['totalMateriais'] as int;
+    final ordenarPorM2 = _ordemTotais == 'm2';
+
+    if (sugestoes.isEmpty) return const SizedBox.shrink();
+
+    // Calcula economia comparada ao melhor fornecedor único
+    final totais = _calcularTotaisPorFornecedor(itens);
+    final valoresEfetivos = totais.values
+        .map((t) => ordenarPorM2 ? (t['totalM2'] as double) : (t['totalEfetivo'] as double))
+        .where((v) => v > 0)
+        .toList()
+      ..sort();
+
+    final melhorFornecedorUnico = valoresEfetivos.isNotEmpty ? valoresEfetivos.first : null;
+    final totalSugerido = ordenarPorM2 ? totalOtimizadoM2 : totalOtimizado;
+    final economia = melhorFornecedorUnico != null && totalSugerido > 0
+        ? melhorFornecedorUnico - totalSugerido
+        : null;
+
+    // Agrupa sugestões por fornecedor com totais
+    final Map<int, Map<String, dynamic>> resumoPorFornecedor = {};
+    for (final entry in sugestoes.entries) {
+      final fId = entry.key;
+      final materiais = entry.value;
+      final materiaisFiltrados = materiais.where((m) => 
+        ordenarPorM2 ? m['modo'] == 'm2' : m['modo'] == 'unitario'
+      ).toList();
+
+      if (materiaisFiltrados.isEmpty) continue;
+
+      final totalFornecedor = materiaisFiltrados.fold<double>(
+        0, (sum, m) => sum + (m['total'] as double)
+      );
+
+      final fornecedorNome = itens
+          .expand((i) => i.precos.entries)
+          .firstWhere((e) => e.key == fId, orElse: () => MapEntry(0, PrecoFornecedorData(fornecedorNome: '—')))
+          .value
+          .fornecedorNome;
+
+      resumoPorFornecedor[fId] = {
+        'nome': fornecedorNome,
+        'materiais': materiaisFiltrados,
+        'total': totalFornecedor,
+        'quantidade': materiaisFiltrados.length,
+      };
+    }
+
+    // Ordena fornecedores por total (maior primeiro, para destacar quem leva mais itens)
+    final fornecedoresOrdenados = resumoPorFornecedor.entries.toList()
+      ..sort((a, b) => (b.value['total'] as double).compareTo(a.value['total'] as double));
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(top: BorderSide(color: AppTheme.divider)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.success.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.lightbulb_outline, size: 20, color: AppTheme.success),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Sugestão de Orçamento Ideal',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.success,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Combinação de fornecedores que resulta no menor custo total',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary.withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: () => _aplicarSugestaoOtimizada(itens),
+                icon: const Icon(Icons.auto_fix_high, size: 14),
+                label: const Text('Aplicar Sugestão', style: TextStyle(fontSize: 12)),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.success,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Total otimizado e economia
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.success.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.success.withValues(alpha: 0.2)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.savings_outlined, size: 16, color: AppTheme.success),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Total ${ordenarPorM2 ? 'm²' : 'Unitário'} Otimizado',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _brl(totalSugerido),
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.success,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (economia != null && economia > 0) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.success.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text(
+                          'Economia',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.success,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _brl(economia),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.success,
+                          ),
+                        ),
+                        Text(
+                          '${((economia / melhorFornecedorUnico!) * 100).toStringAsFixed(1)}% menos',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: AppTheme.success.withValues(alpha: 0.8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // Breakdown por fornecedor
+          const Text(
+            'Distribuição sugerida:',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          ...fornecedoresOrdenados.map((entry) {
+            //final fId = entry.key;
+            final dados = entry.value;
+            final nome = dados['nome'] as String;
+            final materiais = dados['materiais'] as List<Map<String, dynamic>>;
+            final total = dados['total'] as double;
+            final qtd = dados['quantidade'] as int;
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.divider),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: const BoxDecoration(
+                          color: AppTheme.success,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          nome,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '$qtd ${qtd == 1 ? 'material' : 'materiais'}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        _brl(total),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.success,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: materiais.map((m) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.success.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: AppTheme.success.withValues(alpha: 0.2)),
+                        ),
+                        child: Text(
+                          '${m['materialNome']} (${_brl(m['total'] as double)})',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            );
+          }),
+
+          if (materiaisComSugestao < totalMateriais) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.info_outline, size: 12, color: AppTheme.warning),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${totalMateriais - materiaisComSugestao} ${(totalMateriais - materiaisComSugestao) == 1 ? 'material não possui' : 'materiais não possuem'} preço informado',
+                    style: const TextStyle(fontSize: 11, color: AppTheme.warning),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

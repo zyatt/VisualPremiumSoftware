@@ -136,7 +136,9 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
         final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
         final especifico = materialData?['especifico'] as bool? ?? false;
 
-        final chave = especifico ? 'esp_${item['id']}' : 'mat_$materialId';
+        final chave = especifico
+            ? 'esp_${materialId}_${(item['descricaoItem'] as String? ?? '').trim().toLowerCase()}'
+            : 'mat_$materialId';
 
         if (!itensPorChave.containsKey(chave)) {
           itensPorChave[chave] = ItemOrcamentoData(
@@ -438,6 +440,30 @@ class _OrcamentoHistoricoCardState
     extends State<_OrcamentoHistoricoCard> {
   bool _expandido = false;
 
+  // Agrupa os itens por material (mesmo material com múltiplos fornecedores
+  // vira um único grupo). Retorna lista de grupos onde cada grupo contém
+  // as linhas do servidor referentes ao mesmo material.
+  List<List<Map<String, dynamic>>> _agruparItensPorMaterial(
+      List<dynamic> itens) {
+    final Map<String, List<Map<String, dynamic>>> grupos = {};
+    for (final raw in itens) {
+      final item = raw as Map<String, dynamic>;
+      final materialId = item['materialId']?.toString() ?? '';
+      final especifico =
+          (item['material'] as Map<String, dynamic>?)?['especifico'] as bool? ??
+              false;
+      // Materiais específicos são agrupados por materialId + descricaoItem,
+      // pois cada combinação (material + descrição) representa um item distinto,
+      // mas todos os fornecedores desse item devem aparecer juntos.
+      // Usamos normalização para evitar quebras por espaços extras.
+      final chave = especifico
+          ? 'esp_${materialId}_${(item['descricaoItem'] as String? ?? '').trim().toLowerCase()}'
+          : 'mat_$materialId';
+      grupos.putIfAbsent(chave, () => []).add(item);
+    }
+    return grupos.values.toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final orc = widget.orcamento;
@@ -448,6 +474,10 @@ class _OrcamentoHistoricoCardState
         : null;
     final itens = (orc['itens'] as List? ?? []);
     final motivoRejeicao = orc['motivoRejeicao'] as String?;
+
+    // Conta materiais únicos (não duplicados por fornecedor)
+    final grupos = _agruparItensPorMaterial(itens);
+    final totalMateriais = grupos.length;
 
     return Container(
       decoration: BoxDecoration(
@@ -479,7 +509,11 @@ class _OrcamentoHistoricoCardState
                     child: Icon(
                       status == 'ABERTO'
                           ? Icons.save_outlined
-                          : Icons.cancel_outlined,
+                          : status == 'APROVADO'
+                              ? Icons.check_circle_outline
+                              : status == 'AGUARDANDO_APROVACAO'
+                                  ? Icons.pending_outlined
+                                  : Icons.cancel_outlined,
                       size: 20,
                       color: _statusColor(status),
                     ),
@@ -524,7 +558,7 @@ class _OrcamentoHistoricoCardState
                         Row(
                           children: [
                             Text(
-                              '${itens.length} ${itens.length == 1 ? 'material' : 'materiais'}',
+                              '$totalMateriais ${totalMateriais == 1 ? 'material' : 'materiais'}',
                               style: const TextStyle(
                                 fontSize: 12,
                                 color: AppTheme.textSecondary,
@@ -547,8 +581,8 @@ class _OrcamentoHistoricoCardState
                             ],
                           ],
                         ),
-                        // Motivo de cancelamento
-                        if (status == 'CANCELADO' &&
+                        // Motivo de cancelamento / rejeição
+                        if ((status == 'CANCELADO' || status == 'NAO_APROVADO') &&
                             motivoRejeicao != null &&
                             motivoRejeicao.isNotEmpty) ...[
                           const SizedBox(height: 4),
@@ -575,7 +609,7 @@ class _OrcamentoHistoricoCardState
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Botão reabrir (só para salvos)
+                  // Botão reabrir (só para salvos/abertos)
                   if (widget.onReabrir != null) ...[
                     FilledButton.icon(
                       onPressed: widget.onReabrir,
@@ -602,8 +636,8 @@ class _OrcamentoHistoricoCardState
             ),
           ),
 
-          // ── Itens expandidos ────────────────────────────────────────────
-          if (_expandido && itens.isNotEmpty) ...[
+          // ── Itens expandidos (agrupados por material) ───────────────────
+          if (_expandido && grupos.isNotEmpty) ...[
             const Divider(height: 1, color: AppTheme.divider),
             Padding(
               padding: const EdgeInsets.all(12),
@@ -619,13 +653,12 @@ class _OrcamentoHistoricoCardState
                     ),
                   ),
                   const SizedBox(height: 8),
-                  ...itens.map((item) => _buildItemRow(
-                      item as Map<String, dynamic>)),
+                  ...grupos.map((grupo) => _buildGrupoMaterial(grupo)),
                 ],
               ),
             ),
           ],
-          if (_expandido && itens.isEmpty) ...[
+          if (_expandido && grupos.isEmpty) ...[
             const Divider(height: 1, color: AppTheme.divider),
             const Padding(
               padding: EdgeInsets.all(16),
@@ -641,86 +674,293 @@ class _OrcamentoHistoricoCardState
     );
   }
 
-  Widget _buildItemRow(Map<String, dynamic> item) {
-    final materialNome =
-        (item['material'] as Map<String, dynamic>?)?['nome'] as String? ??
-            'Material #${item['materialId']}';
+  /// Constrói o card de um grupo de material (similar ao visual da página principal).
+  /// Um grupo = mesmo material com N linhas de fornecedores.
+  Widget _buildGrupoMaterial(List<Map<String, dynamic>> grupo) {
+    final primeiroItem = grupo.first;
+    final materialData =
+        primeiroItem['material'] as Map<String, dynamic>?;
+    final materialNome = materialData?['nome'] as String? ??
+        'Material #${primeiroItem['materialId']}';
+    final materialMedida = materialData?['medida'] as String?;
+    final materialEspessura = materialData?['espessura'] as String?;
+    final materialIdentificador = materialData?['identificador'] as String?;
+    final materialUnidade = materialData?['unidade'] as String?;
+    final especifico = materialData?['especifico'] as bool? ?? false;
     final quantidade =
-        double.tryParse(item['quantidade']?.toString() ?? '1') ?? 1;
-    final precoUnitario = item['precoUnitario'] != null
-        ? double.tryParse(item['precoUnitario'].toString())
+        double.tryParse(primeiroItem['quantidade']?.toString() ?? '1') ?? 1;
+
+    // Subtítulo com atributos extras do material (medida · espessura · identificador)
+    final subPartes = [
+      materialMedida,
+      materialEspessura,
+      materialIdentificador,
+    ].where((s) => s != null && s.isNotEmpty).join(' · ');
+
+    // Descrição do item (só para materiais específicos)
+    final descricaoItem = especifico
+        ? primeiroItem['descricaoItem'] as String?
         : null;
-    final fornecedorNome =
-        (item['fornecedor'] as Map<String, dynamic>?)?['nomeFantasia']
-            as String?;
-    final selecionado = item['selecionado'] as bool? ?? false;
+
+    // Calcula média de preços unitários (excluindo nulos)
+    final precos = grupo
+        .map((i) => i['precoUnitario'] != null
+            ? double.tryParse(i['precoUnitario'].toString())
+            : null)
+        .whereType<double>()
+        .toList();
+    final mediaPreco =
+        precos.isNotEmpty ? precos.reduce((a, b) => a + b) / precos.length : null;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: selecionado
-            ? AppTheme.primary.withValues(alpha: 0.05)
-            : AppTheme.surfaceVariant,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: selecionado
-              ? AppTheme.primary.withValues(alpha: 0.2)
-              : AppTheme.divider,
-        ),
+        color: AppTheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.divider),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (selecionado)
-            const Icon(Icons.check_circle,
-                size: 13, color: AppTheme.primary)
-          else
-            const Icon(Icons.circle_outlined,
-                size: 13, color: AppTheme.textHint),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
+          // ── Cabeçalho do material ──────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  materialNome,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary,
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Icon(Icons.inventory_2_outlined,
+                      size: 14, color: AppTheme.primary),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              materialNome,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          if (especifico)
+                            Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'Específico',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.primary,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      if (descricaoItem != null && descricaoItem.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          descricaoItem,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.textSecondary,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                      if (subPartes.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subPartes,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Text(
+                            'Qtd: ${quantidade % 1 == 0 ? quantidade.toInt().toString() : quantidade.toString()}',
+                            style: const TextStyle(
+                                fontSize: 11, color: AppTheme.textSecondary),
+                          ),
+                          if (materialUnidade != null &&
+                              materialUnidade.isNotEmpty) ...[
+                            Text(
+                              ' $materialUnidade',
+                              style: const TextStyle(
+                                  fontSize: 11, color: AppTheme.textSecondary),
+                            ),
+                          ],
+                          if (mediaPreco != null) ...[
+                            const Spacer(),
+                            const Icon(Icons.bar_chart,
+                                size: 11, color: AppTheme.textHint),
+                            const SizedBox(width: 3),
+                            Text(
+                              'Média ${_brl(mediaPreco)}',
+                              style: const TextStyle(
+                                  fontSize: 11, color: AppTheme.textHint),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
                   ),
                 ),
-                if (fornecedorNome != null)
-                  Text(
-                    fornecedorNome,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
               ],
             ),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                'Qtd: ${quantidade % 1 == 0 ? quantidade.toInt() : quantidade}',
-                style: const TextStyle(
-                    fontSize: 11, color: AppTheme.textSecondary),
+
+          // ── Tabela de fornecedores ────────────────────────────────────────
+          if (grupo.any((i) => i['fornecedor'] != null)) ...[
+            const Divider(height: 1, color: AppTheme.divider),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+              child: Row(
+                children: const [
+                  Expanded(
+                    child: Text(
+                      'Fornecedor',
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textHint),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 90,
+                    child: Text(
+                      'Valor Unit.',
+                      textAlign: TextAlign.end,
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textHint),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 90,
+                    child: Text(
+                      'Total',
+                      textAlign: TextAlign.end,
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textHint),
+                    ),
+                  ),
+                ],
               ),
-              if (precoUnitario != null)
-                Text(
-                  _brl(precoUnitario),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary,
+            ),
+            ...grupo.where((i) => i['fornecedor'] != null).map((item) {
+              final fornecedorNome =
+                  (item['fornecedor'] as Map<String, dynamic>?)?['nomeFantasia']
+                          as String? ??
+                      '—';
+              final selecionado = item['selecionado'] as bool? ?? false;
+              final precoUnitario = item['precoUnitario'] != null
+                  ? double.tryParse(item['precoUnitario'].toString())
+                  : null;
+              final total = precoUnitario != null
+                  ? precoUnitario * quantidade
+                  : null;
+
+              return Container(
+                margin:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: selecionado
+                      ? AppTheme.primary.withValues(alpha: 0.06)
+                      : AppTheme.surface,
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(
+                    color: selecionado
+                        ? AppTheme.primary.withValues(alpha: 0.25)
+                        : AppTheme.divider,
                   ),
                 ),
-            ],
-          ),
+                child: Row(
+                  children: [
+                    if (selecionado)
+                      const Icon(Icons.check_circle,
+                          size: 13, color: AppTheme.primary)
+                    else
+                      const Icon(Icons.circle_outlined,
+                          size: 13, color: AppTheme.textHint),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        fornecedorNome,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: selecionado
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          color: selecionado
+                              ? AppTheme.primary
+                              : AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 90,
+                      child: Text(
+                        _brl(precoUnitario),
+                        textAlign: TextAlign.end,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: selecionado
+                              ? AppTheme.primary
+                              : AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 90,
+                      child: Text(
+                        _brl(total),
+                        textAlign: TextAlign.end,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: selecionado
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: selecionado
+                              ? AppTheme.primary
+                              : AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 4),
+          ],
         ],
       ),
     );

@@ -136,6 +136,17 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   ),
                 ),
+                const SizedBox(width: 12),
+                IconButton(
+                  onPressed: () => context.read<OrdemCompraProvider>().carregar(),
+                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppTheme.divider),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 20),
@@ -1040,20 +1051,54 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
     final emAndamento = _ordem.status == 'EM_ANDAMENTO';
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        backgroundColor: AppTheme.surface,
-        elevation: 0,
-        scrolledUnderElevation: 1,
-        leading: IconButton(icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary), onPressed: () => Navigator.of(context).pop()),
-        title: Row(children: [
-          Text('OC #${_ordem.id}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: AppTheme.textPrimary)),
-          const SizedBox(width: 10),
-          _statusBadge(_ordem.status),
-        ]),
-        actions: null,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Cabeçalho ──────────────────────────────────────────────────
+            Row(
+              children: [
+                InkWell(
+                  onTap: () => Navigator.of(context).pop(),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: AppTheme.divider),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
+                        SizedBox(width: 6),
+                        Text('Ordens de Compra', style: TextStyle(fontSize: 13, color: AppTheme.textSecondary, fontWeight: FontWeight.w500)),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Text('OC #${_ordem.id}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: AppTheme.textPrimary)),
+                const SizedBox(width: 10),
+                _statusBadge(_ordem.status),
+                const Spacer(),
+                IconButton(
+                  onPressed: _recarregar,
+                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppTheme.divider),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
         children: [
           _secaoCard('Informações Gerais', Icons.info_outline, [
             _infoRow(Icons.business_outlined, 'Fornecedor', _ordem.fornecedorNome ?? '—'),
@@ -1181,8 +1226,21 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
             const SizedBox(height: 24),
           ],
         ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  Future<void> _recarregar() async {
+    await context.read<OrdemCompraProvider>().carregar();
+    if (!mounted) return;
+    final provider = context.read<OrdemCompraProvider>();
+    final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
+    final atualizada = todas.cast<OrdemCompraModel>().where((o) => o.id == _ordem.id).firstOrNull;
+    if (atualizada != null && mounted) setState(() => _ordem = atualizada);
   }
 
   Widget _secaoCard(String titulo, IconData icon, List<Widget> children) => Container(

@@ -106,23 +106,38 @@ class _HistoricoPageState extends State<HistoricoPage>
           children: [
             Consumer<OrdemCompraProvider>(builder: (_, p, __) {
               final total = p.finalizadas.length + p.canceladas.length;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              return Row(
                 children: [
-                  Text(
-                    'Histórico de Ordens',
-                    style: Theme.of(context)
-                        .textTheme
-                        .headlineMedium
-                        ?.copyWith(color: AppTheme.textPrimary),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Histórico de Ordens',
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineMedium
+                            ?.copyWith(color: AppTheme.textPrimary),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$total ${total == 1 ? 'ordem' : 'ordens'} no histórico',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(color: AppTheme.textSecondary),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '$total ${total == 1 ? 'ordem' : 'ordens'} no histórico',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: AppTheme.textSecondary),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => context.read<OrdemCompraProvider>().carregar(),
+                    icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                    tooltip: 'Atualizar',
+                    style: IconButton.styleFrom(
+                      backgroundColor: AppTheme.surface,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      side: const BorderSide(color: AppTheme.divider),
+                    ),
                   ),
                 ],
               );

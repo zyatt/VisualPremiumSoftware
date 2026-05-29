@@ -47,6 +47,14 @@ class OrcamentoRepository {
     await ApiClient.delete('/orcamentos/$orcamentoId/itens/$itemId');
   }
 
+  // ── Limpar todos os itens (operação atômica) ──────────────────────────────────
+  // Substitui o loop de removerItem com catch silencioso, evitando duplicatas
+  // causadas por falhas parciais de remoção.
+
+  Future<void> limparItens(int orcamentoId) async {
+    await ApiClient.delete('/orcamentos/$orcamentoId/itens');
+  }
+
   // ── Atualizar item ────────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> atualizarItem(
