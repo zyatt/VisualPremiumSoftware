@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/producao_model.dart';
 import '../providers/producao_provider.dart';
+import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 
 class _UpperCaseFormatter extends TextInputFormatter {
@@ -563,6 +564,8 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
       );
 
   void _abrirSolicitacao(BuildContext context) {
+    final role = context.read<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
+    if (role == 'COMPRAS') return; // somente leitura
     showDialog(
       context: context,
       builder: (_) => _SolicitarMaterialDialog(material: widget.material),
@@ -575,17 +578,20 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
     final cols       = widget.cols;
     final disponivel = m.quantidade + m.emUso;
 
-    final bgColor = _hovered
+    final role       = context.watch<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
+    final podeOperar = role != 'COMPRAS';
+
+    final bgColor = _hovered && podeOperar
         ? const Color(0xFFFF9800).withValues(alpha: 0.10)
         : AppTheme.surface;
 
     return MouseRegion(
-      cursor: SystemMouseCursors.click,
+      cursor: podeOperar ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _hovered = true),
       onExit:  (_) => setState(() => _hovered = false),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () => _abrirSolicitacao(context),
+        onTap: podeOperar ? () => _abrirSolicitacao(context) : null,
         child: ColoredBox(
           color: bgColor,
           child: ConstrainedBox(
@@ -1565,21 +1571,23 @@ class _SolicitacaoDetalhesDialogState
           onPressed: _processando ? null : () => Navigator.of(context).pop(),
           child: const Text('Fechar'),
         ),
-        OutlinedButton(
-          onPressed: _processando ? null : _finalizar,
-          child: const Text('Finalizar'),
-        ),
-        FilledButton(
-          onPressed: _processando ? null : _registrarBaixa,
-          child: _processando
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Text('Registrar Baixa'),
-        ),
+        if (context.watch<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() != 'COMPRAS') ...[
+          OutlinedButton(
+            onPressed: _processando ? null : _finalizar,
+            child: const Text('Finalizar'),
+          ),
+          FilledButton(
+            onPressed: _processando ? null : _registrarBaixa,
+            child: _processando
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  )
+                : const Text('Registrar Baixa'),
+          ),
+        ],
       ],
     );
   }
@@ -1682,10 +1690,57 @@ class _HistoricoCard extends StatelessWidget {
   final SolicitacaoProducaoModel solicitacao;
   const _HistoricoCard({required this.solicitacao});
 
+  // Converte UTC → GMT-3 (horário de Brasília)
+  static DateTime _toBrasilia(DateTime utc) =>
+      utc.toUtc().subtract(const Duration(hours: 3));
+
+  Future<void> _confirmarExclusao(BuildContext context) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir registro'),
+        content: Text(
+          'Excluir o histórico da OS ${solicitacao.numeroOS}?\n\n'
+          'Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true || !context.mounted) return;
+
+    final ok = await context
+        .read<ProducaoProvider>()
+        .excluirHistorico(solicitacao.id);
+
+    if (!context.mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.read<ProducaoProvider>().erro ?? 'Erro ao excluir',
+          ),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = solicitacao;
-    final dataFim = s.finalizadoEm ?? s.atualizadoEm;
+    final dataFimUtc = s.finalizadoEm ?? s.atualizadoEm;
+    final dataFim    = _toBrasilia(dataFimUtc);
     final dataStr = '${dataFim.day.toString().padLeft(2, '0')}/'
             '${dataFim.month.toString().padLeft(2, '0')}/'
             '${dataFim.year} '
@@ -1782,6 +1837,29 @@ class _HistoricoCard extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 11,
                     color: AppTheme.textHint,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Tooltip(
+                  message: 'Excluir registro',
+                  child: InkWell(
+                    onTap: () => _confirmarExclusao(context),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.error.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: AppTheme.error.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.delete_outline,
+                        size: 16,
+                        color: AppTheme.error,
+                      ),
+                    ),
                   ),
                 ),
               ],

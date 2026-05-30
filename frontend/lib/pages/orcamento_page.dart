@@ -19,6 +19,22 @@ import 'orcamento_historico_page.dart';
 import '../models/ordem_compra_model.dart';
 import 'ordem_compra_page.dart';
 
+// ─── Formatters ───────────────────────────────
+
+/// Bloqueia a digitação de vírgula em campos de texto livre (busca, título, descrição, etc.)
+class _NoCommaFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.contains(',')) {
+      return oldValue;
+    }
+    return newValue;
+  }
+}
+
 // ─── Helpers ──────────────────────────────────
 
 String _brl(double? v) {
@@ -169,6 +185,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                   TextField(
                     controller: tituloCtrl,
                     autofocus: true,
+                    inputFormatters: [_NoCommaFormatter()],
                     decoration: InputDecoration(
                       hintText: 'Ex: Orçamento Obra Abril',
                       isDense: true,
@@ -1079,6 +1096,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                   TextField(
                     controller: tituloCtrl,
                     autofocus: true,
+                    inputFormatters: [_NoCommaFormatter()],
                     decoration: InputDecoration(
                       hintText: 'Ex: Orçamento Obra Abril',
                       isDense: true,
@@ -2037,6 +2055,7 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
                     Expanded(
                       child: TextField(
                         controller: _searchNomeCtrl,
+                        inputFormatters: [_NoCommaFormatter()],
                         decoration: InputDecoration(
                           labelText: 'Nome do material',
                           prefixIcon: _buscando && _searchNomeCtrl.text.isNotEmpty
@@ -2063,6 +2082,7 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
                     Expanded(
                       child: TextField(
                         controller: _searchIdentificadorCtrl,
+                        inputFormatters: [_NoCommaFormatter()],
                         decoration: const InputDecoration(
                           labelText: 'Identificador',
                           prefixIcon: Icon(Icons.qr_code_outlined,
@@ -2076,6 +2096,7 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
                     Expanded(
                       child: TextField(
                         controller: _searchMedidaCtrl,
+                        inputFormatters: [_NoCommaFormatter()],
                         decoration: const InputDecoration(
                           labelText: 'Medida',
                           prefixIcon: Icon(Icons.straighten_outlined,
@@ -2089,6 +2110,7 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
                     Expanded(
                       child: TextField(
                         controller: _searchEspCtrl,
+                        inputFormatters: [_NoCommaFormatter()],
                         decoration: const InputDecoration(
                           labelText: 'Espessura',
                           prefixIcon: Icon(Icons.layers_outlined,
@@ -3592,6 +3614,7 @@ class _DescricaoFieldState extends State<_DescricaoField> {
     return TextField(
       controller:_ctrl,
       maxLines: 2,
+      inputFormatters: [_NoCommaFormatter()],
       decoration: InputDecoration(
         hintText: 'Especificação do material',
         isDense: true,

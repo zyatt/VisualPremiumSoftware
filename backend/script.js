@@ -5,7 +5,7 @@ console.log('🔌 Conectando em:', process.env.DATABASE_URL);
 
 const prisma = require('./src/utils/prisma');
 
-const INICIAR_EM = 43;
+const INICIAR_EM = 44;
 
 async function main() {
   console.log(`\n⚙️  Ajustando sequence de ordens_compra para iniciar em ${INICIAR_EM}...`);

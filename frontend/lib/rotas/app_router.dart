@@ -18,8 +18,8 @@ class AppRouter {
   static final _rootNavigatorKey  = GlobalKey<NavigatorState>();
   static final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
-  // Rotas acessíveis apenas por usuários gerais (não-PRODUCAO)
-  static const _rotasGerais = [
+  // Rotas bloqueadas para o role PRODUCAO (ele só acessa /producao)
+  static const _rotasBloqueadasParaProducao = [
     '/inicio',
     '/estoque',
     '/fornecedores',
@@ -67,19 +67,15 @@ class AppRouter {
         if (isAdmin || isGerente) return null;
 
         // PRODUCAO: só acessa /producao
-        if (isProducao && _rotasGerais.any((r) => path.startsWith(r))) {
+        if (isProducao && _rotasBloqueadasParaProducao.any((r) => path.startsWith(r))) {
           return '/producao';
         }
         if (isProducao && path.startsWith('/admin')) {
           return '/producao';
         }
 
-        // COMPRAS: não acessa /producao nem /admin
-        if (isCompras && path.startsWith('/producao')) return '/inicio';
-        if (isCompras && path.startsWith('/admin'))    return '/inicio';
-
-        // Qualquer outro role não-produção tentando acessar /producao
-        if (!isProducao && path.startsWith('/producao')) return '/inicio';
+        // COMPRAS: pode ver /producao (somente leitura), mas não acessa /admin
+        if (isCompras && path.startsWith('/admin')) return '/inicio';
 
         return null;
       },

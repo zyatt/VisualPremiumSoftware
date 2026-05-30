@@ -226,6 +226,23 @@ async function finalizarSolicitacao({ solicitacaoId }) {
   return finalizada;
 }
 
+// ── Excluir registro do histórico ─────────────────────────────────────────────
+// Apenas solicitações FINALIZADAS podem ser excluídas.
+// A exclusão remove somente o registro histórico; o estoque já foi
+// acertado no momento da finalização, portanto não há reversão.
+async function excluirHistorico(solicitacaoId) {
+  const sol = await prisma.solicitacaoProducao.findUnique({
+    where: { id: solicitacaoId },
+  });
+  if (!sol) throw { status: 404, message: 'Registro não encontrado' };
+  if (sol.status !== 'FINALIZADA') {
+    throw { status: 400, message: 'Somente solicitações finalizadas podem ser excluídas do histórico' };
+  }
+
+  // BaixaProducao tem onDelete: Cascade, portanto são removidas automaticamente
+  await prisma.solicitacaoProducao.delete({ where: { id: solicitacaoId } });
+}
+
 // ── Registrar saída no controle de estoque ────────────────────────────────────
 async function _registrarSaidaControleEstoque(sol) {
   const qtdUsada = Number(sol.quantidadeUsada);
@@ -296,6 +313,7 @@ module.exports = {
   criarSolicitacao,
   registrarBaixa,
   finalizarSolicitacao,
+  excluirHistorico,
   listarSolicitacoes,
   buscarSolicitacao,
   listarCategorias,

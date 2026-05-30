@@ -165,4 +165,17 @@ class ProducaoProvider with ChangeNotifier {
       return false;
     }
   }
+
+  Future<bool> excluirHistorico(int solicitacaoId) async {
+    _erro = null;
+    try {
+      await _repo.excluirHistorico(solicitacaoId);
+      await carregarHistorico();
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      notifyListeners();
+      return false;
+    }
+  }
 }

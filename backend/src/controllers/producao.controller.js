@@ -78,6 +78,14 @@ const finalizarSolicitacao = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+// DELETE /producao/historico/:id
+const excluirHistorico = async (req, res, next) => {
+  try {
+    await svc.excluirHistorico(Number(req.params.id));
+    res.status(204).send();
+  } catch (e) { next(e); }
+};
+
 module.exports = {
   listarMateriais,
   listarCategorias,
@@ -87,4 +95,5 @@ module.exports = {
   criarSolicitacao,
   registrarBaixa,
   finalizarSolicitacao,
+  excluirHistorico,
 };

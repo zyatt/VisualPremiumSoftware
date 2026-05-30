@@ -25,16 +25,17 @@ class AppShell extends StatelessWidget {
     _NavItem(icon: Icons.admin_panel_settings_rounded,    label: 'Admin',            route: '/admin'),
   ];
 
-  // Itens para COMPRAS (sem Produção e sem Admin)
+  // Itens para COMPRAS (sem Admin; pode ver Produção como somente leitura)
   static const _navItemsCompras = [
-    _NavItem(icon: Icons.home_rounded,             label: 'Início',           route: '/inicio'),
-    _NavItem(icon: Icons.inventory_2_rounded,      label: 'Estoque',          route: '/estoque'),
-    _NavItem(icon: Icons.people_rounded,           label: 'Fornecedores',     route: '/fornecedores'),
-    _NavItem(icon: Icons.request_quote_rounded,    label: 'Orçamento',        route: '/orcamento'),
-    _NavItem(icon: Icons.shopping_cart_rounded,    label: 'Ordem de Compra',  route: '/ordem-compra'),
-    _NavItem(icon: Icons.sync_alt_rounded,         label: 'Controle Estoque', route: '/controle-estoque'),
-    _NavItem(icon: Icons.history_rounded,          label: 'Histórico',        route: '/historico'),
-    _NavItem(icon: Icons.description_rounded,      label: 'Relatório OS',     route: '/relatorio-os'),
+    _NavItem(icon: Icons.home_rounded,                    label: 'Início',           route: '/inicio'),
+    _NavItem(icon: Icons.inventory_2_rounded,             label: 'Estoque',          route: '/estoque'),
+    _NavItem(icon: Icons.people_rounded,                  label: 'Fornecedores',     route: '/fornecedores'),
+    _NavItem(icon: Icons.request_quote_rounded,           label: 'Orçamento',        route: '/orcamento'),
+    _NavItem(icon: Icons.shopping_cart_rounded,           label: 'Ordem de Compra',  route: '/ordem-compra'),
+    _NavItem(icon: Icons.sync_alt_rounded,                label: 'Controle Estoque', route: '/controle-estoque'),
+    _NavItem(icon: Icons.history_rounded,                 label: 'Histórico',        route: '/historico'),
+    _NavItem(icon: Icons.description_rounded,             label: 'Relatório OS',     route: '/relatorio-os'),
+    _NavItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção',         route: '/producao'),
   ];
 
   // Único item visível para o cargo PRODUCAO

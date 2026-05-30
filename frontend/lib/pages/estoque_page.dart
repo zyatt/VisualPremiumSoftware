@@ -37,12 +37,28 @@ class _UpperCaseFormatter extends TextInputFormatter {
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    final texto = _removerAcentos(newValue.text).toUpperCase();
+    // Remove vírgulas antes de qualquer outra transformação
+    final semVirgula = newValue.text.replaceAll(',', '');
+    final texto = _removerAcentos(semVirgula).toUpperCase();
     final sel = newValue.selection.copyWith(
       baseOffset:  newValue.selection.baseOffset.clamp(0, texto.length),
       extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
     );
     return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
+/// Bloqueia a digitação de vírgula em campos de texto livre (busca, descrição, etc.)
+class _NoCommaFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.contains(',')) {
+      return oldValue;
+    }
+    return newValue;
   }
 }
 
@@ -198,6 +214,7 @@ class _EstoquePageState extends State<EstoquePage> {
               width: 360,
               child: TextField(
                 controller: _filtroCategoriaCtrl,
+                inputFormatters: [_NoCommaFormatter()],
                 decoration: InputDecoration(
                   hintText:   'Buscar categoria...',
                   prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
@@ -939,6 +956,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   flex: 3,
                   child: TextField(
                     controller: _buscaCtrl,
+                    inputFormatters: [_NoCommaFormatter()],
                     decoration: const InputDecoration(
                       hintText:   'Buscar material...',
                       prefixIcon: Icon(Icons.search, color: AppTheme.textHint, size: 20),
@@ -1153,18 +1171,19 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   final fim          = (inicio + _itensPorPagina).clamp(0, todos.length);
                   final paginados    = todos.sublist(inicio, fim);
 
+                  final mostrarCat = widget.categoriaId == _kCategoriaGeral ||
+                                     widget.categoriaId == _kCategoriaSemCategoria;
                   return Column(
                     children: [
                       Expanded(
                         child: Card(
                           clipBehavior: Clip.antiAlias,
-                          child: SingleChildScrollView(
-                            child: _TabelaMateriais(
-                              materiais:            paginados,
-                              onEditar:             _abrirFormMaterial,
-                              onVerFornecedores:    _abrirPrecosFornecedores,
-                              onVerHistoricoPrecos: _abrirHistoricoPrecos,
-                            ),
+                          child: _TabelaMateriais(
+                            materiais:            paginados,
+                            onEditar:             _abrirFormMaterial,
+                            onVerFornecedores:    _abrirPrecosFornecedores,
+                            onVerHistoricoPrecos: _abrirHistoricoPrecos,
+                            mostrarCategoria:     mostrarCat,
                           ),
                         ),
                       ),
@@ -1551,30 +1570,36 @@ class _TabelaMateriais extends StatelessWidget {
   final void Function(MaterialModel) onEditar;
   final void Function(MaterialModel) onVerFornecedores;
   final void Function(MaterialModel) onVerHistoricoPrecos;
+  final bool mostrarCategoria;
  
   const _TabelaMateriais({
     required this.materiais,
     required this.onEditar,
     required this.onVerFornecedores,
     required this.onVerHistoricoPrecos,
+    this.mostrarCategoria = true,
   });
- 
-  static const List<_ColDef> _cols = [
+
+  static const List<_ColDef> _colsBase = [
     _ColDef(label: 'ID',             fixed: 56),
     _ColDef(label: 'Identificador',          flex: 0.7),
     _ColDef(label: 'Material',       flex: 2.0),
     _ColDef(label: 'Categoria',      flex: 1.0),
-    _ColDef(label: 'Unidade',        flex: 0.9),
     _ColDef(label: 'Medida',         flex: 0.8),
     _ColDef(label: 'Espessura',      flex: 0.7),
     _ColDef(label: 'Estoque atual',  flex: 0.6),
     _ColDef(label: 'Estoque mínimo', flex: 0.6),
+    _ColDef(label: 'Unidade',        flex: 0.9),
     _ColDef(label: 'Valor Intermediário',       flex: 0.9),
     _ColDef(label: 'Valor m² Intermediário',    flex: 0.9),
     _ColDef(label: 'Custo (Últimas compras)',   flex: 0.9),
     _ColDef(label: 'Custo m² (Últimas compras)',flex: 0.9),
     _ColDef(label: 'Status',         flex: 0.8),
   ];
+
+  List<_ColDef> get _cols => mostrarCategoria
+      ? _colsBase
+      : _colsBase.where((c) => c.label != 'Categoria').toList();
  
   Widget _cabecalho() => Container(
         color: AppTheme.surfaceVariant,
@@ -1608,60 +1633,74 @@ class _TabelaMateriais extends StatelessWidget {
   Widget build(BuildContext context) {
     final confirmados = materiais.where((m) =>  m.estoqueConfirmado).toList();
     final naoConfirm  = materiais.where((m) => !m.estoqueConfirmado).toList();
- 
+
+    // Corpo rolável (sem o cabeçalho — ele fica fixo acima)
+    Widget corpoRolavel = SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _SectionHeader(
+            icon:  Icons.pending_outlined,
+            label: 'Aguardando confirmação de estoque',
+            count: naoConfirm.length,
+            color: AppTheme.warning,
+          ),
+          if (naoConfirm.isEmpty)
+            const _EmptySection(message: 'Nenhum material pendente de confirmação.')
+          else ...[
+            for (int i = 0; i < naoConfirm.length; i++) ...[
+              if (i > 0)
+                const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+              _LinhaMateria(
+                material:             naoConfirm[i],
+                cols:                 _cols,
+                onEditar:             onEditar,
+                onVerFornecedores:    onVerFornecedores,
+                onVerHistoricoPrecos: onVerHistoricoPrecos,
+                mostrarCategoria:     mostrarCategoria,
+              ),
+            ],
+            const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+          ],
+
+          const SizedBox(height: 24),
+
+          _SectionHeader(
+            icon:  Icons.verified_outlined,
+            label: 'Estoque confirmado',
+            count: confirmados.length,
+            color: AppTheme.success,
+          ),
+          if (confirmados.isEmpty)
+            const _EmptySection(message: 'Nenhum material com estoque confirmado.')
+          else ...[
+            for (int i = 0; i < confirmados.length; i++) ...[
+              if (i > 0)
+                const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+              _LinhaMateria(
+                material:             confirmados[i],
+                cols:                 _cols,
+                onEditar:             onEditar,
+                onVerFornecedores:    onVerFornecedores,
+                onVerHistoricoPrecos: onVerHistoricoPrecos,
+                mostrarCategoria:     mostrarCategoria,
+              ),
+            ],
+            const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+          ],
+        ],
+      ),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
       children: [
-        _SectionHeader(
-          icon:  Icons.pending_outlined,
-          label: 'Aguardando confirmação de estoque',
-          count: naoConfirm.length,
-          color: AppTheme.warning,
-        ),
-        if (naoConfirm.isEmpty)
-          const _EmptySection(message: 'Nenhum material pendente de confirmação.')
-        else ...[
-          _cabecalho(),
-          for (int i = 0; i < naoConfirm.length; i++) ...[
-            if (i > 0)
-              const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
-            _LinhaMateria(
-              material:             naoConfirm[i],
-              cols:                 _cols,
-              onEditar:             onEditar,
-              onVerFornecedores:    onVerFornecedores,
-              onVerHistoricoPrecos: onVerHistoricoPrecos,
-            ),
-          ],
-          const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
-        ],
- 
-        const SizedBox(height: 24),
- 
-        _SectionHeader(
-          icon:  Icons.verified_outlined,
-          label: 'Estoque confirmado',
-          count: confirmados.length,
-          color: AppTheme.success,
-        ),
-        if (confirmados.isEmpty)
-          const _EmptySection(message: 'Nenhum material com estoque confirmado.')
-        else ...[
-          _cabecalho(),
-          for (int i = 0; i < confirmados.length; i++) ...[
-            if (i > 0)
-              const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
-            _LinhaMateria(
-              material:             confirmados[i],
-              cols:                 _cols,
-              onEditar:             onEditar,
-              onVerFornecedores:    onVerFornecedores,
-              onVerHistoricoPrecos: onVerHistoricoPrecos,
-            ),
-          ],
-          const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
-        ],
+        // Cabeçalho fixo — não entra no scroll
+        _cabecalho(),
+        const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+        // Corpo rolável ocupa o espaço restante
+        Expanded(child: corpoRolavel),
       ],
     );
   }
@@ -1680,6 +1719,7 @@ class _LinhaMateria extends StatefulWidget {
   final void Function(MaterialModel) onEditar;
   final void Function(MaterialModel) onVerFornecedores;
   final void Function(MaterialModel) onVerHistoricoPrecos;
+  final bool mostrarCategoria;
  
   const _LinhaMateria({
     required this.material,
@@ -1687,6 +1727,7 @@ class _LinhaMateria extends StatefulWidget {
     required this.onEditar,
     required this.onVerFornecedores,
     required this.onVerHistoricoPrecos,
+    this.mostrarCategoria = true,
   });
  
   @override
@@ -1843,49 +1884,51 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 ))),
                 _vDivider(),
  
-                // Categoria
-                _colWrap(cols[3], maybeOpacity(_cell(m.categoria ?? '—', inativo: inativo))),
-                _vDivider(),
- 
-                // Unidade
-                _colWrap(cols[4], maybeOpacity(_cell(m.unidade ?? '—', inativo: inativo))),
-                _vDivider(),
+                // Categoria (apenas em Geral / Sem categoria)
+                if (widget.mostrarCategoria) ...[
+                  _colWrap(cols[3], maybeOpacity(_cell(m.categoria ?? '—', inativo: inativo))),
+                  _vDivider(),
+                ],
  
                 // Medida
-                _colWrap(cols[5], maybeOpacity(_cell(m.medida ?? '—', inativo: inativo))),
+                _colWrap(cols[widget.mostrarCategoria ? 4 : 3], maybeOpacity(_cell(m.medida ?? '—', inativo: inativo))),
                 _vDivider(),
  
                 // Espessura
-                _colWrap(cols[6], maybeOpacity(_cell(m.espessura ?? '—', inativo: inativo))),
+                _colWrap(cols[widget.mostrarCategoria ? 5 : 4], maybeOpacity(_cell(m.espessura ?? '—', inativo: inativo))),
                 _vDivider(),
  
                 // Estoque atual (com lógica especial para específico)
-                _colWrap(cols[7], estoqueAtualCell()),
+                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], estoqueAtualCell()),
                 _vDivider(),
  
                 // Estoque mínimo
-                _colWrap(cols[8], maybeOpacity(_cell(
+                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], maybeOpacity(_cell(
                   m.estoqueMinimo.toStringAsFixed(m.estoqueMinimo % 1 == 0 ? 0 : 2),
                   inativo: inativo,
                 ))),
                 _vDivider(),
  
+                // Unidade
+                _colWrap(cols[widget.mostrarCategoria ? 8 : 7], maybeOpacity(_cell(m.unidade ?? '—', inativo: inativo))),
+                _vDivider(),
+ 
                 // Valor intermediário
-                _colWrap(cols[9], maybeOpacity(valorCell(
+                _colWrap(cols[widget.mostrarCategoria ? 9 : 8], maybeOpacity(valorCell(
                   m.precoMediano,
                   m.fornecedorMateriais.isNotEmpty,
                 ))),
                 _vDivider(),
  
                 // Valor m² intermediário
-                _colWrap(cols[10], maybeOpacity(valorCell(
+                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], maybeOpacity(valorCell(
                   m.precoM2Mediano,
                   m.fornecedorMateriais.isNotEmpty,
                 ))),
                 _vDivider(),
  
                 // Custo última compra
-                _colWrap(cols[11], maybeOpacity(_CustoCell(
+                _colWrap(cols[widget.mostrarCategoria ? 11 : 10], maybeOpacity(_CustoCell(
                   valor:       m.ultimoValorPago,
                   temHistorico: true,
                   onTap:       () => widget.onVerHistoricoPrecos(m),
@@ -1893,7 +1936,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _vDivider(),
  
                 // Custo m² última compra
-                _colWrap(cols[12], maybeOpacity(_CustoCell(
+                _colWrap(cols[widget.mostrarCategoria ? 12 : 11], maybeOpacity(_CustoCell(
                   valor:       m.ultimoValorPagoM2,
                   temHistorico: true,
                   onTap:       () => widget.onVerHistoricoPrecos(m),
@@ -1901,7 +1944,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _vDivider(),
  
                 // Status
-                _colWrap(cols[13], maybeOpacity(Center(
+                _colWrap(cols[widget.mostrarCategoria ? 13 : 12], maybeOpacity(Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                     child: _StatusBadge(status: m.status),
@@ -1976,8 +2019,9 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                               _LinhaFilhoEspecifico(
                                 filho:                m.filhosEspecificos[i],
                                 pai:                  m,
-                                cols:                 _TabelaMateriais._cols,
+                                cols:                 widget.cols,
                                 onVerHistoricoPrecos: widget.onVerHistoricoPrecos,
+                                mostrarCategoria:     widget.mostrarCategoria,
                               ),
                             ],
                           ],
@@ -1999,12 +2043,14 @@ class _LinhaFilhoEspecifico extends StatefulWidget {
   final MaterialModel pai;
   final List<_ColDef> cols;
   final void Function(MaterialModel) onVerHistoricoPrecos;
+  final bool mostrarCategoria;
  
   const _LinhaFilhoEspecifico({
     required this.filho,
     required this.pai,
     required this.cols,
     required this.onVerHistoricoPrecos,
+    this.mostrarCategoria = true,
   });
  
   @override
@@ -2122,18 +2168,18 @@ class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
                 )),
                 _vDivider(),
 
-                // col[3–6]: vazios
-                _colWrap(cols[3], _emptyCell()),
+                // col Categoria (apenas em Geral / Sem categoria) + Medida + Espessura: vazios
+                if (widget.mostrarCategoria) ...[
+                  _colWrap(cols[3], _emptyCell()),
+                  _vDivider(),
+                ],
+                _colWrap(cols[widget.mostrarCategoria ? 4 : 3], _emptyCell()),
                 _vDivider(),
-                _colWrap(cols[4], _emptyCell()),
-                _vDivider(),
-                _colWrap(cols[5], _emptyCell()),
-                _vDivider(),
-                _colWrap(cols[6], _emptyCell()),
+                _colWrap(cols[widget.mostrarCategoria ? 5 : 4], _emptyCell()),
                 _vDivider(),
 
-                // col[7]: Estoque atual do filho
-                _colWrap(cols[7], Padding(
+                // col Estoque atual do filho
+                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                   child: Center(
                     child: Text(
@@ -2149,34 +2195,38 @@ class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
                 )),
                 _vDivider(),
 
-                // col[8]: Estoque mínimo — vazio
-                _colWrap(cols[8], _emptyCell()),
+                // col Estoque mínimo — vazio
+                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], _emptyCell()),
                 _vDivider(),
 
-                // col[9–10]: vazios
-                _colWrap(cols[9],  _emptyCell()),
-                _vDivider(),
-                _colWrap(cols[10], _emptyCell()),
+                // col Unidade — vazio
+                _colWrap(cols[widget.mostrarCategoria ? 8 : 7], _emptyCell()),
                 _vDivider(),
 
-                // col[11]: Custo última compra do filho
-                _colWrap(cols[11], _CustoCell(
+                // col Valor Intermediário + m²: vazios
+                _colWrap(cols[widget.mostrarCategoria ? 9 : 8],  _emptyCell()),
+                _vDivider(),
+                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], _emptyCell()),
+                _vDivider(),
+
+                // col Custo última compra do filho
+                _colWrap(cols[widget.mostrarCategoria ? 11 : 10], _CustoCell(
                   valor:        filho.ultimoValorPago,
                   temHistorico: filho.ultimoValorPago != null,
                   onTap:        () => widget.onVerHistoricoPrecos(pai),
                 )),
                 _vDivider(),
 
-                // col[12]: Custo m² última compra do filho
-                _colWrap(cols[12], _CustoCell(
+                // col Custo m² última compra do filho
+                _colWrap(cols[widget.mostrarCategoria ? 12 : 11], _CustoCell(
                   valor:        filho.ultimoValorPagoM2,
                   temHistorico: filho.ultimoValorPagoM2 != null,
                   onTap:        () => widget.onVerHistoricoPrecos(pai),
                 )),
                 _vDivider(),
 
-                // col[13]: Status — vazio
-                _colWrap(cols[13], _emptyCell()),
+                // col Status — vazio
+                _colWrap(cols[widget.mostrarCategoria ? 13 : 12], _emptyCell()),
               ],
             ),
           ),
@@ -3002,6 +3052,7 @@ class _EditarFilhoEspecificoDialogState extends State<_EditarFilhoEspecificoDial
               TextField(
                 controller: _descCtrl,
                 autofocus:  true,
+                inputFormatters: [_NoCommaFormatter()],
                 decoration: const InputDecoration(
                   hintText: 'Ex: Tinta Branca Fosca 18L',
                   isDense:  true,

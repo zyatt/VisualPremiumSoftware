@@ -134,4 +134,8 @@ class ProducaoRepository {
     );
     return SolicitacaoProducaoModel.fromJson(data);
   }
+
+  Future<void> excluirHistorico(int solicitacaoId) async {
+    await ApiClient.delete('/producao/historico/$solicitacaoId');
+  }
 }
