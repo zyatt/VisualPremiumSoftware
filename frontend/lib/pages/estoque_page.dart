@@ -1565,7 +1565,7 @@ class _EmptySection extends StatelessWidget {
   }
 }
 
-class _TabelaMateriais extends StatelessWidget {
+class _TabelaMateriais extends StatefulWidget {
   final List<MaterialModel> materiais;
   final void Function(MaterialModel) onEditar;
   final void Function(MaterialModel) onVerFornecedores;
@@ -1581,58 +1581,119 @@ class _TabelaMateriais extends StatelessWidget {
   });
 
   static const List<_ColDef> _colsBase = [
-    _ColDef(label: 'ID',             fixed: 56),
-    _ColDef(label: 'Identificador',          flex: 0.7),
-    _ColDef(label: 'Material',       flex: 2.0),
-    _ColDef(label: 'Categoria',      flex: 1.0),
-    _ColDef(label: 'Medida',         flex: 0.8),
-    _ColDef(label: 'Espessura',      flex: 0.7),
-    _ColDef(label: 'Estoque atual',  flex: 0.6),
-    _ColDef(label: 'Estoque mínimo', flex: 0.6),
-    _ColDef(label: 'Unidade',        flex: 0.9),
-    _ColDef(label: 'Valor Intermediário',       flex: 0.9),
-    _ColDef(label: 'Valor m² Intermediário',    flex: 0.9),
-    _ColDef(label: 'Custo (Últimas compras)',   flex: 0.9),
-    _ColDef(label: 'Custo m² (Últimas compras)',flex: 0.9),
-    _ColDef(label: 'Status',         flex: 0.8),
+    _ColDef(label: 'ID',                          fixed: 56,  sortKey: 'id'),
+    _ColDef(label: 'Identificador',               flex: 0.7,  sortKey: 'identificador'),
+    _ColDef(label: 'Material',                    flex: 2.0,  sortKey: 'nome'),
+    _ColDef(label: 'Categoria',                   flex: 1.0,  sortKey: 'categoria'),
+    _ColDef(label: 'Medida',                      flex: 0.8,  sortKey: 'medida'),
+    _ColDef(label: 'Espessura',                   flex: 0.7,  sortKey: 'espessura'),
+    _ColDef(label: 'Estoque atual',               flex: 0.6,  sortKey: 'quantidade'),
+    _ColDef(label: 'Estoque mínimo',              flex: 0.6,  sortKey: 'estoqueMinimo'),
+    _ColDef(label: 'Unidade',                     flex: 0.9,  sortKey: 'unidade'),
+    _ColDef(label: 'Valor Intermediário',         flex: 0.9,  sortKey: 'precoMediano'),
+    _ColDef(label: 'Valor m² Intermediário',      flex: 0.9,  sortKey: 'precoM2Mediano'),
+    _ColDef(label: 'Custo (Últimas compras)',     flex: 0.9,  sortKey: 'ultimoValorPago'),
+    _ColDef(label: 'Custo m² (Últimas compras)',  flex: 0.9,  sortKey: 'ultimoValorPagoM2'),
+    _ColDef(label: 'Status',                      flex: 0.8,  sortKey: 'status'),
   ];
 
-  List<_ColDef> get _cols => mostrarCategoria
-      ? _colsBase
-      : _colsBase.where((c) => c.label != 'Categoria').toList();
- 
+  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
+      ? SizedBox(width: col.fixed, child: child)
+      : Expanded(flex: (col.flex! * 10).round(), child: child);
+
+  @override
+  State<_TabelaMateriais> createState() => _TabelaMateriaisState();
+}
+
+class _TabelaMateriaisState extends State<_TabelaMateriais> {
+  String? _colunaOrdem;
+  bool    _crescente = true;
+
+  List<_ColDef> get _cols => widget.mostrarCategoria
+      ? _TabelaMateriais._colsBase
+      : _TabelaMateriais._colsBase.where((c) => c.label != 'Categoria').toList();
+
+  List<MaterialModel> _ordenar(List<MaterialModel> lista) {
+    if (_colunaOrdem == null) return lista;
+    final sorted = [...lista];
+    sorted.sort((a, b) {
+      dynamic va, vb;
+      switch (_colunaOrdem) {
+        case 'id':               va = a.id;               vb = b.id;               break;
+        case 'identificador':    va = a.identificador;    vb = b.identificador;    break;
+        case 'nome':             va = a.nome;             vb = b.nome;             break;
+        case 'categoria':        va = a.categoria;        vb = b.categoria;        break;
+        case 'medida':           va = a.medida;           vb = b.medida;           break;
+        case 'espessura':        va = a.espessura;        vb = b.espessura;        break;
+        case 'quantidade':       va = a.quantidade;       vb = b.quantidade;       break;
+        case 'estoqueMinimo':    va = a.estoqueMinimo;    vb = b.estoqueMinimo;    break;
+        case 'unidade':          va = a.unidade;          vb = b.unidade;          break;
+        case 'precoMediano':     va = a.precoMediano;     vb = b.precoMediano;     break;
+        case 'precoM2Mediano':   va = a.precoM2Mediano;   vb = b.precoM2Mediano;   break;
+        case 'ultimoValorPago':  va = a.ultimoValorPago;  vb = b.ultimoValorPago;  break;
+        case 'ultimoValorPagoM2':va = a.ultimoValorPagoM2;vb = b.ultimoValorPagoM2;break;
+        case 'status':           va = a.status;           vb = b.status;           break;
+        default:                 return 0;
+      }
+      if (va == null && vb == null) return 0;
+      if (va == null) return _crescente ? 1 : -1;
+      if (vb == null) return _crescente ? -1 : 1;
+      final cmp = va is num
+          ? (va as num).compareTo(vb as num)
+          : va.toString().toLowerCase().compareTo(vb.toString().toLowerCase());
+      return _crescente ? cmp : -cmp;
+    });
+    return sorted;
+  }
+
+  void _toggleOrdem(String sortKey) {
+    setState(() {
+      if (_colunaOrdem == sortKey) {
+        _crescente = !_crescente;
+      } else {
+        _colunaOrdem = sortKey;
+        _crescente   = true;
+      }
+    });
+  }
+
   Widget _cabecalho() => Container(
         color: AppTheme.surfaceVariant,
         child: Row(
           children: [
             for (final col in _cols)
-              _colWrap(
+              _TabelaMateriais._colWrap(
                 col,
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                  child: Text(
-                    col.label,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ),
+                col.sortKey != null
+                    ? _CabecalhoOrdenavel(
+                        label:    col.label,
+                        ativo:    _colunaOrdem == col.sortKey,
+                        crescente: _crescente,
+                        onTap:    () => _toggleOrdem(col.sortKey!),
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                        child: Text(
+                          col.label,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      ),
               ),
           ],
         ),
       );
- 
-  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
-      ? SizedBox(width: col.fixed, child: child)
-      : Expanded(flex: (col.flex! * 10).round(), child: child);
- 
+
+
+  
   @override
   Widget build(BuildContext context) {
-    final confirmados = materiais.where((m) =>  m.estoqueConfirmado).toList();
-    final naoConfirm  = materiais.where((m) => !m.estoqueConfirmado).toList();
+    final confirmados = _ordenar(widget.materiais.where((m) =>  m.estoqueConfirmado).toList());
+    final naoConfirm  = _ordenar(widget.materiais.where((m) => !m.estoqueConfirmado).toList());
 
     // Corpo rolável (sem o cabeçalho — ele fica fixo acima)
     Widget corpoRolavel = SingleChildScrollView(
@@ -1655,10 +1716,10 @@ class _TabelaMateriais extends StatelessWidget {
               _LinhaMateria(
                 material:             naoConfirm[i],
                 cols:                 _cols,
-                onEditar:             onEditar,
-                onVerFornecedores:    onVerFornecedores,
-                onVerHistoricoPrecos: onVerHistoricoPrecos,
-                mostrarCategoria:     mostrarCategoria,
+                onEditar:             widget.onEditar,
+                onVerFornecedores:    widget.onVerFornecedores,
+                onVerHistoricoPrecos: widget.onVerHistoricoPrecos,
+                mostrarCategoria:     widget.mostrarCategoria,
               ),
             ],
             const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
@@ -1681,10 +1742,10 @@ class _TabelaMateriais extends StatelessWidget {
               _LinhaMateria(
                 material:             confirmados[i],
                 cols:                 _cols,
-                onEditar:             onEditar,
-                onVerFornecedores:    onVerFornecedores,
-                onVerHistoricoPrecos: onVerHistoricoPrecos,
-                mostrarCategoria:     mostrarCategoria,
+                onEditar:             widget.onEditar,
+                onVerFornecedores:    widget.onVerFornecedores,
+                onVerHistoricoPrecos: widget.onVerHistoricoPrecos,
+                mostrarCategoria:     widget.mostrarCategoria,
               ),
             ],
             const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
@@ -1707,10 +1768,72 @@ class _TabelaMateriais extends StatelessWidget {
 }
 
 class _ColDef {
-  final String label;
+  final String  label;
   final double? fixed;
   final double? flex;
-  const _ColDef({required this.label, this.fixed, this.flex});
+  /// Identificador de ordenação; null = coluna não ordenável
+  final String? sortKey;
+  const _ColDef({required this.label, this.fixed, this.flex, this.sortKey});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CABEÇALHO ORDENÁVEL
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CabecalhoOrdenavel extends StatelessWidget {
+  final String label;
+  final bool   ativo;
+  final bool   crescente;
+  final VoidCallback onTap;
+
+  const _CabecalhoOrdenavel({
+    required this.label,
+    required this.ativo,
+    required this.crescente,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Layout idêntico ao cabeçalho original — só adiciona clique e ícone de seta
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                  color: ativo ? AppTheme.primary : AppTheme.textSecondary,
+                ),
+              ),
+              // Ícone pequeno no canto superior direito, sem afetar o layout do texto
+              Positioned(
+                top: 0,
+                right: 0,
+                child: Icon(
+                  ativo
+                      ? (crescente
+                          ? Icons.arrow_drop_up_rounded
+                          : Icons.arrow_drop_down_rounded)
+                      : Icons.unfold_more_rounded,
+                  size: 12,
+                  color: ativo ? AppTheme.primary : AppTheme.textHint,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _LinhaMateria extends StatefulWidget {

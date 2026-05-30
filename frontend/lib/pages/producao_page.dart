@@ -311,22 +311,75 @@ class _EstoqueTabState extends State<_EstoqueTab> {
             ),
             const SizedBox(width: 12),
             Consumer<ProducaoProvider>(
-              builder: (_, provider, __) => SizedBox(
-                width: 180,
-                child: DropdownButtonFormField<String?>(
-                  initialValue: widget.categoriaFiltro,
-                  decoration: const InputDecoration(
-                    labelText: 'Categoria',
-                    isDense:   true,
+              builder: (_, provider, __) {
+                final opcoes = ['Todas', ...provider.categorias];
+                return SizedBox(
+                  width: 200,
+                  child: Autocomplete<String>(
+                    initialValue: TextEditingValue(
+                      text: widget.categoriaFiltro ?? 'Todas',
+                    ),
+                    optionsBuilder: (TextEditingValue v) {
+                      if (v.text.isEmpty) return opcoes;
+                      return opcoes.where((o) =>
+                          o.toLowerCase().contains(v.text.toLowerCase()));
+                    },
+                    fieldViewBuilder: (context, ctrl, focusNode, onSubmit) {
+                      return TextField(
+                        controller: ctrl,
+                        focusNode: focusNode,
+                        decoration: const InputDecoration(
+                          labelText: 'Categoria',
+                          hintText: 'Buscar categoria...',
+                          prefixIcon: Icon(Icons.category_outlined,
+                              color: AppTheme.textHint, size: 18),
+                          isDense: true,
+                        ),
+                        onSubmitted: (_) => onSubmit(),
+                      );
+                    },
+                    optionsViewBuilder: (context, onSelected, options) {
+                      return Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              maxWidth: 260,
+                              maxHeight: 240,
+                            ),
+                            child: ListView.builder(
+                              padding: EdgeInsets.zero,
+                              shrinkWrap: true,
+                              itemCount: options.length,
+                              itemBuilder: (_, i) {
+                                final opt = options.elementAt(i);
+                                return InkWell(
+                                  onTap: () => onSelected(opt),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 10),
+                                    child: Text(
+                                      opt,
+                                      style: const TextStyle(fontSize: 13),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                    onSelected: (value) {
+                      widget.onCategoriaChanged(
+                          value == 'Todas' ? null : value);
+                    },
                   ),
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text('Todas')),
-                    ...provider.categorias.map((c) =>
-                        DropdownMenuItem(value: c, child: Text(c))),
-                  ],
-                  onChanged: widget.onCategoriaChanged,
-                ),
-              ),
+                );
+              },
             ),
             const SizedBox(width: 12),
             SizedBox(
