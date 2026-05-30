@@ -1885,7 +1885,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                         final medida    = m['medida']    as String?;
                         final espessura = m['espessura'] as String?;
                         final detalhe = [
-                          if (identificador != null && identificador.isNotEmpty) 'ID: $identificador',
+                          if (identificador != null && identificador.isNotEmpty) identificador,
                           if (medida    != null && medida.isNotEmpty)    medida,
                           if (espessura != null && espessura.isNotEmpty) espessura,
                         ].join(' · ');
@@ -2741,7 +2741,7 @@ class _VincularPorMaterialDialogState
                           final medida    = m['medida']    as String?;
                           final espessura = m['espessura'] as String?;
                           final detalhe   = [
-                            if (identificador != null && identificador.isNotEmpty) 'ID: $identificador',
+                            if (identificador != null && identificador.isNotEmpty) identificador,
                             if (medida    != null && medida.isNotEmpty)    medida,
                             if (espessura != null && espessura.isNotEmpty) espessura,
                           ].join(' · ');

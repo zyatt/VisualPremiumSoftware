@@ -12,6 +12,42 @@ import '../repositories/ordem_compra_repository.dart';
 import '../theme/app_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// FORMATTER: MAIÚSCULAS SEM ACENTOS
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _UpperCaseFormatter extends TextInputFormatter {
+  static final _acentos = {
+    'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A',
+    'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a',
+    'È': 'E', 'É': 'E', 'Ê': 'E', 'Ë': 'E',
+    'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
+    'Ì': 'I', 'Í': 'I', 'Î': 'I', 'Ï': 'I',
+    'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
+    'Ò': 'O', 'Ó': 'O', 'Ô': 'O', 'Õ': 'O', 'Ö': 'O',
+    'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
+    'Ù': 'U', 'Ú': 'U', 'Û': 'U', 'Ü': 'U',
+    'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
+    'Ç': 'C', 'ç': 'c',
+    'Ñ': 'N', 'ñ': 'n',
+  };
+  static String _removerAcentos(String s) =>
+      s.split('').map((c) => _acentos[c] ?? c).join();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final texto = _removerAcentos(newValue.text).toUpperCase();
+    final sel = newValue.selection.copyWith(
+      baseOffset:   newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1483,20 +1519,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 
   void _removerItem(int idx) => setState(() => _itens.removeAt(idx));
 
-  void _showAdicionarItem() {
-    showDialog(
-      context: context,
-      builder: (_) => _MaterialPickerDialog(
-        materiais: _materiaisDoFornecedor,
-        onConfirmar: (lista) {
-          for (final v in lista) {
-            _adicionarItem(v);
-          }
-        },
-      ),
-    );
-  }
-
   Future<void> _salvar() async {
     if (_fornecedor == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um fornecedor.'), backgroundColor: AppTheme.error));
@@ -1583,6 +1605,16 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       fontWeight: FontWeight.w600,
       color: AppTheme.textSecondary,
     ),
+  );
+
+  Widget _aviso(String msg) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFFBEB),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: const Color(0xFFFCD34D)),
+    ),
+    child: Text(msg, style: const TextStyle(color: Color(0xFF92400E), fontSize: 13)),
   );
 
   Widget _card({ required String titulo, String? subtitulo, required List<Widget> children, Widget? trailing }) {
@@ -1782,57 +1814,55 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         // ── Itens ─────────────────────────────────────────────────────────────
         _card(
           titulo: 'Itens (${_itens.length})',
-          trailing: _fornecedor != null && _materiaisDoFornecedor.isNotEmpty
-              ? FilledButton.icon(
-                  onPressed: _showAdicionarItem,
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('Adicionar Item'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    textStyle: const TextStyle(fontSize: 13),
-                  ),
-                )
-              : null,
           children: [
             if (_fornecedor == null)
-              const Text('Selecione um fornecedor para adicionar itens.',
-                  style: TextStyle(fontSize: 13, color: AppTheme.textSecondary))
+              _aviso('Selecione um fornecedor para ver os materiais disponíveis.')
             else if (_materiaisDoFornecedor.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFFBEB),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFFCD34D)),
-                ),
-                child: const Text('Este fornecedor não possui materiais vinculados.',
-                    style: TextStyle(color: Color(0xFF92400E), fontSize: 13)),
-              )
-            else if (_itens.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppTheme.surfaceVariant,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppTheme.divider),
-                ),
-                child: const Center(
-                  child: Text(
-                    'Nenhum item adicionado. Você pode salvar a OC sem itens.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppTheme.textSecondary),
+              _aviso('Este fornecedor não possui materiais vinculados.')
+            else ...[
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (_) => _AdicionarItemDialog(
+                        materiais: _materiaisDoFornecedor,
+                        onConfirmar: (lista) {
+                          for (final v in lista) {
+                            _adicionarItem(v);
+                          }
+                        },
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Adicionar Item'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.primary,
+                    side: const BorderSide(color: AppTheme.primary),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    textStyle: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                 ),
-              )
-            else ...[
-              ..._itens.asMap().entries.map((e) => _ItemFormCard(
-                key: ValueKey(e.key),
-                item: e.value,
-                numerosOS: _numerosOS,
-                onRemover: () => _removerItem(e.key),
-                onChanged: () => setState(() {}),
-              )),
+              ),
+              if (_itens.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                const Divider(color: AppTheme.divider),
+                const SizedBox(height: 8),
+              ],
+            ],
+            ..._itens.asMap().entries.map((e) => _ItemFormCard(
+              key: ValueKey(e.key),
+              item: e.value,
+              numerosOS: _numerosOS,
+              onRemover: () => _removerItem(e.key),
+              onChanged: () => setState(() {}),
+            )),
+            if (_itens.isNotEmpty) ...[
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -2139,21 +2169,6 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
     if (d != null) setState(() => _data = d);
   }
 
-  void _showAdicionarItem() {
-    final disponiveis = _materiaisDoFornecedor;
-    showDialog(
-      context: context,
-      builder: (_) => _MaterialPickerDialog(
-        materiais: disponiveis,
-        onConfirmar: (lista) {
-          for (final v in lista) {
-            _adicionarItem(v);
-          }
-        },
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -2421,42 +2436,49 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
 
             // ── Itens ──────────────────────────────────────────────────────
             _card(
-              titulo: 'Itens',
-              trailing: _fornecedor != null &&
-                      _materiaisDoFornecedor.isNotEmpty
-                  ? FilledButton.icon(
-                      onPressed: _showAdicionarItem,
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Adicionar Item'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                        textStyle: const TextStyle(fontSize: 13),
-                      ),
-                    )
-                  : null,
+              titulo: 'Itens (${_itens.length})',
               children: [
                 if (_fornecedor == null)
                   _aviso(
                       'Selecione um fornecedor para ver os materiais disponíveis.')
                 else if (_materiaisDoFornecedor.isEmpty)
                   _aviso('Este fornecedor não possui materiais vinculados.')
-                else if (_itens.isEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surfaceVariant,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.divider),
-                    ),
-                    child: const Center(
-                      child: Text(
-                          'Nenhum item adicionado. Você pode salvar a OC sem itens.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: AppTheme.textSecondary)),
+                else ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (_) => _AdicionarItemDialog(
+                            materiais: _materiaisDoFornecedor,
+                            onConfirmar: (lista) {
+                              for (final v in lista) {
+                                _adicionarItem(v);
+                              }
+                            },
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Adicionar Item'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primary,
+                        side: const BorderSide(color: AppTheme.primary),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        textStyle: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
                     ),
                   ),
+                  if (_itens.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    const Divider(color: AppTheme.divider),
+                    const SizedBox(height: 8),
+                  ],
+                ],
                 ..._itens.asMap().entries.map((e) {
                   final idx = e.key;
                   final item = e.value;
@@ -3467,37 +3489,101 @@ class _FornecedorPickerState extends State<_FornecedorPicker> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MATERIAL PICKER DIALOG (multi-select com busca)
+// DIALOG UNIFICADO: FILTRO + SELEÇÃO DE MATERIAIS
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _MaterialPickerDialog extends StatefulWidget {
+class _AdicionarItemDialog extends StatefulWidget {
   final List<FornecedorMaterialVinculoModel> materiais;
   final void Function(List<FornecedorMaterialVinculoModel>) onConfirmar;
 
-  const _MaterialPickerDialog({
+  const _AdicionarItemDialog({
     required this.materiais,
     required this.onConfirmar,
   });
 
   @override
-  State<_MaterialPickerDialog> createState() => _MaterialPickerDialogState();
+  State<_AdicionarItemDialog> createState() => _AdicionarItemDialogState();
 }
 
-class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
-  final _searchCtrl = TextEditingController();
-  String _busca = '';
+class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
+  final _idCtrl            = TextEditingController();
+  final _identificadorCtrl = TextEditingController();
+  final _nomeCtrl          = TextEditingController();
+  final _categoriaCtrl     = TextEditingController();
+  final _medidaCtrl        = TextEditingController();
+  final _espessuraCtrl     = TextEditingController();
+
   // materialId → quantidade de cópias a adicionar
   final Map<int, int> _quantidades = {};
 
+  @override
+  void dispose() {
+    _idCtrl.dispose();
+    _identificadorCtrl.dispose();
+    _nomeCtrl.dispose();
+    _categoriaCtrl.dispose();
+    _medidaCtrl.dispose();
+    _espessuraCtrl.dispose();
+    super.dispose();
+  }
+
   List<FornecedorMaterialVinculoModel> get _filtrados {
-    if (_busca.isEmpty) return widget.materiais;
-    final q = _busca.toLowerCase();
-    return widget.materiais
-        .where((m) => m.descricaoCompleta.toLowerCase().contains(q))
-        .toList();
+    var lista = widget.materiais;
+    final id         = _idCtrl.text.trim();
+    final ident      = _identificadorCtrl.text.trim().toLowerCase();
+    final nome       = _nomeCtrl.text.trim().toLowerCase();
+    final categoria  = _categoriaCtrl.text.trim().toLowerCase();
+    final medida     = _medidaCtrl.text.trim().toLowerCase();
+    final espessura  = _espessuraCtrl.text.trim().toLowerCase();
+
+    if (id.isNotEmpty) {
+      lista = lista.where((m) =>
+          m.materialId.toString() == id).toList();
+    }
+    if (ident.isNotEmpty) {
+      lista = lista.where((m) =>
+          (m.materialIdentificador ?? '').toLowerCase().contains(ident)).toList();
+    }
+    if (nome.isNotEmpty) {
+      final tokens = nome.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+      lista = lista.where((m) {
+        final desc = m.descricaoCompleta.toLowerCase();
+        return tokens.every((t) => desc.contains(t));
+      }).toList();
+    }
+    if (categoria.isNotEmpty) {
+      lista = lista.where((m) =>
+          m.descricaoCompleta.toLowerCase().contains(categoria)).toList();
+    }
+    if (medida.isNotEmpty) {
+      lista = lista.where((m) =>
+          m.descricaoCompleta.toLowerCase().contains(medida)).toList();
+    }
+    if (espessura.isNotEmpty) {
+      lista = lista.where((m) =>
+          m.descricaoCompleta.toLowerCase().contains(espessura)).toList();
+    }
+    return lista;
   }
 
   int get _totalItens => _quantidades.values.fold(0, (s, v) => s + v);
+
+  bool get _temFiltro =>
+      _idCtrl.text.isNotEmpty ||
+      _identificadorCtrl.text.isNotEmpty ||
+      _nomeCtrl.text.isNotEmpty ||
+      _categoriaCtrl.text.isNotEmpty ||
+      _medidaCtrl.text.isNotEmpty ||
+      _espessuraCtrl.text.isNotEmpty;
+
+  void _limparFiltros() => setState(() {
+        _idCtrl.clear();
+        _identificadorCtrl.clear();
+        _nomeCtrl.clear();
+        _categoriaCtrl.clear();
+        _medidaCtrl.clear();
+        _espessuraCtrl.clear();
+      });
 
   void _confirmar() {
     final escolhidos = <FornecedorMaterialVinculoModel>[];
@@ -3511,86 +3597,154 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
     Navigator.pop(context);
   }
 
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
-  }
+  InputDecoration _deco(String hint, {IconData? icon}) => InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: AppTheme.textHint, fontSize: 12),
+        prefixIcon: icon != null ? Icon(icon, size: 15, color: AppTheme.textHint) : null,
+        filled: true,
+        fillColor: AppTheme.surfaceVariant,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(7),
+            borderSide: const BorderSide(color: AppTheme.divider)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(7),
+            borderSide: const BorderSide(color: AppTheme.divider)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(7),
+            borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
+      );
 
   @override
   Widget build(BuildContext context) {
     final filtrados = _filtrados;
+
     return AlertDialog(
-      title: const Text('Selecionar Materiais',
-          style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w700)),
-      contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      content: SizedBox(
-        width: 560,
-        height: 480,
-        child: Column(
-          children: [
-            // Campo de busca
-            TextField(
-              controller: _searchCtrl,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: 'Buscar material...',
-                prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
-                filled: true,
-                fillColor: AppTheme.surfaceVariant,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: AppTheme.divider),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: AppTheme.divider),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: AppTheme.primary, width: 1.5),
-                ),
-                isDense: true,
-                suffixIcon: _busca.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 16, color: AppTheme.textHint),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          setState(() => _busca = '');
-                        },
-                      )
-                    : null,
+      title: Row(
+        children: [
+          const Text('Adicionar Itens',
+              style: TextStyle(
+                  color: AppTheme.textPrimary, fontWeight: FontWeight.w700)),
+          const Spacer(),
+          if (_totalItens > 0)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
               ),
-              onChanged: (v) => setState(() => _busca = v),
-            ),
-            const SizedBox(height: 8),
-            // Contador de selecionados
-            if (_totalItens > 0)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  '$_totalItens ${_totalItens == 1 ? 'item selecionado' : 'itens selecionados'}',
-                  style: const TextStyle(
+              child: Text(
+                '$_totalItens ${_totalItens == 1 ? 'selecionado' : 'selecionados'}',
+                style: const TextStyle(
                     color: AppTheme.primary,
                     fontWeight: FontWeight.w600,
-                    fontSize: 12,
+                    fontSize: 12),
+              ),
+            ),
+        ],
+      ),
+      contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      content: SizedBox(
+        width: 580,
+        height: 560,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Filtros ────────────────────────────────────────────────────
+            // Linha 1: ID + Nome
+            Row(
+              children: [
+                SizedBox(
+                  width: 88,
+                  child: TextField(
+                    controller: _idCtrl,
+                    decoration: _deco('ID...', icon: Icons.tag),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    onChanged: (_) => setState(() {}),
                   ),
                 ),
-              ),
-            const SizedBox(height: 4),
-            // Lista
+                const SizedBox(width: 6),
+                Expanded(
+                  child: TextField(
+                    controller: _nomeCtrl,
+                    autofocus: true,
+                    decoration: _deco('Buscar por nome...', icon: Icons.search),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            // Linha 2: Identificador + Medida + Espessura + limpar
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _identificadorCtrl,
+                    decoration: _deco('Identificador...', icon: Icons.qr_code),
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: TextField(
+                    controller: _categoriaCtrl,
+                    decoration: _deco('Categoria', icon: Icons.category_outlined),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: TextField(
+                    controller: _medidaCtrl,
+                    decoration: _deco('Medida', icon: Icons.straighten_outlined),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: TextField(
+                    controller: _espessuraCtrl,
+                    decoration: _deco('Espessura', icon: Icons.layers_outlined),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: _temFiltro ? _limparFiltros : null,
+                  icon: Icon(
+                    Icons.filter_alt_off,
+                    size: 18,
+                    color: _temFiltro ? AppTheme.textSecondary : AppTheme.textHint,
+                  ),
+                  tooltip: 'Limpar filtros',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+
+            // ── Contador de resultados ─────────────────────────────────────
+            Text(
+              '${filtrados.length} ${filtrados.length == 1 ? 'material encontrado' : 'materiais encontrados'}',
+              style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 6),
+            const Divider(height: 1, color: AppTheme.divider),
+
+            // ── Lista filtrada ─────────────────────────────────────────────
             Expanded(
               child: filtrados.isEmpty
                   ? const Center(
                       child: Text(
-                        'Nenhum material encontrado.',
+                        'Nenhum material encontrado com esses filtros.',
                         style: TextStyle(color: AppTheme.textSecondary),
+                        textAlign: TextAlign.center,
                       ),
                     )
                   : ListView.separated(
@@ -3602,7 +3756,7 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                         final qty = _quantidades[m.materialId] ?? 0;
                         return Padding(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 8),
+                              horizontal: 4, vertical: 10),
                           child: Row(
                             children: [
                               Expanded(
@@ -3621,11 +3775,14 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      'R\$ ${m.preco.toStringAsFixed(2).replaceAll('.', ',')}${m.precoMetroQuadrado > 0 ? '  •  m²: R\$ ${m.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}' : ''}',
+                                      m.preco > 0
+                                          ? 'R\$ ${m.preco.toStringAsFixed(2).replaceAll('.', ',')}${m.precoMetroQuadrado > 0 ? '  •  m²: R\$ ${m.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}' : ''}'
+                                          : m.precoMetroQuadrado > 0
+                                              ? 'm²: R\$ ${m.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}'
+                                              : 'Sem preço cadastrado',
                                       style: const TextStyle(
-                                        fontSize: 11,
-                                        color: AppTheme.textSecondary,
-                                      ),
+                                          fontSize: 11,
+                                          color: AppTheme.textSecondary),
                                     ),
                                   ],
                                 ),
@@ -3645,20 +3802,25 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                                                 _quantidades[m.materialId] = novo;
                                               }
                                             }),
-                                    icon: const Icon(Icons.remove_circle_outline, size: 20),
-                                    color: qty == 0 ? AppTheme.textHint : AppTheme.error,
+                                    icon: const Icon(
+                                        Icons.remove_circle_outline, size: 22),
+                                    color: qty == 0
+                                        ? AppTheme.textHint
+                                        : AppTheme.error,
                                     padding: EdgeInsets.zero,
                                     constraints: const BoxConstraints(),
                                   ),
                                   SizedBox(
-                                    width: 28,
+                                    width: 30,
                                     child: Text(
                                       '$qty',
                                       textAlign: TextAlign.center,
                                       style: TextStyle(
-                                        fontSize: 14,
+                                        fontSize: 15,
                                         fontWeight: FontWeight.w700,
-                                        color: qty > 0 ? AppTheme.primary : AppTheme.textHint,
+                                        color: qty > 0
+                                            ? AppTheme.primary
+                                            : AppTheme.textHint,
                                       ),
                                     ),
                                   ),
@@ -3666,7 +3828,8 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                                     onPressed: () => setState(() {
                                       _quantidades[m.materialId] = qty + 1;
                                     }),
-                                    icon: const Icon(Icons.add_circle_outline, size: 20),
+                                    icon: const Icon(
+                                        Icons.add_circle_outline, size: 22),
                                     color: AppTheme.primary,
                                     padding: EdgeInsets.zero,
                                     constraints: const BoxConstraints(),
@@ -3692,9 +3855,7 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
           onPressed: _totalItens == 0 ? null : _confirmar,
           style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
           child: Text(
-            _totalItens == 0
-                ? 'Adicionar'
-                : 'Adicionar ($_totalItens)',
+            _totalItens == 0 ? 'Adicionar' : 'Adicionar ($_totalItens)',
           ),
         ),
       ],

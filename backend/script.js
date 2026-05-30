@@ -1,81 +1,33 @@
-// scripts/seedMateriais.js
+// scripts/ajustarSequenceOrdemCompra.js
 
 require('dotenv').config();
-console.log(process.env.DATABASE_URL);
+console.log('🔌 Conectando em:', process.env.DATABASE_URL);
 
 const prisma = require('./src/utils/prisma');
-function calcularStatus(quantidade, estoqueMinimo, ativo = true) {
-  if (!ativo) return 'INATIVO';
-  if (quantidade > estoqueMinimo) return 'OK';
-  if (quantidade === estoqueMinimo) return 'LIMITE';
-  return 'CRITICO';
-}
 
-const categorias = [
-  'MDF',
-  'Compensado',
-  'Ferragem',
-  'Parafuso',
-  'Vidro',
-  'Alumínio',
-  'PVC',
-  'Acessório',
-];
-
-const medidas = [
-  '100x200',
-  '120x220',
-  '150x300',
-  '200x275',
-  '250x300',
-];
-
-const espessuras = [
-  '3mm',
-  '6mm',
-  '9mm',
-  '15mm',
-  '18mm',
-];
+const INICIAR_EM = 43;
 
 async function main() {
-  const materiais = [];
+  console.log(`\n⚙️  Ajustando sequence de ordens_compra para iniciar em ${INICIAR_EM}...`);
 
-  for (let i = 1; i <= 50; i++) {
-    const quantidade = Math.floor(Math.random() * 100);
-    const estoqueMinimo = Math.floor(Math.random() * 20) + 5;
+  await prisma.$executeRawUnsafe(
+    `ALTER SEQUENCE ordens_compra_id_seq RESTART WITH ${INICIAR_EM};`
+  );
 
-    materiais.push({
-      nome: `Material Teste ${i}`,
-      categoria: categorias[i % categorias.length],
-      medida: medidas[i % medidas.length],
-      espessura: espessuras[i % espessuras.length],
-      quantidade,
-      estoqueMinimo,
-      ativo: true,
-      estoqueConfirmado: Math.random() > 0.5,
-      status: calcularStatus(quantidade, estoqueMinimo, true),
-    });
-  }
+  // Confirma usando nextval (avança a sequence de teste e depois reseta)
+  const resultado = await prisma.$queryRaw`
+    SELECT last_value FROM ordens_compra_id_seq;
+  `;
 
-  for (const material of materiais) {
-    try {
-      await prisma.material.create({
-        data: material,
-      });
-
-      console.log(`✅ Inserido: ${material.nome}`);
-    } catch (err) {
-      console.error(`❌ Erro ao inserir ${material.nome}`, err.message);
-    }
-  }
-
-  console.log('\n🚀 Seed finalizado!');
+  console.log('\n✅ Sequence ajustada com sucesso!');
+  console.log(`📋 Próximo ID que será gerado: ${INICIAR_EM}`);
+  console.log('📋 last_value na sequence:', resultado[0]?.last_value?.toString());
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error('❌ Erro ao ajustar sequence:', e.message);
+    process.exit(1);
   })
   .finally(async () => {
     await prisma.$disconnect();
