@@ -5,9 +5,12 @@ import 'package:http/http.dart' as http;
 
 class ApiClient {
   static String get _base {
+    final tunnel = dotenv.env['API_TUNNEL_URL'] ?? '';
+    if (tunnel.isNotEmpty) return tunnel;
+
     final host = dotenv.env['API_HOST'] ?? 'localhost';
-    final port = dotenv.env['API_PORT'] ?? '3002';
-    return 'http://$host:$port';
+    final port = dotenv.env['API_PORT'] ?? '3000';
+    return 'http://$host:$port'; // caso padrão, nada muda
   }
 
   /// URL base pública (ex: para montar links de PDF via url_launcher).

@@ -1,243 +1,308 @@
-// Visual Premium - Prisma Schema
-// PostgreSQL + Prisma ORM
-
 generator client {
-  provider        = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
 }
 
-// ============================================================
-// USUÁRIOS E CONTROLE DE ACESSO
-// ============================================================
-
-enum Role {
-  ADMIN    // Acesso total: todas as páginas e ações, incluindo administração
-  GERENTE  // Acesso total: todas as páginas (exceto página de Admin)
-  COMPRAS  // Acesso a todas as páginas exceto Admin e Produção
-  PRODUCAO // Acesso somente à página de Produção
-}
-
 model Usuario {
-  id        Int      @id @default(autoincrement())
-  nome      String
-  username  String   @unique
-  senha     String
-  role      Role     @default(COMPRAS)
-  ativo     Boolean  @default(true)
-  criadoEm  DateTime @default(now())
-  atualizadoEm DateTime @updatedAt
-
+  id                   Int                   @id @default(autoincrement())
+  nome                 String
+  username             String                @unique
+  senha                String
+  role                 Role                  @default(COMPRAS)
+  ativo                Boolean               @default(true)
+  criadoEm             DateTime              @default(now())
+  atualizadoEm         DateTime              @updatedAt
+  orcamentosAprovados  Orcamento[]           @relation("AprovadorOrcamento")
+  orcamentosCriados    Orcamento[]           @relation("OrcamentoCriador")
+  ordens_compra        OrdemCompra[]
   solicitacoesProducao SolicitacaoProducao[]
-
-  ordens_compra OrdemCompra[]
-
-  orcamentosCriados   Orcamento[] @relation("OrcamentoCriador")
-  orcamentosAprovados Orcamento[] @relation("AprovadorOrcamento")
 
   @@map("usuarios")
 }
 
-// ============================================================
-// MATERIAIS
-// ============================================================
-
-enum StatusEstoque {
-  OK       // quantidade > estoqueMinimo
-  LIMITE   // quantidade == estoqueMinimo
-  CRITICO  // quantidade < estoqueMinimo
-  INATIVO  // desativado pelo usuário
-}
-
 model Material {
-  id              Int           @id @default(autoincrement())
-  nome            String
-  unidade         String?
-  categoria       String?
-  medida          String?
-  espessura       String?
-  identificador   String?
-  valor           Decimal?      @db.Decimal(10, 2)
-  valorMetroQuadrado Decimal?   @db.Decimal(10, 2)
-  quantidade      Decimal       @default(0) @db.Decimal(10, 3)
-  estoqueMinimo   Decimal       @default(0) @db.Decimal(10, 3)
-  status          StatusEstoque @default(OK)
-  estoqueConfirmado Boolean     @default(false)
-  ativo           Boolean       @default(true)
-  especifico      Boolean       @default(false)   // quando true, o estoque é gerenciado por filhos (EstoqueEspecifico)
-
-  // Último valor de custo pago (atualizado ao finalizar uma OC)
-  ultimoValorPago   Decimal?    @db.Decimal(10, 2)
-  // Último custo por metro quadrado pago (atualizado ao finalizar uma OC)
-  ultimoValorPagoM2 Decimal?    @db.Decimal(10, 2)
-
-  criadoEm        DateTime      @default(now())
-  atualizadoEm    DateTime      @updatedAt
-
-  // Relações
+  id                   Int                      @id @default(autoincrement())
+  nome                 String
+  unidade              String?
+  categoria            String?
+  medida               String?
+  espessura            String?
+  identificador        String?
+  valor                Decimal?                 @db.Decimal(10, 2)
+  valorMetroQuadrado   Decimal?                 @db.Decimal(10, 2)
+  quantidade           Decimal                  @default(0) @db.Decimal(10, 3)
+  estoqueMinimo        Decimal                  @default(0) @db.Decimal(10, 3)
+  status               StatusEstoque            @default(OK)
+  estoqueConfirmado    Boolean                  @default(false)
+  ativo                Boolean                  @default(true)
+  especifico           Boolean                  @default(false)
+  ultimoValorPago      Decimal?                 @db.Decimal(10, 2)
+  ultimoValorPagoM2    Decimal?                 @db.Decimal(10, 2)
+  criadoEm             DateTime                 @default(now())
+  atualizadoEm         DateTime                 @updatedAt
+  estoquesEspecificos  EstoqueEspecifico[]
   fornecedorMateriais  FornecedorMaterial[]
-  ordemItens           OrdemCompraItem[]
+  historicoPrecos      HistoricoPrecoMaterial[]
   movimentacoes        MovimentacaoEstoque[]
   orcamentoItens       OrcamentoItem[]
-  historicoPrecos      HistoricoPrecoMaterial[]
-  // ▼ NOVO: filhos de estoque específico
-  estoquesEspecificos  EstoqueEspecifico[]
-
+  ordemItens           OrdemCompraItem[]
   SolicitacoesProducao SolicitacaoProducao[]
 
   @@unique([nome, medida, espessura])
   @@map("materiais")
 }
 
-// ============================================================
-// ESTOQUE DE MATERIAIS ESPECÍFICOS  ← NOVO
-// ============================================================
-// Cada linha representa uma variação comprada de um material específico.
-// A chave de negócio é (materialId, descricao): compras diferentes
-// com a mesma descrição acumulam quantidade na mesma linha.
-
 model EstoqueEspecifico {
-  id          Int      @id @default(autoincrement())
-  materialId  Int
-  descricao   String   // ex: "Tinta Branca Fosca 18L"
-  quantidade  Decimal  @default(0) @db.Decimal(10, 3)
-  criadoEm    DateTime @default(now())
-  atualizadoEm DateTime @updatedAt
+  id                Int      @id @default(autoincrement())
+  materialId        Int
+  descricao         String
+  quantidade        Decimal  @default(0) @db.Decimal(10, 3)
+  criadoEm          DateTime @default(now())
+  atualizadoEm      DateTime @updatedAt
   ultimoValorPago   Decimal? @db.Decimal(10, 4)
   ultimoValorPagoM2 Decimal? @db.Decimal(10, 4)
-  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  material          Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
   @@unique([materialId, descricao])
   @@map("estoque_especificos")
 }
 
-// ============================================================
-// HISTÓRICO DE PREÇOS DE CUSTO
-// ============================================================
-
 model HistoricoPrecoMaterial {
-  id              Int      @id @default(autoincrement())
-  materialId      Int
-  ordemCompraId   Int
-  fornecedorId    Int
-  precoUnitario   Decimal? @db.Decimal(10, 2)
-  precoM2         Decimal? @db.Decimal(10, 2)
-  quantidade      Decimal  @db.Decimal(10, 3)
-  usarM2          Boolean  @default(false)
-  criadoEm        DateTime @default(now())
-
-  material    Material    @relation(fields: [materialId], references: [id], onDelete: Cascade)
-  ordemCompra OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
-  fornecedor  Fornecedor  @relation(fields: [fornecedorId], references: [id])
+  id            Int         @id @default(autoincrement())
+  materialId    Int
+  ordemCompraId Int
+  fornecedorId  Int
+  precoUnitario Decimal?    @db.Decimal(10, 2)
+  precoM2       Decimal?    @db.Decimal(10, 2)
+  quantidade    Decimal     @db.Decimal(10, 3)
+  usarM2        Boolean     @default(false)
+  criadoEm      DateTime    @default(now())
+  fornecedor    Fornecedor  @relation(fields: [fornecedorId], references: [id])
+  material      Material    @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  ordemCompra   OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
 
   @@map("historico_precos_material")
 }
 
-// ============================================================
-// FORNECEDORES
-// ============================================================
-
 model Fornecedor {
-  id            Int      @id @default(autoincrement())
-  nomeFantasia  String
-  tipoFornecedor String?
-  telefone      String?  // normalizado: somente dígitos, ex: "4233091000"
-  cnpj          String?  @unique
-  razaoSocial   String?
-  nomeVendedor  String?
-  ativo         Boolean  @default(true)
-  criadoEm      DateTime @default(now())
-  atualizadoEm  DateTime @updatedAt
-
-  // Relações
-  materiais           FornecedorMaterial[]
-  ordens_compra       OrdemCompra[]
-  orcamentoItens      OrcamentoItem[]
-  historicoPrecos     HistoricoPrecoMaterial[]
+  id              Int                      @id @default(autoincrement())
+  nomeFantasia    String
+  tipoFornecedor  String?
+  telefone        String?
+  cnpj            String?                  @unique
+  razaoSocial     String?
+  nomeVendedor    String?
+  ativo           Boolean                  @default(true)
+  criadoEm        DateTime                 @default(now())
+  atualizadoEm    DateTime                 @updatedAt
+  materiais       FornecedorMaterial[]
+  historicoPrecos HistoricoPrecoMaterial[]
+  orcamentoItens  OrcamentoItem[]
+  ordens_compra   OrdemCompra[]
 
   @@map("fornecedores")
 }
 
-// Tabela de junção: Fornecedor <-> Material com preço específico por fornecedor
 model FornecedorMaterial {
-  id               Int       @id @default(autoincrement())
-  fornecedorId     Int
-  materialId       Int
-  preco            Decimal?  @db.Decimal(10, 2)
-  precoMetroQuadrado Decimal? @db.Decimal(10, 2)
-  ativo            Boolean   @default(true)
-  criadoEm         DateTime  @default(now())
-  atualizadoEm     DateTime  @updatedAt
-
-  fornecedor Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Cascade)
-  material   Material   @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  id                 Int        @id @default(autoincrement())
+  fornecedorId       Int
+  materialId         Int
+  preco              Decimal?   @db.Decimal(10, 2)
+  precoMetroQuadrado Decimal?   @db.Decimal(10, 2)
+  ativo              Boolean    @default(true)
+  criadoEm           DateTime   @default(now())
+  atualizadoEm       DateTime   @updatedAt
+  fornecedor         Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Cascade)
+  material           Material   @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
   @@unique([fornecedorId, materialId])
   @@map("fornecedor_materiais")
 }
 
-// ============================================================
-// ORÇAMENTOS
-// ============================================================
+model Orcamento {
+  id             Int             @id @default(autoincrement())
+  titulo         String          @default("Orçamento")
+  status         StatusOrcamento @default(ABERTO)
+  criadorId      Int?
+  aprovadorId    Int?
+  aprovadoEm     DateTime?
+  motivoRejeicao String?
+  criadoEm       DateTime        @default(now())
+  atualizadoEm   DateTime        @updatedAt
+  itens          OrcamentoItem[]
+  aprovador      Usuario?        @relation("AprovadorOrcamento", fields: [aprovadorId], references: [id])
+  criador        Usuario?        @relation("OrcamentoCriador", fields: [criadorId], references: [id])
+  ordens         OrdemCompra[]
+
+  @@map("orcamentos")
+}
+
+model OrcamentoItem {
+  id            Int         @id @default(autoincrement())
+  orcamentoId   Int
+  materialId    Int
+  fornecedorId  Int?
+  quantidade    Decimal     @default(1) @db.Decimal(10, 3)
+  precoUnitario Decimal?    @db.Decimal(10, 2)
+  precoM2       Decimal?    @db.Decimal(10, 2)
+  usarM2        Boolean     @default(false)
+  selecionado   Boolean     @default(false)
+  descricaoItem String?
+  criadoEm      DateTime    @default(now())
+  fornecedor    Fornecedor? @relation(fields: [fornecedorId], references: [id])
+  material      Material    @relation(fields: [materialId], references: [id])
+  orcamento     Orcamento   @relation(fields: [orcamentoId], references: [id], onDelete: Cascade)
+
+  @@unique([orcamentoId, materialId, fornecedorId])
+  @@map("orcamento_itens")
+}
+
+model OrdemCompra {
+  id              Int                      @id @default(autoincrement())
+  data            DateTime                 @default(now())
+  fornecedorId    Int
+  requisitante    String
+  formaPagamento  String?
+  prazoPagamento  String?
+  observacoes     String?
+  empresa         String?
+  status          StatusOrdemCompra        @default(EM_ANDAMENTO)
+  usuarioId       Int?
+  orcamentoId     Int?
+  valorTotal      Decimal                  @default(0) @db.Decimal(10, 2)
+  criadoEm        DateTime                 @default(now())
+  atualizadoEm    DateTime                 @updatedAt
+  historicoPrecos HistoricoPrecoMaterial[]
+  movimentacoes   MovimentacaoEstoque[]
+  itens           OrdemCompraItem[]
+  numerosOS       OrdemCompraOS[]
+  fornecedor      Fornecedor               @relation(fields: [fornecedorId], references: [id])
+  orcamento       Orcamento?               @relation(fields: [orcamentoId], references: [id])
+  usuario         Usuario?                 @relation(fields: [usuarioId], references: [id])
+
+  @@map("ordens_compra")
+}
+
+model OrdemCompraOS {
+  id            Int         @id @default(autoincrement())
+  ordemCompraId Int
+  numeroOS      String
+  ordemCompra   OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
+
+  @@map("ordem_compra_os")
+}
+
+model OrdemCompraItem {
+  id                 Int         @id @default(autoincrement())
+  ordemCompraId      Int
+  materialId         Int
+  descricaoItem      String?
+  numeroOS           String
+  quantidade         Decimal     @db.Decimal(10, 3)
+  precoUnitario      Decimal     @db.Decimal(10, 2)
+  precoMetroQuadrado Decimal?    @db.Decimal(10, 2)
+  usarM2             Boolean     @default(false)
+  precoTotal         Decimal     @db.Decimal(10, 2)
+  criadoEm           DateTime    @default(now())
+  material           Material    @relation(fields: [materialId], references: [id])
+  ordemCompra        OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
+
+  @@map("ordem_compra_itens")
+}
+
+model RelacaoOS {
+  id            Int                   @id @default(autoincrement())
+  numeroOS      String                @unique
+  descricao     String?
+  status        String                @default("EM_ANDAMENTO")
+  criadoEm      DateTime              @default(now())
+  atualizadoEm  DateTime              @updatedAt
+  movimentacoes MovimentacaoEstoque[]
+
+  @@map("relacoes_os")
+}
+
+model MovimentacaoEstoque {
+  id            Int          @id @default(autoincrement())
+  materialId    Int
+  tipo          String
+  quantidade    Decimal      @db.Decimal(10, 3)
+  numeroOS      String
+  relacaoOSId   Int
+  ordemCompraId Int?
+  precoUnitario Decimal?     @db.Decimal(10, 2)
+  precoM2       Decimal?
+  observacao    String?
+  descricaoItem String?
+  criadoEm      DateTime     @default(now())
+  material      Material     @relation(fields: [materialId], references: [id])
+  ordemCompra   OrdemCompra? @relation(fields: [ordemCompraId], references: [id])
+  relacaoOS     RelacaoOS    @relation(fields: [relacaoOSId], references: [id])
+
+  @@map("movimentacoes_estoque")
+}
+
+// Campo `observacao` adicionado para registrar a observação da solicitação.
+// Status simplificado: apenas FINALIZADA é usado daqui em diante.
+// Os valores ABERTA e EM_USO permanecem no enum para compatibilidade com
+// registros históricos já existentes no banco.
+model SolicitacaoProducao {
+  id                  Int                       @id @default(autoincrement())
+  numeroOS            String
+  materialId          Int
+  descricaoItem       String?
+  observacao          String?                   // observação opcional da saída
+  quantidadeReservada Decimal                   @db.Decimal(10, 3)
+  quantidadeUsada     Decimal                   @default(0) @db.Decimal(10, 3)
+  status              StatusSolicitacaoProducao @default(FINALIZADA)
+  usuarioId           Int
+  usuarioNome         String
+  criadoEm            DateTime                  @default(now())
+  atualizadoEm        DateTime                  @updatedAt
+  finalizadoEm        DateTime?
+  baixas              BaixaProducao[]
+  material            Material                  @relation(fields: [materialId], references: [id])
+  usuario             Usuario                   @relation(fields: [usuarioId], references: [id])
+
+  @@map("solicitacoes_producao")
+}
+
+model BaixaProducao {
+  id            Int                 @id @default(autoincrement())
+  solicitacaoId Int
+  quantidade    Decimal             @db.Decimal(10, 3)
+  observacao    String?
+  criadoEm      DateTime            @default(now())
+  solicitacao   SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+
+  @@map("baixas_producao")
+}
+
+enum Role {
+  ADMIN
+  GERENTE
+  COMPRAS
+  PRODUCAO
+}
+
+enum StatusEstoque {
+  OK
+  LIMITE
+  CRITICO
+  INATIVO
+}
 
 enum StatusOrcamento {
   ABERTO
   AGUARDANDO_APROVACAO
   APROVADO
   NAO_APROVADO
-  CONVERTIDO // virou Ordem de Compra
+  CONVERTIDO
   CANCELADO
 }
-
-model Orcamento {
-  id          Int             @id @default(autoincrement())
-  titulo      String          @default("Orçamento")
-  status      StatusOrcamento @default(ABERTO)
-  
-  // Campos de aprovação
-  criadorId      Int?
-  aprovadorId    Int?
-  aprovadoEm     DateTime?
-  motivoRejeicao String?
-  
-  criadoEm   DateTime         @default(now())
-  atualizadoEm DateTime       @updatedAt
-
-  criador     Usuario?        @relation("OrcamentoCriador",   fields: [criadorId], references: [id])
-  aprovador   Usuario?        @relation("AprovadorOrcamento", fields: [aprovadorId], references: [id])
-  itens       OrcamentoItem[]
-  ordens      OrdemCompra[]
-
-  @@map("orcamentos")
-}
-
-model OrcamentoItem {
-  id              Int      @id @default(autoincrement())
-  orcamentoId     Int
-  materialId      Int
-  fornecedorId    Int?
-  quantidade      Decimal  @default(1) @db.Decimal(10, 3)
-  precoUnitario   Decimal? @db.Decimal(10, 2)
-  precoM2         Decimal? @db.Decimal(10, 2)   // preço por m² deste fornecedor
-  usarM2          Boolean  @default(false)       // modo escolhido pelo usuário p/ este item
-  selecionado     Boolean  @default(false)       // true = fornecedor escolhido para compra
-  descricaoItem   String?  
-  criadoEm        DateTime @default(now())
-
-  orcamento  Orcamento   @relation(fields: [orcamentoId], references: [id], onDelete: Cascade)
-  material   Material    @relation(fields: [materialId], references: [id])
-  fornecedor Fornecedor? @relation(fields: [fornecedorId], references: [id])
-
-  // Uma linha por (orçamento, material, fornecedor)
-  @@unique([orcamentoId, materialId, fornecedorId])
-  @@map("orcamento_itens")
-}
-
-// ============================================================
-// ORDENS DE COMPRA
-// ============================================================
 
 enum StatusOrdemCompra {
   EM_ANDAMENTO
@@ -245,151 +310,15 @@ enum StatusOrdemCompra {
   CANCELADO
 }
 
-model OrdemCompra {
-  id              Int               @id @default(autoincrement())
-  data            DateTime          @default(now())
-  fornecedorId    Int
-  requisitante    String
-  formaPagamento  String?
-  prazoPagamento  String?
-  observacoes     String?
-  empresa         String?
-  status          StatusOrdemCompra @default(EM_ANDAMENTO)
-  usuarioId       Int?
-  orcamentoId     Int?
-  valorTotal      Decimal           @default(0) @db.Decimal(10, 2)
-  criadoEm        DateTime          @default(now())
-  atualizadoEm    DateTime          @updatedAt
-
-  fornecedor Fornecedor  @relation(fields: [fornecedorId], references: [id])
-  usuario    Usuario?    @relation(fields: [usuarioId], references: [id])
-  orcamento  Orcamento?  @relation(fields: [orcamentoId], references: [id])
-
-  itens           OrdemCompraItem[]
-  numerosOS       OrdemCompraOS[]
-  movimentacoes   MovimentacaoEstoque[]
-  historicoPrecos HistoricoPrecoMaterial[]
-
-  @@map("ordens_compra")
-}
-
-model OrdemCompraOS {
-  id            Int    @id @default(autoincrement())
-  ordemCompraId Int
-  numeroOS      String
-
-  ordemCompra OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
-
-  @@map("ordem_compra_os")
-}
-
-model OrdemCompraItem {
-  id              Int      @id @default(autoincrement())
-  ordemCompraId   Int
-  materialId      Int
-  descricaoItem   String?  // descrição personalizada; obrigatória quando material.especifico = true
-  numeroOS        String
-  quantidade      Decimal  @db.Decimal(10, 3)
-  precoUnitario   Decimal  @db.Decimal(10, 2)
-  precoMetroQuadrado Decimal? @db.Decimal(10, 2)
-  usarM2          Boolean  @default(false)
-  precoTotal      Decimal  @db.Decimal(10, 2)
-  criadoEm        DateTime @default(now())
-
-  ordemCompra OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
-  material    Material    @relation(fields: [materialId], references: [id])
-
-  @@map("ordem_compra_itens")
-}
-
-// ============================================================
-// CONTROLE DE ESTOQUE - MOVIMENTAÇÕES
-// ============================================================
-
 enum TipoMovimentacao {
   ENTRADA
   SAIDA
 }
 
-model RelacaoOS {
-  id           Int      @id @default(autoincrement())
-  numeroOS     String   @unique
-  descricao    String?
-  status       String   @default("EM_ANDAMENTO")
-  criadoEm     DateTime @default(now())
-  atualizadoEm DateTime @updatedAt
-
-  movimentacoes MovimentacaoEstoque[]
-
-  @@map("relacoes_os")
-}
-
-model MovimentacaoEstoque {
-  id              Int              @id @default(autoincrement())
-  materialId      Int
-  tipo            String
-  quantidade      Decimal          @db.Decimal(10, 3)
-  numeroOS        String
-  relacaoOSId     Int
-  ordemCompraId   Int?
-  precoUnitario   Decimal?         @db.Decimal(10, 2)
-  precoM2         Decimal?
-  observacao      String?
-  descricaoItem   String?          // preenchido quando material.especifico = true
-  
-  criadoEm        DateTime         @default(now())
-  material    Material     @relation(fields: [materialId], references: [id])
-  relacaoOS   RelacaoOS    @relation(fields: [relacaoOSId], references: [id])
-  ordemCompra OrdemCompra? @relation(fields: [ordemCompraId], references: [id])
-
-  @@map("movimentacoes_estoque")
-}
-
-// ============================================================
-// PRODUÇÃO — SOLICITAÇÕES DE MATERIAL
-// ============================================================
-
-// Status do ciclo de vida de uma solicitação de produção:
-// ABERTA      → reserva feita, nenhuma baixa ainda
-// EM_USO      → já teve ao menos uma baixa parcial
-// FINALIZADA  → usuário encerrou; sobra devolvida ao estoque
-
+// ABERTA e EM_USO mantidos apenas para compatibilidade com dados históricos.
+// Novas solicitações são criadas diretamente como FINALIZADA.
 enum StatusSolicitacaoProducao {
   ABERTA
   EM_USO
   FINALIZADA
-}
-
-model SolicitacaoProducao {
-  id           Int      @id @default(autoincrement())
-  numeroOS     String                            // OS informada pelo usuário
-  materialId   Int
-  descricaoItem String?                          // obrigatório p/ material.especifico
-  quantidadeReservada Decimal @db.Decimal(10, 3) // qtd retirada do estoque e em uso
-  quantidadeUsada     Decimal @default(0) @db.Decimal(10, 3) // soma das baixas
-  status       StatusSolicitacaoProducao @default(ABERTA)
-  usuarioId    Int
-  usuarioNome  String                            // desnormalizado para histórico
-  criadoEm    DateTime @default(now())
-  atualizadoEm DateTime @updatedAt
-  finalizadoEm DateTime?
-
-  material Material @relation(fields: [materialId], references: [id])
-  usuario  Usuario  @relation(fields: [usuarioId], references: [id])
-  baixas   BaixaProducao[]
-
-  @@map("solicitacoes_producao")
-}
-
-// Cada registro representa uma baixa parcial ou total feita pelo usuário
-model BaixaProducao {
-  id              Int      @id @default(autoincrement())
-  solicitacaoId   Int
-  quantidade      Decimal  @db.Decimal(10, 3)
-  observacao      String?
-  criadoEm        DateTime @default(now())
-
-  solicitacao SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
-
-  @@map("baixas_producao")
 }

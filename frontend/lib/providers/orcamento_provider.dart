@@ -128,11 +128,23 @@ class OrcamentoTab {
   /// Enquanto for null, o orçamento ainda não existe no banco.
   int? servidorId;
 
+  /// Flags de estado da aba (mantidas aqui para sobreviver a rebuilds da page).
+  bool aguardandoAprovacao;
+  bool jaFinalizado;
+  bool modoGerarOC;
+  /// true enquanto o usuário está editando (mesmo sem itens ainda).
+  /// Garante que o editor fique visível logo após clicar em "Novo Orçamento".
+  bool modoEdicao;
+
   OrcamentoTab({
     required this.id,
     required this.titulo,
     List<ItemOrcamentoData>? itens,
     this.servidorId,
+    this.aguardandoAprovacao = false,
+    this.jaFinalizado = false,
+    this.modoGerarOC = false,
+    this.modoEdicao = false,
   }) : itens = itens ?? [];
 
   Map<String, dynamic> toJson() => {
@@ -140,12 +152,20 @@ class OrcamentoTab {
         'titulo': titulo,
         'itens': itens.map((i) => i.toJson()).toList(),
         'servidorId': servidorId,
+        'aguardandoAprovacao': aguardandoAprovacao,
+        'jaFinalizado': jaFinalizado,
+        'modoGerarOC': modoGerarOC,
+        'modoEdicao': modoEdicao,
       };
 
   factory OrcamentoTab.fromJson(Map<String, dynamic> j) => OrcamentoTab(
         id: j['id'] as String,
         titulo: j['titulo'] as String,
         servidorId: j['servidorId'] as int?,
+        aguardandoAprovacao: j['aguardandoAprovacao'] as bool? ?? false,
+        jaFinalizado: j['jaFinalizado'] as bool? ?? false,
+        modoGerarOC: j['modoGerarOC'] as bool? ?? false,
+        modoEdicao: j['modoEdicao'] as bool? ?? false,
         itens: (j['itens'] as List)
             .map((i) => ItemOrcamentoData.fromJson(i as Map<String, dynamic>))
             .toList(),
@@ -189,8 +209,7 @@ class OrcamentoProvider extends ChangeNotifier {
     if (userId != null) {
       await _carregar();
     } else {
-      // Deslogou: garante aba vazia sem persistir nada
-      _novaAba(notificar: false);
+      // Deslogou: sem abas, painel de aprovação é a tela base
       _carregado = true;
       notifyListeners();
     }
@@ -212,7 +231,7 @@ class OrcamentoProvider extends ChangeNotifier {
       if (_abaAtiva >= _abas.length) _abaAtiva = 0;
     } catch (_) {}
 
-    if (_abas.isEmpty) _novaAba(notificar: false);
+    // Não força aba inicial — o painel de aprovação é a tela base quando não há abas.
     _carregado = true;
     notifyListeners();
   }
@@ -262,6 +281,23 @@ class OrcamentoProvider extends ChangeNotifier {
   void setServidorIdTab(int? id) {
     if (tabAtual == null) return;
     tabAtual!.servidorId = id;
+    _salvarAbas();
+    notifyListeners();
+  }
+
+  /// Atualiza as flags de estado da aba ativa.
+  /// Chamado pela page após operações no servidor (salvar, aprovar, reabrir…).
+  void atualizarFlagsTab({
+    bool? aguardandoAprovacao,
+    bool? jaFinalizado,
+    bool? modoGerarOC,
+    bool? modoEdicao,
+  }) {
+    if (tabAtual == null) return;
+    if (aguardandoAprovacao != null) tabAtual!.aguardandoAprovacao = aguardandoAprovacao;
+    if (jaFinalizado != null) tabAtual!.jaFinalizado = jaFinalizado;
+    if (modoGerarOC != null) tabAtual!.modoGerarOC = modoGerarOC;
+    if (modoEdicao != null) tabAtual!.modoEdicao = modoEdicao;
     _salvarAbas();
     notifyListeners();
   }
@@ -361,9 +397,7 @@ class OrcamentoProvider extends ChangeNotifier {
   }
 
   void limparAba() {
-    tabAtual?.itens.clear();
-    if (tabAtual != null) tabAtual!.servidorId = null;
-    _salvarAbas();
+    _fecharAbaAtual();
     notifyListeners();
   }
 
@@ -376,24 +410,15 @@ class OrcamentoProvider extends ChangeNotifier {
   }
 
   void _fecharAbaAtual() {
-    if (_abas.length == 1) {
-      // Mantém sempre ao menos uma aba vazia (sem servidorId)
-      _abas[0] = OrcamentoTab(id: _uuid.v4(), titulo: 'Orçamento 1');
-    } else {
-      _abas.removeAt(_abaAtiva);
-      if (_abaAtiva >= _abas.length) _abaAtiva = _abas.length - 1;
-    }
+    _abas.removeAt(_abaAtiva);
+    if (_abaAtiva >= _abas.length) _abaAtiva = _abas.isEmpty ? 0 : _abas.length - 1;
     _salvarAbas();
   }
 
   void fecharAba(int index) {
     if (index < 0 || index >= _abas.length) return;
-    if (_abas.length == 1) {
-      _abas[0] = OrcamentoTab(id: _uuid.v4(), titulo: 'Orçamento 1');
-    } else {
-      _abas.removeAt(index);
-      if (_abaAtiva >= _abas.length) _abaAtiva = _abas.length - 1;
-    }
+    _abas.removeAt(index);
+    if (_abaAtiva >= _abas.length) _abaAtiva = _abas.isEmpty ? 0 : _abas.length - 1;
     _salvarAbas();
     notifyListeners();
   }
@@ -402,11 +427,11 @@ class OrcamentoProvider extends ChangeNotifier {
   /// O servidorId será preenchido apenas ao salvar ou enviar para aprovação.
   void novoOrcamento(String titulo) {
     if (_abas.isEmpty) {
-      _abas.add(OrcamentoTab(id: _uuid.v4(), titulo: titulo));
+      _abas.add(OrcamentoTab(id: _uuid.v4(), titulo: titulo, modoEdicao: true));
       _abaAtiva = 0;
     } else {
       // Substitui a aba atual (que deve estar vazia)
-      _abas[_abaAtiva] = OrcamentoTab(id: _uuid.v4(), titulo: titulo);
+      _abas[_abaAtiva] = OrcamentoTab(id: _uuid.v4(), titulo: titulo, modoEdicao: true);
     }
     _salvarAbas();
     notifyListeners();

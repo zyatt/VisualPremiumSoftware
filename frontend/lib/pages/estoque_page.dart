@@ -1639,7 +1639,7 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
       if (va == null) return _crescente ? 1 : -1;
       if (vb == null) return _crescente ? -1 : 1;
       final cmp = va is num
-          ? (va as num).compareTo(vb as num)
+          ? (va).compareTo(vb as num)
           : va.toString().toLowerCase().compareTo(vb.toString().toLowerCase());
       return _crescente ? cmp : -cmp;
     });

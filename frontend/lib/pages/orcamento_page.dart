@@ -67,25 +67,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   bool _salvandoPreco = false;
   bool _mostrarResultados = false;
 
-  // Modo de edição: null = lista inicial, true = editando orçamento
-  bool? _modoEdicao;
-  
-  // ID do orçamento sendo editado (quando reabrindo do servidor)
-  int? _orcamentoServidorId;
-
-  // Impede que o build() restaure o modo edição quando o usuário voltou intencionalmente
-  bool _ignorarRestauracaoAba = false;
-
-  // true somente quando o orçamento foi reaberto com status AGUARDANDO_APROVACAO
-  // (nesse caso faz sentido aprovar diretamente, em vez de reenviar)
-  bool _orcamentoAguardandoAprovacao = false;
-
-  // true quando o orçamento reaberto já tem status APROVADO ou NAO_APROVADO
-  // (botão Enviar para Aprovação deve ficar bloqueado)
-  bool _orcamentoJaFinalizado = false;
-  
-  // Modo especial: gerar OC de orçamento aprovado
-  bool _modoGerarOC = false;
+  // (flags de edição foram movidos para OrcamentoTab no provider)
 
   // Campos de busca avançada de materiais
   final _searchIdCtrl = TextEditingController();
@@ -97,6 +79,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
   // Modo de ordenação da tabela de totais por fornecedor
   String _ordemTotais = 'unitario';
+
+  /// Controla se o editor de orçamento está em foco (true) ou se o
+  /// painel de aprovação está visível (false). Permite alternar sem fechar abas.
+  bool _abaVisivel = false;
 
   @override
   void initState() {
@@ -234,8 +220,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       final repo = OrcamentoRepository();
       int orcId;
 
-      if (_orcamentoServidorId != null) {
-        orcId = _orcamentoServidorId!;
+      // ignore: use_build_context_synchronously
+      final orcamentoServidorId = context.read<OrcamentoProvider>().tabAtual?.servidorId;
+      if (orcamentoServidorId != null) {
+        orcId = orcamentoServidorId;
         await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
         // Remove todos os itens de uma vez (atômico) — evita duplicatas
         // causadas por falhas parciais no loop individual com catch silencioso.
@@ -281,6 +269,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
       // Limpa o orçamento local
       provider.limparAba();
+      setState(() => _abaVisivel = false);
       
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -291,14 +280,8 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       );
       
       // Volta para lista inicial
-      setState(() {
-        _modoEdicao = null;
-        _orcamentoServidorId = null;
-        _modoGerarOC = false;
-        _ignorarRestauracaoAba = false;
-        _orcamentoAguardandoAprovacao = false;
-        _orcamentoJaFinalizado = false;
-      });
+      context.read<OrcamentoProvider>().atualizarFlagsTab(
+        aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
       await _carregarOrcamentosServidor();
     } catch (e) {
       if (mounted) {
@@ -524,10 +507,8 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           ),
         );
         
-        setState(() {
-          _modoEdicao = true;
-          _modoGerarOC = true;
-        });
+        context.read<OrcamentoProvider>().atualizarFlagsTab(modoGerarOC: true);
+        setState(() => _abaVisivel = true);
       }
     } catch (e) {
       if (mounted) {
@@ -620,13 +601,11 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       provider.setServidorIdTab(orc['id'] as int);
 
       final statusReaberto = orc['status'] as String? ?? '';
-      setState(() {
-        _modoEdicao = true;
-        _ignorarRestauracaoAba = false;
-        _orcamentoServidorId = orc['id'] as int;
-        _orcamentoAguardandoAprovacao = statusReaberto == 'AGUARDANDO_APROVACAO';
-        _orcamentoJaFinalizado = statusReaberto == 'APROVADO' || statusReaberto == 'NAO_APROVADO';
-      });
+      provider.atualizarFlagsTab(
+        aguardandoAprovacao: statusReaberto == 'AGUARDANDO_APROVACAO',
+        jaFinalizado: statusReaberto == 'APROVADO' || statusReaberto == 'NAO_APROVADO',
+        modoGerarOC: false,
+      );
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -634,6 +613,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           backgroundColor: AppTheme.success,
         ),
       );
+      setState(() => _abaVisivel = true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1190,13 +1170,8 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       // pisque de volta ao valor antigo (o provider ainda tem o título novo, mas
       // o setState local precisa fechar o modo edição primeiro).
       setState(() {
-        _modoEdicao = null;
-        _orcamentoServidorId = null;
-        _modoGerarOC = false;
-        _ignorarRestauracaoAba = false;
-        _orcamentoAguardandoAprovacao = false;
-        _orcamentoJaFinalizado = false;
         _salvandoPreco = false;
+        _abaVisivel = false;
       });
 
       provider.fecharAbaAposOperacao();
@@ -1285,14 +1260,8 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           backgroundColor: AppTheme.error,
         ),
       );
-      setState(() {
-        _modoEdicao = null;
-        _orcamentoServidorId = null;
-        _modoGerarOC = false;
-        _ignorarRestauracaoAba = false;
-        _orcamentoAguardandoAprovacao = false;
-        _orcamentoJaFinalizado = false;
-      });
+      context.read<OrcamentoProvider>().atualizarFlagsTab(
+        aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1532,53 +1501,14 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
           );
         }
 
-        // Restaura estado ao voltar para a página (ex: navegou para outra rota e voltou)
-        if (_modoEdicao == null && !_ignorarRestauracaoAba) {
-          final tab = provider.tabAtual;
-          // Considera "em edição" se tiver itens OU se já tiver um servidorId
-          // (usuário criou, adicionou itens, navegou, voltou)
-          if (tab != null && (tab.itens.isNotEmpty || tab.servidorId != null)) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) {
-                setState(() {
-                  _modoEdicao = true;
-                  _orcamentoServidorId = tab.servidorId;
-                });
-              }
-            });
-          }
-        }
+        final abas    = provider.abas;
+        final abaAtiva = provider.abaAtiva;
+        final tab     = provider.tabAtual;
+        final itens   = tab?.itens ?? [];
+        final temAbas = abas.isNotEmpty;
+        final emEdicao = tab != null && (tab.modoEdicao || tab.itens.isNotEmpty || tab.servidorId != null);
+        final mostrarEditor = temAbas && _abaVisivel && emEdicao;
 
-        // Se está em modo de edição, mostra o editor
-        if (_modoEdicao == true) {
-          final tab = provider.tabAtual;
-          final itens = tab?.itens ?? [];
-          
-          return Scaffold(
-            backgroundColor: AppTheme.background,
-            body: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeaderEdicao(provider, itens),
-                  const SizedBox(height: 16),
-                  _buildBarraAcoes(provider, itens),
-                  const SizedBox(height: 16),
-                  _buildSelecaoMateriais(provider, itens),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: itens.isEmpty
-                        ? _buildEmptyState()
-                        : _buildConteudo(provider, itens),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        // Caso contrário, mostra a lista inicial de orçamentos
         return Scaffold(
           backgroundColor: AppTheme.background,
           body: Padding(
@@ -1586,85 +1516,34 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // ── Cabeçalho global ─────────────────────────────────────
                 _buildHeader(),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
 
-                Container(
-                  decoration: const BoxDecoration(
-                    color: AppTheme.surface,
-                    border: Border(bottom: BorderSide(color: AppTheme.divider)),
-                  ),
-                  child: TabBar(
-                    controller: _mainTabController,
-                    labelColor: AppTheme.primary,
-                    unselectedLabelColor: AppTheme.textSecondary,
-                    indicatorColor: AppTheme.primary,
-                    indicatorWeight: 2,
-                    labelStyle: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 13),
-                    tabs: [
-                      Tab(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('Aguardando Aprovação'),
-                            if (_aguardandoAprovacao.isNotEmpty) ...[
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.warning,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Text(
-                                  '${_aguardandoAprovacao.length}',
-                                  style: const TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const Tab(text: 'Aprovados'),
-                      const Tab(text: 'Não Aprovados'),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
+                // ── Guias de orçamentos (só aparecem se há abas abertas) ──
+                if (temAbas) ...[
+                  _buildGuias(provider, abas, abaAtiva),
+                  const SizedBox(height: 16),
+                ],
 
+                // ── Conteúdo ─────────────────────────────────────────────
                 Expanded(
-                  child: TabBarView(
-                    controller: _mainTabController,
-                    physics: const NeverScrollableScrollPhysics(),
-                    children:[
-                      _buildListaAprovacao(
-                        lista: _aguardandoAprovacao,
-                        emptyMessage: 'Nenhum orçamento aguardando aprovação',
-                        emptyIcon: Icons.pending_outlined,
-                        statusColor: AppTheme.warning,
-                        mostrarAcoes: true,
-                      ),
-
-                      _buildListaAprovacao(
-                        lista: _aprovados,
-                        emptyMessage: 'Nenhum orçamento aprovado',
-                        emptyIcon: Icons.check_circle_outline,
-                        statusColor: AppTheme.success,
-                      ),
-
-                      _buildListaAprovacao(
-                        lista: _naoAprovados,
-                        emptyMessage: 'Nenhum orçamento não aprovado',
-                        emptyIcon: Icons.cancel_outlined,
-                        statusColor: AppTheme.error,
-                      ),
-                    ],
-                  ),
+                  child: mostrarEditor
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildBarraAcoes(provider, itens),
+                            const SizedBox(height: 16),
+                            _buildSelecaoMateriais(provider, itens),
+                            const SizedBox(height: 16),
+                            Expanded(
+                              child: itens.isEmpty
+                                  ? _buildEmptyState()
+                                  : _buildConteudo(provider, itens),
+                            ),
+                          ],
+                        )
+                      : _buildPainelAprovacao(),
                 ),
               ],
             ),
@@ -1673,6 +1552,215 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
       },
     );
   }
+
+  // ── Guias de orçamentos ──────────────────────────────────────────────────────
+
+  Widget _buildGuias(OrcamentoProvider provider, List<OrcamentoTab> abas, int abaAtiva) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          // Botão "← Voltar" — só aparece quando o editor está em foco
+          if (_abaVisivel) ...[
+            GestureDetector(
+              onTap: () => setState(() => _abaVisivel = false),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.divider),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.arrow_back, size: 14, color: AppTheme.textSecondary),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Voltar',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          ...abas.asMap().entries.map((entry) {
+            final i   = entry.key;
+            final aba = entry.value;
+            final ativa = i == abaAtiva;
+            final temConteudo = aba.itens.isNotEmpty || aba.servidorId != null;
+            return GestureDetector(
+              onTap: () {
+                provider.selecionarAba(i);
+                setState(() => _abaVisivel = true);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                margin: const EdgeInsets.only(right: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: ativa && _abaVisivel ? AppTheme.primary : AppTheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: ativa && _abaVisivel ? AppTheme.primary : AppTheme.divider,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (temConteudo)
+                      Container(
+                        width: 6, height: 6,
+                        margin: const EdgeInsets.only(right: 6),
+                        decoration: BoxDecoration(
+                          color: ativa && _abaVisivel
+                              ? Colors.white.withValues(alpha: 0.8)
+                              : AppTheme.primary,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 160),
+                      child: Text(
+                        aba.titulo,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: ativa && _abaVisivel ? FontWeight.w700 : FontWeight.w500,
+                          color: ativa && _abaVisivel ? Colors.white : AppTheme.textSecondary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () {
+                        provider.fecharAba(i);
+                        if (provider.abas.isEmpty) {
+                          setState(() => _abaVisivel = false);
+                        }
+                      },
+                      child: Icon(
+                        Icons.close,
+                        size: 14,
+                        color: ativa && _abaVisivel
+                            ? Colors.white.withValues(alpha: 0.8)
+                            : AppTheme.textHint,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+          // Botão "+" — nova aba
+          GestureDetector(
+            onTap: () {
+              provider.adicionarAba();
+              provider.atualizarFlagsTab(modoEdicao: true);
+              setState(() => _abaVisivel = true);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.divider),
+              ),
+              child: const Icon(Icons.add, size: 16, color: AppTheme.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Painel de aprovação (exibido quando a aba ativa está vazia) ──────────────
+
+  Widget _buildPainelAprovacao() {
+    return Column(
+      children: [
+        Container(
+          decoration: const BoxDecoration(
+            color: AppTheme.surface,
+            border: Border(bottom: BorderSide(color: AppTheme.divider)),
+          ),
+          child: TabBar(
+            controller: _mainTabController,
+            labelColor: AppTheme.primary,
+            unselectedLabelColor: AppTheme.textSecondary,
+            indicatorColor: AppTheme.primary,
+            indicatorWeight: 2,
+            labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            tabs: [
+              Tab(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Aguardando Aprovação'),
+                    if (_aguardandoAprovacao.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: AppTheme.warning,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '${_aguardandoAprovacao.length}',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const Tab(text: 'Aprovados'),
+              const Tab(text: 'Não Aprovados'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Expanded(
+          child: TabBarView(
+            controller: _mainTabController,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              _buildListaAprovacao(
+                lista: _aguardandoAprovacao,
+                emptyMessage: 'Nenhum orçamento aguardando aprovação',
+                emptyIcon: Icons.pending_outlined,
+                statusColor: AppTheme.warning,
+                mostrarAcoes: true,
+              ),
+              _buildListaAprovacao(
+                lista: _aprovados,
+                emptyMessage: 'Nenhum orçamento aprovado',
+                emptyIcon: Icons.check_circle_outline,
+                statusColor: AppTheme.success,
+              ),
+              _buildListaAprovacao(
+                lista: _naoAprovados,
+                emptyMessage: 'Nenhum orçamento não aprovado',
+                emptyIcon: Icons.cancel_outlined,
+                statusColor: AppTheme.error,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
 
   Widget _buildHeader() {
     return Row(
@@ -1703,15 +1791,10 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
 
         FilledButton.icon(
           onPressed: () {
-            // Apenas inicializa a aba local — o servidor SÓ é chamado
-            // ao salvar ou enviar para aprovação.
-            context.read<OrcamentoProvider>().novoOrcamento('Novo Orçamento');
-
-            setState(() {
-              _modoEdicao = true;
-              _orcamentoServidorId = null;
-              _modoGerarOC = false;
-            });
+            final p = context.read<OrcamentoProvider>();
+            p.adicionarAba();
+            p.atualizarFlagsTab(modoEdicao: true);
+            setState(() => _abaVisivel = true);
           },
           icon: const Icon(Icons.add, size: 16),
           label: const Text(
@@ -1741,12 +1824,7 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
 
             if (resultado is Map &&
                 resultado['reabrirServidorId'] != null) {
-              setState(() {
-                _modoEdicao = true;
-                _orcamentoServidorId =
-                    resultado['reabrirServidorId'] as int;
-                _modoGerarOC = false;
-              });
+              // A reabertura já configura a aba no provider via _reabrirOrcamento
             }
           },
           icon: const Icon(Icons.history, size: 16),
@@ -1798,19 +1876,16 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
     );
   }
 
+  // ignore: unused_element
   Widget _buildHeaderEdicao(OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         IconButton(
           onPressed: () {
-            setState(() {
-              _modoEdicao = null;
-              _modoGerarOC = false;
-              _ignorarRestauracaoAba = true;
-              _orcamentoAguardandoAprovacao = false;
-        _orcamentoJaFinalizado = false;
-            });
+            context.read<OrcamentoProvider>().atualizarFlagsTab(
+              aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
+            context.read<OrcamentoProvider>().fecharAbaAposOperacao();
           },
           icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: AppTheme.textSecondary),
           style: IconButton.styleFrom(
@@ -2277,7 +2352,7 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
 
     // Determina qual botão mostrar: "Enviar para Aprovação" ou "Aprovar"
     // Só mostra "Aprovar" se o orçamento foi reaberto com status AGUARDANDO_APROVACAO
-    final bool mostrarBotaoAprovar = _orcamentoAguardandoAprovacao;
+    final bool mostrarBotaoAprovar = context.read<OrcamentoProvider>().tabAtual?.aguardandoAprovacao ?? false;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -2359,17 +2434,12 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
                 if (mostrarBotaoAprovar)
                   OutlinedButton.icon(
                     onPressed: itens.isEmpty ? null : () async {
-                      if (_orcamentoServidorId == null) return;
-                      await _aprovarOrcamento(_orcamentoServidorId!, provider.tabAtual?.titulo ?? '');
-                      setState(() {
-                        _modoEdicao = null;
-                        _orcamentoServidorId = null;
-                        _modoGerarOC = false;
-                        _ignorarRestauracaoAba = false;
-                        _orcamentoAguardandoAprovacao = false;
-        _orcamentoJaFinalizado = false;
-                      });
-                      provider.limparAba();
+                      final sid = provider.tabAtual?.servidorId;
+                      if (sid == null) return;
+                      await _aprovarOrcamento(sid, provider.tabAtual?.titulo ?? '');
+                      provider.atualizarFlagsTab(
+                        aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
+                      provider.fecharAbaAposOperacao();
                     },
                     icon: const Icon(Icons.check_circle_outline, size: 15),
                     label: const Text('Aprovar', style: TextStyle(fontSize: 12)),
@@ -2381,22 +2451,22 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
                   )
                 else
                   Tooltip(
-                    message: _orcamentoJaFinalizado
+                    message: (provider.tabAtual?.jaFinalizado ?? false)
                         ? 'Orçamento já aprovado/não aprovado. Reabra para reenviar.'
                         : '',
                     child: OutlinedButton.icon(
-                      onPressed: (itens.isEmpty || _orcamentoJaFinalizado) ? null : _enviarParaAprovacao,
+                      onPressed: (itens.isEmpty || (provider.tabAtual?.jaFinalizado ?? false)) ? null : _enviarParaAprovacao,
                       icon: const Icon(Icons.send_outlined, size: 15),
                       label: const Text('Enviar para Aprovação', style: TextStyle(fontSize: 12)),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: _orcamentoJaFinalizado ? AppTheme.textHint : AppTheme.warning,
-                        side: BorderSide(color: _orcamentoJaFinalizado ? AppTheme.divider : AppTheme.warning),
+                        foregroundColor: (provider.tabAtual?.jaFinalizado ?? false) ? AppTheme.textHint : AppTheme.warning,
+                        side: BorderSide(color: (provider.tabAtual?.jaFinalizado ?? false) ? AppTheme.divider : AppTheme.warning),
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       ),
                     ),
                   ),
                 const SizedBox(width: 8),
-                if (_modoGerarOC)
+                if (provider.tabAtual?.modoGerarOC ?? false)
                   Tooltip(
                     message: podeGerar
                         ? 'Gerar Ordem de Compra'

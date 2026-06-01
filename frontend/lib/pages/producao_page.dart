@@ -51,31 +51,29 @@ class _ProducaoPageState extends State<ProducaoPage>
   late TabController _tabController;
 
   // ── Filtros da aba Estoque ─────────────────────────────────────────────────
-  final _buscaCtrl        = TextEditingController();
-  final _buscaIdCtrl      = TextEditingController();
+  final _buscaCtrl         = TextEditingController();
+  final _buscaIdCtrl       = TextEditingController();
   final _identificadorCtrl = TextEditingController();
-  final _medidaCtrl       = TextEditingController();
-  final _espessuraCtrl    = TextEditingController();
+  final _medidaCtrl        = TextEditingController();
+  final _espessuraCtrl     = TextEditingController();
   String? _categoriaFiltro;
-  String  _statusFiltro   = '';
+  String  _statusFiltro    = '';
   Timer?  _debounce;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(_onTabChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ProducaoProvider>().carregarCategorias();
       context.read<ProducaoProvider>().carregarMateriais();
-      context.read<ProducaoProvider>().carregarSolicitacoes();
       context.read<ProducaoProvider>().carregarHistorico();
     });
   }
 
   void _onTabChanged() {
-    if (_tabController.index == 2) {
-      // Aba de histórico
+    if (_tabController.index == 1) {
       context.read<ProducaoProvider>().carregarHistorico();
     }
   }
@@ -159,7 +157,6 @@ class _ProducaoPageState extends State<ProducaoPage>
                   onPressed: () {
                     context.read<ProducaoProvider>().carregarCategorias();
                     context.read<ProducaoProvider>().carregarMateriais();
-                    context.read<ProducaoProvider>().carregarSolicitacoes();
                     context.read<ProducaoProvider>().carregarHistorico();
                   },
                   icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
@@ -189,7 +186,6 @@ class _ProducaoPageState extends State<ProducaoPage>
                     fontWeight: FontWeight.w600, fontSize: 13),
                 tabs: const [
                   Tab(text: 'Estoque'),
-                  Tab(text: 'Solicitações'),
                   Tab(text: 'Histórico'),
                 ],
               ),
@@ -220,7 +216,6 @@ class _ProducaoPageState extends State<ProducaoPage>
                     onDebounce:        _aplicarFiltros,
                     onLimpar:          _limparFiltros,
                   ),
-                  const _SolicitacoesTab(),
                   const _HistoricoTab(),
                 ],
               ),
@@ -231,6 +226,10 @@ class _ProducaoPageState extends State<ProducaoPage>
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ABA ESTOQUE
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _EstoqueTab extends StatefulWidget {
   final TextEditingController buscaCtrl;
@@ -510,7 +509,7 @@ class _EstoqueTabState extends State<_EstoqueTab> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TABELA DE MATERIAIS (estilo estoque, sem mínimo/custos/valores)
+// TABELA DE MATERIAIS
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ColDef {
@@ -618,7 +617,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
 
   void _abrirSolicitacao(BuildContext context) {
     final role = context.read<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
-    if (role == 'COMPRAS') return; // somente leitura
+    if (role == 'COMPRAS') return;
     showDialog(
       context: context,
       builder: (_) => _SolicitarMaterialDialog(material: widget.material),
@@ -797,6 +796,10 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DIALOG — SOLICITAR MATERIAL (baixa imediata)
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _SolicitarMaterialDialog extends StatefulWidget {
   final MaterialProducaoModel material;
   const _SolicitarMaterialDialog({required this.material});
@@ -807,19 +810,18 @@ class _SolicitarMaterialDialog extends StatefulWidget {
 }
 
 class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
-  final _formKey  = GlobalKey<FormState>();
-  final _osCtrl   = TextEditingController();
-  final _qtdCtrl  = TextEditingController();
-  bool _enviando  = false;
+  final _formKey = GlobalKey<FormState>();
+  final _osCtrl  = TextEditingController();
+  final _qtdCtrl = TextEditingController();
+  final _obsCtrl = TextEditingController();
+  bool  _enviando = false;
   String? _erro;
 
-  // Para material específico: filho selecionado no dropdown
   FilhoEspecificoProducaoModel? _filhoSelecionado;
 
   @override
   void initState() {
     super.initState();
-    // Pré-seleciona o único filho se houver apenas um
     final filhos = widget.material.filhosEspecificos;
     if (filhos.length == 1) _filhoSelecionado = filhos.first;
   }
@@ -828,13 +830,13 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
   void dispose() {
     _osCtrl.dispose();
     _qtdCtrl.dispose();
+    _obsCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _confirmar() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Validação extra: filho obrigatório para material específico
     if (widget.material.especifico && _filhoSelecionado == null) {
       setState(() => _erro = 'Selecione a variação do material');
       return;
@@ -864,7 +866,7 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Solicitação criada'),
+          content: Text('Material baixado com sucesso'),
           backgroundColor: AppTheme.success,
         ),
       );
@@ -879,13 +881,11 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
     final m      = widget.material;
     final filhos = m.filhosEspecificos;
 
-    // Disponível: se filho selecionado, usa a qtd do filho; senão usa geral
     final disponivel = m.especifico && _filhoSelecionado != null
         ? _filhoSelecionado!.quantidade
         : m.quantidade;
     final unidade = m.unidade ?? '';
 
-    // Construir linha com identificador · medida · espessura
     final detalhes = <String>[];
     if (m.identificador != null && m.identificador!.isNotEmpty) {
       detalhes.add(m.identificador!);
@@ -905,24 +905,18 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
             children: [
               Text(
                 m.nome,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
               ),
               if (detalhes.isNotEmpty) ...[
                 const SizedBox(height: 2),
                 Text(
                   detalhes.join(' · '),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.textSecondary,
-                  ),
+                  style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                 ),
               ],
               const SizedBox(height: 16),
 
-              // ── Número da OS ───────────────────────────────────────────────
+              // ── Número da OS ─────────────────────────────────────────────
               TextFormField(
                 controller: _osCtrl,
                 decoration: const InputDecoration(
@@ -936,7 +930,7 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
               ),
               const SizedBox(height: 12),
 
-              // ── Variação (somente para material específico) ────────────────
+              // ── Variação (material específico) ───────────────────────────
               if (m.especifico) ...[
                 if (filhos.isEmpty)
                   Container(
@@ -956,9 +950,7 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                           child: Text(
                             'Nenhuma variação em estoque para este material.',
                             style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.statusCritico,
-                            ),
+                              fontSize: 12, color: AppTheme.statusCritico),
                           ),
                         ),
                       ],
@@ -1020,15 +1012,14 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                     const SizedBox(height: 6),
                     Text(
                       'Disponível: ${_filhoSelecionado!.quantidade.toStringAsFixed(_filhoSelecionado!.quantidade % 1 == 0 ? 0 : 2)} $unidade',
-                      style: const TextStyle(
-                          fontSize: 12, color: AppTheme.textHint),
+                      style: const TextStyle(fontSize: 12, color: AppTheme.textHint),
                     ),
                   ],
                 ],
                 const SizedBox(height: 12),
               ],
 
-              // ── Quantidade ─────────────────────────────────────────────────
+              // ── Quantidade ───────────────────────────────────────────────
               if (!m.especifico || filhos.isNotEmpty) ...[
                 TextFormField(
                   controller: _qtdCtrl,
@@ -1044,7 +1035,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                     final qtd =
                         double.tryParse((v ?? '').replaceAll(',', '.'));
                     if (qtd == null || qtd <= 0) return 'Quantidade inválida';
-                    // Valida contra o disponível do filho selecionado
                     if (m.especifico && _filhoSelecionado != null) {
                       if (qtd > _filhoSelecionado!.quantidade) {
                         return 'Máximo disponível: ${_filhoSelecionado!.quantidade.toStringAsFixed(2)} $unidade';
@@ -1060,13 +1050,23 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                   const SizedBox(height: 8),
                   Text(
                     'Disponível: ${disponivel.toStringAsFixed(disponivel % 1 == 0 ? 0 : 2)} $unidade',
-                    style: const TextStyle(
-                        fontSize: 12, color: AppTheme.textHint),
+                    style: const TextStyle(fontSize: 12, color: AppTheme.textHint),
                   ),
                 ],
+                const SizedBox(height: 12),
+
+                // ── Observação ─────────────────────────────────────────────
+                TextFormField(
+                  controller: _obsCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Observação (opcional)',
+                    isDense:   true,
+                  ),
+                  maxLines: 2,
+                ),
               ],
 
-              // ── Erro geral ─────────────────────────────────────────────────
+              // ── Erro geral ───────────────────────────────────────────────
               if (_erro != null) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -1095,556 +1095,16 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white),
                 )
-              : const Text('Solicitar'),
+              : const Text('Confirmar Saída'),
         ),
       ],
     );
   }
 }
 
-class _SolicitacoesTab extends StatefulWidget {
-  const _SolicitacoesTab();
-
-  @override
-  State<_SolicitacoesTab> createState() => _SolicitacoesTabState();
-}
-
-class _SolicitacoesTabState extends State<_SolicitacoesTab> {
-  final _buscaCtrl = TextEditingController();
-  static const int _itensPorPagina = 50;
-  int _paginaAtual = 0;
-
-  @override
-  void dispose() {
-    _buscaCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        const SizedBox(height: 16),
-        TextField(
-          controller: _buscaCtrl,
-          decoration: const InputDecoration(
-            hintText:   'Buscar por OS ou material...',
-            prefixIcon: Icon(Icons.search, color: AppTheme.textHint, size: 20),
-            isDense:    true,
-          ),
-          onChanged: (v) {
-            setState(() => _paginaAtual = 0);
-            context
-                .read<ProducaoProvider>()
-                .carregarSolicitacoes(busca: v.trim());
-          },
-        ),
-        const SizedBox(height: 16),
-        Expanded(
-          child: Consumer<ProducaoProvider>(
-            builder: (_, provider, __) {
-              if (provider.carregandoSolicitacoes) {
-                return const Center(
-                    child: CircularProgressIndicator(color: AppTheme.primary));
-              }
-              if (provider.solicitacoes.isEmpty) {
-                return const Center(
-                  child: Text(
-                    'Nenhuma solicitação em andamento',
-                    style: TextStyle(color: AppTheme.textHint),
-                  ),
-                );
-              }
-
-              final todos        = provider.solicitacoes;
-              final totalPaginas = (todos.length / _itensPorPagina).ceil();
-              final paginaSegura = _paginaAtual.clamp(0, (totalPaginas - 1).clamp(0, 999));
-              final inicio       = paginaSegura * _itensPorPagina;
-              final fim          = (inicio + _itensPorPagina).clamp(0, todos.length);
-              final paginados    = todos.sublist(inicio, fim);
-
-              return Column(
-                children: [
-                  Expanded(
-                    child: ListView.separated(
-                      itemCount: paginados.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) {
-                        final s = paginados[i];
-                        return _SolicitacaoCard(solicitacao: s);
-                      },
-                    ),
-                  ),
-                  if (totalPaginas > 1) ...[
-                    const SizedBox(height: 12),
-                    _BarraPaginacao(
-                      paginaAtual:     paginaSegura,
-                      totalPaginas:    totalPaginas,
-                      totalItens:      todos.length,
-                      itensPorPagina:  _itensPorPagina,
-                      onPaginaChanged: (p) => setState(() => _paginaAtual = p),
-                    ),
-                  ],
-                ],
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SolicitacaoCard extends StatelessWidget {
-  final SolicitacaoProducaoModel solicitacao;
-  const _SolicitacaoCard({required this.solicitacao});
-
-  @override
-  Widget build(BuildContext context) {
-    final s = solicitacao;
-
-    // Construir linha com identificador · medida · espessura
-    final detalhes = <String>[];
-    if (s.materialIdentificador != null && s.materialIdentificador!.isNotEmpty) {
-      detalhes.add(s.materialIdentificador!);
-    }
-    if (s.materialMedida != null) {
-      detalhes.add(s.materialMedida!);
-    }
-    if (s.materialEspessura != null) {
-      detalhes.add(s.materialEspessura!);
-    }
-
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: InkWell(
-        onTap: () => _abrirDetalhes(context),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppTheme.warning.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.pending_actions,
-                    color: AppTheme.warning, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'OS ${s.numeroOS}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      s.materialNome,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                    if (detalhes.isNotEmpty)
-                      Text(
-                        detalhes.join(' · '),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                    if (s.descricaoItem != null)
-                      Text(
-                        s.descricaoItem!,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.primary,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    'Reservado: ${s.quantidadeReservada.toStringAsFixed(s.quantidadeReservada % 1 == 0 ? 0 : 2)} ${s.materialUnidade ?? ''}',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  Text(
-                    'Usado: ${s.quantidadeUsada.toStringAsFixed(s.quantidadeUsada % 1 == 0 ? 0 : 2)} ${s.materialUnidade ?? ''}',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  Text(
-                    'Restante: ${s.saldoEmUso.toStringAsFixed(s.saldoEmUso % 1 == 0 ? 0 : 2)} ${s.materialUnidade ?? ''}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.warning,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _abrirDetalhes(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => _SolicitacaoDetalhesDialog(solicitacao: solicitacao),
-    );
-  }
-}
-
-class _SolicitacaoDetalhesDialog extends StatefulWidget {
-  final SolicitacaoProducaoModel solicitacao;
-  const _SolicitacaoDetalhesDialog({required this.solicitacao});
-
-  @override
-  State<_SolicitacaoDetalhesDialog> createState() =>
-      _SolicitacaoDetalhesDialogState();
-}
-
-class _SolicitacaoDetalhesDialogState
-    extends State<_SolicitacaoDetalhesDialog> {
-  final _qtdCtrl = TextEditingController();
-  final _obsCtrl = TextEditingController();
-  bool _processando = false;
-
-  @override
-  void dispose() {
-    _qtdCtrl.dispose();
-    _obsCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _registrarBaixa() async {
-    final qtd = double.tryParse(_qtdCtrl.text.replaceAll(',', '.'));
-    if (qtd == null || qtd <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Quantidade inválida'),
-          backgroundColor: AppTheme.error,
-        ),
-      );
-      return;
-    }
-
-    setState(() => _processando = true);
-
-    final ok = await context.read<ProducaoProvider>().registrarBaixa(
-          solicitacaoId: widget.solicitacao.id,
-          quantidade:    qtd,
-          observacao:    _obsCtrl.text.trim().isEmpty ? null : _obsCtrl.text.trim(),
-        );
-
-    if (!mounted) return;
-    setState(() => _processando = false);
-
-    if (ok) {
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Baixa registrada'),
-          backgroundColor: AppTheme.success,
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              context.read<ProducaoProvider>().erro ?? 'Erro ao registrar baixa'),
-          backgroundColor: AppTheme.error,
-        ),
-      );
-    }
-  }
-
-  Future<void> _finalizar() async {
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Finalizar solicitação'),
-        content: const Text(
-          'Deseja finalizar esta solicitação?\n\n'
-          'A quantidade restante será devolvida ao estoque.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Finalizar'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmar != true || !mounted) return;
-
-    setState(() => _processando = true);
-
-    final ok = await context
-        .read<ProducaoProvider>()
-        .finalizarSolicitacao(widget.solicitacao.id);
-
-    if (!mounted) return;
-    setState(() => _processando = false);
-
-    if (ok) {
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Solicitação finalizada'),
-          backgroundColor: AppTheme.success,
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              context.read<ProducaoProvider>().erro ?? 'Erro ao finalizar'),
-          backgroundColor: AppTheme.error,
-        ),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final s = widget.solicitacao;
-
-    // Construir linha com identificador · medida · espessura
-    final detalhes = <String>[];
-    if (s.materialIdentificador != null && s.materialIdentificador!.isNotEmpty) {
-      detalhes.add(s.materialIdentificador!);
-    }
-    if (s.materialMedida != null) {
-      detalhes.add(s.materialMedida!);
-    }
-    if (s.materialEspessura != null) {
-      detalhes.add(s.materialEspessura!);
-    }
-
-    return AlertDialog(
-      title: Text('OS ${s.numeroOS}'),
-      content: SizedBox(
-        width: 500,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              s.materialNome,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            if (detalhes.isNotEmpty) ...[
-              const SizedBox(height: 2),
-              Text(
-                detalhes.join(' · '),
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-            ],
-            if (s.descricaoItem != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                s.descricaoItem!,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppTheme.primary,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ],
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Reservado:',
-                          style: TextStyle(fontSize: 13)),
-                      Text(
-                        '${s.quantidadeReservada.toStringAsFixed(s.quantidadeReservada % 1 == 0 ? 0 : 2)} ${s.materialUnidade ?? ''}',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Usado:', style: TextStyle(fontSize: 13)),
-                      Text(
-                        '${s.quantidadeUsada.toStringAsFixed(s.quantidadeUsada % 1 == 0 ? 0 : 2)} ${s.materialUnidade ?? ''}',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Restante:',
-                          style: TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600)),
-                      Text(
-                        '${s.saldoEmUso.toStringAsFixed(s.saldoEmUso % 1 == 0 ? 0 : 2)} ${s.materialUnidade ?? ''}',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.warning,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Registrar baixa',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _qtdCtrl,
-              decoration: InputDecoration(
-                labelText: 'Quantidade',
-                isDense:   true,
-                suffixText: s.materialUnidade ?? '',
-              ),
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _obsCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Observação (opcional)',
-                isDense:   true,
-              ),
-              maxLines: 2,
-            ),
-            if (s.baixas.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              const Text(
-                'Histórico de baixas',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 150),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: s.baixas.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final b = s.baixas[i];
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${b.quantidade.toStringAsFixed(b.quantidade % 1 == 0 ? 0 : 2)} ${s.materialUnidade ?? ''}',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                if (b.observacao != null)
-                                  Text(
-                                    b.observacao!,
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: AppTheme.textSecondary,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          Text(
-                            '${b.criadoEm.day.toString().padLeft(2, '0')}/'
-                            '${b.criadoEm.month.toString().padLeft(2, '0')} '
-                            '${b.criadoEm.hour.toString().padLeft(2, '0')}:'
-                            '${b.criadoEm.minute.toString().padLeft(2, '0')}',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: AppTheme.textHint,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _processando ? null : () => Navigator.of(context).pop(),
-          child: const Text('Fechar'),
-        ),
-        if (context.watch<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() != 'COMPRAS') ...[
-          OutlinedButton(
-            onPressed: _processando ? null : _finalizar,
-            child: const Text('Finalizar'),
-          ),
-          FilledButton(
-            onPressed: _processando ? null : _registrarBaixa,
-            child: _processando
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
-                  )
-                : const Text('Registrar Baixa'),
-          ),
-        ],
-      ],
-    );
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// ABA HISTÓRICO
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _HistoricoTab extends StatefulWidget {
   const _HistoricoTab();
@@ -1672,7 +1132,7 @@ class _HistoricoTabState extends State<_HistoricoTab> {
         TextField(
           controller: _buscaCtrl,
           decoration: const InputDecoration(
-            hintText:   'Buscar por OS ou material...',
+            hintText:   'Buscar por OS ou usuário...',
             prefixIcon: Icon(Icons.search, color: AppTheme.textHint, size: 20),
             isDense:    true,
           ),
@@ -1694,7 +1154,7 @@ class _HistoricoTabState extends State<_HistoricoTab> {
               if (provider.historico.isEmpty) {
                 return const Center(
                   child: Text(
-                    'Nenhuma solicitação finalizada',
+                    'Nenhuma saída registrada',
                     style: TextStyle(color: AppTheme.textHint),
                   ),
                 );
@@ -1739,11 +1199,14 @@ class _HistoricoTabState extends State<_HistoricoTab> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CARD DO HISTÓRICO
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _HistoricoCard extends StatelessWidget {
   final SolicitacaoProducaoModel solicitacao;
   const _HistoricoCard({required this.solicitacao});
 
-  // Converte UTC → GMT-3 (horário de Brasília)
   static DateTime _toBrasilia(DateTime utc) =>
       utc.toUtc().subtract(const Duration(hours: 3));
 
@@ -1791,26 +1254,24 @@ class _HistoricoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = solicitacao;
-    final dataFimUtc = s.finalizadoEm ?? s.atualizadoEm;
-    final dataFim    = _toBrasilia(dataFimUtc);
-    final dataStr = '${dataFim.day.toString().padLeft(2, '0')}/'
-            '${dataFim.month.toString().padLeft(2, '0')}/'
-            '${dataFim.year} '
-            '${dataFim.hour.toString().padLeft(2, '0')}:'
-            '${dataFim.minute.toString().padLeft(2, '0')}';
+    final s      = solicitacao;
+    final data   = _toBrasilia(s.finalizadoEm ?? s.atualizadoEm);
+    final dataStr = '${data.day.toString().padLeft(2, '0')}/'
+        '${data.month.toString().padLeft(2, '0')}/'
+        '${data.year} '
+        '${data.hour.toString().padLeft(2, '0')}:'
+        '${data.minute.toString().padLeft(2, '0')}';
 
-    // Construir linha com identificador · medida · espessura
     final detalhes = <String>[];
     if (s.materialIdentificador != null && s.materialIdentificador!.isNotEmpty) {
       detalhes.add(s.materialIdentificador!);
     }
-    if (s.materialMedida != null) {
-      detalhes.add(s.materialMedida!);
-    }
-    if (s.materialEspessura != null) {
-      detalhes.add(s.materialEspessura!);
-    }
+    if (s.materialMedida != null) detalhes.add(s.materialMedida!);
+    if (s.materialEspessura != null) detalhes.add(s.materialEspessura!);
+
+    // Verificar role para mostrar botão de exclusão
+    final role = context.watch<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
+    final podeExcluir = role == 'ADMIN' || role == 'GERENTE';
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -1864,6 +1325,15 @@ class _HistoricoCard extends StatelessWidget {
                         fontStyle: FontStyle.italic,
                       ),
                     ),
+                  if (s.baixas.isNotEmpty && s.baixas.last.observacao != null)
+                    Text(
+                      s.baixas.last.observacao!,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
                   Text(
                     'Usuário: ${s.usuarioNome}',
                     style: const TextStyle(
@@ -1878,12 +1348,12 @@ class _HistoricoCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  'Usado: ${s.quantidadeUsada.toStringAsFixed(s.quantidadeUsada % 1 == 0 ? 0 : 2)} ${s.materialUnidade ?? ''}',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                Text(
-                  'Devolvido: ${(s.quantidadeReservada - s.quantidadeUsada).toStringAsFixed((s.quantidadeReservada - s.quantidadeUsada) % 1 == 0 ? 0 : 2)} ${s.materialUnidade ?? ''}',
-                  style: const TextStyle(fontSize: 12),
+                  '${s.quantidadeUsada.toStringAsFixed(s.quantidadeUsada % 1 == 0 ? 0 : 2)} ${s.materialUnidade ?? ''}',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
                 ),
                 Text(
                   dataStr,
@@ -1892,29 +1362,31 @@ class _HistoricoCard extends StatelessWidget {
                     color: AppTheme.textHint,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Tooltip(
-                  message: 'Excluir registro',
-                  child: InkWell(
-                    onTap: () => _confirmarExclusao(context),
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.error.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: AppTheme.error.withValues(alpha: 0.25),
+                if (podeExcluir) ...[
+                  const SizedBox(height: 4),
+                  Tooltip(
+                    message: 'Excluir registro',
+                    child: InkWell(
+                      onTap: () => _confirmarExclusao(context),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: AppTheme.error.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: AppTheme.error.withValues(alpha: 0.25),
+                          ),
                         ),
-                      ),
-                      child: const Icon(
-                        Icons.delete_outline,
-                        size: 16,
-                        color: AppTheme.error,
+                        child: const Icon(
+                          Icons.delete_outline,
+                          size: 16,
+                          color: AppTheme.error,
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
               ],
             ),
           ],
@@ -1923,6 +1395,10 @@ class _HistoricoCard extends StatelessWidget {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAGINAÇÃO
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _BarraPaginacao extends StatelessWidget {
   final int paginaAtual;
@@ -2024,7 +1500,7 @@ class _BotaoPagina extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        onTap: enabled ? onTap: null,
+        onTap: enabled ? onTap : null,
         borderRadius: BorderRadius.circular(6),
         child: Container(
           width: 32,

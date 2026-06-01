@@ -193,23 +193,24 @@ function drawMovTableHeader(doc, y, comPreco) {
 
 function buildCols(comPreco) {
   if (comPreco) {
-    const unitW  = 80;
+    const qtdW   = 50;
+    const unitW  = 72;
     const totalW = 72;
-    const dataW  = 60;
-    const matW   = CONTENT_W - unitW - totalW - dataW;
+    const dataW  = 55;
+    const matW   = CONTENT_W - qtdW - unitW - totalW - dataW;
     return [
-      { label: 'Material',   w: matW,   align: 'left'   },
-      { label: 'Qtd.',       w: unitW,  align: 'center' },
-      { label: 'Unit.',      w: totalW, align: 'right'  },
-      { label: 'Total',      w: totalW, align: 'right'  },
-      { label: 'Data',       w: dataW,  align: 'right'  },
+      { label: 'Material', w: matW,   align: 'left'   },
+      { label: 'Qtd.',     w: qtdW,   align: 'center' },
+      { label: 'Unit.',    w: unitW,  align: 'right'  },
+      { label: 'Total',    w: totalW, align: 'right'  },
+      { label: 'Data',     w: dataW,  align: 'right'  },
     ];
   } else {
     const qtdW  = 72;
     const dataW = 60;
     const matW  = CONTENT_W - qtdW - dataW;
     return [
-      { label: 'Material', w: matW,  align: 'left'  },
+      { label: 'Material', w: matW,  align: 'left'   },
       { label: 'Qtd.',     w: qtdW,  align: 'center' },
       { label: 'Data',     w: dataW, align: 'right'  },
     ];
@@ -222,32 +223,44 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
   const FOOTER_RESERVE = 50;
   const ROW_PAD_V      = 5;
   const FONT_SZ        = 8.5;
+  const SUB_SZ         = 7;
+  const LINE_SUB       = 10; // altura de cada sublinha
 
-  const cols   = buildCols(comPreco);
-  const nomeH  = doc.heightOfString(item.material, { width: cols[0].w - 8, fontSize: FONT_SZ });
-  const rowH   = Math.max(22, nomeH + ROW_PAD_V * 2);
+  const cols  = buildCols(comPreco);
+  const colW0 = cols[0].w - 8;
+
+  // Monta as sublinhas abaixo do nome
+  const sublines = [];
+  const partes = [item.medida, item.espessura].filter(Boolean);
+  if (partes.length > 0) sublines.push(partes.join(' \u00b7 '));
+  if (item.unidade)      sublines.push(item.unidade);
+  if (item.observacao)   sublines.push(`Obs: ${item.observacao}`);
+
+  const nomeH = doc.heightOfString(item.material || '\u2014', { width: colW0, fontSize: FONT_SZ });
+  const innerH = nomeH + sublines.length * LINE_SUB;
+  const rowH   = Math.max(24, innerH + ROW_PAD_V * 2);
 
   if (y + rowH > pageH - FOOTER_RESERVE) return null; // sinaliza nova página
 
   if (idx % 2 === 0) fillRect(doc, MARGIN, y, CONTENT_W, rowH, C.bgRow);
 
-  const tyText = y + ROW_PAD_V;
+  const tyText   = y + ROW_PAD_V;
   const tySingle = y + (rowH - FONT_SZ) / 2;
 
   let cx = MARGIN;
 
-  // Material + unidade
+  // Nome do material
   doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
-     .text(item.material || '—', cx + 4, tyText, { width: cols[0].w - 8, lineBreak: true });
-  if (item.unidade) {
-    const unidadeY = tyText + doc.heightOfString(item.material, { width: cols[0].w - 8, fontSize: FONT_SZ });
-    doc.font('Helvetica').fontSize(7).fillColor(C.lightGray)
-       .text(item.unidade, cx + 4, unidadeY, { width: cols[0].w - 8, lineBreak: false });
+     .text(item.material || '\u2014', cx + 4, tyText, { width: colW0, lineBreak: false });
+
+  // Sublinhas: medida\u00b7espessura, unidade, obs
+  let subY = tyText + nomeH + 1;
+  for (const sub of sublines) {
+    doc.font('Helvetica').fontSize(SUB_SZ).fillColor(C.lightGray)
+       .text(sub, cx + 4, subY, { width: colW0, lineBreak: false });
+    subY += LINE_SUB;
   }
-  if (item.observacao) {
-    doc.font('Helvetica').fontSize(7).fillColor(C.lightGray)
-       .text(`Obs: ${item.observacao}`, cx + 4, tyText + rowH - 14, { width: cols[0].w - 8, lineBreak: false });
-  }
+
   cx += cols[0].w;
 
   if (comPreco) {

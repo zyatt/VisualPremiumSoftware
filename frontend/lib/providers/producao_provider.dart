@@ -18,11 +18,6 @@ class ProducaoProvider with ChangeNotifier {
   bool _carregandoMateriais = false;
   bool get carregandoMateriais => _carregandoMateriais;
 
-  List<SolicitacaoProducaoModel> _solicitacoes = [];
-  List<SolicitacaoProducaoModel> get solicitacoes => _solicitacoes;
-  bool _carregandoSolicitacoes = false;
-  bool get carregandoSolicitacoes => _carregandoSolicitacoes;
-
   List<SolicitacaoProducaoModel> _historico = [];
   List<SolicitacaoProducaoModel> get historico => _historico;
   bool _carregandoHistorico = false;
@@ -72,24 +67,6 @@ class ProducaoProvider with ChangeNotifier {
     }
   }
 
-  Future<void> carregarSolicitacoes({String? busca}) async {
-    _carregandoSolicitacoes = true;
-    _erro = null;
-    notifyListeners();
-
-    try {
-      _solicitacoes = await _repo.listarSolicitacoes(
-        status: ['ABERTA', 'EM_USO'],
-        busca: busca,
-      );
-    } catch (e) {
-      _erro = _mensagemErro(e);
-    } finally {
-      _carregandoSolicitacoes = false;
-      notifyListeners();
-    }
-  }
-
   Future<void> carregarHistorico({String? busca}) async {
     _carregandoHistorico = true;
     _erro = null;
@@ -120,7 +97,7 @@ class ProducaoProvider with ChangeNotifier {
         numeroOS: numeroOS,
       );
       await carregarMateriais();
-      await carregarSolicitacoes();
+      await carregarHistorico();
       return true;
     } catch (e) {
       _erro = _mensagemErro(e);
@@ -142,7 +119,6 @@ class ProducaoProvider with ChangeNotifier {
         observacao: observacao,
       );
       await carregarMateriais();
-      await carregarSolicitacoes();
       return true;
     } catch (e) {
       _erro = _mensagemErro(e);
@@ -156,7 +132,6 @@ class ProducaoProvider with ChangeNotifier {
     try {
       await _repo.finalizarSolicitacao(solicitacaoId);
       await carregarMateriais();
-      await carregarSolicitacoes();
       await carregarHistorico();
       return true;
     } catch (e) {
