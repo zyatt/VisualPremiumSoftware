@@ -14,7 +14,7 @@ import 'providers/ordem_compra_provider.dart';
 import 'providers/historico_provider.dart';
 import 'providers/relatorio_os_provider.dart';
 import 'providers/producao_provider.dart';
-//import 'utils/update_checker.dart';
+import 'widgets/update_checker_widget.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,25 +45,25 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => RelatorioOSProvider()),
         ChangeNotifierProvider(create: (_) => ProducaoProvider()),
       ],
-      child: MaterialApp.router(
-        title: 'Visual Premium',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light,
-        darkTheme: AppTheme.dark,
-        themeMode: ThemeMode.dark,
-        // Passa a mesma instância do provider para que o router possa
-        // usar refreshListenable e o redirect global funcione corretamente.
-        routerConfig: AppRouter.buildRouter(usuarioProvider),
-        localizationsDelegates: const [
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        supportedLocales: const [
-          Locale('pt', 'BR'),
-          Locale('en', 'US'),
-        ],
-        locale: const Locale('pt', 'BR'),
+      child: UpdateChecker(
+        child: MaterialApp.router(
+          title: 'Visual Premium',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          themeMode: ThemeMode.dark,
+          routerConfig: AppRouter.buildRouter(usuarioProvider),
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [
+            Locale('pt', 'BR'),
+            Locale('en', 'US'),
+          ],
+          locale: const Locale('pt', 'BR'),
+        ),
       ),
     );
   }
