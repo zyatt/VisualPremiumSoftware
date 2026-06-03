@@ -374,224 +374,50 @@ function drawFooter(doc, pageNum, empresaNome = 'Visual Premium') {
      .text(`Página ${pageNum}`, MARGIN, y, { width: CONTENT_W, align: 'right' });
 }
 
-// ─── Gerador de PDF de Orçamento (dados do cliente, sem ID do banco) ──────────
+// ─── Gerador de PDF de Orçamento — Layout Matricial (espelha o editor Flutter) ─
 
 /**
- * Desenha a tabela de comparação de um único item do orçamento.
- * Mostra todos os fornecedores vinculados, destaca o menor preço,
- * e exibe o total por fornecedor.
- *
- * Retorna o novo valor de `y` após o bloco.
+ * Monta a lista ordenada de todos os IDs de fornecedores presentes nos itens.
+ * Retorna array de { fornecedorId, fornecedorNome }.
  */
-function drawItemComparacao(doc, item, idx, startY) {
-  const FOOTER_RESERVE = 120;
-  const FONT_SZ        = 7;
-  const ROW_H          = 20;
-  const HEADER_H       = 22;
-  const COL_HDR_H      = 13;
-  const BLOCK_PAD      = 10;
-
-  const qtd       = item.quantidade ?? 1;
-  const usarM2    = item.modoOrcamento === 'metroQuadrado';
-  const descricao = item.descricao?.trim() || null;
-  const unidade   = item.materialUnidade ?? '';
-
-  // Monta texto legível de quantidade
-  // Ex: "Quantidade: 3,50 m²" ou "Quantidade: 2 unidades"
-  const unidadeLabel = usarM2
-    ? 'm²'
-    : (unidade || 'unidade' + (qtd !== 1 ? 's' : ''));
-  const qtdTexto = `Quantidade: ${formatNumberSmart(qtd)} ${unidadeLabel}`;
-
-  // Normaliza a lista de fornecedores com seus preços
-  const precosMap = item.precos ?? {};
-  const fornList  = Object.entries(precosMap).map(([fId, pf]) => {
-    const preco   = pf.preco   ?? null;
-    const precoM2 = pf.precoM2 ?? null;
-    // usa m² se o item está em modo m², ou se só tem preço m² cadastrado
-    const usarM2f    = usarM2 || (item.modoOrcamento == null && precoM2 != null && precoM2 > 0 && !preco);
-    const precoBase  = usarM2f ? precoM2 : preco;
-    const precoTotal = precoBase != null ? precoBase * qtd : null;
-    return {
-      fornecedorId:   fId,
-      fornecedorNome: pf.fornecedorNome ?? `Fornecedor ${fId}`,
-      preco,
-      precoM2,
-      precoTotal,
-    };
-  });
-
-  // Menor preço total entre os que têm preço informado
-  const comPreco   = fornList.filter((f) => f.precoTotal != null);
-  const menorTotal = comPreco.length > 0 ? Math.min(...comPreco.map((f) => f.precoTotal)) : null;
-
-  // Ordena: menor preço primeiro, sem preço no final
-  fornList.sort((a, b) => {
-    if (a.precoTotal == null && b.precoTotal == null) return 0;
-    if (a.precoTotal == null) return 1;
-    if (b.precoTotal == null) return -1;
-    return a.precoTotal - b.precoTotal;
-  });
-
-  // Totais por fornecedor (retornados para o acumulador global)
-  const totaisForn = {}; // { fornecedorNome: total }
-  fornList.forEach((f) => {
-    if (f.precoTotal != null) totaisForn[f.fornecedorNome] = f.precoTotal;
-  });
-
-  // Estima altura do bloco
-  const descH  = descricao ? 9 : 0;
-  const nForn  = Math.max(fornList.length, 1);
-  const blockH = BLOCK_PAD + HEADER_H + descH + COL_HDR_H + nForn * ROW_H + BLOCK_PAD;
-
-  // Quebra de página se necessário
-  let y = startY;
-  if (y + blockH > PAGE_H - FOOTER_RESERVE) {
-    drawFooter(doc, doc.bufferedPageRange().count);
-    doc.addPage();
-    y = MARGIN + 10;
-  }
-
-  // ── Faixa do material ─────────────────────────────────────────────────
-  fillRect(doc, MARGIN, y, CONTENT_W, HEADER_H + descH, C.bgHeader);
-  fillRect(doc, MARGIN, y, 3, HEADER_H + descH, C.accent);
-
-  // Nome do material
-  doc.font('Helvetica-Bold').fontSize(8).fillColor(C.black)
-     .text(item.materialNome, MARGIN + 10, y + 5, { width: 300, lineBreak: false });
-
-  // Quantidade — texto completo, legível, alinhado à direita da faixa
-  doc.font('Helvetica').fontSize(7).fillColor(C.gray)
-     .text(qtdTexto, MARGIN + 10, y + 13, { width: CONTENT_W - 20, align: 'right', lineBreak: false });
-
-  // Descrição (material específico) — abaixo do nome
-  if (descricao) {
-    doc.font('Helvetica').fontSize(6.5).fillColor(C.gray)
-       .text(descricao, MARGIN + 10, y + HEADER_H - 8, { width: CONTENT_W - 20, lineBreak: false });
-  }
-
-  y += HEADER_H + descH;
-
-  // ── Cabeçalho das colunas ─────────────────────────────────────────────
-  // Colunas: Fornecedor | Preço Unit. | Preço M² | Total | Status
-  const colNome   = { x: MARGIN + 6,   w: 195 };
-  const colPUnit  = { x: MARGIN + 205, w: 85  };
-  const colPM2    = { x: MARGIN + 293, w: 85  };
-  const colTotal  = { x: MARGIN + 381, w: 90  };
-  const colStatus = { x: MARGIN + 474, w: 49  };
-
-  fillRect(doc, MARGIN, y, CONTENT_W, COL_HDR_H, '#EBEBEB');
-  doc.font('Helvetica-Bold').fontSize(6).fillColor(C.gray);
-  doc.text('FORNECEDOR',  colNome.x,   y + 3, { width: colNome.w,   lineBreak: false });
-  doc.text('PREÇO UNIT.', colPUnit.x,  y + 3, { width: colPUnit.w,  align: 'center', lineBreak: false });
-  doc.text('PREÇO M²',    colPM2.x,    y + 3, { width: colPM2.w,    align: 'center', lineBreak: false });
-  doc.text('TOTAL',       colTotal.x,  y + 3, { width: colTotal.w,  align: 'right',  lineBreak: false });
-  y += COL_HDR_H;
-
-  // ── Linhas de fornecedores ────────────────────────────────────────────
-  if (fornList.length === 0) {
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.lightGray)
-       .text('Nenhum fornecedor vinculado.', MARGIN + 6, y + 4, { width: CONTENT_W - 12, lineBreak: false });
-    y += ROW_H;
-  } else {
-    fornList.forEach((forn) => {
-      const isMenor = forn.precoTotal != null && forn.precoTotal === menorTotal;
-
-      // Fundo branco para todas as linhas
-      fillRect(doc, MARGIN, y, CONTENT_W, ROW_H, C.white);
-
-      const ty = y + (ROW_H - FONT_SZ) / 2;
-
-      // Nome do fornecedor
-      doc.font(isMenor ? 'Helvetica-Bold' : 'Helvetica').fontSize(FONT_SZ).fillColor(C.black)
-         .text(forn.fornecedorNome, colNome.x, ty, { width: colNome.w, lineBreak: false });
-
-      // Preço unitário
-      doc.font('Helvetica').fontSize(FONT_SZ)
-         .fillColor(forn.preco != null ? C.black : C.lightGray)
-         .text(forn.preco != null ? formatCurrency(forn.preco) : '—',
-               colPUnit.x, ty, { width: colPUnit.w, align: 'center', lineBreak: false });
-
-      // Preço M²
-      doc.font('Helvetica').fontSize(FONT_SZ)
-         .fillColor(forn.precoM2 != null ? C.black : C.lightGray)
-         .text(forn.precoM2 != null ? formatCurrency(forn.precoM2) : '—',
-               colPM2.x, ty, { width: colPM2.w, align: 'center', lineBreak: false });
-
-      // Total — verde se menor, preto normal, cinza se sem preço
-      const totalColor = isMenor ? C.statusOk : (forn.precoTotal != null ? C.black : C.lightGray);
-      doc.font(isMenor ? 'Helvetica-Bold' : 'Helvetica').fontSize(FONT_SZ).fillColor(totalColor)
-         .text(forn.precoTotal != null ? formatCurrency(forn.precoTotal) : '—',
-               colTotal.x, ty, { width: colTotal.w, align: 'right', lineBreak: false });
-
-      // Coluna STATUS — badge "✓ MENOR" dedicada, sem risco de corte
-      if (isMenor) {
-        const badgeX = colStatus.x + 2;
-        const badgeW = colStatus.w - 4;
-        const badgeH = 11;
-        const badgeY = y + (ROW_H - badgeH) / 2;
-        fillRect(doc, badgeX, badgeY, badgeW, badgeH, '#D1FAE5');
-        doc.rect(badgeX, badgeY, badgeW, badgeH)
-           .strokeColor('#6EE7B7').lineWidth(0.4).stroke();
-        doc.font('Helvetica-Bold').fontSize(5.5).fillColor(C.statusOk)
-           .text('MENOR', badgeX, badgeY + 2.5, { width: badgeW, align: 'center', lineBreak: false });
-      }
-
-      // Linha divisória sutil
-      doc.strokeColor(C.divider).lineWidth(0.3)
-         .moveTo(MARGIN, y + ROW_H).lineTo(PAGE_W - MARGIN, y + ROW_H).stroke();
-
-      y += ROW_H;
+function coletarFornecedores(itens) {
+  const map = new Map(); // id -> nome
+  itens.forEach((item) => {
+    Object.entries(item.precos ?? {}).forEach(([fId, pf]) => {
+      if (!map.has(fId)) map.set(fId, pf.fornecedorNome ?? `Fornecedor ${fId}`);
     });
-
-    // ── Linha de médias ───────────────────────────────────────────────────
-    const comPrecoUnit = fornList.filter((f) => f.preco   != null);
-    const comPrecoM2   = fornList.filter((f) => f.precoM2 != null);
-    const comTotal     = fornList.filter((f) => f.precoTotal != null);
-
-    const mediaUnit  = comPrecoUnit.length > 0 ? comPrecoUnit.reduce((s, f) => s + f.preco,   0) / comPrecoUnit.length : null;
-    const mediaM2    = comPrecoM2.length   > 0 ? comPrecoM2.reduce((s, f)   => s + f.precoM2, 0) / comPrecoM2.length   : null;
-    const mediaTotal = comTotal.length     > 0 ? comTotal.reduce((s, f)     => s + f.precoTotal, 0) / comTotal.length   : null;
-
-    const MEDIA_H = 14;
-    fillRect(doc, MARGIN, y, CONTENT_W, MEDIA_H, '#FFF7ED');
-
-    // Borda superior sutil em laranja
-    doc.strokeColor('#FDBA74').lineWidth(0.4)
-       .moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).stroke();
-
-    const tym = y + (MEDIA_H - FONT_SZ) / 2;
-
-    doc.font('Helvetica-Bold').fontSize(6).fillColor('#EA580C')
-       .text('MÉDIA', colNome.x, tym, { width: colNome.w, lineBreak: false });
-
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(mediaUnit != null ? '#EA580C' : C.lightGray)
-       .text(mediaUnit != null ? formatCurrency(mediaUnit) : '—',
-             colPUnit.x, tym, { width: colPUnit.w, align: 'center', lineBreak: false });
-
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(mediaM2 != null ? '#EA580C' : C.lightGray)
-       .text(mediaM2 != null ? formatCurrency(mediaM2) : '—',
-             colPM2.x, tym, { width: colPM2.w, align: 'center', lineBreak: false });
-
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(mediaTotal != null ? '#EA580C' : C.lightGray)
-       .text(mediaTotal != null ? formatCurrency(mediaTotal) : '—',
-             colTotal.x, tym, { width: colTotal.w, align: 'right', lineBreak: false });
-
-    doc.strokeColor('#FDBA74').lineWidth(0.4)
-       .moveTo(MARGIN, y + MEDIA_H).lineTo(PAGE_W - MARGIN, y + MEDIA_H).stroke();
-
-    y += MEDIA_H;
-  }
-
-  y += BLOCK_PAD;
-  return { y, totaisForn };
+  });
+  return Array.from(map.entries()).map(([id, nome]) => ({ id, nome }));
 }
 
+/**
+ * Para cada item, obtém o preço efetivo de um fornecedor (unitário ou m²).
+ */
+function precoEfetivo(pf, usarM2) {
+  if (!pf) return null;
+  if (usarM2) return pf.precoM2 ?? pf.preco ?? null;
+  return pf.preco ?? null;
+}
+
+/**
+ * Desenha a tabela matricial do orçamento (materiais × fornecedores).
+ * Orientação landscape: gira para A4 wide quando há muitos fornecedores.
+ */
 async function gerarPdfDeItens(dados) {
   const { titulo = 'Orçamento', itens = [] } = dados;
 
   return new Promise((resolve, reject) => {
-    const doc    = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true });
+    // Decidir orientação: landscape se > 3 fornecedores para ter espaço
+    const fornecedores = coletarFornecedores(itens);
+    const useLandscape = fornecedores.length > 3;
+
+    const pageSize   = useLandscape ? [841.89, 595.28] : [595.28, 841.89];
+    const pW         = pageSize[0];
+    const pH         = pageSize[1];
+    const margin     = 36;
+    const contentW   = pW - margin * 2;
+
+    const doc    = new PDFDocument({ size: pageSize, margin: 0, bufferPages: true });
     const chunks = [];
 
     doc.on('data',  (chunk) => chunks.push(chunk));
@@ -599,164 +425,440 @@ async function gerarPdfDeItens(dados) {
     doc.on('error', reject);
 
     const logoPath = path.join(__dirname, '../../../frontend/assets/images/logoPreta.png');
+    const orcFake  = { _isOrdemCompra: false, logoEmpresa: 'PREMIUM', empresa: 'VISUAL PREMIUM' };
 
-    const orcFake = { _isOrdemCompra: false, logoEmpresa: 'PREMIUM', empresa: 'VISUAL PREMIUM' };
-    drawPageHeader(doc, orcFake, logoPath);
-    let y = 90;
+    // ── helpers locais que respeitam as dimensões da página ─────────────
+    const fillR = (x, y, w, h, color) => doc.fillColor(color).rect(x, y, w, h).fill();
+    const hlineL = (y, color = C.divider, lw = 0.5) => {
+      doc.strokeColor(color).lineWidth(lw)
+         .moveTo(margin, y).lineTo(pW - margin, y).stroke();
+    };
 
-    if (itens.length === 0) {
-      drawSectionHeader(doc, y, 'Comparativo de Preços — 0 materiais');
-      y += 26;
-      doc.font('Helvetica').fontSize(9).fillColor(C.gray)
-         .text('Nenhum item neste orçamento.', MARGIN, y, { width: CONTENT_W, align: 'center' });
-      y += 20;
-    } else {
-      const totalMateriais = itens.length;
+    // ── Cabeçalho da página (versão simplificada para landscape) ────────
+    const drawHeader = () => {
+      const H = 70;
+      fillR(0, 0, pW, H, C.white);
+      fillR(0, 0, pW, 4, C.accent);
 
-      // ── Pré-calcula totais por fornecedor (primeira passagem, sem desenhar) ───
-      // Estrutura: { nome: { total, materiaisVinculados, materiaisComPreco } }
-      const totaisMap = {};
-      itens.forEach((item) => {
-        const qtd    = item.quantidade ?? 1;
-        const usarM2 = item.modoOrcamento === 'metroQuadrado';
-        Object.entries(item.precos ?? {}).forEach(([, pf]) => {
-          const nome = pf.fornecedorNome ?? 'Desconhecido';
-          if (!totaisMap[nome]) {
-            totaisMap[nome] = { total: 0, materiaisVinculados: 0, materiaisComPreco: 0 };
-          }
-          totaisMap[nome].materiaisVinculados += 1;
-          const preco   = pf.preco   ?? null;
-          const precoM2 = pf.precoM2 ?? null;
-          const usarM2f = usarM2 || (item.modoOrcamento == null && precoM2 != null && precoM2 > 0 && !preco);
-          const precoBase = usarM2f ? precoM2 : preco;
-          if (precoBase != null) {
-            totaisMap[nome].total            += precoBase * qtd;
-            totaisMap[nome].materiaisComPreco += 1;
-          }
-        });
-      });
-
-      const todosEntries = Object.entries(totaisMap)
-        .sort((a, b) => {
-          // sem nenhum preço vai pro final; dentro do grupo ordena por total
-          if (a[1].total === 0 && b[1].total === 0) return 0;
-          if (a[1].total === 0) return 1;
-          if (b[1].total === 0) return -1;
-          return a[1].total - b[1].total;
-        });
-
-      // ── Seção de Totais por Fornecedor (no topo) ─────────────────────────────
-      if (todosEntries.length > 0) {
-        const rowH       = 20;
-        const tableLines = todosEntries.length;
-        const tableH     = 26 + 13 + tableLines * rowH + 10;
-
-        if (y + tableH > PAGE_H - 60) {
-          drawFooter(doc, doc.bufferedPageRange().count);
-          doc.addPage();
-          y = MARGIN + 10;
-        }
-
-        drawSectionHeader(doc, y, 'Totais por Fornecedor — resumo comparativo');
-        y += 26;
-
-        // Colunas: Fornecedor | Materiais | Total Acumulado | Status
-        const colForn  = { x: MARGIN + 8,   w: 220 };
-        const colMats  = { x: MARGIN + 232,  w: 110 };
-        const colTotal = { x: MARGIN + 346,  w: 130 };
-        const colBadge = { x: MARGIN + 479,  w: 44  };
-
-        // Cabeçalho
-        fillRect(doc, MARGIN, y, CONTENT_W, 13, '#EBEBEB');
-        doc.font('Helvetica-Bold').fontSize(6).fillColor(C.gray);
-        doc.text('FORNECEDOR',       colForn.x,  y + 3, { width: colForn.w,  lineBreak: false });
-        doc.text('MATERIAIS',        colMats.x,  y + 3, { width: colMats.w,  align: 'center', lineBreak: false });
-        doc.text('TOTAL ACUMULADO',  colTotal.x, y + 3, { width: colTotal.w, align: 'right',  lineBreak: false });
-        y += 13;
-
-        const menorTotalGeral = todosEntries.find(([, v]) => v.total > 0)?.[1]?.total ?? null;
-
-        todosEntries.forEach(([nome, info], ri) => {
-          const { total, materiaisVinculados, materiaisComPreco } = info;
-          const isMenor      = total > 0 && total === menorTotalGeral;
-          const cobreTotal   = materiaisVinculados >= totalMateriais;
-          const temPrecTodos = materiaisComPreco   >= totalMateriais;
-
-          if (ri % 2 === 0) fillRect(doc, MARGIN, y, CONTENT_W, rowH, C.bgRow);
-
-          const ty = y + (rowH - 7) / 2;
-
-          // Nome do fornecedor
-          doc.font(isMenor ? 'Helvetica-Bold' : 'Helvetica').fontSize(7)
-             .fillColor(isMenor ? C.statusOk : C.black)
-             .text(nome, colForn.x, ty, { width: colForn.w, lineBreak: false });
-
-          // ── Coluna Materiais: "X/Total" + sub-label se incompleto ────────
-          const matsLabel = `${materiaisVinculados}/${totalMateriais}`;
-          const matsColor = cobreTotal
-            ? (temPrecTodos ? C.black : C.statusWarn)
-            : C.statusErr;
-
-          doc.font('Helvetica-Bold').fontSize(7).fillColor(matsColor)
-             .text(matsLabel, colMats.x, cobreTotal ? ty : ty - 2,
-                   { width: colMats.w, align: 'center', lineBreak: false });
-
-          if (!cobreTotal) {
-            doc.font('Helvetica').fontSize(5.5).fillColor(C.statusErr)
-               .text('incompleto', colMats.x, ty + 6,
-                     { width: colMats.w, align: 'center', lineBreak: false });
-          } else if (!temPrecTodos) {
-            const semPreco = materiaisVinculados - materiaisComPreco;
-            doc.font('Helvetica').fontSize(5.5).fillColor(C.statusWarn)
-               .text(`${semPreco} sem preço`, colMats.x, ty + 6,
-                     { width: colMats.w, align: 'center', lineBreak: false });
-          }
-
-          // Total acumulado
-          doc.font('Helvetica-Bold').fontSize(7)
-             .fillColor(isMenor ? C.statusOk : (total > 0 ? C.black : C.lightGray))
-             .text(total > 0 ? formatCurrency(total) : '—',
-                   colTotal.x, ty, { width: colTotal.w, align: 'right', lineBreak: false });
-
-          // Badge "MENOR TOTAL"
-          if (isMenor) {
-            const bx = colBadge.x + 2;
-            const bw = colBadge.w - 4;
-            const bh = 11;
-            const by = y + (rowH - bh) / 2;
-            fillRect(doc, bx, by, bw, bh, '#D1FAE5');
-            doc.rect(bx, by, bw, bh).strokeColor('#6EE7B7').lineWidth(0.4).stroke();
-            doc.font('Helvetica-Bold').fontSize(5.5).fillColor(C.statusOk)
-               .text('MENOR TOTAL', bx, by + 2.5, { width: bw, align: 'center', lineBreak: false });
-          }
-
-          doc.strokeColor(C.divider).lineWidth(0.3)
-             .moveTo(MARGIN, y + rowH).lineTo(PAGE_W - MARGIN, y + rowH).stroke();
-          y += rowH;
-        });
-
-        y += 14;
-        hline(doc, y, '#D1D5DB', 0.8);
-        y += 14;
+      const logoW = 90;
+      try {
+        doc.image(logoPath, margin, 14, { height: 38, fit: [logoW, 38] });
+      } catch (_) {
+        doc.font('Helvetica-Bold').fontSize(13).fillColor(C.accent)
+           .text('Visual Premium', margin, 22, { lineBreak: false });
       }
 
-      // ── Seção dos itens individuais ───────────────────────────────────────────
-      drawSectionHeader(doc, y, `Comparativo de Preços — ${itens.length} ${itens.length === 1 ? 'material' : 'materiais'}`);
-      y += 26;
+      // Título do orçamento
+      doc.font('Helvetica-Bold').fontSize(13).fillColor(C.accent)
+         .text('ORÇAMENTO', margin + logoW + 12, 20, { width: contentW - logoW - 12, align: 'right', lineBreak: false });
+      doc.font('Helvetica').fontSize(7.5).fillColor(C.lightGray)
+         .text(`${titulo}   •   Emitido em ${formatDate(new Date())}`,
+               margin + logoW + 12, 38, { width: contentW - logoW - 12, align: 'right', lineBreak: false });
 
-      itens.forEach((item, idx) => {
-        const result = drawItemComparacao(doc, item, idx, y);
-        y = result.y;
+      doc.strokeColor(C.divider).lineWidth(1)
+         .moveTo(0, H).lineTo(pW, H).stroke();
+      return H + 8;
+    };
+
+    const drawFooterL = (pageNum) => {
+      const y = pH - 30;
+      hlineL(y - 6);
+      doc.font('Helvetica').fontSize(6.5).fillColor(C.lightGray)
+         .text(`Gerado em ${formatDate(new Date())}   •   Visual Premium Estoque e Compras`,
+               margin, y, { width: contentW - 60, align: 'left' })
+         .text(`Página ${pageNum}`, margin, y, { width: contentW, align: 'right' });
+    };
+
+    // ── Cálculos matriciais ──────────────────────────────────────────────
+    const totalMateriais = itens.length;
+
+    // Para cada item, qual modo usar
+    const usarM2PorItem = itens.map((item) => item.modoOrcamento === 'metroQuadrado');
+
+    // Para cada fornecedor: total acumulado e cobertura
+    const totaisForn    = {}; // id -> { total, comPreco, vinculados }
+    const menorPorItem  = []; // menor preço por item (menor entre fornecedores)
+
+    fornecedores.forEach(({ id }) => {
+      totaisForn[id] = { total: 0, comPreco: 0, vinculados: 0 };
+    });
+
+    itens.forEach((item, iIdx) => {
+      const qtd    = item.quantidade ?? 1;
+      const usM2   = usarM2PorItem[iIdx];
+      let   menor  = null;
+
+      fornecedores.forEach(({ id }) => {
+        const pf = (item.precos ?? {})[id];
+        if (!pf) return;
+        totaisForn[id].vinculados += 1;
+        const p = precoEfetivo(pf, usM2);
+        if (p != null) {
+          totaisForn[id].total    += p * qtd;
+          totaisForn[id].comPreco += 1;
+          if (menor === null || p < menor) menor = p;
+        }
       });
 
-      hline(doc, y, '#D1D5DB', 0.8);
-      y += 10;
+      menorPorItem.push(menor);
+    });
+
+    // Total da coluna "Melhor Preço" (soma dos menores por item)
+    let totalMelhorPreco  = 0;
+    let matComMelhorPreco = 0;
+    itens.forEach((item, i) => {
+      const m = menorPorItem[i];
+      if (m != null) {
+        totalMelhorPreco  += m * (item.quantidade ?? 1);
+        matComMelhorPreco += 1;
+      }
+    });
+
+    // Fornecedor com menor total (para destaque de coluna)
+    const fornComPreco = fornecedores.filter(({ id }) => totaisForn[id].total > 0);
+    const menorTotalForn = fornComPreco.length > 0
+      ? Math.min(...fornComPreco.map(({ id }) => totaisForn[id].total))
+      : null;
+
+    // Sugestão: fornecedor com maior cobertura e menor total
+    let maxCob        = 0;
+    let suggFornId    = null;
+    let suggFornNome  = null;
+    let suggTotal     = null;
+    fornecedores.forEach(({ id, nome }) => {
+      const cob = totaisForn[id].vinculados;
+      const tot = totaisForn[id].total;
+      if (cob > maxCob || (cob === maxCob && tot > 0 && (suggTotal === null || tot < suggTotal))) {
+        maxCob       = cob;
+        suggFornId   = id;
+        suggFornNome = nome;
+        suggTotal    = tot;
+      }
+    });
+
+    // ── Layout de colunas ────────────────────────────────────────────────
+    // Colunas fixas: Material | Qtd | ...Fornecedores... | Melhor Preço
+    const COL_MAT    = 150;
+    const COL_QTD    = 48;
+    const COL_MELHOR = 85;
+    const FOOTER_RES = 100;
+    const fixedW     = COL_MAT + COL_QTD + COL_MELHOR;
+    const nForn      = fornecedores.length;
+    // Cada coluna de fornecedor: divide o espaço restante, mínimo 80
+    const COL_FORN   = nForn > 0
+      ? Math.max(80, (contentW - fixedW) / nForn)
+      : 80;
+
+    // x inicial de cada coluna
+    const xMat    = margin;
+    const xQtd    = xMat + COL_MAT;
+    const xForn   = (i) => xQtd + COL_QTD + i * COL_FORN;
+    const xMelhor = xQtd + COL_QTD + nForn * COL_FORN;
+
+    const ROW_H      = 34;
+    const HDR_H      = 30;
+    const TOTAL_H    = 26;
+    const SUGEST_H   = 28;
+    const FONT_SZ    = 7;
+
+    // ── Função: cabeçalho da tabela ──────────────────────────────────────
+    const drawTableHeader = (y) => {
+      fillR(margin, y, contentW, HDR_H, '#F1F3F5');
+      hlineL(y, '#D1D5DB', 0.8);
+
+      const ty = y + (HDR_H - 7) / 2;
+
+      // Material
+      doc.font('Helvetica-Bold').fontSize(6.5).fillColor(C.gray)
+         .text('MATERIAL', xMat + 4, ty, { width: COL_MAT - 8, lineBreak: false });
+
+      // Qtd
+      doc.font('Helvetica-Bold').fontSize(6.5).fillColor(C.gray)
+         .text('QTD', xQtd + 2, ty, { width: COL_QTD - 4, align: 'center', lineBreak: false });
+
+      // Fornecedores
+      fornecedores.forEach(({ id, nome }, fi) => {
+        const x        = xForn(fi);
+        const isMenuor = menorTotalForn != null && totaisForn[id].total === menorTotalForn && totaisForn[id].total > 0;
+        const cob      = totaisForn[id].vinculados;
+
+        if (isMenuor) {
+          fillR(x + 2, y + 2, COL_FORN - 4, HDR_H - 4, '#D1FAE5');
+          doc.rect(x + 2, y + 2, COL_FORN - 4, HDR_H - 4)
+             .strokeColor('#6EE7B7').lineWidth(0.4).stroke();
+        }
+
+        if (isMenuor) {
+          doc.font('Helvetica-Bold').fontSize(5).fillColor(C.statusOk)
+             .text('▼ MENOR TOTAL', x + 4, y + 5, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+        }
+
+        doc.font('Helvetica-Bold').fontSize(isMenuor ? 7 : 6.5)
+           .fillColor(isMenuor ? C.statusOk : C.gray)
+           .text(nome, x + 4, isMenuor ? y + 13 : ty - 3, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+
+        doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
+           .text(`${cob}/${totalMateriais} mat.`, x + 4, isMenuor ? y + 21 : ty + 8,
+                 { width: COL_FORN - 8, align: 'center', lineBreak: false });
+
+        // Divisor vertical
+        if (fi > 0) {
+          doc.strokeColor(C.divider).lineWidth(0.4)
+             .moveTo(x, y + 4).lineTo(x, y + HDR_H - 4).stroke();
+        }
+      });
+
+      // Coluna Melhor Preço
+      doc.font('Helvetica-Bold').fontSize(6).fillColor('#1D4ED8')
+         .text('★ MELHOR', xMelhor + 4, ty - 4, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
+      doc.font('Helvetica').fontSize(5.5).fillColor('#93C5FD')
+         .text('menor por item', xMelhor + 4, ty + 5, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
+
+      doc.strokeColor(C.divider).lineWidth(0.4)
+         .moveTo(xMelhor, y + 4).lineTo(xMelhor, y + HDR_H - 4).stroke();
+
+      hlineL(y + HDR_H, '#D1D5DB', 0.8);
+      return y + HDR_H;
+    };
+
+    // ── Função: linha de totais ──────────────────────────────────────────
+    const drawTotalsRow = (y) => {
+      fillR(margin, y, contentW, TOTAL_H, '#F8F9FA');
+      hlineL(y, '#D1D5DB', 1);
+
+      const ty = y + (TOTAL_H - 7) / 2;
+
+      doc.font('Helvetica-Bold').fontSize(7).fillColor(C.black)
+         .text('TOTAL POR FORNECEDOR', xMat + 4, ty, { width: COL_MAT + COL_QTD - 8, lineBreak: false });
+
+      fornecedores.forEach(({ id }, fi) => {
+        const x      = xForn(fi);
+        const info   = totaisForn[id];
+        const isMen  = menorTotalForn != null && info.total === menorTotalForn && info.total > 0;
+        const semPrc = info.vinculados - info.comPreco;
+
+        doc.font('Helvetica-Bold').fontSize(isMen ? 8 : 7)
+           .fillColor(isMen ? C.statusOk : (info.total > 0 ? C.black : C.lightGray))
+           .text(info.total > 0 ? formatCurrency(info.total) : '—',
+                 x + 4, semPrc > 0 ? ty - 3 : ty, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+
+        if (semPrc > 0) {
+          doc.font('Helvetica').fontSize(5.5).fillColor(C.statusWarn)
+             .text(`${semPrc} sem preço`, x + 4, ty + 7, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+        }
+      });
+
+      // Melhor total acumulado
+      fillR(xMelhor + 2, y + 3, COL_MELHOR - 4, TOTAL_H - 6, '#EFF6FF');
+      doc.rect(xMelhor + 2, y + 3, COL_MELHOR - 4, TOTAL_H - 6)
+         .strokeColor('#BFDBFE').lineWidth(0.5).stroke();
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#1D4ED8')
+         .text(matComMelhorPreco > 0 ? formatCurrency(totalMelhorPreco) : '—',
+               xMelhor + 4, ty - 2, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
+      doc.font('Helvetica').fontSize(5.5).fillColor('#93C5FD')
+         .text(`${matComMelhorPreco}/${totalMateriais} mat.`,
+               xMelhor + 4, ty + 7, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
+
+      hlineL(y + TOTAL_H, '#D1D5DB', 1);
+      return y + TOTAL_H;
+    };
+
+    // ── Função: bloco de sugestão de compra ideal ────────────────────────
+    const drawSugestao = (y) => {
+      if (!suggFornId || matComMelhorPreco === 0) return y;
+
+      const diferenca = (suggTotal ?? 0) - totalMelhorPreco;
+      const isMelhor  = diferenca <= 0;
+
+      const bgColor  = isMelhor ? '#F0FDF4' : '#FFFBEB';
+      const bdColor  = isMelhor ? '#86EFAC' : '#FCD34D';
+      const txColor  = isMelhor ? C.statusOk : C.statusWarn;
+      const icon     = isMelhor ? '✓' : '⚠';
+
+      fillR(margin, y, contentW, SUGEST_H, bgColor);
+      fillR(margin, y, 4, SUGEST_H, isMelhor ? C.statusOk : C.statusWarn);
+      hlineL(y, bdColor, 1);
+
+      const ty = y + (SUGEST_H - 7) / 2;
+
+      doc.font('Helvetica-Bold').fontSize(7).fillColor(txColor)
+         .text(`${icon} SUGESTÃO DE COMPRA IDEAL`, margin + 10, ty - 4, { lineBreak: false });
+
+      let msg;
+      if (isMelhor) {
+        msg = `"${suggFornNome}" cobre mais materiais e já é o mais vantajoso com ${formatCurrency(suggTotal ?? 0)} — mesmo comprando tudo de um único fornecedor.`;
+      } else {
+        const dif = formatCurrency(Math.abs(diferenca));
+        msg = `Comprando tudo de "${suggFornNome}" (${formatCurrency(suggTotal ?? 0)}) vs melhor por item separado (${formatCurrency(totalMelhorPreco)}): diferença de ${dif} a mais. Avalie se a praticidade compensa.`;
+      }
+
+      doc.font('Helvetica').fontSize(6.5).fillColor(txColor)
+         .text(msg, margin + 10, ty + 5, { width: contentW - 20, lineBreak: false });
+
+      hlineL(y + SUGEST_H, bdColor, 0.5);
+      return y + SUGEST_H;
+    };
+
+    // ═══════════════════════════════════════════════════════════════════
+    // INÍCIO DO DOCUMENTO
+    // ═══════════════════════════════════════════════════════════════════
+
+    let y = drawHeader();
+
+    if (itens.length === 0) {
+      doc.font('Helvetica').fontSize(10).fillColor(C.gray)
+         .text('Nenhum item neste orçamento.', margin, y + 20, { width: contentW, align: 'center' });
+    } else {
+      // Seção: título da tabela matricial
+      drawSectionHeader(doc, y, `Comparativo de Preços — ${totalMateriais} ${totalMateriais === 1 ? 'material' : 'materiais'} × ${nForn} ${nForn === 1 ? 'fornecedor' : 'fornecedores'}`);
+      y += 26;
+
+      // Cabeçalho da tabela
+      y = drawTableHeader(y);
+
+      // ── Linhas de materiais ────────────────────────────────────────────
+      itens.forEach((item, iIdx) => {
+        const qtd  = item.quantidade ?? 1;
+        const usM2 = usarM2PorItem[iIdx];
+        const menor = menorPorItem[iIdx];
+
+        // Mede altura necessária para o nome (pode quebrar linha)
+        doc.font('Helvetica-Bold').fontSize(FONT_SZ);
+        const nomeH = doc.heightOfString(item.materialNome, { width: COL_MAT - 8 });
+        const descH = item.descricao?.trim()
+          ? doc.font('Helvetica').fontSize(5.5).heightOfString(item.descricao.trim(), { width: COL_MAT - 8 }) + 2
+          : 0;
+        const rowH  = Math.max(ROW_H, nomeH + descH + 14);
+
+        // Quebra de página
+        if (y + rowH > pH - FOOTER_RES) {
+          drawFooterL(doc.bufferedPageRange().count);
+          doc.addPage();
+          y = drawHeader();
+          y = drawTableHeader(y);
+        }
+
+        // Fundo alternado
+        if (iIdx % 2 === 0) fillR(margin, y, contentW, rowH, C.bgRow);
+
+        const tyCtr = y + (rowH - FONT_SZ) / 2;
+        const tyTop = y + 6;
+
+        // ── Coluna Material ────────────────────────────────────────────
+        doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
+           .text(item.materialNome, xMat + 4, tyTop, { width: COL_MAT - 8, lineBreak: true });
+
+        const subparts = [item.materialCategoria, item.materialMedida, item.materialEspessura, item.materialIdentificador]
+          .filter(Boolean).join(' · ');
+        if (subparts) {
+          doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
+             .text(subparts, xMat + 4, tyTop + nomeH + 1, { width: COL_MAT - 8, lineBreak: false });
+        }
+        if (item.descricao?.trim()) {
+          doc.font('Helvetica').fontSize(5.5).fillColor(C.gray)
+             .text(item.descricao.trim(), xMat + 4, tyTop + nomeH + (subparts ? 7 : 1), { width: COL_MAT - 8, lineBreak: false });
+        }
+
+        // ── Coluna Qtd ─────────────────────────────────────────────────
+        const unidLabel = usM2 ? 'm²' : (item.materialUnidade || '');
+        doc.font('Helvetica').fontSize(6.5).fillColor(C.black)
+           .text(formatNumberSmart(qtd), xQtd + 2, tyCtr - 4, { width: COL_QTD - 4, align: 'center', lineBreak: false });
+        if (unidLabel) {
+          doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
+             .text(unidLabel, xQtd + 2, tyCtr + 4, { width: COL_QTD - 4, align: 'center', lineBreak: false });
+        }
+
+        // ── Colunas de fornecedores ────────────────────────────────────
+        fornecedores.forEach(({ id }, fi) => {
+          const x      = xForn(fi);
+          const pf     = (item.precos ?? {})[id];
+
+          // Divisor vertical
+          doc.strokeColor(C.divider).lineWidth(0.3)
+             .moveTo(x, y + 4).lineTo(x, y + rowH - 4).stroke();
+
+          if (!pf) {
+            // Fornecedor não vinculado
+            doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
+               .text('—', x + 4, tyCtr, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+            return;
+          }
+
+          const preco  = precoEfetivo(pf, usM2);
+          const total  = preco != null ? preco * qtd : null;
+          const isMen  = menor != null && preco != null && preco === menor;
+
+          // Destaque fundo verde suave para o menor da linha
+          if (isMen) {
+            fillR(x + 2, y + 2, COL_FORN - 4, rowH - 4, '#F0FDF4');
+            doc.rect(x + 2, y + 2, COL_FORN - 4, rowH - 4)
+               .strokeColor('#86EFAC').lineWidth(0.4).stroke();
+          }
+
+          if (preco != null) {
+            // Seta para baixo + preço
+            if (isMen) {
+              doc.font('Helvetica-Bold').fontSize(5.5).fillColor(C.statusOk)
+                 .text('▼ MENOR', x + 4, y + 5, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+            }
+            const precoY = isMen ? y + 12 : tyCtr - 4;
+            doc.font(isMen ? 'Helvetica-Bold' : 'Helvetica')
+               .fontSize(isMen ? 8 : 7.5)
+               .fillColor(isMen ? C.statusOk : C.black)
+               .text(formatCurrency(preco), x + 4, precoY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+
+            // Total da linha
+            if (total != null) {
+              doc.font('Helvetica').fontSize(5.5)
+                 .fillColor(isMen ? '#15803D' : C.gray)
+                 .text(formatCurrency(total), x + 4, precoY + 9, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+            }
+          } else {
+            doc.font('Helvetica').fontSize(6).fillColor(C.lightGray)
+               .text('sem preço', x + 4, tyCtr, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+          }
+        });
+
+        // ── Coluna Melhor Preço ────────────────────────────────────────
+        doc.strokeColor('#BFDBFE').lineWidth(0.3)
+           .moveTo(xMelhor, y + 4).lineTo(xMelhor, y + rowH - 4).stroke();
+
+        if (menor != null) {
+          const melhorTotal = menor * qtd;
+          fillR(xMelhor + 2, y + 3, COL_MELHOR - 4, rowH - 6, '#EFF6FF');
+          doc.rect(xMelhor + 2, y + 3, COL_MELHOR - 4, rowH - 6)
+             .strokeColor('#BFDBFE').lineWidth(0.4).stroke();
+
+          doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#1D4ED8')
+             .text(formatCurrency(menor), xMelhor + 4, tyCtr - 5, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
+          doc.font('Helvetica').fontSize(6).fillColor('#60A5FA')
+             .text(formatCurrency(melhorTotal), xMelhor + 4, tyCtr + 4, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
+        } else {
+          doc.font('Helvetica').fontSize(7).fillColor(C.lightGray)
+             .text('—', xMelhor + 4, tyCtr, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
+        }
+
+        hlineL(y + rowH, C.divider, 0.3);
+        y += rowH;
+      });
+
+      // ── Linha de totais ────────────────────────────────────────────────
+      if (y + TOTAL_H + SUGEST_H > pH - FOOTER_RES) {
+        drawFooterL(doc.bufferedPageRange().count);
+        doc.addPage();
+        y = drawHeader();
+      }
+      y = drawTotalsRow(y);
+      y = drawSugestao(y);
+
+      y += 12;
     }
 
+    // Rodapé em todas as páginas
     const range = doc.bufferedPageRange();
     for (let i = 0; i < range.count; i++) {
       doc.switchToPage(range.start + i);
-      drawFooter(doc, i + 1, 'Visual Premium');
+      drawFooterL(i + 1);
     }
 
     doc.end();

@@ -5,7 +5,7 @@ const { authMiddleware, roleMiddleware } = require('../middlewares/auth.middlewa
 
 const LEITURA  = ['ADMIN','GERENTE','COMPRAS'];
 const ESCRITA  = ['ADMIN','GERENTE','COMPRAS'];
-const APROVACAO = ['ADMIN','GERENTE'];
+const APROVACAO = ['ADMIN','GERENTE','COMPRAS'];
 const EXCLUSAO = ['ADMIN','GERENTE','COMPRAS'];
 
 router.post('/pdf',                      authMiddleware, roleMiddleware(LEITURA),  pdfCtrl.gerarPdf);

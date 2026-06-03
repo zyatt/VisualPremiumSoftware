@@ -205,12 +205,6 @@ async function validarParaOC(orcamentoId) {
   if (orcamento.itens.length === 0)
     throw { status: 400, message: 'Orçamento não possui itens' };
 
-  const fornecedoresDistintos = new Set(
-    orcamento.itens.map((i) => i.fornecedorId).filter(Boolean)
-  );
-  if (fornecedoresDistintos.size < 3)
-    throw { status: 400, message: 'É necessário pelo menos 3 fornecedores distintos para gerar uma OC' };
-
   return true;
 }
 

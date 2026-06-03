@@ -11,10 +11,21 @@ const _includeCompleto = {
 };
 
 // ── Listagem de relatórios (OS FECHADAS) ──────────────────────────────────────
-async function listar({ busca, materialId, materialNome, materialIdentificador, materialMedida, materialEspessura } = {}) {
+async function listar({ busca, materialId, materialNome, materialIdentificador, materialMedida, materialEspessura, dataInicio, dataFim } = {}) {
   const where = { status: 'FECHADA' };
 
   if (busca) where.numeroOS = { contains: busca, mode: 'insensitive' };
+
+  // ── Filtro de período (fechamento = atualizadoEm) ─────────────────────────
+  if (dataInicio || dataFim) {
+    where.atualizadoEm = {};
+    if (dataInicio) where.atualizadoEm.gte = new Date(dataInicio);
+    if (dataFim) {
+      const fim = new Date(dataFim);
+      fim.setHours(23, 59, 59, 999);
+      where.atualizadoEm.lte = fim;
+    }
+  }
 
   // Filtra OS que possuam ao menos uma movimentação cujo material satisfaça
   // todos os critérios informados (AND dentro do some).

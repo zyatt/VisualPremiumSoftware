@@ -87,6 +87,10 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   final _espessuraCtrl     = TextEditingController();
   Timer? _debounce;
 
+  // ── Filtro de período ─────────────────────────────────────────────────────
+  DateTime? _dataInicio;
+  DateTime? _dataFim;
+
   @override
   void initState() {
     super.initState();
@@ -127,6 +131,8 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
           materialEspessura:     _espessuraCtrl.text.trim().isEmpty
               ? null
               : _espessuraCtrl.text.trim(),
+          dataInicio:            _dataInicio,
+          dataFim:               _dataFim,
         );
   }
 
@@ -144,15 +150,22 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
     _identificadorCtrl.clear();
     _medidaCtrl.clear();
     _espessuraCtrl.clear();
+    setState(() {
+      _dataInicio = null;
+      _dataFim    = null;
+    });
     _aplicarFiltros();
   }
+
+  bool get _temFiltroData => _dataInicio != null || _dataFim != null;
 
   bool get _temFiltroMaterial =>
       _materialIdCtrl.text.isNotEmpty ||
       _materialNomeCtrl.text.isNotEmpty ||
       _identificadorCtrl.text.isNotEmpty ||
       _medidaCtrl.text.isNotEmpty ||
-      _espessuraCtrl.text.isNotEmpty;
+      _espessuraCtrl.text.isNotEmpty ||
+      _temFiltroData;
 
   void _abrirDetalhe(RelacaoOSModel rel) {
     Navigator.of(context).push(
@@ -343,6 +356,102 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
               ],
             ),
             const SizedBox(height: 16),
+
+            // ── Filtro linha 3: período de fechamento ────────────────────────
+            Row(
+              children: [
+                _DatePickerField(
+                  label: 'Fechado de',
+                  value: _dataInicio,
+                  firstDate: DateTime(2020),
+                  lastDate: _dataFim ?? DateTime.now(),
+                  onPicked: (d) {
+                    setState(() => _dataInicio = d);
+                    _aplicarFiltros();
+                  },
+                  onCleared: () {
+                    setState(() => _dataInicio = null);
+                    _aplicarFiltros();
+                  },
+                ),
+                const SizedBox(width: 12),
+                _DatePickerField(
+                  label: 'até',
+                  value: _dataFim,
+                  firstDate: _dataInicio ?? DateTime(2020),
+                  lastDate: DateTime.now(),
+                  onPicked: (d) {
+                    setState(() => _dataFim = d);
+                    _aplicarFiltros();
+                  },
+                  onCleared: () {
+                    setState(() => _dataFim = null);
+                    _aplicarFiltros();
+                  },
+                ),
+                const Spacer(),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // ── Barra de resumo: contagem + total geral filtrado ─────────────
+            if (!provider.carregando && provider.erro == null && provider.relatorios.isNotEmpty)
+              Builder(
+                builder: (_) {
+                  final total = provider.relatorios.fold<double>(0, (acc, rel) {
+                    return acc + rel.movimentacoes
+                        .where((m) => m.tipo == 'SAIDA')
+                        .fold<double>(0, (s, m) {
+                      final pu = m.precoUnitario ?? 0.0;
+                      final pm = m.precoM2 ?? 0.0;
+                      final p  = pu > 0 ? pu : (pm > 0 ? pm : 0.0);
+                      return s + p * m.quantidade;
+                    });
+                  });
+                  final qtd = provider.relatorios.length;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color:        _corFechada.withValues(alpha: 0.07),
+                      border:       Border.all(color: _corFechada.withValues(alpha: 0.25)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.summarize_outlined, size: 16, color: _corFechada.withValues(alpha: 0.8)),
+                        const SizedBox(width: 8),
+                        Text(
+                          '$qtd ${qtd == 1 ? 'OS' : 'OS'} encontrada${qtd == 1 ? '' : 's'}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (total > 0) ...[
+                          const Text(
+                            'Total filtrado:',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _brl(total),
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: _corFechada,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
 
             // ── Conteúdo ────────────────────────────────────────────
             Expanded(
@@ -1287,6 +1396,87 @@ class _MovimentacaoSection extends StatelessWidget {
                     ),
                   ],
                 ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Widget auxiliar — seletor de data com chip clicável
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _DatePickerField extends StatelessWidget {
+  final String    label;
+  final DateTime? value;
+  final DateTime  firstDate;
+  final DateTime  lastDate;
+  final ValueChanged<DateTime> onPicked;
+  final VoidCallback           onCleared;
+
+  const _DatePickerField({
+    required this.label,
+    required this.value,
+    required this.firstDate,
+    required this.lastDate,
+    required this.onPicked,
+    required this.onCleared,
+  });
+
+  Future<void> _pick(BuildContext context) async {
+    final now     = DateTime.now();
+    final initial = value != null
+        ? (value!.isAfter(lastDate) ? lastDate : value!)
+        : (now.isBefore(lastDate) ? now : lastDate);
+    final picked = await showDatePicker(
+      context:     context,
+      initialDate: initial,
+      firstDate:   firstDate,
+      lastDate:    lastDate,
+    );
+    if (picked != null) onPicked(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasValue = value != null;
+    return InkWell(
+      onTap: () => _pick(context),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color:  AppTheme.surface,
+          border: Border.all(
+            color: hasValue ? AppTheme.primary : AppTheme.divider,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.calendar_today,
+              size:  16,
+              color: hasValue ? AppTheme.primary : AppTheme.textHint,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              hasValue ? '$label: ${_fmtData(value)}' : label,
+              style: TextStyle(
+                fontSize:   13,
+                color:      hasValue ? AppTheme.primary : AppTheme.textHint,
+                fontWeight: hasValue ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+            if (hasValue) ...[
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: onCleared,
+                child: const Icon(Icons.close, size: 14, color: AppTheme.textHint),
               ),
             ],
           ],

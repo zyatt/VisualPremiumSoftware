@@ -623,10 +623,10 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                                                     'OS: ${item.numeroOS}'),
                                                 _itemChip(
                                                     Icons.format_list_numbered,
-                                                    'Qtd: ${_fmtNum(item.quantidade)}'),
+                                                    'Quantidade: ${_fmtNum(item.quantidade)}'),
                                                 _itemChipDestaque(
                                                     Icons.attach_money,
-                                                    'Unit: ${_moeda(item.precoUnitario)}',
+                                                    'Unitário: ${_moeda(item.precoUnitario)}',
                                                     ativo: !item.usarM2),
                                                 if (item.precoMetroQuadrado != null)
                                                   _itemChipDestaque(
@@ -917,9 +917,9 @@ class _HistoricoDetalhePage extends StatelessWidget {
                         _itemChip(Icons.assignment_outlined,
                             'OS: ${item.numeroOS}'),
                         _itemChip(Icons.format_list_numbered,
-                            'Qtd: ${_fmtNum(item.quantidade)}'),
+                            'Quantidade: ${_fmtNum(item.quantidade)}'),
                         _itemChipDestaque(Icons.attach_money,
-                            'Unit: ${_moeda(item.precoUnitario)}',
+                            'Unitário: ${_moeda(item.precoUnitario)}',
                             ativo: !item.usarM2),
                         if (item.precoMetroQuadrado != null)
                           _itemChipDestaque(Icons.square_foot,

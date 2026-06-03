@@ -39,6 +39,14 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
+// Sentinels para categorias especiais
+const _kCategoriaGeral        = '__GERAL__';
+const _kCategoriaSemCategoria = '__SEM_CATEGORIA__';
+
+// Sentinels para identificadores especiais
+const _kIdentificadorTodos           = '__TODOS__';
+const _kIdentificadorSemIdentificador = '__SEM_IDENTIFICADOR__';
+
 class ProducaoPage extends StatefulWidget {
   const ProducaoPage({super.key});
 
@@ -50,16 +58,6 @@ class _ProducaoPageState extends State<ProducaoPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
-  // ── Filtros da aba Estoque ─────────────────────────────────────────────────
-  final _buscaCtrl         = TextEditingController();
-  final _buscaIdCtrl       = TextEditingController();
-  final _identificadorCtrl = TextEditingController();
-  final _medidaCtrl        = TextEditingController();
-  final _espessuraCtrl     = TextEditingController();
-  String? _categoriaFiltro;
-  String  _statusFiltro    = '';
-  Timer?  _debounce;
-
   @override
   void initState() {
     super.initState();
@@ -67,7 +65,6 @@ class _ProducaoPageState extends State<ProducaoPage>
     _tabController.addListener(_onTabChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ProducaoProvider>().carregarCategorias();
-      context.read<ProducaoProvider>().carregarMateriais();
       context.read<ProducaoProvider>().carregarHistorico();
     });
   }
@@ -82,47 +79,11 @@ class _ProducaoPageState extends State<ProducaoPage>
   void dispose() {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
-    _buscaCtrl.dispose();
-    _buscaIdCtrl.dispose();
-    _identificadorCtrl.dispose();
-    _medidaCtrl.dispose();
-    _espessuraCtrl.dispose();
-    _debounce?.cancel();
     super.dispose();
-  }
-
-  void _aplicarFiltros() {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), () {
-      context.read<ProducaoProvider>().carregarMateriais(
-            busca:         _buscaCtrl.text.trim(),
-            categoria:     _categoriaFiltro,
-            status:        _statusFiltro.isEmpty ? null : _statusFiltro,
-            id:            _buscaIdCtrl.text.trim(),
-            identificador: _identificadorCtrl.text.trim(),
-            medida:        _medidaCtrl.text.trim(),
-            espessura:     _espessuraCtrl.text.trim(),
-          );
-    });
-  }
-
-  void _limparFiltros() {
-    _buscaCtrl.clear();
-    _buscaIdCtrl.clear();
-    _identificadorCtrl.clear();
-    _medidaCtrl.clear();
-    _espessuraCtrl.clear();
-    setState(() {
-      _categoriaFiltro = null;
-      _statusFiltro    = '';
-    });
-    context.read<ProducaoProvider>().carregarMateriais();
   }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: Padding(
@@ -156,7 +117,6 @@ class _ProducaoPageState extends State<ProducaoPage>
                 IconButton(
                   onPressed: () {
                     context.read<ProducaoProvider>().carregarCategorias();
-                    context.read<ProducaoProvider>().carregarMateriais();
                     context.read<ProducaoProvider>().carregarHistorico();
                   },
                   icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
@@ -194,29 +154,9 @@ class _ProducaoPageState extends State<ProducaoPage>
             Expanded(
               child: TabBarView(
                 controller: _tabController,
-                children: [
-                  _EstoqueTab(
-                    buscaCtrl:         _buscaCtrl,
-                    buscaIdCtrl:       _buscaIdCtrl,
-                    identificadorCtrl: _identificadorCtrl,
-                    medidaCtrl:        _medidaCtrl,
-                    espessuraCtrl:     _espessuraCtrl,
-                    categoriaFiltro:   _categoriaFiltro,
-                    statusFiltro:      _statusFiltro,
-                    scheme:            scheme,
-                    onCategoriaChanged: (v) {
-                      setState(() => _categoriaFiltro = v);
-                      _aplicarFiltros();
-                    },
-                    onStatusChanged: (v) {
-                      setState(() => _statusFiltro = v ?? '');
-                      _aplicarFiltros();
-                    },
-                    onBuscaChanged:    (_) => _aplicarFiltros(),
-                    onDebounce:        _aplicarFiltros,
-                    onLimpar:          _limparFiltros,
-                  ),
-                  const _HistoricoTab(),
+                children: const [
+                  _EstoqueTab(),
+                  _HistoricoTab(),
                 ],
               ),
             ),
@@ -228,285 +168,1062 @@ class _ProducaoPageState extends State<ProducaoPage>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ABA ESTOQUE
+// ABA ESTOQUE — grade de categorias
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _EstoqueTab extends StatefulWidget {
-  final TextEditingController buscaCtrl;
-  final TextEditingController buscaIdCtrl;
-  final TextEditingController identificadorCtrl;
-  final TextEditingController medidaCtrl;
-  final TextEditingController espessuraCtrl;
-  final String?               categoriaFiltro;
-  final String                statusFiltro;
-  final ColorScheme           scheme;
-  final void Function(String?) onCategoriaChanged;
-  final void Function(String?) onStatusChanged;
-  final void Function(String)  onBuscaChanged;
-  final VoidCallback           onDebounce;
-  final VoidCallback           onLimpar;
-
-  const _EstoqueTab({
-    required this.buscaCtrl,
-    required this.buscaIdCtrl,
-    required this.identificadorCtrl,
-    required this.medidaCtrl,
-    required this.espessuraCtrl,
-    required this.categoriaFiltro,
-    required this.statusFiltro,
-    required this.scheme,
-    required this.onCategoriaChanged,
-    required this.onStatusChanged,
-    required this.onBuscaChanged,
-    required this.onDebounce,
-    required this.onLimpar,
-  });
+  const _EstoqueTab();
 
   @override
   State<_EstoqueTab> createState() => _EstoqueTabState();
 }
 
 class _EstoqueTabState extends State<_EstoqueTab> {
-  static const int _itensPorPagina = 50;
-  int _paginaAtual = 0;
+  final _filtroCategoriaCtrl = TextEditingController();
+  String _filtroCategoria    = '';
+
+  static IconData _iconePara(String categoria) {
+    final c = categoria.toUpperCase();
+    if (c.contains('LONA'))      return Icons.straighten;
+    if (c.contains('BANNER'))    return Icons.flag;
+    if (c.contains('VINIL'))     return Icons.layers;
+    if (c.contains('PERFIL'))    return Icons.square_foot;
+    if (c.contains('TINTA'))     return Icons.format_paint;
+    if (c.contains('PAPEL'))     return Icons.description;
+    if (c.contains('ACESSORIO')) return Icons.handyman;
+    if (c.contains('COLA'))      return Icons.water_drop;
+    if (c.contains('TECIDO'))    return Icons.texture;
+    if (c.contains('MADEIRA'))   return Icons.foundation;
+    if (c.contains('METAL'))     return Icons.hardware;
+    return Icons.inventory_2;
+  }
+
+  static const _cores = [
+    Color(0xFF5E35B1), Color(0xFF1E88E5), Color(0xFF00897B),
+    Color(0xFFE53935), Color(0xFFF4511E), Color(0xFF8E24AA),
+    Color(0xFF039BE5), Color(0xFF43A047), Color(0xFFFFB300),
+    Color(0xFF6D4C41), Color(0xFF546E7A), Color(0xFFD81B60),
+  ];
+
+  @override
+  void dispose() {
+    _filtroCategoriaCtrl.dispose();
+    super.dispose();
+  }
+
+  void _navegarParaCategoria({
+    required String categoriaId,
+    required String categoriaLabel,
+    required Color cor,
+    required IconData icone,
+  }) {
+    // Geral e Sem categoria não possuem tela de identificadores —
+    // navegam diretamente para a listagem de materiais.
+    final pularIdentificadores =
+        categoriaId == _kCategoriaGeral ||
+        categoriaId == _kCategoriaSemCategoria;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => pularIdentificadores
+            ? _ProducaoCategoriaPage(
+                categoriaId:    categoriaId,
+                categoriaLabel: categoriaLabel,
+                cor:            cor,
+                icone:          icone,
+              )
+            : _ProducaoIdentificadorPage(
+                categoriaId:    categoriaId,
+                categoriaLabel: categoriaLabel,
+                cor:            cor,
+                icone:          icone,
+              ),
+      ),
+    ).then((_) {
+      if (mounted) context.read<ProducaoProvider>().carregarCategorias();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 16),
 
-        // ── Linha 1: ID · Busca · Categoria · Status · Limpar ───────────────
-        Row(
-          children: [
-            SizedBox(
-              width: 110,
-              child: TextField(
-                controller: widget.buscaIdCtrl,
-                decoration: const InputDecoration(
-                  hintText:   'ID...',
-                  prefixIcon: Icon(Icons.tag, color: AppTheme.textHint, size: 18),
-                  isDense:    true,
-                ),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                onChanged: (_) => widget.onDebounce(),
-                onSubmitted: (_) => widget.onDebounce(),
-              ),
+        SizedBox(
+          width: 360,
+          child: TextField(
+            controller: _filtroCategoriaCtrl,
+            decoration: InputDecoration(
+              hintText:   'Buscar categoria...',
+              prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
+              isDense:    true,
+              suffixIcon: _filtroCategoria.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () {
+                        _filtroCategoriaCtrl.clear();
+                        setState(() => _filtroCategoria = '');
+                      },
+                    )
+                  : null,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 3,
-              child: TextField(
-                controller: widget.buscaCtrl,
-                decoration: const InputDecoration(
-                  hintText:   'Buscar material...',
-                  prefixIcon: Icon(Icons.search, color: AppTheme.textHint, size: 20),
-                  isDense:    true,
-                ),
-                onChanged: widget.onBuscaChanged,
-                onSubmitted: (_) => widget.onDebounce(),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Consumer<ProducaoProvider>(
+            onChanged: (v) => setState(() => _filtroCategoria = v.trim().toLowerCase()),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        Expanded(
+          child: SingleChildScrollView(
+            child: Consumer<ProducaoProvider>(
               builder: (_, provider, __) {
-                final opcoes = ['Todas', ...provider.categorias];
-                return SizedBox(
-                  width: 200,
-                  child: Autocomplete<String>(
-                    initialValue: TextEditingValue(
-                      text: widget.categoriaFiltro ?? 'Todas',
+                if (provider.carregandoCategorias && provider.categorias.isEmpty) {
+                  return const SizedBox(
+                    height: 200,
+                    child: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+                  );
+                }
+
+                bool corresponde(String label) =>
+                    _filtroCategoria.isEmpty ||
+                    label.toLowerCase().contains(_filtroCategoria);
+
+                final cards = <Widget>[
+                  if (corresponde('Geral'))
+                    _CategoriaCardProducao(
+                      categoria: 'Geral',
+                      cor:       const Color(0xFF5E35B1),
+                      icone:     Icons.grid_view_rounded,
+                      onTap: () => _navegarParaCategoria(
+                        categoriaId:    _kCategoriaGeral,
+                        categoriaLabel: 'Geral',
+                        cor:            const Color(0xFF5E35B1),
+                        icone:          Icons.grid_view_rounded,
+                      ),
                     ),
-                    optionsBuilder: (TextEditingValue v) {
-                      if (v.text.isEmpty) return opcoes;
-                      return opcoes.where((o) =>
-                          o.toLowerCase().contains(v.text.toLowerCase()));
-                    },
-                    fieldViewBuilder: (context, ctrl, focusNode, onSubmit) {
-                      return TextField(
-                        controller: ctrl,
-                        focusNode: focusNode,
-                        decoration: const InputDecoration(
-                          labelText: 'Categoria',
-                          hintText: 'Buscar categoria...',
-                          prefixIcon: Icon(Icons.category_outlined,
-                              color: AppTheme.textHint, size: 18),
-                          isDense: true,
+                  if (corresponde('Sem categoria'))
+                    _CategoriaCardProducao(
+                      categoria: 'Sem categoria',
+                      cor:       const Color(0xFF546E7A),
+                      icone:     Icons.help_outline,
+                      onTap: () => _navegarParaCategoria(
+                        categoriaId:    _kCategoriaSemCategoria,
+                        categoriaLabel: 'Sem categoria',
+                        cor:            const Color(0xFF546E7A),
+                        icone:          Icons.help_outline,
+                      ),
+                    ),
+                  for (int i = 0; i < provider.categorias.length; i++)
+                    if (corresponde(provider.categorias[i]))
+                      _CategoriaCardProducao(
+                        categoria: provider.categorias[i],
+                        cor:       _cores[i % _cores.length],
+                        icone:     _iconePara(provider.categorias[i]),
+                        onTap: () => _navegarParaCategoria(
+                          categoriaId:    provider.categorias[i],
+                          categoriaLabel: provider.categorias[i],
+                          cor:            _cores[i % _cores.length],
+                          icone:          _iconePara(provider.categorias[i]),
                         ),
-                        onSubmitted: (_) => onSubmit(),
-                      );
-                    },
-                    optionsViewBuilder: (context, onSelected, options) {
-                      return Align(
-                        alignment: Alignment.topLeft,
-                        child: Material(
-                          elevation: 4,
-                          borderRadius: BorderRadius.circular(8),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(
-                              maxWidth: 260,
-                              maxHeight: 240,
-                            ),
-                            child: ListView.builder(
-                              padding: EdgeInsets.zero,
-                              shrinkWrap: true,
-                              itemCount: options.length,
-                              itemBuilder: (_, i) {
-                                final opt = options.elementAt(i);
-                                return InkWell(
-                                  onTap: () => onSelected(opt),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 12, vertical: 10),
-                                    child: Text(
-                                      opt,
-                                      style: const TextStyle(fontSize: 13),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
+                      ),
+                ];
+
+                if (cards.isEmpty) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 80),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.search_off, size: 64, color: AppTheme.textHint),
+                          const SizedBox(height: 16),
+                          Text(
+                            _filtroCategoria.isNotEmpty
+                                ? 'Nenhuma categoria encontrada'
+                                : 'Nenhuma categoria cadastrada',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyLarge
+                                ?.copyWith(color: AppTheme.textSecondary),
                           ),
-                        ),
-                      );
-                    },
-                    onSelected: (value) {
-                      widget.onCategoriaChanged(
-                          value == 'Todas' ? null : value);
-                    },
-                  ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
+                return GridView.count(
+                  crossAxisCount:   4,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing:  16,
+                  childAspectRatio: 1.0,
+                  shrinkWrap:       true,
+                  physics:          const NeverScrollableScrollPhysics(),
+                  children:         cards,
                 );
               },
             ),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: 150,
-              child: DropdownButtonFormField<String>(
-                initialValue: widget.statusFiltro.isEmpty ? '' : widget.statusFiltro,
-                decoration: const InputDecoration(
-                  labelText: 'Status',
-                  isDense:   true,
-                ),
-                items: const [
-                  DropdownMenuItem(value: '',        child: Text('Todos')),
-                  DropdownMenuItem(value: 'OK',      child: Text('OK')),
-                  DropdownMenuItem(value: 'LIMITE',  child: Text('Limite')),
-                  DropdownMenuItem(value: 'CRITICO', child: Text('Crítico')),
-                ],
-                onChanged: widget.onStatusChanged,
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.outlined(
-              tooltip: 'Limpar filtros',
-              icon: Icon(Icons.filter_alt_off, color: widget.scheme.onSurfaceVariant),
-              onPressed: widget.onLimpar,
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-
-        // ── Linha 2: Identificador · Medida · Espessura ──────────────────────
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: widget.identificadorCtrl,
-                decoration: const InputDecoration(
-                  hintText:   'Identificador...',
-                  prefixIcon: Icon(Icons.qr_code, color: AppTheme.textHint, size: 18),
-                  isDense:    true,
-                ),
-                textCapitalization: TextCapitalization.characters,
-                inputFormatters: [_UpperCaseFormatter()],
-                onChanged: (_) => widget.onDebounce(),
-                onSubmitted: (_) => widget.onDebounce(),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: widget.medidaCtrl,
-                decoration: const InputDecoration(
-                  hintText:   'Medida...',
-                  prefixIcon: Icon(Icons.straighten, color: AppTheme.textHint, size: 18),
-                  isDense:    true,
-                ),
-                onChanged: (_) => widget.onDebounce(),
-                onSubmitted: (_) => widget.onDebounce(),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: widget.espessuraCtrl,
-                decoration: const InputDecoration(
-                  hintText:   'Espessura...',
-                  prefixIcon: Icon(Icons.layers, color: AppTheme.textHint, size: 18),
-                  isDense:    true,
-                ),
-                onChanged: (_) => widget.onDebounce(),
-                onSubmitted: (_) => widget.onDebounce(),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-
-        Expanded(
-          child: Consumer<ProducaoProvider>(
-            builder: (_, provider, __) {
-              if (provider.carregandoMateriais) {
-                return const Center(
-                    child: CircularProgressIndicator(color: AppTheme.primary));
-              }
-              if (provider.materiais.isEmpty) {
-                return const Center(
-                  child: Text(
-                    'Nenhum material encontrado',
-                    style: TextStyle(color: AppTheme.textHint),
-                  ),
-                );
-              }
-
-              final todos        = provider.materiais;
-              final totalPaginas = (todos.length / _itensPorPagina).ceil();
-              final paginaSegura = _paginaAtual.clamp(0, (totalPaginas - 1).clamp(0, 999));
-              final inicio       = paginaSegura * _itensPorPagina;
-              final fim          = (inicio + _itensPorPagina).clamp(0, todos.length);
-              final paginados    = todos.sublist(inicio, fim);
-
-              return Column(
-                children: [
-                  Expanded(
-                    child: Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: SingleChildScrollView(
-                        child: _TabelaMateriais(materiais: paginados),
-                      ),
-                    ),
-                  ),
-                  if (totalPaginas > 1) ...[
-                    const SizedBox(height: 12),
-                    _BarraPaginacao(
-                      paginaAtual:     paginaSegura,
-                      totalPaginas:    totalPaginas,
-                      totalItens:      todos.length,
-                      itensPorPagina:  _itensPorPagina,
-                      onPaginaChanged: (p) => setState(() => _paginaAtual = p),
-                    ),
-                  ],
-                ],
-              );
-            },
           ),
         ),
       ],
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CARD DE CATEGORIA
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CategoriaCardProducao extends StatefulWidget {
+  final String     categoria;
+  final Color      cor;
+  final IconData   icone;
+  final VoidCallback onTap;
+
+  const _CategoriaCardProducao({
+    required this.categoria,
+    required this.cor,
+    required this.icone,
+    required this.onTap,
+  });
+
+  @override
+  State<_CategoriaCardProducao> createState() => _CategoriaCardProducaoState();
+}
+
+class _CategoriaCardProducaoState extends State<_CategoriaCardProducao> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ativo = _hovered;
+    return MouseRegion(
+      onEnter:  (_) => setState(() => _hovered = true),
+      onExit:   (_) => setState(() => _hovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            color: ativo ? widget.cor.withValues(alpha: 0.12) : AppTheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: ativo ? widget.cor : widget.cor.withValues(alpha: 0.25),
+              width: ativo ? 2 : 1.5,
+            ),
+            boxShadow: ativo
+                ? [BoxShadow(color: widget.cor.withValues(alpha: 0.20), blurRadius: 12, offset: const Offset(0, 4))]
+                : [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 4, offset: const Offset(0, 2))],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: widget.cor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(widget.icone, color: widget.cor, size: 28),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  widget.categoria,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: ativo ? widget.cor : AppTheme.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PÁGINA DE IDENTIFICADORES (nível 2 da hierarquia: categoria → identificador)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ProducaoIdentificadorPage extends StatefulWidget {
+  final String   categoriaId;
+  final String   categoriaLabel;
+  final Color    cor;
+  final IconData icone;
+
+  const _ProducaoIdentificadorPage({
+    required this.categoriaId,
+    required this.categoriaLabel,
+    required this.cor,
+    required this.icone,
+  });
+
+  @override
+  State<_ProducaoIdentificadorPage> createState() => _ProducaoIdentificadorPageState();
+}
+
+class _ProducaoIdentificadorPageState extends State<_ProducaoIdentificadorPage> {
+  final _filtroCtrl = TextEditingController();
+  String _filtro = '';
+  bool _carregando = true;
+  List<dynamic> _materiais = [];
+
+  String? _categoriaParaProvider() {
+    if (widget.categoriaId == _kCategoriaGeral)        return null;
+    if (widget.categoriaId == _kCategoriaSemCategoria) return '';
+    return widget.categoriaId;
+  }
+
+  static const _cores = [
+    Color(0xFF1E88E5), Color(0xFF00897B), Color(0xFFE53935),
+    Color(0xFFF4511E), Color(0xFF8E24AA), Color(0xFF039BE5),
+    Color(0xFF43A047), Color(0xFFFFB300), Color(0xFF6D4C41),
+    Color(0xFF546E7A), Color(0xFFD81B60), Color(0xFF5E35B1),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _carregar());
+  }
+
+  @override
+  void dispose() {
+    _filtroCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _carregar() async {
+    setState(() => _carregando = true);
+    try {
+      await context.read<ProducaoProvider>().carregarMateriais(
+        categoria: _categoriaParaProvider(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _materiais = context.read<ProducaoProvider>().materiais;
+        _carregando = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _carregando = false);
+    }
+  }
+
+  List<String?> _identificadoresUnicos() {
+    final set = <String?>{};
+    for (final m in _materiais) {
+      final ident = m.identificador as String?;
+      set.add(ident?.trim().isNotEmpty == true ? ident!.trim() : null);
+    }
+    final lista = set.toList();
+    lista.sort((a, b) {
+      if (a == null && b == null) return 0;
+      if (a == null) return 1;
+      if (b == null) return -1;
+      return a.compareTo(b);
+    });
+    return lista;
+  }
+
+  int _contarMateriais(String? identificador) {
+    if (identificador == null) {
+      return _materiais.where((m) {
+        final ident = m.identificador as String?;
+        return ident == null || ident.trim().isEmpty;
+      }).length;
+    }
+    return _materiais.where((m) => (m.identificador as String?)?.trim() == identificador).length;
+  }
+
+  void _navegarParaIdentificador({
+    required String identificadorId,
+    required String? identificadorReal,
+  }) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _ProducaoCategoriaPage(
+          categoriaId:                 widget.categoriaId,
+          categoriaLabel:              widget.categoriaLabel,
+          cor:                         widget.cor,
+          icone:                       widget.icone,
+          identificadorFiltro:         identificadorReal,
+          identificadorLabel:          identificadorId == _kIdentificadorTodos
+              ? null
+              : identificadorId == _kIdentificadorSemIdentificador
+                  ? 'Sem identificador'
+                  : identificadorId,
+          mostrarBotaoIdentificadores: true,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Cabeçalho ────────────────────────────────────────────────────
+            Row(
+              children: [
+                InkWell(
+                  onTap: () => Navigator.of(context).pop(),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: AppTheme.divider),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
+                        SizedBox(width: 6),
+                        Text(
+                          'Categorias',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: widget.cor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(widget.icone, color: widget.cor, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.categoriaLabel,
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineMedium
+                          ?.copyWith(color: AppTheme.textPrimary),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Selecione um identificador para ver os materiais',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: AppTheme.textSecondary),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: _carregar,
+                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppTheme.divider),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // ── Campo de busca ────────────────────────────────────────────────
+            SizedBox(
+              width: 360,
+              child: TextField(
+                controller: _filtroCtrl,
+                decoration: InputDecoration(
+                  hintText:   'Buscar identificador...',
+                  prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
+                  isDense:    true,
+                  suffixIcon: _filtro.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () {
+                            _filtroCtrl.clear();
+                            setState(() => _filtro = '');
+                          },
+                        )
+                      : null,
+                ),
+                onChanged: (v) => setState(() => _filtro = v.trim().toLowerCase()),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // ── Grid de identificadores ───────────────────────────────────────
+            Expanded(
+              child: _carregando
+                  ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
+                  : _buildGrid(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGrid() {
+    final identificadores = _identificadoresUnicos();
+
+    bool corresponde(String label) =>
+        _filtro.isEmpty || label.toLowerCase().contains(_filtro);
+
+    final cards = <Widget>[];
+
+    // Card "Todos"
+    if (corresponde('todos')) {
+      cards.add(_IdentificadorCardProducao(
+        label:      'Todos',
+        quantidade: _materiais.length,
+        cor:        widget.cor,
+        icone:      Icons.grid_view_rounded,
+        onTap: () => _navegarParaIdentificador(
+          identificadorId:   _kIdentificadorTodos,
+          identificadorReal: null,
+        ),
+      ));
+    }
+
+    // Identificadores reais
+    for (int i = 0; i < identificadores.length; i++) {
+      final ident = identificadores[i];
+      final label = ident ?? 'Sem identificador';
+      if (!corresponde(label)) continue;
+      final cor = ident == null ? const Color(0xFF546E7A) : _cores[i % _cores.length];
+      cards.add(_IdentificadorCardProducao(
+        label:      label,
+        quantidade: _contarMateriais(ident),
+        cor:        cor,
+        icone:      ident == null ? Icons.help_outline : Icons.qr_code,
+        onTap: () => _navegarParaIdentificador(
+          identificadorId:   ident ?? _kIdentificadorSemIdentificador,
+          identificadorReal: ident,
+        ),
+      ));
+    }
+
+    if (cards.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.search_off, size: 64, color: AppTheme.textHint),
+            const SizedBox(height: 16),
+            Text(
+              'Nenhum identificador encontrado',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyLarge
+                  ?.copyWith(color: AppTheme.textSecondary),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      child: GridView.count(
+        crossAxisCount:   4,
+        crossAxisSpacing: 16,
+        mainAxisSpacing:  16,
+        childAspectRatio: 1.0,
+        shrinkWrap:       true,
+        physics:          const NeverScrollableScrollPhysics(),
+        children:         cards,
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CARD DE IDENTIFICADOR
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _IdentificadorCardProducao extends StatefulWidget {
+  final String     label;
+  final int        quantidade;
+  final Color      cor;
+  final IconData   icone;
+  final VoidCallback onTap;
+
+  const _IdentificadorCardProducao({
+    required this.label,
+    required this.quantidade,
+    required this.cor,
+    required this.icone,
+    required this.onTap,
+  });
+
+  @override
+  State<_IdentificadorCardProducao> createState() => _IdentificadorCardProducaoState();
+}
+
+class _IdentificadorCardProducaoState extends State<_IdentificadorCardProducao> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ativo = _hovered;
+    return MouseRegion(
+      onEnter:  (_) => setState(() => _hovered = true),
+      onExit:   (_) => setState(() => _hovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            color: ativo ? widget.cor.withValues(alpha: 0.12) : AppTheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: ativo ? widget.cor : widget.cor.withValues(alpha: 0.25),
+              width: ativo ? 2 : 1.5,
+            ),
+            boxShadow: ativo
+                ? [BoxShadow(color: widget.cor.withValues(alpha: 0.20), blurRadius: 12, offset: const Offset(0, 4))]
+                : [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 4, offset: const Offset(0, 2))],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: widget.cor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(widget.icone, color: widget.cor, size: 28),
+              ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: ativo ? widget.cor : AppTheme.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${widget.quantidade} ${widget.quantidade == 1 ? "material" : "materiais"}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: ativo ? widget.cor.withValues(alpha: 0.8) : AppTheme.textHint,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PÁGINA DE MATERIAIS POR CATEGORIA
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ProducaoCategoriaPage extends StatefulWidget {
+  final String   categoriaId;
+  final String   categoriaLabel;
+  final Color    cor;
+  final IconData icone;
+  /// Quando não-null, pré-preenche o filtro de identificador (vindo de
+  /// _ProducaoIdentificadorPage). String vazia = sem identificador.
+  final String?  identificadorFiltro;
+  /// Rótulo do identificador para exibir no breadcrumb (null = sem filtro).
+  final String?  identificadorLabel;
+  /// Se true, exibe breadcrumb de volta à tela de identificadores.
+  final bool     mostrarBotaoIdentificadores;
+
+  const _ProducaoCategoriaPage({
+    required this.categoriaId,
+    required this.categoriaLabel,
+    required this.cor,
+    required this.icone,
+    this.identificadorFiltro,
+    this.identificadorLabel,
+    this.mostrarBotaoIdentificadores = false,
+  });
+
+  @override
+  State<_ProducaoCategoriaPage> createState() => _ProducaoCategoriaPageState();
+}
+
+class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
+  final _buscaCtrl         = TextEditingController();
+  final _buscaIdCtrl       = TextEditingController();
+  final _identificadorCtrl = TextEditingController();
+  final _medidaCtrl        = TextEditingController();
+  final _espessuraCtrl     = TextEditingController();
+  String  _statusFiltro    = '';
+  Timer?  _debounce;
+
+  static const int _itensPorPagina = 50;
+  int _paginaAtual = 0;
+
+  String? _categoriaParaProvider() {
+    if (widget.categoriaId == _kCategoriaGeral)        return null;
+    if (widget.categoriaId == _kCategoriaSemCategoria) return '';
+    return widget.categoriaId;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Pré-preenche o filtro de identificador vindo da página anterior
+    if (widget.identificadorFiltro != null) {
+      _identificadorCtrl.text = widget.identificadorFiltro!;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _aplicarFiltros());
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _buscaCtrl.dispose();
+    _buscaIdCtrl.dispose();
+    _identificadorCtrl.dispose();
+    _medidaCtrl.dispose();
+    _espessuraCtrl.dispose();
+    super.dispose();
+  }
+
+  void _aplicarFiltros() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      setState(() => _paginaAtual = 0);
+      context.read<ProducaoProvider>().carregarMateriais(
+            busca:         _buscaCtrl.text.trim(),
+            categoria:     _categoriaParaProvider(),
+            status:        _statusFiltro.isEmpty ? null : _statusFiltro,
+            id:            _buscaIdCtrl.text.trim(),
+            identificador: _identificadorCtrl.text.trim(),
+            medida:        _medidaCtrl.text.trim(),
+            espessura:     _espessuraCtrl.text.trim(),
+          );
+    });
+  }
+
+  void _limparFiltros() {
+    _buscaCtrl.clear();
+    _buscaIdCtrl.clear();
+    _identificadorCtrl.clear();
+    _medidaCtrl.clear();
+    _espessuraCtrl.clear();
+    setState(() => _statusFiltro = '');
+    context.read<ProducaoProvider>().carregarMateriais(categoria: _categoriaParaProvider());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Cabeçalho ──────────────────────────────────────────────────
+            Row(
+              children: [
+                InkWell(
+                  onTap: () => Navigator.of(context).pop(),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: AppTheme.divider),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
+                        const SizedBox(width: 6),
+                        Text(
+                          widget.mostrarBotaoIdentificadores
+                              ? widget.categoriaLabel
+                              : 'Categorias',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (widget.mostrarBotaoIdentificadores && widget.identificadorLabel != null) ...[
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6),
+                    child: Icon(Icons.chevron_right, size: 16, color: AppTheme.textHint),
+                  ),
+                  Text(
+                    widget.identificadorLabel!,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+                const SizedBox(width: 16),
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: widget.cor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(widget.icone, color: widget.cor, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.categoriaLabel,
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineMedium
+                          ?.copyWith(color: AppTheme.textPrimary),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Solicitação e controle de materiais',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: AppTheme.textSecondary),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: _aplicarFiltros,
+                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppTheme.divider),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // ── Linha 1: ID · Busca · Status · Limpar ──────────────────────
+            Row(
+              children: [
+                SizedBox(
+                  width: 110,
+                  child: TextField(
+                    controller: _buscaIdCtrl,
+                    decoration: const InputDecoration(
+                      hintText:   'ID...',
+                      prefixIcon: Icon(Icons.tag, color: AppTheme.textHint, size: 18),
+                      isDense:    true,
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    onChanged: (_) => _aplicarFiltros(),
+                    onSubmitted: (_) => _aplicarFiltros(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 3,
+                  child: TextField(
+                    controller: _buscaCtrl,
+                    decoration: const InputDecoration(
+                      hintText:   'Buscar material...',
+                      prefixIcon: Icon(Icons.search, color: AppTheme.textHint, size: 20),
+                      isDense:    true,
+                    ),
+                    onChanged: (_) => _aplicarFiltros(),
+                    onSubmitted: (_) => _aplicarFiltros(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 150,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _statusFiltro.isEmpty ? '' : _statusFiltro,
+                    decoration: const InputDecoration(
+                      labelText: 'Status',
+                      isDense:   true,
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: '',        child: Text('Todos')),
+                      DropdownMenuItem(value: 'OK',      child: Text('OK')),
+                      DropdownMenuItem(value: 'LIMITE',  child: Text('Limite')),
+                      DropdownMenuItem(value: 'CRITICO', child: Text('Crítico')),
+                    ],
+                    onChanged: (v) {
+                      setState(() => _statusFiltro = v ?? '');
+                      _aplicarFiltros();
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.outlined(
+                  tooltip: 'Limpar filtros',
+                  icon: Icon(Icons.filter_alt_off, color: scheme.onSurfaceVariant),
+                  onPressed: _limparFiltros,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // ── Linha 2: Identificador · Medida · Espessura ─────────────────
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _identificadorCtrl,
+                    decoration: const InputDecoration(
+                      hintText:   'Identificador...',
+                      prefixIcon: Icon(Icons.qr_code, color: AppTheme.textHint, size: 18),
+                      isDense:    true,
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    onChanged: (_) => _aplicarFiltros(),
+                    onSubmitted: (_) => _aplicarFiltros(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _medidaCtrl,
+                    decoration: const InputDecoration(
+                      hintText:   'Medida...',
+                      prefixIcon: Icon(Icons.straighten, color: AppTheme.textHint, size: 18),
+                      isDense:    true,
+                    ),
+                    onChanged: (_) => _aplicarFiltros(),
+                    onSubmitted: (_) => _aplicarFiltros(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _espessuraCtrl,
+                    decoration: const InputDecoration(
+                      hintText:   'Espessura...',
+                      prefixIcon: Icon(Icons.layers, color: AppTheme.textHint, size: 18),
+                      isDense:    true,
+                    ),
+                    onChanged: (_) => _aplicarFiltros(),
+                    onSubmitted: (_) => _aplicarFiltros(),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // ── Tabela ──────────────────────────────────────────────────────
+            Expanded(
+              child: Consumer<ProducaoProvider>(
+                builder: (_, provider, __) {
+                  if (provider.carregandoMateriais) {
+                    return const Center(
+                        child: CircularProgressIndicator(color: AppTheme.primary));
+                  }
+                  if (provider.materiais.isEmpty) {
+                    return const Center(
+                      child: Text(
+                        'Nenhum material encontrado',
+                        style: TextStyle(color: AppTheme.textHint),
+                      ),
+                    );
+                  }
+
+                  final todos        = provider.materiais;
+                  final totalPaginas = (todos.length / _itensPorPagina).ceil();
+                  final paginaSegura = _paginaAtual.clamp(0, (totalPaginas - 1).clamp(0, 999));
+                  final inicio       = paginaSegura * _itensPorPagina;
+                  final fim          = (inicio + _itensPorPagina).clamp(0, todos.length);
+                  final paginados    = todos.sublist(inicio, fim);
+
+                  return Column(
+                    children: [
+                      Expanded(
+                        child: Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: SingleChildScrollView(
+                            child: _TabelaMateriais(
+                              materiais: paginados,
+                              mostrarCategoria: widget.categoriaId == _kCategoriaGeral,
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (totalPaginas > 1) ...[
+                        const SizedBox(height: 12),
+                        _BarraPaginacao(
+                          paginaAtual:     paginaSegura,
+                          totalPaginas:    totalPaginas,
+                          totalItens:      todos.length,
+                          itensPorPagina:  _itensPorPagina,
+                          onPaginaChanged: (p) => setState(() => _paginaAtual = p),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TABELA DE MATERIAIS
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TABELA DE MATERIAIS
@@ -521,10 +1238,14 @@ class _ColDef {
 
 class _TabelaMateriais extends StatelessWidget {
   final List<MaterialProducaoModel> materiais;
+  final bool mostrarCategoria;
 
-  const _TabelaMateriais({required this.materiais});
+  const _TabelaMateriais({
+    required this.materiais,
+    this.mostrarCategoria = true,
+  });
 
-  static const List<_ColDef> _cols = [
+  static const List<_ColDef> _todosColsDef = [
     _ColDef(label: 'ID',            fixed: 56),
     _ColDef(label: 'Identificador', flex: 0.7),
     _ColDef(label: 'Material',      flex: 2.0),
@@ -537,6 +1258,10 @@ class _TabelaMateriais extends StatelessWidget {
     _ColDef(label: 'Disponível',    flex: 0.7),
     _ColDef(label: 'Status',        flex: 0.8),
   ];
+
+  List<_ColDef> get _cols => mostrarCategoria
+      ? _todosColsDef
+      : _todosColsDef.where((c) => c.label != 'Categoria').toList();
 
   static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
       ? SizedBox(width: col.fixed, child: child)
@@ -568,6 +1293,7 @@ class _TabelaMateriais extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cols = _cols;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -576,7 +1302,11 @@ class _TabelaMateriais extends StatelessWidget {
         for (int i = 0; i < materiais.length; i++) ...[
           if (i > 0)
             const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
-          _LinhaMateria(material: materiais[i], cols: _cols),
+          _LinhaMateria(
+            material: materiais[i],
+            cols: cols,
+            mostrarCategoria: mostrarCategoria,
+          ),
         ],
         if (materiais.isNotEmpty)
           const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
@@ -588,8 +1318,13 @@ class _TabelaMateriais extends StatelessWidget {
 class _LinhaMateria extends StatefulWidget {
   final MaterialProducaoModel material;
   final List<_ColDef> cols;
+  final bool mostrarCategoria;
 
-  const _LinhaMateria({required this.material, required this.cols});
+  const _LinhaMateria({
+    required this.material,
+    required this.cols,
+    this.mostrarCategoria = true,
+  });
 
   @override
   State<_LinhaMateria> createState() => _LinhaMateriaState();
@@ -685,30 +1420,32 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 )),
                 _vDivider(),
 
-                // Categoria
-                _colWrap(cols[3], _cell(m.categoria ?? '—')),
-                _vDivider(),
+                // Categoria (oculta quando categoria específica selecionada)
+                if (widget.mostrarCategoria) ...[
+                  _colWrap(cols[3], _cell(m.categoria ?? '—')),
+                  _vDivider(),
+                ],
 
                 // Unidade
-                _colWrap(cols[4], _cell(m.unidade ?? '—')),
+                _colWrap(cols[widget.mostrarCategoria ? 4 : 3], _cell(m.unidade ?? '—')),
                 _vDivider(),
 
                 // Medida
-                _colWrap(cols[5], _cell(m.medida ?? '—')),
+                _colWrap(cols[widget.mostrarCategoria ? 5 : 4], _cell(m.medida ?? '—')),
                 _vDivider(),
 
                 // Espessura
-                _colWrap(cols[6], _cell(m.espessura ?? '—')),
+                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], _cell(m.espessura ?? '—')),
                 _vDivider(),
 
                 // Estoque atual
-                _colWrap(cols[7], _cell(
+                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], _cell(
                   m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2),
                 )),
                 _vDivider(),
 
                 // Em uso
-                _colWrap(cols[8], Padding(
+                _colWrap(cols[widget.mostrarCategoria ? 8 : 7], Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
                     m.emUso > 0
@@ -725,7 +1462,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _vDivider(),
 
                 // Disponível
-                _colWrap(cols[9], Padding(
+                _colWrap(cols[widget.mostrarCategoria ? 9 : 8], Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
                     disponivel.toStringAsFixed(disponivel % 1 == 0 ? 0 : 2),
@@ -740,7 +1477,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _vDivider(),
 
                 // Status
-                _colWrap(cols[10], Center(
+                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                     child: _StatusBadge(status: m.statusReal),

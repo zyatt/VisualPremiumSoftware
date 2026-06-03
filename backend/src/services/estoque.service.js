@@ -88,33 +88,43 @@ async function registrarMovimentacao({
 
   const delta = tipo === 'ENTRADA' ? quantidade : -quantidade;
 
-  // OS numérica → mescla na RelacaoOS existente; OS textual → reutiliza a aberta existente
-  // ou cria nova se vier de movimentação manual sem relação prévia
+  // Resolve qual RelacaoOS usar:
+  // 1. OS numérica ou com sufixo (#OC/#S/#E): upsert direto pelo numeroOS exato.
+  // 2. OS textual sem sufixo: verifica se já existe uma RelacaoOS EM_ANDAMENTO
+  //    com esse numeroOS (ex: criada pela produção). Se existir, reutiliza.
+  //    Só cria nova com sufixo de timestamp quando não houver nenhuma aberta.
   const osEhNumerica = /^\d+$/.test(numeroOS);
-  // OS "com sufixo" = já tem #OC..., #S... ou #E... → veio de uma sessão com sufixo gerado pelo cliente
   const osTemSufixo  = /#(OC|S|E)/.test(numeroOS);
   let relacao;
 
   if (osEhNumerica || osTemSufixo) {
-    // OS numérica ou com sufixo: upsert garante uma única relação por chave
+    // OS numérica ou com sufixo: upsert garante uma única relação por chave exata
     relacao = await prisma.relacaoOS.upsert({
       where:  { numeroOS },
       create: { numeroOS, status: 'EM_ANDAMENTO' },
       update: {},
     });
   } else {
-    // OS textual sem sufixo: o cliente deveria ter adicionado um sufixo antes de
-    // enviar o lote. Chegando aqui sem sufixo (chamada avulsa), cria uma relação
-    // nova com sufixo de timestamp para não misturar com outras relações dessa OS.
-    const sufixo = tipo === 'SAIDA' ? `#S${Date.now()}` : `#E${Date.now()}`;
-    const numeroOSComSufixo = `${numeroOS}${sufixo}`;
-    relacao = await prisma.relacaoOS.upsert({
-      where:  { numeroOS: numeroOSComSufixo },
-      create: { numeroOS: numeroOSComSufixo, status: 'EM_ANDAMENTO' },
-      update: {},
+    // OS textual sem sufixo: tenta reutilizar RelacaoOS EM_ANDAMENTO existente
+    const relacaoAberta = await prisma.relacaoOS.findFirst({
+      where:   { numeroOS, status: 'EM_ANDAMENTO' },
+      orderBy: { criadoEm: 'asc' },
     });
-  }
 
+    if (relacaoAberta) {
+      // Já existe uma OS aberta com esse nome — reutiliza (ex: criada pela produção)
+      relacao = relacaoAberta;
+    } else {
+      // Não existe nenhuma aberta: cria nova com sufixo de timestamp
+      const sufixo = tipo === 'SAIDA' ? `#S${Date.now()}` : `#E${Date.now()}`;
+      const numeroOSComSufixo = `${numeroOS}${sufixo}`;
+      relacao = await prisma.relacaoOS.upsert({
+        where:  { numeroOS: numeroOSComSufixo },
+        create: { numeroOS: numeroOSComSufixo, status: 'EM_ANDAMENTO' },
+        update: {},
+      });
+    }
+  }
   // Cria a movimentação
   const [movimentacao] = await prisma.$transaction([
     prisma.movimentacaoEstoque.create({

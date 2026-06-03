@@ -10,6 +10,7 @@ class MaterialRepository {
     String? identificador,
     String? medida,
     String? espessura,
+    bool? ativo,
   }) async {
     final params = <String, String>{};
     if (busca != null && busca.isNotEmpty)               params['busca']        = busca;
@@ -23,6 +24,7 @@ class MaterialRepository {
     if (identificador != null && identificador.isNotEmpty) params['identificador'] = identificador;
     if (medida != null && medida.isNotEmpty)             params['medida']       = medida;
     if (espessura != null && espessura.isNotEmpty)       params['espessura']    = espessura;
+    if (ativo != null)                                   params['ativo']        = ativo.toString();
 
     final query = params.entries
         .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
@@ -87,19 +89,19 @@ class MaterialRepository {
     await ApiClient.delete('/materiais/$materialId/especificos/$filhoId');
   }
 
- Future<EstoqueEspecificoModel> atualizarFilhoEspecifico(
+  Future<EstoqueEspecificoModel> atualizarFilhoEspecifico(
     int materialId,
     int filhoId, {
     String? descricao,
     double? ultimoValorPago,
     double? ultimoValorPagoM2,
-    double? quantidade,           // ← NOVO
+    double? quantidade,
   }) async {
     final body = <String, dynamic>{};
     if (descricao != null)         body['descricao']         = descricao;
     if (ultimoValorPago != null)   body['ultimoValorPago']   = ultimoValorPago;
     if (ultimoValorPagoM2 != null) body['ultimoValorPagoM2'] = ultimoValorPagoM2;
-    if (quantidade != null)        body['quantidade']        = quantidade;  // ← NOVO
+    if (quantidade != null)        body['quantidade']        = quantidade;
 
     final data = await ApiClient.patch('/materiais/$materialId/especificos/$filhoId', body);
     return EstoqueEspecificoModel.fromJson(data);

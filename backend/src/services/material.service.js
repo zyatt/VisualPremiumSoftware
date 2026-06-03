@@ -47,7 +47,7 @@ async function listar(filtros = {}) {
   if (semCategoria === 'true') {
     where.categoria = null;
   } else if (categoria) {
-    where.categoria = { contains: categoria, mode: 'insensitive' };
+    where.categoria = { equals: categoria, mode: 'insensitive' };
   }
   if (status)              where.status = status;
   if (comFornecedor === 'true') {

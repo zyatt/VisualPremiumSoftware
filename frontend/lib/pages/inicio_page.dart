@@ -9,9 +9,12 @@ class InicioPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final usuario = context.watch<UsuarioProvider>().usuarioLogado;
-    final scheme  = Theme.of(context).colorScheme;
+    final usuario    = context.watch<UsuarioProvider>().usuarioLogado;
+    final scheme     = Theme.of(context).colorScheme;
     final isProducao = AppShell.isProducaoRole(usuario?.role);
+    final roleUp     = usuario?.role.trim().toUpperCase() ?? '';
+    final isAdmin    = roleUp == 'ADMIN';
+    final isGerente  = roleUp == 'GERENTE';
 
     return Scaffold(
       body: Padding(
@@ -24,12 +27,12 @@ class InicioPage extends StatelessWidget {
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 4),
-            Text('Bem-vindo ao Visual Premium', style: TextStyle(color: scheme.onSurfaceVariant)),
+            Text('Bem-vindo à Visual Premium', style: TextStyle(color: scheme.onSurfaceVariant)),
             const SizedBox(height: 32),
             Expanded(
               child: isProducao
                   ? _buildProducaoCards()
-                  : _buildGeralCards(),
+                  : _buildGeralCards(isAdmin: isAdmin, isGerente: isGerente),
             ),
           ],
         ),
@@ -54,20 +57,23 @@ class InicioPage extends StatelessWidget {
     );
   }
 
-  Widget _buildGeralCards() {
+  Widget _buildGeralCards({required bool isAdmin, required bool isGerente}) {
     return GridView.count(
       crossAxisCount: 4,
       mainAxisSpacing: 16,
       crossAxisSpacing: 16,
       childAspectRatio: 1.8,
-      children: const [
-        _DashCard(icon: Icons.inventory_2,   label: 'Estoque',          route: '/estoque',          color: Color(0xFF6C63FF)),
-        _DashCard(icon: Icons.people,        label: 'Fornecedores',      route: '/fornecedores',     color: Color(0xFF03DAC6)),
-        _DashCard(icon: Icons.request_quote, label: 'Orçamento',         route: '/orcamento',        color: Color(0xFFFF9800)),
-        _DashCard(icon: Icons.shopping_cart, label: 'Ordem de Compra',   route: '/ordem-compra',     color: Color(0xFF4CAF50)),
-        _DashCard(icon: Icons.sync_alt,      label: 'Controle Estoque',  route: '/controle-estoque', color: Color(0xFFE91E63)),
-        _DashCard(icon: Icons.history,       label: 'Histórico',         route: '/historico',        color: Color(0xFF9C27B0)),
-        _DashCard(icon: Icons.description,   label: 'Relatório OS',      route: '/relatorio-os',     color: Color(0xFF2196F3)),
+      children: [
+        const _DashCard(icon: Icons.inventory_2,                      label: 'Estoque',           route: '/estoque',          color: Color(0xFF6C63FF)),
+        const _DashCard(icon: Icons.people,                           label: 'Fornecedores',       route: '/fornecedores',     color: Color(0xFF03DAC6)),
+        const _DashCard(icon: Icons.request_quote,                    label: 'Orçamento',          route: '/orcamento',        color: Color(0xFFFF9800)),
+        const _DashCard(icon: Icons.shopping_cart,                    label: 'Ordem de Compra',    route: '/ordem-compra',     color: Color(0xFF4CAF50)),
+        const _DashCard(icon: Icons.sync_alt,                         label: 'Controle Estoque',   route: '/controle-estoque', color: Color(0xFFE91E63)),
+        const _DashCard(icon: Icons.history,                          label: 'Histórico',          route: '/historico',        color: Color(0xFF9C27B0)),
+        const _DashCard(icon: Icons.description,                      label: 'Relatório OS',       route: '/relatorio-os',     color: Color(0xFF2196F3)),
+        const _DashCard(icon: Icons.precision_manufacturing_rounded,  label: 'Produção',           route: '/producao',         color: Color(0xFF00BCD4)),
+        if (isAdmin || isGerente)
+          const _DashCard(icon: Icons.admin_panel_settings_rounded,   label: 'Admin',              route: '/admin',            color: Color(0xFFFF5722)),
       ],
     );
   }

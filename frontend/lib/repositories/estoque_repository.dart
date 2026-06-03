@@ -27,6 +27,8 @@ class EstoqueRepository {
     String? materialIdentificador,
     String? materialMedida,
     String? materialEspessura,
+    DateTime? dataInicio,
+    DateTime? dataFim,
   }) async {
     final params = <String>[];
     if (busca != null && busca.isNotEmpty) {
@@ -46,6 +48,18 @@ class EstoqueRepository {
     }
     if (materialEspessura != null && materialEspessura.isNotEmpty) {
       params.add('materialEspessura=${Uri.encodeComponent(materialEspessura)}');
+    }
+    if (dataInicio != null) {
+      final s = '${dataInicio.year}-'
+          '${dataInicio.month.toString().padLeft(2, '0')}-'
+          '${dataInicio.day.toString().padLeft(2, '0')}';
+      params.add('dataInicio=${Uri.encodeComponent(s)}');
+    }
+    if (dataFim != null) {
+      final s = '${dataFim.year}-'
+          '${dataFim.month.toString().padLeft(2, '0')}-'
+          '${dataFim.day.toString().padLeft(2, '0')}';
+      params.add('dataFim=${Uri.encodeComponent(s)}');
     }
     final path = params.isEmpty
         ? '/relatorios-os'

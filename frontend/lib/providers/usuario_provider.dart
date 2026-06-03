@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:visual_premium/providers/orcamento_provider.dart';
 import '../models/usuario_model.dart';
@@ -9,9 +8,7 @@ class UsuarioProvider extends ChangeNotifier {
   final UsuarioRepository _repo = UsuarioRepository();
   OrcamentoProvider? _orcamentoProvider;
 
-  void setOrcamentoProvider(OrcamentoProvider p) {
-    _orcamentoProvider = p;
-  }
+  void setOrcamentoProvider(OrcamentoProvider p) => _orcamentoProvider = p;
 
   UsuarioModel? _usuarioLogado;
   UsuarioModel? get usuarioLogado => _usuarioLogado;
@@ -22,22 +19,41 @@ class UsuarioProvider extends ChangeNotifier {
   bool _carregando = false;
   bool get carregando => _carregando;
 
+  bool _restaurando = true;
+  bool get restaurando => _restaurando;
+
   String? _erro;
   String? get erro => _erro;
 
+  // Chamado em main() antes de runApp — tenta restaurar sessão salva
+  Future<void> restaurarSessao() async {
+    try {
+      final sessao = await _repo.carregarSessao();
+      if (sessao != null) {
+        _token         = sessao.token;
+        _usuarioLogado = sessao.usuario;
+        ApiClient.setToken(_token);
+        await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
+      }
+    } catch (_) {
+      // Sessão corrompida — ignora e segue para login
+      await _repo.limparSessao();
+    } finally {
+      _restaurando = false;
+      notifyListeners();
+    }
+  }
+
   Future<bool> login(String username, String senha) async {
     _carregando = true;
-    _erro = null;
+    _erro       = null;
     notifyListeners();
     try {
-      final result = await _repo.login(username, senha);
-      _token = result.token;
+      final result   = await _repo.login(username, senha);
+      _token         = result.token;
       _usuarioLogado = result.usuario;
       ApiClient.setToken(_token);
-
-      // Recarrega o estado do orçamento para este usuário
       await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
-
       return true;
     } catch (e) {
       _erro = e.toString().replaceFirst('Exception: ', '');
@@ -48,14 +64,12 @@ class UsuarioProvider extends ChangeNotifier {
     }
   }
 
-  void logout() {
+  Future<void> logout() async {
     _usuarioLogado = null;
-    _token = null;
+    _token         = null;
     ApiClient.setToken(null);
-
-    // Limpa o estado do orçamento ao deslogar
+    await _repo.limparSessao();
     _orcamentoProvider?.trocarUsuario(null);
-
     notifyListeners();
   }
 }

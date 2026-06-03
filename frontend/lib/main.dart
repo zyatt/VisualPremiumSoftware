@@ -20,19 +20,32 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
 
-  runApp(const VisualPremiumApp());
+  // Cria os providers antes do runApp para poder restaurar a sessão
+  final usuarioProvider   = UsuarioProvider();
+  final orcamentoProvider = OrcamentoProvider();
+  usuarioProvider.setOrcamentoProvider(orcamentoProvider);
+
+  // Restaura sessão salva (token + usuário) antes de exibir qualquer tela
+  await usuarioProvider.restaurarSessao();
+
+  runApp(VisualPremiumApp(
+    usuarioProvider:   usuarioProvider,
+    orcamentoProvider: orcamentoProvider,
+  ));
 }
 
 class VisualPremiumApp extends StatelessWidget {
-  const VisualPremiumApp({super.key});
+  final UsuarioProvider   usuarioProvider;
+  final OrcamentoProvider orcamentoProvider;
+
+  const VisualPremiumApp({
+    super.key,
+    required this.usuarioProvider,
+    required this.orcamentoProvider,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final usuarioProvider = UsuarioProvider();
-    final orcamentoProvider = OrcamentoProvider();
-
-    usuarioProvider.setOrcamentoProvider(orcamentoProvider);
-
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: usuarioProvider),
@@ -45,25 +58,24 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => RelatorioOSProvider()),
         ChangeNotifierProvider(create: (_) => ProducaoProvider()),
       ],
-      child: UpdateChecker(
-        child: MaterialApp.router(
-          title: 'Visual Premium',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.light,
-          darkTheme: AppTheme.dark,
-          themeMode: ThemeMode.dark,
-          routerConfig: AppRouter.buildRouter(usuarioProvider),
-          localizationsDelegates: const [
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
-          ],
-          supportedLocales: const [
-            Locale('pt', 'BR'),
-            Locale('en', 'US'),
-          ],
-          locale: const Locale('pt', 'BR'),
-        ),
+      child: MaterialApp.router(
+        title: 'Visual Premium',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: ThemeMode.dark,
+        builder: (context, child) => UpdateChecker(child: child!),
+        routerConfig: AppRouter.buildRouter(usuarioProvider),
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [
+          Locale('pt', 'BR'),
+          Locale('en', 'US'),
+        ],
+        locale: const Locale('pt', 'BR'),
       ),
     );
   }

@@ -1,24 +1,15 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
-import '../models/material_model.dart';
 import '../models/fornecedor_model.dart';
-import '../providers/material_provider.dart';
 import '../providers/fornecedor_provider.dart';
 import '../providers/orcamento_provider.dart';
-import '../repositories/fornecedor_repository.dart';
 import '../repositories/orcamento_repository.dart';
-import '../repositories/ordem_compra_repository.dart';
 import '../theme/app_theme.dart';
 import 'orcamento_historico_page.dart';
-import '../models/ordem_compra_model.dart';
-import 'ordem_compra_page.dart';
-
+import 'orcamento_editor_page.dart';
 // ─── Formatters ───────────────────────────────
 
 /// Bloqueia a digitação de vírgula em campos de texto livre (busca, título, descrição, etc.)
@@ -34,15 +25,6 @@ class _NoCommaFormatter extends TextInputFormatter {
     return newValue;
   }
 }
-
-// ─── Helpers ──────────────────────────────────
-
-String _brl(double? v) {
-  if (v == null || v == 0) return '—';
-  return 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
-}
-
-// ─── Page ─────────────────────────────────────
 
 class OrcamentoPage extends StatefulWidget {
   const OrcamentoPage({super.key});
@@ -62,11 +44,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   bool _carregandoAprovacao = false;
   String? _erroAprovacao;
 
-  List<MaterialModel> _resultadosBusca = [];
-  bool _buscando = false;
   bool _salvandoPreco = false;
-  bool _mostrarResultados = false;
-
   // (flags de edição foram movidos para OrcamentoTab no provider)
 
   // Campos de busca avançada de materiais
@@ -78,11 +56,8 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   Timer? _debounceMatBusca;
 
   // Modo de ordenação da tabela de totais por fornecedor
-  String _ordemTotais = 'unitario';
 
-  /// Controla se o editor de orçamento está em foco (true) ou se o
-  /// painel de aprovação está visível (false). Permite alternar sem fechar abas.
-  bool _abaVisivel = false;
+  // _abaVisivel controla a visibilidade do editor inline (quando usado)
 
   @override
   void initState() {
@@ -138,164 +113,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
   // ── Enviar para aprovação ─────────────────────────────────────────────────────
 
-  Future<void> _enviarParaAprovacao() async {
-    final provider = context.read<OrcamentoProvider>();
-    final tab = provider.tabAtual;
-    if (tab == null || tab.itens.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Adicione ao menos um material antes de enviar para aprovação.')),
-      );
-      return;
-    }
-
-    final tituloCtrl = TextEditingController(text: tab.titulo);
-    final novoTitulo = await showDialog<String>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) {
-          bool vazio = false;
-          return AlertDialog(
-            title: const Text('Enviar para Aprovação',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-            content: SizedBox(
-              width: 340,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Nome do orçamento:',
-                    style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: tituloCtrl,
-                    autofocus: true,
-                    inputFormatters: [_NoCommaFormatter()],
-                    decoration: InputDecoration(
-                      hintText: 'Ex: Orçamento Obra Abril',
-                      isDense: true,
-                      errorText: null,
-                    ),
-                    onChanged: (_) {
-                      if (vazio && tituloCtrl.text.trim().isNotEmpty) {
-                        setSt(() => vazio = false);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'Após o envio, aguarde Admin/Gerente aprovar antes de gerar a Ordem de Compra.',
-                    style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancelar')),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-                onPressed: () {
-                  if (tituloCtrl.text.trim().isEmpty) {
-                    setSt(() => vazio = true);
-                    return;
-                  }
-                  Navigator.pop(ctx, tituloCtrl.text.trim());
-                },
-                child: const Text('Enviar para Aprovação'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    if (novoTitulo == null) return;
-
-    provider.renomearAba(provider.abaAtiva, novoTitulo);
-
-    setState(() => _salvandoPreco = true);
-    try {
-      final repo = OrcamentoRepository();
-      int orcId;
-
-      // ignore: use_build_context_synchronously
-      final orcamentoServidorId = context.read<OrcamentoProvider>().tabAtual?.servidorId;
-      if (orcamentoServidorId != null) {
-        orcId = orcamentoServidorId;
-        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
-        // Remove todos os itens de uma vez (atômico) — evita duplicatas
-        // causadas por falhas parciais no loop individual com catch silencioso.
-        await repo.limparItens(orcId);
-      } else {
-        final criado = await repo.criar(novoTitulo);
-        orcId = criado['id'] as int;
-        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
-      }
-
-      for (final item in tab.itens) {
-        if (item.precos.isEmpty) {
-          // Item sem fornecedor/preço — envia mesmo assim para não perder o material
-          await repo.adicionarItem(orcId, {
-            'materialId': item.materialId,
-            'fornecedorId': null,
-            'quantidade': item.quantidade,
-            'precoUnitario': null,
-            'precoM2': null,
-            'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado,
-            'selecionado': false,
-            'descricaoItem': item.descricao,
-          });
-        } else {
-          for (final entry in item.precos.entries) {
-            final fId = entry.key;
-            final pf = entry.value;
-            await repo.adicionarItem(orcId, {
-              'materialId': item.materialId,
-              'fornecedorId': fId,
-              'quantidade': item.quantidade,
-              'precoUnitario': pf.preco,
-              'precoM2': pf.precoM2,
-              'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado,
-              'selecionado': item.fornecedorSelecionado == fId,
-              'descricaoItem': item.descricao,
-            });
-          }
-        }
-      }
-
-      await repo.enviarParaAprovacao(orcId);
-
-      // Limpa o orçamento local
-      provider.limparAba();
-      setState(() => _abaVisivel = false);
-      
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Orçamento #$orcId enviado para aprovação com sucesso!'),
-          backgroundColor: AppTheme.success,
-        ),
-      );
-      
-      // Volta para lista inicial
-      context.read<OrcamentoProvider>().atualizarFlagsTab(
-        aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
-      await _carregarOrcamentosServidor();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao enviar para aprovação: $e'),
-            backgroundColor: AppTheme.error,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _salvandoPreco = false);
-    }
-  }
 
   // ── Aprovar orçamento ─────────────────────────────────────────────────────────
 
@@ -508,7 +325,13 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         );
         
         context.read<OrcamentoProvider>().atualizarFlagsTab(modoGerarOC: true);
-        setState(() => _abaVisivel = true);
+        // Abre o editor na página de edição
+        if (mounted) {
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+          );
+          if (mounted) _carregarOrcamentosServidor();
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -527,11 +350,26 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   // ── Reabrir orçamento ─────────────────────────────────────────────────────────
 
   Future<void> _reabrirOrcamento(Map<String, dynamic> orc) async {
+    final provider = context.read<OrcamentoProvider>();
+    final orcId = orc['id'] as int;
+
+    // Se já existe uma aba aberta com esse servidorId, apenas navega para ela
+    final abaExistente = provider.ativarAbaExistente(orcId);
+    if (abaExistente >= 0) {
+      if (mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+        );
+        if (mounted) _carregarOrcamentosServidor();
+      }
+      return;
+    }
+
     setState(() => _salvandoPreco = true);
     try {
       // Busca o orçamento completo SEM alterar o status no servidor
       final orcamentoCompleto =
-          await OrcamentoRepository().buscarPorId(orc['id'] as int);
+          await OrcamentoRepository().buscarPorId(orcId);
 
       final itens = (orcamentoCompleto['itens'] as List? ?? []);
 
@@ -592,28 +430,33 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
       if (!mounted) return;
 
-      final provider = context.read<OrcamentoProvider>();
       provider.adicionarItensEmLote(
-        orcamentoCompleto['titulo'] as String? ?? 'Orçamento #${orc['id']}',
+        orcamentoCompleto['titulo'] as String? ?? 'Orçamento #$orcId',
         itensPorChave.values.toList(),
       );
 
-      provider.setServidorIdTab(orc['id'] as int);
+      provider.setServidorIdTab(orcId);
 
       final statusReaberto = orc['status'] as String? ?? '';
       provider.atualizarFlagsTab(
         aguardandoAprovacao: statusReaberto == 'AGUARDANDO_APROVACAO',
         jaFinalizado: statusReaberto == 'APROVADO' || statusReaberto == 'NAO_APROVADO',
-        modoGerarOC: false,
+        modoGerarOC: statusReaberto == 'APROVADO',
       );
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Orçamento #${orc['id']} carregado para edição.'),
+          content: Text('Orçamento #$orcId carregado para edição.'),
           backgroundColor: AppTheme.success,
         ),
       );
-      setState(() => _abaVisivel = true);
+
+      // Navega para o editor
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+      );
+      if (mounted) _carregarOrcamentosServidor();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -628,868 +471,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     }
   }
 
-  // ── Busca de materiais ────────────────────────────────────────────────────────
-
-  void _agendarBuscaMateriais() {
-    _debounceMatBusca?.cancel();
-    _debounceMatBusca = Timer(
-      const Duration(milliseconds: 400),
-      _executarBuscaMateriais,
-    );
-  }
-
-  Future<void> _executarBuscaMateriais() async {
-    final id = _searchIdCtrl.text.trim();
-    final nome = _searchNomeCtrl.text.trim();
-    final identificador = _searchIdentificadorCtrl.text.trim();
-    final medida = _searchMedidaCtrl.text.trim();
-    final esp = _searchEspCtrl.text.trim();
-
-    final algumFiltro = id.isNotEmpty || nome.isNotEmpty || identificador.isNotEmpty ||
-        medida.isNotEmpty || esp.isNotEmpty;
-
-    if (!algumFiltro) {
-      setState(() {
-        _resultadosBusca = [];
-        _mostrarResultados = false;
-      });
-      return;
-    }
-
-    setState(() {
-      _buscando = true;
-      _mostrarResultados = true;
-    });
-
-    try {
-      await context.read<MaterialProvider>().carregar(
-        busca: nome.isNotEmpty ? nome : '',
-        id: id.isNotEmpty ? id : '',
-        identificador: identificador.isNotEmpty ? identificador : '',
-        medida: medida.isNotEmpty ? medida : '',
-        espessura: esp.isNotEmpty ? esp : '',
-      );
-      if (!mounted) return;
-      final todos = context.read<MaterialProvider>().materiais;
-      final provider = context.read<OrcamentoProvider>();
-
-      final idsNormaisJaAdicionados = provider.tabAtual?.itens
-              .where((i) => !i.materialEspecifico)
-              .map((i) => i.materialId)
-              .toSet() ??
-          {};
-
-      setState(() {
-        _resultadosBusca = todos
-            .where((m) => m.especifico || !idsNormaisJaAdicionados.contains(m.id))
-            .toList();
-      });
-    } finally {
-      if (mounted) setState(() => _buscando = false);
-    }
-  }
-
-  void _adicionarMaterial(MaterialModel material) {
-    final provider = context.read<OrcamentoProvider>();
-    final precos = <int, PrecoFornecedorData>{};
-    for (final fm in material.fornecedorMateriais) {
-      precos[fm.fornecedorId] = PrecoFornecedorData(
-        fornecedorNome: fm.fornecedorNome,
-        preco: fm.preco > 0 ? fm.preco : null,
-        precoM2: fm.precoMetroQuadrado > 0 ? fm.precoMetroQuadrado : null,
-      );
-    }
-    provider.adicionarItem(ItemOrcamentoData(
-      materialId: material.id,
-      materialNome: material.nome,
-      materialUnidade: material.unidade,
-      materialCategoria: material.categoria,
-      materialMedida: material.medida,
-      materialEspessura: material.espessura,
-      materialIdentificador: material.identificador,
-      materialStatus: material.status,
-      materialEspecifico: material.especifico,
-      precos: precos,
-    ));
-    _searchIdCtrl.clear();
-    _searchNomeCtrl.clear();
-    _searchIdentificadorCtrl.clear();
-    _searchMedidaCtrl.clear();
-    _searchEspCtrl.clear();
-    setState(() {
-      _resultadosBusca = [];
-      _mostrarResultados = false;
-    });
-  }
-
-  // ── Vincular fornecedores ─────────────────────────────────────────────────────
-
-  Future<void> _vincularFornecedores(int itemIndex) async {
-    final provider = context.read<OrcamentoProvider>();
-    final tab = provider.tabAtual;
-    if (tab == null || itemIndex >= tab.itens.length) return;
-
-    final item = tab.itens[itemIndex];
-    final fornecedores = context.read<FornecedorProvider>().fornecedores;
-    final idsJaVinculados = item.precos.keys.toSet();
-
-    final selecionados = await showDialog<List<int>>(
-      context: context,
-      builder: (ctx) => _DialogVincularFornecedores(
-        fornecedores: fornecedores,
-        idsJaVinculados: idsJaVinculados,
-        materialNome: item.materialNome,
-      ),
-    );
-
-    if (selecionados == null || selecionados.isEmpty) return;
-
-    final novosPrecos = Map<int, PrecoFornecedorData>.from(item.precos);
-    for (final fId in selecionados) {
-      if (!novosPrecos.containsKey(fId)) {
-        final f = fornecedores.firstWhere((f) => f.id == fId);
-        novosPrecos[fId] = PrecoFornecedorData(fornecedorNome: f.nomeFantasia);
-      }
-    }
-    provider.atualizarItemParcial(item.itemId, precos: novosPrecos);
-
-    final repo = FornecedorRepository();
-    for (final fId in selecionados) {
-      if (!idsJaVinculados.contains(fId)) {
-        try {
-          await repo.vincularMaterial(fId, {'materialId': item.materialId});
-        } catch (_) {}
-      }
-    }
-  }
-
-  // ── Editar preço ──────────────────────────────────────────────────────────────
-
-  Future<void> _editarPreco(int itemIndex, int fornecedorId) async {
-    final provider = context.read<OrcamentoProvider>();
-    final tab = provider.tabAtual;
-    if (tab == null || itemIndex >= tab.itens.length) return;
-    final item = tab.itens[itemIndex];
-    final pf = item.precos[fornecedorId]!;
-
-    final result = await showDialog<Map<String, double?>>(
-      context: context,
-      builder: (ctx) => _DialogEditarPreco(
-        fornecedorNome: pf.fornecedorNome,
-        materialNome: item.materialNome,
-        precoAtual: pf.preco,
-        precoM2Atual: pf.precoM2,
-      ),
-    );
-
-    if (result == null) return;
-
-    final novosPrecos = Map<int, PrecoFornecedorData>.from(item.precos);
-    novosPrecos[fornecedorId] = PrecoFornecedorData(
-      fornecedorNome: pf.fornecedorNome,
-      preco: result['preco'],
-      precoM2: result['precoM2'],
-    );
-    provider.atualizarItemParcial(item.itemId, precos: novosPrecos);
-
-    setState(() => _salvandoPreco = true);
-    try {
-      await FornecedorRepository().atualizarPreco(
-        fornecedorId,
-        item.materialId,
-        {
-          if (result['preco'] != null) 'preco': result['preco'],
-          if (result['precoM2'] != null) 'precoMetroQuadrado': result['precoM2'],
-        },
-      );
-    } catch (_) {
-    } finally {
-      if (mounted) setState(() => _salvandoPreco = false);
-    }
-  }
-
-  // ── Gerar OC ─────────────────────────────────
-
-  Future<void> _gerarOrdemCompra() async {
-    final provider = context.read<OrcamentoProvider>();
-    final itens = provider.tabAtual?.itens ?? [];
-    final opcao = await showDialog<String>(
-      context: context,
-      builder: (ctx) => _DialogOpcaoOC(itens: itens),
-    );
-    if (opcao == null) return;
-
-    if (opcao == 'nova') {
-      await _criarNovaOC(itens);
-    } else {
-      await _adicionarOCExistente(itens);
-    }
-  }
-
-  // ── Exportar PDF ─────────────────────────────────────────────────────────────
-
-  Future<void> _exportarPdf() async {
-    final provider = context.read<OrcamentoProvider>();
-    final tab = provider.tabAtual;
-    if (tab == null || tab.itens.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Adicione ao menos um material antes de exportar.')),
-      );
-      return;
-    }
-
-    setState(() => _salvandoPreco = true);
-
-    try {
-      final dadosOrcamento = {
-        'titulo': tab.titulo,
-        'itens': tab.itens.map((item) => item.toJson()).toList(),
-      };
-
-      final pdfBytes = await OrcamentoRepository().gerarPdf(dadosOrcamento);
-
-      final hoje = DateTime.now();
-      final dataStr =
-          '${hoje.day.toString().padLeft(2, '0')}-'
-          '${hoje.month.toString().padLeft(2, '0')}-'
-          '${hoje.year}';
-      final nomeArquivo = 'orcamento($dataStr).pdf';
-
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}${Platform.pathSeparator}$nomeArquivo');
-      await file.writeAsBytes(pdfBytes, flush: true);
-
-      if (Platform.isWindows) {
-        await Process.run('explorer', [file.path]);
-      } else if (Platform.isMacOS) {
-        await Process.run('open', [file.path]);
-      } else {
-        await Process.run('xdg-open', [file.path]);
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('PDF exportado com sucesso!'),
-            backgroundColor: AppTheme.success,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao gerar PDF: $e'),
-            backgroundColor: AppTheme.error,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _salvandoPreco = false);
-    }
-  }
-
-  Future<void> _criarNovaOC(List<ItemOrcamentoData> itens) async {
-    final fornecedorId = itens.first.fornecedorSelecionado!;
-    final fornecedores = context.read<FornecedorProvider>().fornecedores;
-    final FornecedorModel? fornecedorInicial = fornecedores.cast<FornecedorModel?>()
-        .firstWhere((f) => f?.id == fornecedorId, orElse: () => null);
-
-    final itensPre = itens.map((item) {
-      final fId = item.fornecedorSelecionado!;
-      final pf = item.precos[fId]!;
-      final usarM2 = item.modoOrcamento == ModoOrcamento.metroQuadrado
-          || (item.modoOrcamento == null && pf.precoM2 != null && pf.precoM2! > 0);
-      return ItemPreCarregadoOC(
-        materialId: item.materialId,
-        materialNome: item.materialNome,
-        materialEspecifico: item.materialEspecifico,
-        quantidade: item.quantidade,
-        precoUnitario: pf.preco ?? 0,
-        precoMetroQuadrado: pf.precoM2,
-        usarM2: usarM2,
-        descricao: item.descricao,
-      );
-    }).toList();
-
-    final resultado = await Navigator.of(context).push<dynamic>(
-      MaterialPageRoute(
-        builder: (_) => NovaOrdemCompraPage(
-          itensPreCarregados: itensPre,
-          fornecedorInicial: fornecedorInicial,
-        ),
-      ),
-    );
-
-    if (resultado == null || !mounted) return;
-
-    context.read<OrcamentoProvider>().limparAba();
-
-    if (resultado is OrdemCompraModel) {
-      context.go('/ordem-compra', extra: resultado.id);
-    } else {
-      context.go('/ordem-compra');
-    }
-  }
-
-  Future<void> _adicionarOCExistente(List<ItemOrcamentoData> itens) async {
-    List<dynamic> ocsEmAndamento = [];
-    try {
-      final repo = OrdemCompraRepository();
-      final todas = await repo.listar();
-      ocsEmAndamento = todas.where((o) => o['status'] == 'EM_ANDAMENTO').toList();
-    } catch (_) {}
-
-    if (!mounted) return;
-
-    if (ocsEmAndamento.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Nenhuma OC em andamento encontrada. Crie uma nova OC.')),
-      );
-      return;
-    }
-
-    final ocSelecionada = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (ctx) => _DialogSelecionarOC(ocs: ocsEmAndamento),
-    );
-    if (ocSelecionada == null) return;
-
-    if (!mounted) return;
-
-    final fornecedorIdOrcamento = itens.first.fornecedorSelecionado!;
-    final fornecedorIdOC = ocSelecionada['fornecedor']?['id'] as int?;
-
-    if (fornecedorIdOC != null && fornecedorIdOC != fornecedorIdOrcamento) {
-      final fornecedorNomeAtual =
-          ocSelecionada['fornecedor']?['nomeFantasia'] as String? ?? '—';
-      final fornecedorNomeNovo =
-          itens.first.precos[fornecedorIdOrcamento]?.fornecedorNome ?? '—';
-
-      final confirmar = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Substituir fornecedor?',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-          content: Text(
-            'Esta OC está vinculada a "$fornecedorNomeAtual".\n\n'
-            'Ao continuar, o fornecedor será substituído por "$fornecedorNomeNovo".',
-            style: const TextStyle(fontSize: 13),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar')),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Substituir e continuar'),
-            ),
-          ],
-        ),
-      );
-      if (confirmar != true) return;
-      if (!mounted) return;
-    }
-
-    try {
-      final repo = OrdemCompraRepository();
-      final ocId = ocSelecionada['id'] as int;
-
-      for (final item in itens) {
-        final fId = item.fornecedorSelecionado!;
-        final pf = item.precos[fId]!;
-        final usarM2 = item.modoOrcamento == ModoOrcamento.metroQuadrado
-            || (item.modoOrcamento == null && pf.precoM2 != null && pf.precoM2! > 0);
-        await repo.adicionarItem(ocId, {
-          'materialId': item.materialId,
-          'numeroOS': 'OS-GERAL',
-          'quantidade': item.quantidade,
-          'precoUnitario': pf.preco ?? 0,
-          'precoMetroQuadrado': pf.precoM2,
-          'usarM2': usarM2,
-          if (item.descricao != null && item.descricao!.isNotEmpty)
-            'descricaoItem': item.descricao,
-        });
-      }
-
-      await repo.atualizar(ocId, {'fornecedorId': fornecedorIdOrcamento});
-
-      if (mounted) {
-        context.read<OrcamentoProvider>().limparAba();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Itens adicionados à OC #$ocId com sucesso!'),
-            backgroundColor: AppTheme.success,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao adicionar à OC: $e'),
-            backgroundColor: AppTheme.error,
-          ),
-        );
-      }
-    }
-  }
-
-  // ── Salvar / Cancelar ────────────────────────────────────────────────────────
-
-  Future<void> _salvarOrcamento() async {
-    final provider = context.read<OrcamentoProvider>();
-    final tab = provider.tabAtual;
-    if (tab == null || tab.itens.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Adicione ao menos um material para salvar.')),
-      );
-      return;
-    }
-
-    // Dialog com campo para o nome do orçamento
-    final tituloCtrl = TextEditingController(text: tab.titulo);
-    final novoTitulo = await showDialog<String>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) {
-          bool vazio = false;
-          return AlertDialog(
-            title: Text(
-              tab.servidorId != null ? 'Atualizar Orçamento' : 'Salvar Orçamento',
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-            ),
-            content: SizedBox(
-              width: 340,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Nome do orçamento:',
-                    style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: tituloCtrl,
-                    autofocus: true,
-                    inputFormatters: [_NoCommaFormatter()],
-                    decoration: InputDecoration(
-                      hintText: 'Ex: Orçamento Obra Abril',
-                      isDense: true,
-                      errorText: null,
-                    ),
-                    onChanged: (_) {
-                      if (vazio && tituloCtrl.text.trim().isNotEmpty) {
-                        setSt(() => vazio = false);
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancelar')),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: AppTheme.success),
-                onPressed: () {
-                  if (tituloCtrl.text.trim().isEmpty) {
-                    setSt(() => vazio = true);
-                    return;
-                  }
-                  Navigator.pop(ctx, tituloCtrl.text.trim());
-                },
-                child: Text(tab.servidorId != null ? 'Atualizar' : 'Salvar'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    if (novoTitulo == null) return;
-
-    provider.renomearAba(provider.abaAtiva, novoTitulo);
-
-    setState(() => _salvandoPreco = true);
-    try {
-      final repo = OrcamentoRepository();
-      int orcId;
-
-      if (tab.servidorId != null) {
-        orcId = tab.servidorId!;
-        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
-        // Remove todos os itens de uma vez (atômico) — evita duplicatas
-        // causadas por falhas parciais no loop individual com catch silencioso.
-        await repo.limparItens(orcId);
-      } else {
-        final criado = await repo.criar(novoTitulo);
-        orcId = criado['id'] as int;
-        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
-      }
-
-      final tabAtualizado = provider.tabAtual!;
-      for (final item in tabAtualizado.itens) {
-        if (item.precos.isEmpty) {
-          // Item sem fornecedor/preço — envia mesmo assim para não perder o material
-          await repo.adicionarItem(orcId, {
-            'materialId': item.materialId,
-            'fornecedorId': null,
-            'quantidade': item.quantidade,
-            'precoUnitario': null,
-            'precoM2': null,
-            'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado,
-            'selecionado': false,
-            'descricaoItem': item.descricao,
-          });
-        } else {
-          for (final entry in item.precos.entries) {
-            final fId = entry.key;
-            final pf = entry.value;
-            await repo.adicionarItem(orcId, {
-              'materialId': item.materialId,
-              'fornecedorId': fId,
-              'quantidade': item.quantidade,
-              'precoUnitario': pf.preco,
-              'precoM2': pf.precoM2,
-              'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado,
-              'selecionado': item.fornecedorSelecionado == fId,
-              'descricaoItem': item.descricao,
-            });
-          }
-        }
-      }
-
-      if (!mounted) return;
-
-      // Atualiza estado local ANTES de fechar a aba para evitar que o título
-      // pisque de volta ao valor antigo (o provider ainda tem o título novo, mas
-      // o setState local precisa fechar o modo edição primeiro).
-      setState(() {
-        _salvandoPreco = false;
-        _abaVisivel = false;
-      });
-
-      provider.fecharAbaAposOperacao();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Orçamento #$orcId salvo com sucesso!'),
-          backgroundColor: AppTheme.success,
-        ),
-      );
-
-      // Recarrega dados do servidor para refletir o título atualizado
-      await _carregarOrcamentosServidor();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao salvar: $e'),
-            backgroundColor: AppTheme.error,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _salvandoPreco = false);
-    }
-  }
-
-  Future<void> _cancelarOrcamento() async {
-    final provider = context.read<OrcamentoProvider>();
-    final tab = provider.tabAtual;
-
-    // Pede motivo apenas se o orçamento já existe no servidor
-    final temServidorId = tab?.servidorId != null;
-
-    String? motivo;
-    if (temServidorId) {
-      motivo = await showDialog<String>(
-        context: context,
-        builder: (_) => const _DialogDescartarOrcamento(),
-      );
-      if (motivo == null) return; // usuário fechou o dialog
-    } else {
-      // Rascunho local puro: confirma descarte simples
-      final confirmar = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Descartar Orçamento',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-          content: const Text(
-            'Este orçamento ainda não foi salvo no servidor.\n'
-            'Deseja descartar o rascunho?',
-            style: TextStyle(fontSize: 13),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Não')),
-            FilledButton(
-              style:
-                  FilledButton.styleFrom(backgroundColor: AppTheme.error),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Descartar'),
-            ),
-          ],
-        ),
-      );
-      if (confirmar != true) return;
-    }
-
-    setState(() => _salvandoPreco = true);
-    try {
-      if (temServidorId) {
-        // Cancela no servidor
-        await OrcamentoRepository().cancelar(tab!.servidorId!);
-      }
-
-      // Fecha aba local
-      provider.fecharAbaAposOperacao();
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(temServidorId
-              ? 'Orçamento #${tab!.servidorId} cancelado.'
-              : 'Rascunho descartado.'),
-          backgroundColor: AppTheme.error,
-        ),
-      );
-      context.read<OrcamentoProvider>().atualizarFlagsTab(
-        aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao cancelar: $e'),
-            backgroundColor: AppTheme.error,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _salvandoPreco = false);
-    }
-  }
-
-  // ── Totais ────────────────────────────────────────────────────────────────────
-
-  Map<int, Map<String, dynamic>> _calcularTotaisPorFornecedor(
-      List<ItemOrcamentoData> itens) {
-    final Map<int, Map<String, dynamic>> totais = {};
-    
-    // Conta materiais únicos (não duplicados por fornecedor)
-    final totalMateriais = itens.length;
-    
-    for (final item in itens) {
-      for (final entry in item.precos.entries) {
-        final fId = entry.key;
-        final pf = entry.value;
-        if (!totais.containsKey(fId)) {
-          totais[fId] = {
-            'nome': pf.fornecedorNome,
-            'total': 0.0,
-            'totalM2': 0.0,
-            'totalEfetivo': 0.0,
-            'materiais': 0,
-            'materiaisComPreco': 0,
-            'totalMateriais': totalMateriais,
-            'temTodosPrecos': true,
-          };
-        }
-        totais[fId]!['materiais'] = (totais[fId]!['materiais'] as int) + 1;
-
-        if (pf.preco != null) {
-          totais[fId]!['total'] =
-              (totais[fId]!['total'] as double) + pf.preco! * item.quantidade;
-          totais[fId]!['totalEfetivo'] =
-              (totais[fId]!['totalEfetivo'] as double) + pf.preco! * item.quantidade;
-          totais[fId]!['materiaisComPreco'] =
-              (totais[fId]!['materiaisComPreco'] as int) + 1;
-        } else {
-          totais[fId]!['temTodosPrecos'] = false;
-        }
-
-        if (pf.precoM2 != null) {
-          totais[fId]!['totalM2'] =
-              (totais[fId]!['totalM2'] as double) + pf.precoM2! * item.quantidade;
-        }
-      }
-    }
-    return totais;
-  }
-
-  Map<String, dynamic> _calcularOrcamentoOtimizado(List<ItemOrcamentoData> itens) {
-  final Map<int, List<Map<String, dynamic>>> sugestoesPorFornecedor = {};
-  double totalOtimizado = 0;
-  double totalOtimizadoM2 = 0;
-  int materiaisComSugestao = 0;
-
-  for (final item in itens) {
-    if (item.precos.isEmpty) continue;
-
-    // Encontra o menor preço unitário
-    double? menorPreco;
-    int? fornecedorMenorPreco;
-    for (final entry in item.precos.entries) {
-      final preco = entry.value.preco;
-      if (preco != null && (menorPreco == null || preco < menorPreco)) {
-        menorPreco = preco;
-        fornecedorMenorPreco = entry.key;
-      }
-    }
-
-    // Encontra o menor preço m²
-    double? menorPrecoM2;
-    int? fornecedorMenorPrecoM2;
-    for (final entry in item.precos.entries) {
-      final precoM2 = entry.value.precoM2;
-      if (precoM2 != null && (menorPrecoM2 == null || precoM2 < menorPrecoM2)) {
-        menorPrecoM2 = precoM2;
-        fornecedorMenorPrecoM2 = entry.key;
-      }
-    }
-
-    if (menorPreco != null && fornecedorMenorPreco != null) {
-      totalOtimizado += menorPreco * item.quantidade;
-      materiaisComSugestao++;
-
-      sugestoesPorFornecedor.putIfAbsent(fornecedorMenorPreco, () => []).add({
-        'itemId': item.itemId,
-        'materialNome': item.materialNome,
-        'quantidade': item.quantidade,
-        'preco': menorPreco,
-        'total': menorPreco * item.quantidade,
-        'modo': 'unitario',
-      });
-    }
-
-    if (menorPrecoM2 != null && fornecedorMenorPrecoM2 != null) {
-      totalOtimizadoM2 += menorPrecoM2 * item.quantidade;
-
-      if (fornecedorMenorPreco != fornecedorMenorPrecoM2) {
-        sugestoesPorFornecedor.putIfAbsent(fornecedorMenorPrecoM2, () => []).add({
-          'itemId': item.itemId,
-          'materialNome': item.materialNome,
-          'quantidade': item.quantidade,
-          'preco': menorPrecoM2,
-          'total': menorPrecoM2 * item.quantidade,
-          'modo': 'm2',
-        });
-      }
-    }
-  }
-
-  return {
-    'sugestoesPorFornecedor': sugestoesPorFornecedor,
-    'totalOtimizado': totalOtimizado,
-    'totalOtimizadoM2': totalOtimizadoM2,
-    'materiaisComSugestao': materiaisComSugestao,
-    'totalMateriais': itens.length,
-  };
-}
-
-void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
-  final provider = context.read<OrcamentoProvider>();
-  //final otimizado = _calcularOrcamentoOtimizado(itens);
-  //final sugestoes = otimizado['sugestoesPorFornecedor'] as Map<int, List<Map<String, dynamic>>>;
-  final ordenarPorM2 = _ordemTotais == 'm2';
-
-  for (final item in itens) {
-    if (item.precos.isEmpty) continue;
-
-    // Encontra o fornecedor com menor preço para este material
-    double? menorValor;
-    int? fornecedorEscolhido;
-    ModoOrcamento? modoEscolhido;
-
-    for (final entry in item.precos.entries) {
-      final fId = entry.key;
-      final pf = entry.value;
-
-      if (ordenarPorM2) {
-        if (pf.precoM2 != null && (menorValor == null || pf.precoM2! < menorValor)) {
-          menorValor = pf.precoM2;
-          fornecedorEscolhido = fId;
-          modoEscolhido = ModoOrcamento.metroQuadrado;
-        }
-      } else {
-        if (pf.preco != null && (menorValor == null || pf.preco! < menorValor)) {
-          menorValor = pf.preco;
-          fornecedorEscolhido = fId;
-          modoEscolhido = ModoOrcamento.unitario;
-        }
-      }
-    }
-
-    if (fornecedorEscolhido != null && modoEscolhido != null) {
-      provider.atualizarItemParcial(
-        item.itemId,
-        fornecedorSelecionado: fornecedorEscolhido,
-        modoOrcamento: modoEscolhido,
-      );
-    }
-  }
-
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text('Sugestão de orçamento otimizado aplicada!'),
-      backgroundColor: AppTheme.success,
-    ),
-  );
-}
-
-  double? _mediaPreco(ItemOrcamentoData item) {
-    final precos =
-        item.precos.values.map((p) => p.preco).whereType<double>().toList();
-    if (precos.isEmpty) return null;
-    return precos.reduce((a, b) => a + b) / precos.length;
-  }
-
-  double? _mediaPrecoM2(ItemOrcamentoData item) {
-    final precos =
-        item.precos.values.map((p) => p.precoM2).whereType<double>().toList();
-    if (precos.isEmpty) return null;
-    return precos.reduce((a, b) => a + b) / precos.length;
-  }
-
-  Set<int> _todosFornecedoresIds(List<ItemOrcamentoData> itens) {
-    final ids = <int>{};
-    for (final item in itens) {
-      ids.addAll(item.precos.keys);
-    }
-    return ids;
-  }
-
-  bool _podeGerarOC(List<ItemOrcamentoData> itens) {
-    if (itens.isEmpty) return false;
-    if (!itens.every((i) => i.fornecedorSelecionado != null)) return false;
-    
-    for (final item in itens) {
-      if (item.materialEspecifico && 
-          (item.descricao == null || item.descricao!.trim().isEmpty)) {
-        return false;
-      }
-    }
-    
-    final ids = itens.map((i) => i.fornecedorSelecionado!).toSet();
-    return ids.length == 1;
-  }
-
-  int _fornecedoresSelecionados(List<ItemOrcamentoData> itens) {
-    return itens
-        .where((i) => i.fornecedorSelecionado != null)
-        .map((i) => i.fornecedorSelecionado!)
-        .toSet()
-        .length;
-  }
-
-  // ── Build ─────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Consumer<OrcamentoProvider>(
@@ -1500,14 +481,6 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
                 child: CircularProgressIndicator(color: AppTheme.primary)),
           );
         }
-
-        final abas    = provider.abas;
-        final abaAtiva = provider.abaAtiva;
-        final tab     = provider.tabAtual;
-        final itens   = tab?.itens ?? [];
-        final temAbas = abas.isNotEmpty;
-        final emEdicao = tab != null && (tab.modoEdicao || tab.itens.isNotEmpty || tab.servidorId != null);
-        final mostrarEditor = temAbas && _abaVisivel && emEdicao;
 
         return Scaffold(
           backgroundColor: AppTheme.background,
@@ -1520,31 +493,8 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
                 _buildHeader(),
                 const SizedBox(height: 12),
 
-                // ── Guias de orçamentos (só aparecem se há abas abertas) ──
-                if (temAbas) ...[
-                  _buildGuias(provider, abas, abaAtiva),
-                  const SizedBox(height: 16),
-                ],
-
-                // ── Conteúdo ─────────────────────────────────────────────
-                Expanded(
-                  child: mostrarEditor
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildBarraAcoes(provider, itens),
-                            const SizedBox(height: 16),
-                            _buildSelecaoMateriais(provider, itens),
-                            const SizedBox(height: 16),
-                            Expanded(
-                              child: itens.isEmpty
-                                  ? _buildEmptyState()
-                                  : _buildConteudo(provider, itens),
-                            ),
-                          ],
-                        )
-                      : _buildPainelAprovacao(),
-                ),
+                // ── Conteúdo: sempre o painel de aprovação ────────────────
+                Expanded(child: _buildPainelAprovacao()),
               ],
             ),
           ),
@@ -1555,130 +505,6 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
 
   // ── Guias de orçamentos ──────────────────────────────────────────────────────
 
-  Widget _buildGuias(OrcamentoProvider provider, List<OrcamentoTab> abas, int abaAtiva) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          // Botão "← Voltar" — só aparece quando o editor está em foco
-          if (_abaVisivel) ...[
-            GestureDetector(
-              onTap: () => setState(() => _abaVisivel = false),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                margin: const EdgeInsets.only(right: 8),
-                decoration: BoxDecoration(
-                  color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppTheme.divider),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.arrow_back, size: 14, color: AppTheme.textSecondary),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Voltar',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          ...abas.asMap().entries.map((entry) {
-            final i   = entry.key;
-            final aba = entry.value;
-            final ativa = i == abaAtiva;
-            final temConteudo = aba.itens.isNotEmpty || aba.servidorId != null;
-            return GestureDetector(
-              onTap: () {
-                provider.selecionarAba(i);
-                setState(() => _abaVisivel = true);
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                margin: const EdgeInsets.only(right: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: ativa && _abaVisivel ? AppTheme.primary : AppTheme.surface,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: ativa && _abaVisivel ? AppTheme.primary : AppTheme.divider,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (temConteudo)
-                      Container(
-                        width: 6, height: 6,
-                        margin: const EdgeInsets.only(right: 6),
-                        decoration: BoxDecoration(
-                          color: ativa && _abaVisivel
-                              ? Colors.white.withValues(alpha: 0.8)
-                              : AppTheme.primary,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 160),
-                      child: Text(
-                        aba.titulo,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: ativa && _abaVisivel ? FontWeight.w700 : FontWeight.w500,
-                          color: ativa && _abaVisivel ? Colors.white : AppTheme.textSecondary,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: () {
-                        provider.fecharAba(i);
-                        if (provider.abas.isEmpty) {
-                          setState(() => _abaVisivel = false);
-                        }
-                      },
-                      child: Icon(
-                        Icons.close,
-                        size: 14,
-                        color: ativa && _abaVisivel
-                            ? Colors.white.withValues(alpha: 0.8)
-                            : AppTheme.textHint,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }),
-          // Botão "+" — nova aba
-          GestureDetector(
-            onTap: () {
-              provider.adicionarAba();
-              provider.atualizarFlagsTab(modoEdicao: true);
-              setState(() => _abaVisivel = true);
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppTheme.divider),
-              ),
-              child: const Icon(Icons.add, size: 16, color: AppTheme.textSecondary),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   // ── Painel de aprovação (exibido quando a aba ativa está vazia) ──────────────
 
@@ -1789,12 +615,76 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
 
         const Spacer(),
 
+        // Botão Orçamentos em andamento
+        Consumer<OrcamentoProvider>(
+          builder: (context, provider, _) {
+            final temAbas = provider.abas.isNotEmpty;
+            return OutlinedButton.icon(
+              onPressed: temAbas
+                  ? () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const OrcamentoEditorPage()),
+                      );
+                      if (mounted) _carregarOrcamentosServidor();
+                    }
+                  : null,
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.edit_note, size: 16),
+                  if (temAbas)
+                    Positioned(
+                      right: -4,
+                      top: -4,
+                      child: Container(
+                        width: 14,
+                        height: 14,
+                        decoration: const BoxDecoration(
+                          color: AppTheme.warning,
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          '${provider.abas.length}',
+                          style: const TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              label: const Text(
+                'Em andamento',
+                style: TextStyle(fontSize: 13),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: temAbas ? AppTheme.warning : AppTheme.textHint,
+                side: BorderSide(
+                    color: temAbas ? AppTheme.warning : AppTheme.divider),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+              ),
+            );
+          },
+        ),
+
+        const SizedBox(width: 12),
+
         FilledButton.icon(
-          onPressed: () {
+          onPressed: () async {
             final p = context.read<OrcamentoProvider>();
             p.adicionarAba();
             p.atualizarFlagsTab(modoEdicao: true);
-            setState(() => _abaVisivel = true);
+            await Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+            );
+            if (mounted) _carregarOrcamentosServidor();
           },
           icon: const Icon(Icons.add, size: 16),
           label: const Text(
@@ -2035,1618 +925,11 @@ void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
     );
   }
 
-  Widget _buildSelecaoMateriais(
-      OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-            child: Row(
-              children: [
-                const Icon(Icons.inventory_2_outlined,
-                    size: 16, color: AppTheme.primary),
-                const SizedBox(width: 8),
-                const Text(
-                  'Selecionar Materiais',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary,
-                  ),
-                ),
-                if (itens.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      '${itens.length} selecionados',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-                const Spacer(),
-                if (itens.isNotEmpty)
-                  TextButton.icon(
-                    onPressed: provider.limparAba,
-                    icon: const Icon(Icons.close, size: 14),
-                    label: const Text('Limpar', style: TextStyle(fontSize: 13)),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.textSecondary,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    ),
-                  ),
-              ],
-            ),
-          ),
 
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Column(
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: 110,
-                      child: TextField(
-                        controller: _searchIdCtrl,
-                        decoration: InputDecoration(
-                          labelText: 'ID',
-                          prefixIcon: const Icon(Icons.tag, size: 16, color: AppTheme.textHint),
-                          isDense: true,
-                          suffixIcon: _buscando && _searchIdCtrl.text.isNotEmpty
-                              ? const Padding(
-                                  padding: EdgeInsets.all(10),
-                                  child: SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2, color: AppTheme.primary),
-                                  ),
-                                )
-                              : null,
-                        ),
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        onChanged: (_) => _agendarBuscaMateriais(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _searchNomeCtrl,
-                        inputFormatters: [_NoCommaFormatter()],
-                        decoration: InputDecoration(
-                          labelText: 'Nome do material',
-                          prefixIcon: _buscando && _searchNomeCtrl.text.isNotEmpty
-                              ? const Padding(
-                                  padding: EdgeInsets.all(10),
-                                  child: SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2, color: AppTheme.primary),
-                                  ),
-                                )
-                              : const Icon(Icons.search, size: 18, color: AppTheme.textHint),
-                          isDense: true,
-                        ),
-                        onChanged: (_) => _agendarBuscaMateriais(),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchIdentificadorCtrl,
-                        inputFormatters: [_NoCommaFormatter()],
-                        decoration: const InputDecoration(
-                          labelText: 'Identificador',
-                          prefixIcon: Icon(Icons.qr_code_outlined,
-                              size: 16, color: AppTheme.textHint),
-                          isDense: true,
-                        ),
-                        onChanged: (_) => _agendarBuscaMateriais(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _searchMedidaCtrl,
-                        inputFormatters: [_NoCommaFormatter()],
-                        decoration: const InputDecoration(
-                          labelText: 'Medida',
-                          prefixIcon: Icon(Icons.straighten_outlined,
-                              size: 16, color: AppTheme.textHint),
-                          isDense: true,
-                        ),
-                        onChanged: (_) => _agendarBuscaMateriais(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _searchEspCtrl,
-                        inputFormatters: [_NoCommaFormatter()],
-                        decoration: const InputDecoration(
-                          labelText: 'Espessura',
-                          prefixIcon: Icon(Icons.layers_outlined,
-                              size: 16, color: AppTheme.textHint),
-                          isDense: true,
-                        ),
-                        onChanged: (_) => _agendarBuscaMateriais(),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    IconButton(
-                      tooltip: 'Limpar filtros',
-                      icon: const Icon(Icons.filter_alt_off,
-                          size: 18, color: AppTheme.textHint),
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () {
-                        _searchIdCtrl.clear();
-                        _searchNomeCtrl.clear();
-                        _searchIdentificadorCtrl.clear();
-                        _searchMedidaCtrl.clear();
-                        _searchEspCtrl.clear();
-                        setState(() {
-                          _resultadosBusca = [];
-                          _mostrarResultados = false;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
 
-          if (_mostrarResultados && (_buscando || _resultadosBusca.isNotEmpty))
-            Container(
-              constraints: const BoxConstraints(maxHeight: 240),
-              margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppTheme.divider),
-                boxShadow: const [
-                  BoxShadow(
-                      color: Color(0x14000000),
-                      blurRadius: 8,
-                      offset: Offset(0, 4)),
-                ],
-              ),
-              child: _buscando
-                  ? const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Center(
-                          child: CircularProgressIndicator(color: AppTheme.primary)),
-                    )
-                  : _resultadosBusca.isEmpty
-                      ? const Padding(
-                          padding: EdgeInsets.all(16),
-                          child: Row(
-                            children: [
-                              Icon(Icons.search_off,
-                                  size: 16, color: AppTheme.textHint),
-                              SizedBox(width: 8),
-                              Text('Nenhum material encontrado.',
-                                  style: TextStyle(
-                                      color: AppTheme.textHint, fontSize: 13)),
-                            ],
-                          ),
-                        )
-                      : ListView.separated(
-                          shrinkWrap: true,
-                          itemCount: _resultadosBusca.length,
-                          separatorBuilder: (_, __) => const Divider(
-                              height: 1, color: AppTheme.divider),
-                          itemBuilder: (ctx, i) {
-                            final m = _resultadosBusca[i];
-                            final sub = [
-                              m.categoria,
-                              m.medida,
-                              m.espessura,
-                              m.identificador,
-                              m.unidade
-                            ].where((s) => s != null && s.isNotEmpty).join(' · ');
-                            return ListTile(
-                              dense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 2),
-                              title: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      m.nome,
-                                      style: const TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppTheme.textPrimary),
-                                    ),
-                                  ),
-                                  if (m.especifico)
-                                    Container(
-                                      margin: const EdgeInsets.only(left: 6),
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.primary.withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: const Text(
-                                        'Específico',
-                                        style: TextStyle(
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.w700,
-                                          color: AppTheme.primary,
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              subtitle: sub.isNotEmpty
-                                  ? Text(sub,
-                                      style: const TextStyle(
-                                          fontSize: 11, color: AppTheme.textSecondary))
-                                  : null,
-                              trailing: _StatusChip(status: m.status),
-                              onTap: () => _adicionarMaterial(m),
-                            );
-                          },
-                        ),
-            ),
 
-          if (itens.isNotEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: itens.asMap().entries.map((e) {
-                  final item = e.value;
-                  final selecionado = item.fornecedorSelecionado != null;
-                  return _MaterialChip(
-                    nome: item.materialNome,
-                    selecionado: selecionado,
-                    especifico: item.materialEspecifico,
-                    descricao: item.descricao,
-                    onRemover: () => provider.removerItem(item.itemId),
-                  );
-                }).toList(),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
 
-  Widget _buildBarraAcoes(
-      OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
-    final podeGerar = _podeGerarOC(itens);
-    final fornsSel = _fornecedoresSelecionados(itens);
-    
-    final materiaisEspecificosSemDescricao = itens
-        .where((i) => i.materialEspecifico && 
-                     (i.descricao == null || i.descricao!.trim().isEmpty))
-        .length;
 
-    // Determina qual botão mostrar: "Enviar para Aprovação" ou "Aprovar"
-    // Só mostra "Aprovar" se o orçamento foi reaberto com status AGUARDANDO_APROVACAO
-    final bool mostrarBotaoAprovar = context.read<OrcamentoProvider>().tabAtual?.aguardandoAprovacao ?? false;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.shopping_cart_outlined,
-                  size: 16,
-                  color: AppTheme.textSecondary,
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    '${itens.length} ${itens.length == 1 ? 'material' : 'materiais'} — '
-                    '$fornsSel ${fornsSel == 1 ? 'fornecedor selecionado' : 'fornecedores selecionados'}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textSecondary,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(width: 16),
-
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _salvarOrcamento,
-                  icon: const Icon(Icons.save_outlined, size: 15),
-                  label: const Text('Salvar', style: TextStyle(fontSize: 12)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.success,
-                    side: const BorderSide(color: AppTheme.success),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  ),
-                ),
-                const SizedBox(width: 8),
-
-                OutlinedButton.icon(
-                  onPressed: _cancelarOrcamento,
-                  icon: const Icon(Icons.delete_outline, size: 15),
-                  label: const Text('Cancelar', style: TextStyle(fontSize: 12)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.error,
-                    side: const BorderSide(color: AppTheme.error),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  ),
-                ),
-                const SizedBox(width: 8),
-
-                OutlinedButton.icon(
-                  onPressed: itens.isEmpty ? null : _exportarPdf,
-                  icon: const Icon(Icons.picture_as_pdf_outlined, size: 15),
-                  label: const Text('Exportar PDF', style: TextStyle(fontSize: 12)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.textSecondary,
-                    side: const BorderSide(color: AppTheme.divider),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  ),
-                ),
-                const SizedBox(width: 8),
-
-                if (mostrarBotaoAprovar)
-                  OutlinedButton.icon(
-                    onPressed: itens.isEmpty ? null : () async {
-                      final sid = provider.tabAtual?.servidorId;
-                      if (sid == null) return;
-                      await _aprovarOrcamento(sid, provider.tabAtual?.titulo ?? '');
-                      provider.atualizarFlagsTab(
-                        aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
-                      provider.fecharAbaAposOperacao();
-                    },
-                    icon: const Icon(Icons.check_circle_outline, size: 15),
-                    label: const Text('Aprovar', style: TextStyle(fontSize: 12)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.success,
-                      side: const BorderSide(color: AppTheme.success),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    ),
-                  )
-                else
-                  Tooltip(
-                    message: (provider.tabAtual?.jaFinalizado ?? false)
-                        ? 'Orçamento já aprovado/não aprovado. Reabra para reenviar.'
-                        : '',
-                    child: OutlinedButton.icon(
-                      onPressed: (itens.isEmpty || (provider.tabAtual?.jaFinalizado ?? false)) ? null : _enviarParaAprovacao,
-                      icon: const Icon(Icons.send_outlined, size: 15),
-                      label: const Text('Enviar para Aprovação', style: TextStyle(fontSize: 12)),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: (provider.tabAtual?.jaFinalizado ?? false) ? AppTheme.textHint : AppTheme.warning,
-                        side: BorderSide(color: (provider.tabAtual?.jaFinalizado ?? false) ? AppTheme.divider : AppTheme.warning),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      ),
-                    ),
-                  ),
-                const SizedBox(width: 8),
-                if (provider.tabAtual?.modoGerarOC ?? false)
-                  Tooltip(
-                    message: podeGerar
-                        ? 'Gerar Ordem de Compra'
-                        : materiaisEspecificosSemDescricao > 0
-                            ? 'Preencha a descrição dos materiais específicos'
-                            : 'Selecione o MESMO fornecedor para todos os materiais',
-                    child: FilledButton.icon(
-                      onPressed: podeGerar ? _gerarOrdemCompra : null,
-                      icon: const Icon(Icons.shopping_cart_checkout, size: 16),
-                      label: Text(
-                        'Gerar OC (${itens.length})',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Icon(Icons.request_quote_outlined,
-                size: 36, color: AppTheme.primary),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Nenhum material adicionado',
-            style: Theme.of(context)
-                .textTheme
-                .headlineSmall
-                ?.copyWith(color: AppTheme.textPrimary),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Use a busca acima para adicionar materiais ao orçamento\ne comparar valores entre fornecedores.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildConteudo(
-      OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
-    return ListView(
-      children: [
-        if (_todosFornecedoresIds(itens).isNotEmpty) ...[
-          _buildTabelaComparativa(provider, itens),
-          const SizedBox(height: 16),
-        ],
-        ...itens.asMap().entries.map(
-            (e) => _buildItemCard(provider, e.key, e.value, itens)),
-        const SizedBox(height: 24),
-      ],
-    );
-  }
-
-  Widget _buildItemCard(OrcamentoProvider provider, int index,
-      ItemOrcamentoData item, List<ItemOrcamentoData> todosItens) {
-    final usarM2 = item.modoOrcamento == ModoOrcamento.metroQuadrado;
-    final allFornIds = item.precos.keys.toList();
-
-    final menorPreco = allFornIds
-        .map((id) => item.precos[id]?.preco)
-        .whereType<double>()
-        .fold<double?>(
-            null, (min, v) => min == null || v < min ? v : min);
-
-    final menorPrecoM2 = allFornIds
-        .map((id) => item.precos[id]?.precoM2)
-        .whereType<double>()
-        .fold<double?>(
-            null, (min, v) => min == null || v < min ? v : min);
-
-    allFornIds.sort((a, b) {
-      final aMenorUnit = menorPreco != null && item.precos[a]?.preco == menorPreco;
-      final aMenorM2 = menorPrecoM2 != null && item.precos[a]?.precoM2 == menorPrecoM2;
-      final bMenorUnit = menorPreco != null && item.precos[b]?.preco == menorPreco;
-      final bMenorM2 = menorPrecoM2 != null && item.precos[b]?.precoM2 == menorPrecoM2;
-      final aAmbos = aMenorUnit && aMenorM2;
-      final bAmbos = bMenorUnit && bMenorM2;
-      if (aAmbos && !bAmbos) return -1;
-      if (bAmbos && !aAmbos) return 1;
-      final pa = usarM2
-          ? (item.precos[a]?.precoM2 ?? double.infinity)
-          : (item.precos[a]?.preco ?? double.infinity);
-      final pb = usarM2
-          ? (item.precos[b]?.precoM2 ?? double.infinity)
-          : (item.precos[b]?.preco ?? double.infinity);
-      return pa.compareTo(pb);
-    });
-
-    final media = _mediaPreco(item);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-            decoration: const BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.inventory_2_outlined,
-                      size: 16, color: AppTheme.primary),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              item.materialNome,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.textPrimary,
-                              ),
-                            ),
-                          ),
-                          if (item.materialEspecifico)
-                            Container(
-                              margin: const EdgeInsets.only(left: 6),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primary.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text(
-                                'Específico',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.primary,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      if ([
-                        item.materialCategoria,
-                        item.materialMedida,
-                        item.materialEspessura,
-                        item.materialIdentificador,
-                        item.materialUnidade
-                      ].any((s) => s != null && s.isNotEmpty))
-                        Text(
-                          [
-                            item.materialCategoria,
-                            item.materialMedida,
-                            item.materialEspessura,
-                            item.materialIdentificador,
-                            item.materialUnidade
-                          ].where((s) => s != null && s.isNotEmpty).join(' · '),
-                          style: const TextStyle(
-                              fontSize: 11, color: AppTheme.textSecondary),
-                        ),
-                    ],
-                  ),
-                ),
-                Row(
-                  children: [
-                    const Text('Quantidade',
-                        style: TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 80,
-                      child: _QuantidadeField(
-                        value: item.quantidade,
-                        onChanged: (v) => provider.atualizarItemParcial(item.itemId,
-                            quantidade: v),
-                      ),
-                    ),
-                    if (item.materialUnidade != null &&
-                        item.materialUnidade!.isNotEmpty) ...[
-                      const SizedBox(width: 6),
-                      Text(item.materialUnidade!,
-                          style: const TextStyle(
-                              fontSize: 11, color: AppTheme.textSecondary)),
-                    ],
-                  ],
-                ),
-                const SizedBox(width: 12),
-                if (item.modoOrcamento == ModoOrcamento.unitario &&
-                    media != null) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surface,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: AppTheme.divider),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.bar_chart,
-                            size: 12, color: AppTheme.textSecondary),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Média unitária ${_brl(media)}',
-                          style: const TextStyle(
-                              fontSize: 11, color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-                ] else if (item.modoOrcamento == ModoOrcamento.metroQuadrado &&
-                    _mediaPrecoM2(item) != null) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surface,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: AppTheme.divider),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.square_foot,
-                            size: 12, color: AppTheme.textSecondary),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Média m² ${_brl(_mediaPrecoM2(item))}',
-                          style: const TextStyle(
-                              fontSize: 11, color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                const SizedBox(width: 8),
-                _StatusChip(status: item.materialStatus ?? ''),
-                const SizedBox(width: 4),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 16),
-                  tooltip: 'Remover material',
-                  color: AppTheme.textHint,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  onPressed: () => provider.removerItem(item.itemId),
-                ),
-              ],
-            ),
-          ),
-
-          if (item.materialEspecifico)
-            Container(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.03),
-                border: const Border(
-                  bottom: BorderSide(color: AppTheme.divider),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.description_outlined, size: 14, color: AppTheme.primary),
-                      SizedBox(width: 6),
-                      Text(
-                        'Descrição do material específico *',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  _DescricaoField(
-                    valorInicial: item.descricao,
-                    onChanged: (v) => provider.atualizarItemParcial(
-                      item.itemId,
-                      descricao: v,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-          if (allFornIds.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, size: 14, color: AppTheme.textHint),
-                  SizedBox(width: 8),
-                  Text(
-                    'Nenhum fornecedor vinculado. Clique em "Adicionar Fornecedor" para comparar valores.',
-                    style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                  ),
-                ],
-              ),
-            )
-          else
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-                  child: Row(
-                    children: [
-                      const Text(
-                        'Orçar por:',
-                        style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                      ),
-                      const SizedBox(width: 10),
-                      _ModoButton(
-                        label: 'Unidade',
-                        icon: Icons.tag,
-                        selecionado: item.modoOrcamento == ModoOrcamento.unitario,
-                        onTap: () => provider.atualizarItemParcial(
-                          item.itemId,
-                          modoOrcamento: item.modoOrcamento == ModoOrcamento.unitario
-                              ? null
-                              : ModoOrcamento.unitario,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _ModoButton(
-                        label: 'm²',
-                        icon: Icons.square_foot,
-                        selecionado: item.modoOrcamento == ModoOrcamento.metroQuadrado,
-                        onTap: () => provider.atualizarItemParcial(
-                          item.itemId,
-                          modoOrcamento: item.modoOrcamento == ModoOrcamento.metroQuadrado
-                              ? null
-                              : ModoOrcamento.metroQuadrado,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                if (item.modoOrcamento != null) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-                    child: Row(
-                      children: [
-                        const SizedBox(width: 24),
-                        const Expanded(
-                          child: Text('Fornecedor',
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.textSecondary)),
-                        ),
-                        if (item.modoOrcamento == ModoOrcamento.unitario) ...[
-                          const SizedBox(
-                            width: 110,
-                            child: Text('Valor Unitário',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.textSecondary)),
-                          ),
-                          const SizedBox(
-                            width: 120,
-                            child: Text('Total',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.textSecondary)),
-                          ),
-                        ] else ...[
-                          const SizedBox(
-                            width: 110,
-                            child: Text('Valor m²',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.textSecondary)),
-                          ),
-                          const SizedBox(
-                            width: 120,
-                            child: Text('Total m²',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.textSecondary)),
-                          ),
-                        ],
-                        const SizedBox(width: 80),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1, color: AppTheme.divider),
-                  ...allFornIds.map((fId) {
-                    final pf = item.precos[fId]!;
-                    final isMenorPreco =
-                        menorPreco != null && pf.preco != null && pf.preco == menorPreco;
-                    final isMenorPrecoM2Efetivo =
-                        menorPrecoM2 != null && pf.precoM2 != null && pf.precoM2 == menorPrecoM2;
-                    final isSelected = item.fornecedorSelecionado == fId;
-
-                    return _FornecedorRow(
-                      fornecedorNome: pf.fornecedorNome,
-                      preco: pf.preco,
-                      precoM2: pf.precoM2,
-                      quantidade: item.quantidade,
-                      isMenorPreco: isMenorPreco,
-                      isMenorPrecoM2: isMenorPrecoM2Efetivo,
-                      isSelected: isSelected,
-                      modoOrcamento: item.modoOrcamento!,
-                      onSelect: () => provider.atualizarItemParcial(
-                        item.itemId,
-                        fornecedorSelecionado: isSelected ? null : fId,
-                        clearFornecedor: isSelected,
-                      ),
-                      onEditarPreco: () => _editarPreco(index, fId),
-                    );
-                  }),
-                ],
-              ],
-            ),
-
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: Row(
-              children: [
-                TextButton.icon(
-                  icon: const Icon(Icons.person_add_outlined, size: 14),
-                  label: const Text('Adicionar Fornecedor',
-                      style: TextStyle(fontSize: 12)),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  ),
-                  onPressed: () => _vincularFornecedores(index),
-                ),
-                const Spacer(),
-                if (item.fornecedorSelecionado != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: AppTheme.statusOk.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                          color: AppTheme.statusOk.withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.check_circle,
-                            size: 12, color: AppTheme.statusOk),
-                        const SizedBox(width: 5),
-                        Text(
-                          'Escolhido: ${item.precos[item.fornecedorSelecionado!]?.fornecedorNome}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.statusOk,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTabelaComparativa(
-    OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
-    final totais = _calcularTotaisPorFornecedor(itens);
-    if (totais.isEmpty) return const SizedBox.shrink();
-
-    final ordenarPorM2 = _ordemTotais == 'm2';
-
-    final sortedIds = totais.keys.toList()
-      ..sort((a, b) {
-        if (ordenarPorM2) {
-          final ta = totais[a]!['totalM2'] as double;
-          final tb = totais[b]!['totalM2'] as double;
-          if (ta == 0 && tb == 0) return 0;
-          if (ta == 0) return 1;
-          if (tb == 0) return -1;
-          return ta.compareTo(tb);
-        } else {
-          final ta = totais[a]!['totalEfetivo'] as double;
-          final tb = totais[b]!['totalEfetivo'] as double;
-          if (ta == 0 && tb == 0) return 0;
-          if (ta == 0) return 1;
-          if (tb == 0) return -1;
-          return ta.compareTo(tb);
-        }
-      });
-
-    final valoresEfetivos = sortedIds
-        .map((id) => totais[id]!['totalEfetivo'] as double)
-        .where((v) => v > 0)
-        .toList();
-
-    final menorTotal =
-        valoresEfetivos.isNotEmpty ? valoresEfetivos.first : null;
-
-    final valoresM2Validos = sortedIds
-        .map((id) => totais[id]!['totalM2'] as double)
-        .where((v) => v > 0)
-        .toList();
-
-    final menorTotalM2 = valoresM2Validos.isNotEmpty
-        ? valoresM2Validos.reduce((a, b) => a < b ? a : b)
-        : null;
-
-    final bestIdAtual = ordenarPorM2
-        ? (menorTotalM2 != null
-            ? sortedIds.firstWhere(
-                (id) => (totais[id]!['totalM2'] as double) == menorTotalM2,
-                orElse: () => sortedIds.first)
-            : null)
-        : (menorTotal != null ? sortedIds.first : null);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.25)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.06),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.bar_chart, size: 16, color: AppTheme.primary),
-                const SizedBox(width: 8),
-                const Text(
-                  'Totais por Fornecedor',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.primary,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  '— soma dos valores em todos os materiais',
-                  style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                ),
-                const Spacer(),
-                Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppTheme.divider),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _OrdemTotaisBtn(
-                        label: 'Unitário',
-                        icon: Icons.straighten,
-                        ativo: !ordenarPorM2,
-                        onTap: () {
-                          setState(() => _ordemTotais = 'unitario');
-                          for (final item in itens) {
-                            provider.atualizarItemParcial(
-                              item.itemId,
-                              modoOrcamento: ModoOrcamento.unitario,
-                            );
-                          }
-                        },
-                      ),
-                      Container(width: 1, height: 24, color: AppTheme.divider),
-                      _OrdemTotaisBtn(
-                        label: 'm²',
-                        icon: Icons.square_foot,
-                        ativo: ordenarPorM2,
-                        onTap: () {
-                          setState(() => _ordemTotais = 'm2');
-                          for (final item in itens) {
-                            provider.atualizarItemParcial(
-                              item.itemId,
-                              modoOrcamento: ModoOrcamento.metroQuadrado,
-                            );
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Row(
-              children: [
-                const Expanded(
-                    child: Text('Fornecedor',
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textSecondary))),
-                const SizedBox(
-                    width: 100,
-                    child: Text('Materiais',
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textSecondary))),
-                SizedBox(
-                  width: 130,
-                  child: Row(
-                    children: [
-                      Text(
-                        'Total Unitário',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: !ordenarPorM2
-                              ? AppTheme.primary
-                              : AppTheme.textSecondary,
-                        ),
-                      ),
-                      if (!ordenarPorM2) ...[
-                        const SizedBox(width: 4),
-                        const Icon(Icons.arrow_upward,
-                            size: 10, color: AppTheme.primary),
-                      ],
-                    ],
-                  ),
-                ),
-                SizedBox(
-                  width: 130,
-                  child: Row(
-                    children: [
-                      Text(
-                        'Total m²',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: ordenarPorM2
-                              ? AppTheme.primary
-                              : AppTheme.textSecondary,
-                        ),
-                      ),
-                      if (ordenarPorM2) ...[
-                        const SizedBox(width: 4),
-                        const Icon(Icons.arrow_upward,
-                            size: 10, color: AppTheme.primary),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1, color: AppTheme.divider),
-
-          ...sortedIds.asMap().entries.map((entry) {
-            final rank = entry.key;
-            final fId = entry.value;
-            final t = totais[fId]!;
-            final total = t['total'] as double;
-            final totalM2 = t['totalM2'] as double;
-            final totalEfetivo = t['totalEfetivo'] as double;
-            final mats = t['materiais'] as int;
-            final temTodos = t['temTodosPrecos'] as bool;
-
-            final isMelhor = menorTotal != null &&
-                totalEfetivo == menorTotal &&
-                totalEfetivo > 0;
-            final isMelhorM2 = menorTotalM2 != null &&
-                totalM2 == menorTotalM2 &&
-                totalM2 > 0;
-
-            final diff =
-                (menorTotal != null && totalEfetivo > 0 && !isMelhor)
-                    ? totalEfetivo - menorTotal
-                    : null;
-            final diffM2 =
-                (menorTotalM2 != null && totalM2 > 0 && !isMelhorM2)
-                    ? totalM2 - menorTotalM2
-                    : null;
-
-            final isDestaque = ordenarPorM2 ? isMelhorM2 : isMelhor;
-
-            final itensComEsteForn =
-                itens.where((i) => i.precos.containsKey(fId)).toList();
-            final isSelecionadoEmTodos = itensComEsteForn.isNotEmpty &&
-                itensComEsteForn.every((i) => i.fornecedorSelecionado == fId);
-
-            return _TabelaComparativaRow(
-              rank: rank + 1,
-              nome: t['nome'] as String,
-              total: total,
-              totalM2: totalM2,
-              materiais: mats,
-              materiaisComPreco: t['materiaisComPreco'] as int,
-              totalMateriais: t['totalMateriais'] as int,
-              isMelhor: isMelhor,
-              isMelhorM2: isMelhorM2,
-              isDestaqueAtual: isDestaque,
-              isSelecionadoEmTodos: isSelecionadoEmTodos,
-              diff: diff,
-              diffM2: diffM2,
-              temTodosPrecos: temTodos,
-              ordenarPorM2: ordenarPorM2,
-              onSelectAll: () {
-                for (final item in itens) {
-                  if (item.fornecedorSelecionado != null) {
-                    provider.atualizarItemParcial(
-                      item.itemId,
-                      fornecedorSelecionado: null,
-                      clearFornecedor: true,
-                    );
-                  }
-                }
-                if (!isSelecionadoEmTodos) {
-                  for (final item in itens) {
-                    if (item.precos.containsKey(fId)) {
-                      provider.atualizarItemParcial(
-                        item.itemId,
-                        fornecedorSelecionado: fId,
-                      );
-                    }
-                  }
-                }
-              },
-            );
-          }),
-
-          if ((menorTotal != null && menorTotal > 0) ||
-              (menorTotalM2 != null && menorTotalM2 > 0))
-            Container(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-              decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: AppTheme.divider)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (!ordenarPorM2 && menorTotal != null && menorTotal > 0)
-                    Row(
-                      children: [
-                        const Icon(Icons.star_rounded,
-                            size: 16, color: AppTheme.statusOk),
-                        const SizedBox(width: 6),
-                        RichText(
-                          text: TextSpan(
-                            style: const TextStyle(
-                                fontSize: 13, color: AppTheme.textPrimary),
-                            children: [
-                              const TextSpan(text: 'Melhor total unitário: '),
-                              TextSpan(
-                                text:
-                                    '${totais[sortedIds.first]!['nome']} com ${_brl(menorTotal)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.statusOk,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  if (ordenarPorM2 &&
-                      menorTotalM2 != null &&
-                      menorTotalM2 > 0 &&
-                      bestIdAtual != null)
-                    Row(
-                      children: [
-                        const Icon(Icons.star_rounded,
-                            size: 16, color: AppTheme.primary),
-                        const SizedBox(width: 6),
-                        RichText(
-                          text: TextSpan(
-                            style: const TextStyle(
-                                fontSize: 13, color: AppTheme.textPrimary),
-                            children: [
-                              const TextSpan(text: 'Melhor total m²: '),
-                              TextSpan(
-                                text:
-                                    '${totais[bestIdAtual]!['nome']} com ${_brl(menorTotalM2)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.primary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                ],
-              ),
-            ),
-
-          if (!_podeGerarOC(itens) && itens.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: const Row(
-                children: [
-                  Icon(Icons.info_outline, size: 14, color: AppTheme.primary),
-                  SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Selecione um fornecedor em cada material para habilitar o botão "Gerar OC".',
-                      style: TextStyle(fontSize: 12, color: AppTheme.primary),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (itens.isNotEmpty) ...[
-              const Divider(height: 1, color: AppTheme.divider),
-              _buildSugestaoOtimizada(provider, itens),
-            ],
-        ],
-      ),
-    );
-  }
-  Widget _buildSugestaoOtimizada(OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
-    final otimizado = _calcularOrcamentoOtimizado(itens);
-    final sugestoes = otimizado['sugestoesPorFornecedor'] as Map<int, List<Map<String, dynamic>>>;
-    final totalOtimizado = otimizado['totalOtimizado'] as double;
-    final totalOtimizadoM2 = otimizado['totalOtimizadoM2'] as double;
-    final materiaisComSugestao = otimizado['materiaisComSugestao'] as int;
-    final totalMateriais = otimizado['totalMateriais'] as int;
-    final ordenarPorM2 = _ordemTotais == 'm2';
-
-    if (sugestoes.isEmpty) return const SizedBox.shrink();
-
-    // Calcula economia comparada ao melhor fornecedor único
-    final totais = _calcularTotaisPorFornecedor(itens);
-    final valoresEfetivos = totais.values
-        .map((t) => ordenarPorM2 ? (t['totalM2'] as double) : (t['totalEfetivo'] as double))
-        .where((v) => v > 0)
-        .toList()
-      ..sort();
-
-    final melhorFornecedorUnico = valoresEfetivos.isNotEmpty ? valoresEfetivos.first : null;
-    final totalSugerido = ordenarPorM2 ? totalOtimizadoM2 : totalOtimizado;
-    final economia = melhorFornecedorUnico != null && totalSugerido > 0
-        ? melhorFornecedorUnico - totalSugerido
-        : null;
-
-    // Agrupa sugestões por fornecedor com totais
-    final Map<int, Map<String, dynamic>> resumoPorFornecedor = {};
-    for (final entry in sugestoes.entries) {
-      final fId = entry.key;
-      final materiais = entry.value;
-      final materiaisFiltrados = materiais.where((m) => 
-        ordenarPorM2 ? m['modo'] == 'm2' : m['modo'] == 'unitario'
-      ).toList();
-
-      if (materiaisFiltrados.isEmpty) continue;
-
-      final totalFornecedor = materiaisFiltrados.fold<double>(
-        0, (sum, m) => sum + (m['total'] as double)
-      );
-
-      final fornecedorNome = itens
-          .expand((i) => i.precos.entries)
-          .firstWhere((e) => e.key == fId, orElse: () => MapEntry(0, PrecoFornecedorData(fornecedorNome: '—')))
-          .value
-          .fornecedorNome;
-
-      resumoPorFornecedor[fId] = {
-        'nome': fornecedorNome,
-        'materiais': materiaisFiltrados,
-        'total': totalFornecedor,
-        'quantidade': materiaisFiltrados.length,
-      };
-    }
-
-    // Ordena fornecedores por total (maior primeiro, para destacar quem leva mais itens)
-    final fornecedoresOrdenados = resumoPorFornecedor.entries.toList()
-      ..sort((a, b) => (b.value['total'] as double).compareTo(a.value['total'] as double));
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: const BoxDecoration(
-        color: AppTheme.surface,
-        border: Border(top: BorderSide(color: AppTheme.divider)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppTheme.success.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.lightbulb_outline, size: 20, color: AppTheme.success),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Sugestão de Orçamento Ideal',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.success,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Combinação de fornecedores que resulta no menor custo total',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary.withValues(alpha: 0.8),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              FilledButton.icon(
-                onPressed: () => _aplicarSugestaoOtimizada(itens),
-                icon: const Icon(Icons.auto_fix_high, size: 14),
-                label: const Text('Aplicar Sugestão', style: TextStyle(fontSize: 12)),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.success,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // Total otimizado e economia
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.success.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppTheme.success.withValues(alpha: 0.2)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.savings_outlined, size: 16, color: AppTheme.success),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Total ${ordenarPorM2 ? 'm²' : 'Unitário'} Otimizado',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _brl(totalSugerido),
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.success,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (economia != null && economia > 0) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppTheme.success.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        const Text(
-                          'Economia',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.success,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _brl(economia),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.success,
-                          ),
-                        ),
-                        Text(
-                          '${((economia / melhorFornecedorUnico!) * 100).toStringAsFixed(1)}% menos',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: AppTheme.success.withValues(alpha: 0.8),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Breakdown por fornecedor
-          const Text(
-            'Distribuição sugerida:',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          ...fornecedoresOrdenados.map((entry) {
-            //final fId = entry.key;
-            final dados = entry.value;
-            final nome = dados['nome'] as String;
-            final materiais = dados['materiais'] as List<Map<String, dynamic>>;
-            final total = dados['total'] as double;
-            final qtd = dados['quantidade'] as int;
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppTheme.divider),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(
-                          color: AppTheme.success,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          nome,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        '$qtd ${qtd == 1 ? 'material' : 'materiais'}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        _brl(total),
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.success,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: materiais.map((m) {
-                      return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppTheme.success.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: AppTheme.success.withValues(alpha: 0.2)),
-                        ),
-                        child: Text(
-                          '${m['materialNome']} (${_brl(m['total'] as double)})',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ],
-              ),
-            );
-          }),
-
-          if (materiaisComSugestao < totalMateriais) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(Icons.info_outline, size: 12, color: AppTheme.warning),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    '${totalMateriais - materiaisComSugestao} ${(totalMateriais - materiaisComSugestao) == 1 ? 'material não possui' : 'materiais não possuem'} preço informado',
-                    style: const TextStyle(fontSize: 11, color: AppTheme.warning),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 }
 
 // ─── Campo de descrição com controller persistente ───────────────────────────
@@ -3900,19 +1183,19 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    FilledButton.icon(
-                      onPressed: onReabrir,
-                      icon: const Icon(Icons.edit_outlined, size: 14),
-                      label: const Text('Reabrir', style: TextStyle(fontSize: 12)),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                      ),
-                    ),
-
+                    // Aba "Aguardando Aprovação": Reabrir + Rejeitar + Aprovar
                     if (mostrarAcoes) ...[
+                      OutlinedButton.icon(
+                        onPressed: onReabrir,
+                        icon: const Icon(Icons.edit_outlined, size: 14),
+                        label: const Text('Reabrir', style: TextStyle(fontSize: 12)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.primary,
+                          side: const BorderSide(color: AppTheme.primary),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       OutlinedButton.icon(
                         onPressed: onRejeitar,
@@ -3939,9 +1222,20 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
                               horizontal: 14, vertical: 8),
                         ),
                       ),
-                    ],
-                    
-                    if (onGerarOC != null) ...[
+                    ]
+                    // Aba "Aprovados": Reabrir (secundário) + Gerar OC (primário)
+                    else if (onGerarOC != null) ...[
+                      OutlinedButton.icon(
+                        onPressed: onReabrir,
+                        icon: const Icon(Icons.edit_outlined, size: 14),
+                        label: const Text('Reabrir', style: TextStyle(fontSize: 12)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.textSecondary,
+                          side: const BorderSide(color: AppTheme.divider),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       FilledButton.icon(
                         onPressed: onGerarOC,
@@ -3955,7 +1249,20 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
                               horizontal: 14, vertical: 8),
                         ),
                       ),
-                    ],
+                    ]
+                    // Demais abas (Não Aprovados, etc.): apenas Reabrir
+                    else
+                      FilledButton.icon(
+                        onPressed: onReabrir,
+                        icon: const Icon(Icons.edit_outlined, size: 14),
+                        label: const Text('Reabrir', style: TextStyle(fontSize: 12)),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                        ),
+                      ),
                   ],
                 ),
               ],
@@ -3969,6 +1276,7 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
 
 // ─── Sub-widgets (reutilizados) ───────────────────────────────────────────────
 
+// ignore: unused_element
 class _MaterialChip extends StatelessWidget {
   final String nome;
   final bool selecionado;
@@ -3980,9 +1288,8 @@ class _MaterialChip extends StatelessWidget {
     required this.nome,
     required this.selecionado,
     required this.especifico,
-    this.descricao,
     required this.onRemover,
-  });
+  }) : descricao = null;
 
   @override
   Widget build(BuildContext context) {
@@ -4074,90 +1381,6 @@ class _MaterialChip extends StatelessWidget {
   }
 }
 
-class _ModoButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool selecionado;
-  final VoidCallback onTap;
-
-  const _ModoButton({
-    required this.label,
-    required this.icon,
-    required this.selecionado,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selecionado ? AppTheme.primary : AppTheme.surfaceVariant,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selecionado ? AppTheme.primary : AppTheme.divider,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 13,
-              color: selecionado ? Colors.white : AppTheme.textSecondary,
-            ),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: selecionado ? Colors.white : AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  final String status;
-  const _StatusChip({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    Color bg, fg;
-    switch (status) {
-      case 'OK':
-        bg = AppTheme.statusOk.withValues(alpha: 0.1);
-        fg = AppTheme.statusOk;
-      case 'LIMITE':
-        bg = AppTheme.statusBaixo.withValues(alpha: 0.1);
-        fg = AppTheme.statusBaixo;
-      case 'CRITICO':
-        bg = AppTheme.statusCritico.withValues(alpha: 0.1);
-        fg = AppTheme.statusCritico;
-      default:
-        bg = AppTheme.surfaceVariant;
-        fg = AppTheme.textSecondary;
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration:
-          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
-      child: Text(
-        status,
-        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: fg),
-      ),
-    );
-  }
-}
-
 class _QuantidadeField extends StatefulWidget {
   final double value;
   final ValueChanged<double> onChanged;
@@ -4207,456 +1430,6 @@ class _QuantidadeFieldState extends State<_QuantidadeField> {
   }
 }
 
-class _FornecedorRow extends StatelessWidget {
-  final String fornecedorNome;
-  final double? preco;
-  final double? precoM2;
-  final double quantidade;
-  final bool isMenorPreco;
-  final bool isMenorPrecoM2;
-  final bool isSelected;
-  final ModoOrcamento modoOrcamento;
-  final VoidCallback onSelect;
-  final VoidCallback onEditarPreco;
-
-  const _FornecedorRow({
-    required this.fornecedorNome,
-    this.preco,
-    this.precoM2,
-    required this.quantidade,
-    required this.isMenorPreco,
-    required this.isMenorPrecoM2,
-    required this.isSelected,
-    required this.modoOrcamento,
-    required this.onSelect,
-    required this.onEditarPreco,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final totalUnit = preco != null ? preco! * quantidade : null;
-    final totalM2v = precoM2 != null ? precoM2! * quantidade : null;
-    final isUnit = modoOrcamento == ModoOrcamento.unitario;
-
-    return GestureDetector(
-      onTap: onSelect,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primary.withValues(alpha: 0.04) : null,
-          border: const Border(
-            top: BorderSide(color: AppTheme.divider, width: 0.5),
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              isSelected
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_unchecked,
-              size: 18,
-              color: isSelected ? AppTheme.primary : AppTheme.textHint,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      fornecedorNome,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight:
-                            isSelected ? FontWeight.w600 : FontWeight.w500,
-                        color: isSelected
-                            ? AppTheme.primary
-                            : AppTheme.textPrimary,
-                      ),
-                    ),
-                  ),
-                  if (isSelected)
-                    Container(
-                      margin: const EdgeInsets.only(left: 8),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
-                            color: AppTheme.primary.withValues(alpha: 0.4)),
-                      ),
-                      child: const Text(
-                        'Selecionado',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            SizedBox(
-              width: 110,
-              child: isUnit
-                  ? (preco != null
-                      ? Text(_brl(preco),
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: isMenorPreco
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                            color: isMenorPreco
-                                ? AppTheme.statusOk
-                                : AppTheme.textPrimary,
-                          ))
-                      : const Text('—',
-                          style: TextStyle(
-                              fontSize: 12, color: AppTheme.textHint)))
-                  : (precoM2 != null
-                      ? Text(_brl(precoM2),
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: isMenorPrecoM2
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                            color: isMenorPrecoM2
-                                ? AppTheme.statusOk
-                                : AppTheme.textPrimary,
-                          ))
-                      : const Text('—',
-                          style: TextStyle(
-                              fontSize: 12, color: AppTheme.textHint))),
-            ),
-            SizedBox(
-              width: 120,
-              child: isUnit
-                  ? (totalUnit != null
-                      ? Text(_brl(totalUnit),
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: isMenorPreco
-                                ? FontWeight.w700
-                                : FontWeight.w600,
-                            color: isMenorPreco
-                                ? AppTheme.statusOk
-                                : AppTheme.textPrimary,
-                          ))
-                      : const Text('—',
-                          style: TextStyle(
-                              fontSize: 12, color: AppTheme.textHint)))
-                  : (totalM2v != null
-                      ? Text(_brl(totalM2v),
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: isMenorPrecoM2
-                                ? FontWeight.w700
-                                : FontWeight.w600,
-                            color: isMenorPrecoM2
-                                ? AppTheme.statusOk
-                                : AppTheme.textPrimary,
-                          ))
-                      : const Text('—',
-                          style: TextStyle(
-                              fontSize: 12, color: AppTheme.textHint))),
-            ),
-            SizedBox(
-              width: 80,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  OutlinedButton(
-                    onPressed: onEditarPreco,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.primary,
-                      side: const BorderSide(color: AppTheme.divider),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      textStyle: const TextStyle(
-                          fontSize: 11, fontWeight: FontWeight.w600),
-                    ),
-                    child: const Text('Editar'),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TabelaComparativaRow extends StatelessWidget {
-  final int rank;
-  final String nome;
-  final double total;
-  final double totalM2;
-  final int materiais;
-  final int materiaisComPreco;
-  final int totalMateriais;
-  final bool isMelhor;
-  final bool isMelhorM2;
-  final bool isDestaqueAtual;
-  final bool isSelecionadoEmTodos;
-  final bool ordenarPorM2;
-  final double? diff;
-  final double? diffM2;
-  final bool temTodosPrecos;
-  final VoidCallback onSelectAll;
-
-  const _TabelaComparativaRow({
-    required this.rank,
-    required this.nome,
-    required this.total,
-    required this.totalM2,
-    required this.materiais,
-    required this.materiaisComPreco,
-    required this.totalMateriais,
-    required this.isMelhor,
-    required this.isMelhorM2,
-    required this.isDestaqueAtual,
-    required this.isSelecionadoEmTodos,
-    required this.ordenarPorM2,
-    this.diff,
-    this.diffM2,
-    required this.temTodosPrecos,
-    required this.onSelectAll,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cobreTotal = materiais >= totalMateriais;
-    final temPrecoTotal = materiaisComPreco >= totalMateriais;
-
-    return GestureDetector(
-      onTap: onSelectAll,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: isSelecionadoEmTodos
-              ? AppTheme.primary.withValues(alpha: 0.06)
-              : isDestaqueAtual
-                  ? AppTheme.statusOk.withValues(alpha: 0.05)
-                  : null,
-          border: Border(
-            top: const BorderSide(color: AppTheme.divider),
-            left: isSelecionadoEmTodos
-                ? const BorderSide(color: AppTheme.primary, width: 3)
-                : BorderSide.none,
-          ),
-        ),
-        child: Row(
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Icon(
-                isSelecionadoEmTodos
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_unchecked,
-                size: 18,
-                color: isSelecionadoEmTodos
-                    ? AppTheme.primary
-                    : AppTheme.textHint,
-              ),
-            ),
-            Expanded(
-              child: Row(
-                children: [
-                  if (isDestaqueAtual && !isSelecionadoEmTodos)
-                    const Padding(
-                      padding: EdgeInsets.only(right: 6),
-                      child: Icon(Icons.emoji_events,
-                          size: 16, color: AppTheme.statusOk),
-                    )
-                  else if (!isSelecionadoEmTodos)
-                    Container(
-                      width: 20,
-                      height: 20,
-                      margin: const EdgeInsets.only(right: 8),
-                      alignment: Alignment.center,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: AppTheme.surfaceVariant,
-                      ),
-                      child: Text(
-                        '$rank°',
-                        style: const TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textSecondary),
-                      ),
-                    ),
-                  Flexible(
-                    child: Text(
-                      nome,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: (isDestaqueAtual || isSelecionadoEmTodos)
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        color: isSelecionadoEmTodos
-                            ? AppTheme.primary
-                            : isDestaqueAtual
-                                ? AppTheme.statusOk
-                                : AppTheme.textPrimary,
-                      ),
-                    ),
-                  ),
-                  if (isSelecionadoEmTodos)
-                    Container(
-                      margin: const EdgeInsets.only(left: 8),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
-                            color: AppTheme.primary.withValues(alpha: 0.4)),
-                      ),
-                      child: const Text(
-                        'Selecionado',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                    ),
-                  if (!temTodosPrecos)
-                    const Padding(
-                      padding: EdgeInsets.only(left: 4),
-                      child: Tooltip(
-                        message: 'Valor de algum material não informado',
-                        child: Icon(Icons.warning_amber_rounded,
-                            size: 13, color: AppTheme.warning),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            SizedBox(
-              width: 100,
-              child: Tooltip(
-                message: cobreTotal
-                    ? temPrecoTotal
-                        ? 'Cobre todos os $totalMateriais materiais com preço'
-                        : 'Cobre todos os $totalMateriais materiais, mas ${materiais - materiaisComPreco} sem preço'
-                    : 'Cobre apenas $materiais de $totalMateriais materiais — total parcial',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          cobreTotal
-                              ? (temPrecoTotal
-                                  ? Icons.check_circle_outline
-                                  : Icons.warning_amber_rounded)
-                              : Icons.remove_circle_outline,
-                          size: 13,
-                          color: cobreTotal
-                              ? (temPrecoTotal
-                                  ? AppTheme.statusOk
-                                  : AppTheme.warning)
-                              : AppTheme.statusCritico,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '$materiais/$totalMateriais',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: cobreTotal
-                                ? AppTheme.textPrimary
-                                : AppTheme.statusCritico,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (!cobreTotal)
-                      Text(
-                        'incompleto',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: AppTheme.statusCritico.withValues(alpha: 0.8),
-                        ),
-                      )
-                    else if (!temPrecoTotal)
-                      Text(
-                        '${materiais - materiaisComPreco} sem preço',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: AppTheme.warning.withValues(alpha: 0.9),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            SizedBox(
-              width: 130,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    total > 0 ? _brl(total) : '—',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: (isMelhor && !ordenarPorM2) ? FontWeight.w700 : FontWeight.w500,
-                      color: (isMelhor && !ordenarPorM2)
-                          ? AppTheme.statusOk
-                          : (!ordenarPorM2
-                              ? AppTheme.textPrimary
-                              : AppTheme.textSecondary),
-                    ),
-                  ),
-                  if (diff != null && !ordenarPorM2)
-                    Text('+${_brl(diff)}',
-                        style: const TextStyle(
-                            fontSize: 11, color: AppTheme.statusCritico)),
-                ],
-              ),
-            ),
-            SizedBox(
-              width: 130,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    totalM2 > 0 ? _brl(totalM2) : '—',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: (isMelhorM2 && ordenarPorM2) ? FontWeight.w700 : FontWeight.w500,
-                      color: (isMelhorM2 && ordenarPorM2)
-                          ? AppTheme.statusOk
-                          : (ordenarPorM2
-                              ? AppTheme.textPrimary
-                              : AppTheme.textSecondary),
-                    ),
-                  ),
-                  if (diffM2 != null && ordenarPorM2)
-                    Text('+${_brl(diffM2)}',
-                        style: const TextStyle(
-                            fontSize: 11, color: AppTheme.statusCritico)),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Diálogos ─────────────────────────────────
-
 class _DialogVincularFornecedores extends StatefulWidget {
   final List<FornecedorModel> fornecedores;
   final Set<int> idsJaVinculados;
@@ -4676,6 +1449,14 @@ class _DialogVincularFornecedores extends StatefulWidget {
 class _DialogVincularFornecedoresState
     extends State<_DialogVincularFornecedores> {
   final Set<int> _selecionados = {};
+  final _buscaCtrl = TextEditingController();
+  String _filtro = '';
+
+  @override
+  void dispose() {
+    _buscaCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4683,43 +1464,111 @@ class _DialogVincularFornecedoresState
         .where((f) => !widget.idsJaVinculados.contains(f.id))
         .toList();
 
+    final filtrados = _filtro.isEmpty
+        ? disponiveis
+        : disponiveis
+            .where((f) =>
+                f.nomeFantasia.toLowerCase().contains(_filtro.toLowerCase()) ||
+                (f.cnpj != null && f.cnpj!.contains(_filtro)))
+            .toList();
+
     return AlertDialog(
       title: Text('Adicionar Fornecedores — ${widget.materialNome}',
           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
       content: SizedBox(
         width: 360,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 320),
-          child: disponiveis.isEmpty
-              ? const Text(
-                  'Todos os fornecedores já estão vinculados a este material.',
-                  style: TextStyle(fontSize: 13, color: AppTheme.textSecondary))
-              : ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: disponiveis.length,
-                  separatorBuilder: (_, __) =>
-                      const Divider(height: 1, color: AppTheme.divider),
-                  itemBuilder: (ctx, i) {
-                    final f = disponiveis[i];
-                    return CheckboxListTile(
-                      dense: true,
-                      title: Text(f.nomeFantasia,
-                          style: const TextStyle(fontSize: 13)),
-                      subtitle: f.cnpj != null
-                          ? Text(f.cnpj!, style: const TextStyle(fontSize: 11))
-                          : null,
-                      value: _selecionados.contains(f.id),
-                      activeColor: AppTheme.primary,
-                      onChanged: (v) => setState(() {
-                        if (v == true) {
-                          _selecionados.add(f.id);
-                        } else {
-                          _selecionados.remove(f.id);
-                        }
-                      }),
-                    );
-                  },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _buscaCtrl,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: 'Buscar fornecedor...',
+                prefixIcon: const Icon(Icons.search, size: 18, color: AppTheme.textHint),
+                suffixIcon: _filtro.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.close, size: 16, color: AppTheme.textHint),
+                        onPressed: () {
+                          _buscaCtrl.clear();
+                          setState(() => _filtro = '');
+                        },
+                      )
+                    : null,
+                isDense: true,
+              ),
+              onChanged: (v) => setState(() => _filtro = v),
+            ),
+            const SizedBox(height: 8),
+            if (_selecionados.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle, size: 13, color: AppTheme.primary),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${_selecionados.length} selecionado${_selecionados.length > 1 ? 's' : ''}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 280),
+              child: disponiveis.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                          'Todos os fornecedores já estão vinculados a este material.',
+                          style: TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+                    )
+                  : filtrados.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.search_off, size: 16, color: AppTheme.textHint),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Nenhum fornecedor encontrado para "$_filtro".',
+                                style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: filtrados.length,
+                          separatorBuilder: (_, __) =>
+                              const Divider(height: 1, color: AppTheme.divider),
+                          itemBuilder: (ctx, i) {
+                            final f = filtrados[i];
+                            return CheckboxListTile(
+                              dense: true,
+                              title: Text(f.nomeFantasia,
+                                  style: const TextStyle(fontSize: 13)),
+                              subtitle: f.cnpj != null
+                                  ? Text(f.cnpj!, style: const TextStyle(fontSize: 11))
+                                  : null,
+                              value: _selecionados.contains(f.id),
+                              activeColor: AppTheme.primary,
+                              onChanged: (v) => setState(() {
+                                if (v == true) {
+                                  _selecionados.add(f.id);
+                                } else {
+                                  _selecionados.remove(f.id);
+                                }
+                              }),
+                            );
+                          },
+                        ),
+            ),
+          ],
         ),
       ),
       actions: [
@@ -4747,9 +1596,7 @@ class _DialogEditarPreco extends StatefulWidget {
   const _DialogEditarPreco({
     required this.fornecedorNome,
     required this.materialNome,
-    this.precoAtual,
-    this.precoM2Atual,
-  });
+  }) : precoAtual = null, precoM2Atual = null;
 
   @override
   State<_DialogEditarPreco> createState() => _DialogEditarPrecoState();
@@ -4920,6 +1767,7 @@ class _DialogDescartarOrcamentoState
   }
 }
 
+// ignore: unused_element
 class _DialogOpcaoOC extends StatelessWidget {
   final List<ItemOrcamentoData> itens;
   const _DialogOpcaoOC({required this.itens});
@@ -4961,148 +1809,6 @@ class _DialogOpcaoOC extends StatelessWidget {
           onPressed: () => Navigator.pop(context, 'nova'),
           child: const Text('Criar nova OC'),
         ),
-      ],
-    );
-  }
-}
-
-class _OrdemTotaisBtn extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool ativo;
-  final VoidCallback onTap;
-
-  const _OrdemTotaisBtn({
-    required this.label,
-    required this.icon,
-    required this.ativo,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(7),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: ativo ? AppTheme.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(7),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 14,
-              color: ativo ? Colors.white : AppTheme.textSecondary,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: ativo ? Colors.white : AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DialogSelecionarOC extends StatelessWidget {
-  final List<dynamic> ocs;
-  const _DialogSelecionarOC({required this.ocs});
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Selecionar OC existente',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-      content: SizedBox(
-        width: 420,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 380),
-          child: ListView.separated(
-            shrinkWrap: true,
-            itemCount: ocs.length,
-            separatorBuilder: (_, __) =>
-                const Divider(height: 1, color: AppTheme.divider),
-            itemBuilder: (ctx, i) {
-              final oc = ocs[i] as Map<String, dynamic>;
-              final fornNome = oc['fornecedor']?['nomeFantasia'] ?? '—';
-              final valorTotal =
-                  double.tryParse(oc['valorTotal']?.toString() ?? '0') ?? 0;
-              return InkWell(
-                onTap: () => Navigator.pop(context, oc),
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 56,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                              color: AppTheme.primary.withValues(alpha: 0.3)),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          '#${oc['id']}',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              fornNome,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.textPrimary,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Total: ${_brl(valorTotal)}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Icon(Icons.arrow_forward_ios,
-                          size: 14, color: AppTheme.textHint),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar')),
       ],
     );
   }

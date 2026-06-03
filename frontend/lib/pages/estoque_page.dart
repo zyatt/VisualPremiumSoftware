@@ -91,7 +91,8 @@ const _kCategoriaGeral       = '__GERAL__';
 const _kCategoriaSemCategoria = '__SEM_CATEGORIA__';
 
 class EstoquePage extends StatefulWidget {
-  const EstoquePage({super.key});
+  final String roleUsuario;
+  const EstoquePage({super.key, required this.roleUsuario});
 
   @override
   State<EstoquePage> createState() => _EstoquePageState();
@@ -146,14 +147,29 @@ class _EstoquePageState extends State<EstoquePage> {
     required Color cor,
     required IconData icone,
   }) {
+    // Geral e Sem categoria não possuem tela de identificadores —
+    // navegam diretamente para a listagem de materiais.
+    final pularIdentificadores =
+        categoriaId == _kCategoriaGeral ||
+        categoriaId == _kCategoriaSemCategoria;
+
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => EstoqueCategoriaPage(
-          categoriaId:    categoriaId,
-          categoriaLabel: categoriaLabel,
-          cor:            cor,
-          icone:          icone,
-        ),
+        builder: (_) => pularIdentificadores
+            ? EstoqueCategoriaPage(
+                categoriaId:    categoriaId,
+                categoriaLabel: categoriaLabel,
+                cor:            cor,
+                icone:          icone,
+                roleUsuario:    widget.roleUsuario,
+              )
+            : EstoqueIdentificadorPage(
+                categoriaId:    categoriaId,
+                categoriaLabel: categoriaLabel,
+                cor:            cor,
+                icone:          icone,
+                roleUsuario:    widget.roleUsuario,
+              ),
       ),
     ).then((_) {
       // Recarrega categorias ao voltar (pode ter sido criada/removida alguma)
@@ -448,6 +464,445 @@ class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PÁGINA DE IDENTIFICADORES (nível 2 da hierarquia: categoria → identificador)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _kIdentificadorTodos       = '__TODOS__';
+const _kIdentificadorSemIdentificador = '__SEM_IDENTIFICADOR__';
+
+class EstoqueIdentificadorPage extends StatefulWidget {
+  final String   categoriaId;
+  final String   categoriaLabel;
+  final Color    cor;
+  final IconData icone;
+  final String   roleUsuario;
+
+  const EstoqueIdentificadorPage({
+    super.key,
+    required this.categoriaId,
+    required this.categoriaLabel,
+    required this.cor,
+    required this.icone,
+    required this.roleUsuario,
+  });
+
+  @override
+  State<EstoqueIdentificadorPage> createState() => _EstoqueIdentificadorPageState();
+}
+
+class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
+  final _filtroCtrl = TextEditingController();
+  String _filtro = '';
+  bool _carregando = true;
+  List<MaterialModel> _materiais = [];
+
+  // ── Helpers de ícone / cor para identificadores ──────────────────────────
+  static const _cores = [
+    Color(0xFF1E88E5), Color(0xFF00897B), Color(0xFFE53935),
+    Color(0xFFF4511E), Color(0xFF8E24AA), Color(0xFF039BE5),
+    Color(0xFF43A047), Color(0xFFFFB300), Color(0xFF6D4C41),
+    Color(0xFF546E7A), Color(0xFFD81B60), Color(0xFF5E35B1),
+  ];
+
+  String? _categoriaParaProvider() {
+    if (widget.categoriaId == _kCategoriaGeral)        return null;
+    if (widget.categoriaId == _kCategoriaSemCategoria) return '';
+    return widget.categoriaId;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _carregar());
+  }
+
+  @override
+  void dispose() {
+    _filtroCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _carregar() async {
+    setState(() => _carregando = true);
+    try {
+      await context.read<MaterialProvider>().buscarSugestoes(
+        '',
+        limite: 9999,
+      );
+      // buscarSugestoes não filtra por categoria; fazemos aqui no client:
+      // Melhor usar o repo diretamente via provider.carregar e capturar o resultado.
+      // Mas como não temos acesso direto, usamos o provider normalmente.
+      if (!mounted) return;
+      // Carrega tudo da categoria no provider para extrair identificadores
+      await context.read<MaterialProvider>().carregar(
+        categoria: _categoriaParaProvider(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _materiais = context.read<MaterialProvider>().materiais;
+        _carregando = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _carregando = false);
+    }
+  }
+
+  /// Extrai identificadores únicos dos materiais (null → sem identificador).
+  List<String?> _identificadoresUnicos() {
+    final set = <String?>{};
+    for (final m in _materiais) {
+      set.add(m.identificador?.trim().isNotEmpty == true ? m.identificador!.trim() : null);
+    }
+    final lista = set.toList();
+    lista.sort((a, b) {
+      if (a == null && b == null) return 0;
+      if (a == null) return 1;
+      if (b == null) return -1;
+      return a.compareTo(b);
+    });
+    return lista;
+  }
+
+  int _contarMateriais(String? identificador) {
+    if (identificador == null) {
+      return _materiais.where((m) =>
+        m.identificador == null || m.identificador!.trim().isEmpty).length;
+    }
+    return _materiais.where((m) =>
+      m.identificador?.trim() == identificador).length;
+  }
+
+  void _navegarParaIdentificador({
+    required String identificadorId,
+    required String? identificadorReal,
+  }) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EstoqueCategoriaPage(
+          categoriaId:          widget.categoriaId,
+          categoriaLabel:       widget.categoriaLabel,
+          cor:                  widget.cor,
+          icone:                widget.icone,
+          identificadorFiltro:  identificadorReal,
+          identificadorLabel:   identificadorId == _kIdentificadorTodos
+              ? null
+              : identificadorId == _kIdentificadorSemIdentificador
+                  ? 'Sem identificador'
+                  : identificadorId,
+          mostrarBotaoIdentificadores: true,
+          roleUsuario: widget.roleUsuario,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Cabeçalho ────────────────────────────────────────────────────
+            Row(
+              children: [
+                InkWell(
+                  onTap: () => Navigator.of(context).pop(),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: AppTheme.divider),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
+                        SizedBox(width: 6),
+                        Text(
+                          'Categorias',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: widget.cor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(widget.icone, color: widget.cor, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.categoriaLabel,
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineMedium
+                          ?.copyWith(color: AppTheme.textPrimary),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Selecione um identificador para ver os materiais',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: AppTheme.textSecondary),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: _carregar,
+                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppTheme.divider),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // ── Campo de busca ────────────────────────────────────────────────
+            SizedBox(
+              width: 360,
+              child: TextField(
+                controller: _filtroCtrl,
+                inputFormatters: [_NoCommaFormatter()],
+                decoration: InputDecoration(
+                  hintText:   'Buscar identificador...',
+                  prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
+                  isDense:    true,
+                  suffixIcon: _filtro.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () {
+                            _filtroCtrl.clear();
+                            setState(() => _filtro = '');
+                          },
+                        )
+                      : null,
+                ),
+                onChanged: (v) => setState(() => _filtro = v.trim().toLowerCase()),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // ── Grid de identificadores ───────────────────────────────────────
+            Expanded(
+              child: _carregando
+                  ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
+                  : _buildGrid(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGrid() {
+    final identificadores = _identificadoresUnicos();
+
+    bool corresponde(String label) =>
+        _filtro.isEmpty || label.toLowerCase().contains(_filtro);
+
+    final cards = <Widget>[];
+
+    // Card "Todos"
+    if (corresponde('todos')) {
+      cards.add(_IdentificadorCard(
+        label:       'Todos',
+        quantidade:  _materiais.length,
+        cor:         widget.cor,
+        icone:       Icons.grid_view_rounded,
+        onTap: () => _navegarParaIdentificador(
+          identificadorId:   _kIdentificadorTodos,
+          identificadorReal: null, // sem filtro de identificador
+        ),
+      ));
+    }
+
+    // Identificadores reais
+    for (int i = 0; i < identificadores.length; i++) {
+      final ident = identificadores[i];
+      final label = ident ?? 'Sem identificador';
+      if (!corresponde(label)) continue;
+      final cor = ident == null
+          ? const Color(0xFF546E7A)
+          : _cores[i % _cores.length];
+      cards.add(_IdentificadorCard(
+        label:       label,
+        quantidade:  _contarMateriais(ident),
+        cor:         cor,
+        icone:       ident == null ? Icons.help_outline : Icons.qr_code,
+        onTap: () => _navegarParaIdentificador(
+          identificadorId:   ident ?? _kIdentificadorSemIdentificador,
+          identificadorReal: ident, // null = sem identificador
+        ),
+      ));
+    }
+
+    if (cards.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.search_off, size: 64, color: AppTheme.textHint),
+            const SizedBox(height: 16),
+            Text(
+              'Nenhum identificador encontrado',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyLarge
+                  ?.copyWith(color: AppTheme.textSecondary),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      child: GridView.count(
+        crossAxisCount:   4,
+        crossAxisSpacing: 16,
+        mainAxisSpacing:  16,
+        childAspectRatio: 1.0,
+        shrinkWrap:       true,
+        physics:          const NeverScrollableScrollPhysics(),
+        children:         cards,
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CARD DE IDENTIFICADOR
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _IdentificadorCard extends StatefulWidget {
+  final String   label;
+  final int      quantidade;
+  final Color    cor;
+  final IconData icone;
+  final VoidCallback onTap;
+
+  const _IdentificadorCard({
+    required this.label,
+    required this.quantidade,
+    required this.cor,
+    required this.icone,
+    required this.onTap,
+  });
+
+  @override
+  State<_IdentificadorCard> createState() => _IdentificadorCardState();
+}
+
+class _IdentificadorCardState extends State<_IdentificadorCard> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ativo = _hovered;
+    return MouseRegion(
+      onEnter:  (_) => setState(() => _hovered = true),
+      onExit:   (_) => setState(() => _hovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            color: ativo
+                ? widget.cor.withValues(alpha: 0.12)
+                : AppTheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: ativo
+                  ? widget.cor
+                  : widget.cor.withValues(alpha: 0.25),
+              width: ativo ? 2 : 1.5,
+            ),
+            boxShadow: ativo
+                ? [
+                    BoxShadow(
+                      color: widget.cor.withValues(alpha: 0.20),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    )
+                  ]
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    )
+                  ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: widget.cor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(widget.icone, color: widget.cor, size: 28),
+              ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: ativo ? widget.cor : AppTheme.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${widget.quantidade} ${widget.quantidade == 1 ? "material" : "materiais"}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: ativo
+                      ? widget.cor.withValues(alpha: 0.8)
+                      : AppTheme.textHint,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PÁGINA DE MATERIAIS POR CATEGORIA
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -457,6 +912,15 @@ class EstoqueCategoriaPage extends StatefulWidget {
   final Color    cor;
   final IconData icone;
   final String?  buscaInicial;
+  /// Quando não-null, filtra automaticamente pelo identificador escolhido na
+  /// página anterior (EstoqueIdentificadorPage). String vazia = sem identificador.
+  /// null especial vindo de _kIdentificadorTodos = sem filtro de identificador.
+  final String?  identificadorFiltro;
+  /// Rótulo do identificador para exibir no breadcrumb (null = sem filtro).
+  final String?  identificadorLabel;
+  /// Se true, exibe breadcrumb de volta à tela de identificadores.
+  final bool     mostrarBotaoIdentificadores;
+  final String   roleUsuario;
 
   const EstoqueCategoriaPage({
     super.key,
@@ -465,6 +929,10 @@ class EstoqueCategoriaPage extends StatefulWidget {
     required this.cor,
     required this.icone,
     this.buscaInicial,
+    this.identificadorFiltro,
+    this.identificadorLabel,
+    this.mostrarBotaoIdentificadores = false,
+    required this.roleUsuario,
   });
 
   @override
@@ -494,6 +962,10 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   void initState() {
     super.initState();
     _buscaCtrl = TextEditingController(text: widget.buscaInicial ?? '');
+    // Pré-preenche o filtro de identificador vindo da página anterior
+    if (widget.identificadorFiltro != null) {
+      _identificadorCtrl.text = widget.identificadorFiltro!;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _aplicarFiltros());
   }
 
@@ -532,14 +1004,24 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   }
 
   Future<void> _abrirFormMaterial([MaterialModel? material]) async {
+    final isCompras = widget.roleUsuario == 'COMPRAS';
+    if (isCompras && material != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Você não tem permissão para editar materiais.'),
+          backgroundColor: AppTheme.warning,
+        ),
+      );
+      return;
+    }
     final salvou = await showDialog(
       context: context,
       barrierDismissible: true,
       builder: (_) => _MaterialFormDialog(
         material:    material,
-        onDesativar: material != null ? _desativar : null,
-        onReativar:  material != null ? _reativar  : null,
-        onExcluir:   material != null ? _excluir   : null,
+        onDesativar: (!isCompras && material != null) ? _desativar : null,
+        onReativar:  (!isCompras && material != null) ? _reativar  : null,
+        onExcluir:   (!isCompras && material != null) ? _excluir   : null,
       ),
     );
     if (!mounted) return;
@@ -813,14 +1295,16 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                       border: Border.all(color: AppTheme.divider),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
-                        SizedBox(width: 6),
+                        const Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
+                        const SizedBox(width: 6),
                         Text(
-                          'Categorias',
-                          style: TextStyle(
+                          widget.mostrarBotaoIdentificadores
+                              ? widget.categoriaLabel
+                              : 'Categorias',
+                          style: const TextStyle(
                             fontSize: 13,
                             color: AppTheme.textSecondary,
                             fontWeight: FontWeight.w500,
@@ -845,8 +1329,37 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Breadcrumb: Categoria › Identificador (se veio da tela de identificadores)
+                    if (widget.mostrarBotaoIdentificadores && widget.identificadorLabel != null)
+                      Row(
+                        children: [
+                          Text(
+                            widget.categoriaLabel,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: AppTheme.textHint),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 4),
+                            child: Icon(Icons.chevron_right, size: 14, color: AppTheme.textHint),
+                          ),
+                          Text(
+                            widget.identificadorLabel!,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: cor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      ),
                     Text(
-                      widget.categoriaLabel,
+                      widget.mostrarBotaoIdentificadores && widget.identificadorLabel != null
+                          ? widget.identificadorLabel!
+                          : widget.categoriaLabel,
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium

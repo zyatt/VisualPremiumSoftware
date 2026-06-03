@@ -8,6 +8,7 @@ const _includeSolicitacao = {
       id: true, nome: true, unidade: true, quantidade: true,
       estoqueMinimo: true, identificador: true, medida: true,
       espessura: true, categoria: true, especifico: true, status: true,
+      ultimoValorPago: true, ultimoValorPagoM2: true,
     },
   },
   baixas: { orderBy: { criadoEm: 'asc' } },
@@ -81,6 +82,9 @@ async function criarSolicitacao({ materialId, descricaoItem, quantidadeReservada
   const material = await prisma.material.findUnique({ where: { id: materialId } });
   if (!material || !material.ativo) throw { status: 404, message: 'Material não encontrado ou inativo' };
 
+  // Normaliza o número da OS: sem espaços extras, maiúsculas
+  const numeroOSNorm = (numeroOS ?? '').trim().toUpperCase();
+
   if (material.especifico) {
     const desc = (descricaoItem ?? '').trim();
     if (!desc) throw { status: 400, message: 'Materiais específicos exigem uma descrição' };
@@ -120,24 +124,33 @@ async function criarSolicitacao({ materialId, descricaoItem, quantidadeReservada
     });
   }
 
+  const qtd = Number(quantidadeReservada);
+
+  // Recalcula status do material sem reserva pendente (solicitação já finalizada)
   const matAtualizado = await prisma.material.findUnique({ where: { id: materialId } });
-  const emUso         = await _emUsoMaterial(materialId) + Number(quantidadeReservada);
+  const emUso         = await _emUsoMaterial(materialId); // 0 reservas abertas
   const novoStatus    = _statusComReserva(matAtualizado.quantidade, emUso, matAtualizado.estoqueMinimo, matAtualizado.ativo);
   await prisma.material.update({ where: { id: materialId }, data: { status: novoStatus } });
 
-  return prisma.solicitacaoProducao.create({
+  // Cria já finalizada — sem passar por ABERTA/EM_USO
+  const solicitacao = await prisma.solicitacaoProducao.create({
     data: {
-      numeroOS,
+      numeroOS: numeroOSNorm,
       materialId,
       descricaoItem: descricaoItem ?? null,
-      quantidadeReservada: Number(quantidadeReservada),
-      quantidadeUsada: 0,
-      status: 'ABERTA',
+      quantidadeReservada: qtd,
+      quantidadeUsada: qtd,
+      status: 'FINALIZADA',
+      finalizadoEm: new Date(),
       usuarioId,
       usuarioNome,
     },
     include: _includeSolicitacao,
   });
+
+  await _registrarSaidaControleEstoque(solicitacao);
+
+  return solicitacao;
 }
 
 // ── Registrar baixa ───────────────────────────────────────────────────────────
@@ -251,6 +264,26 @@ async function _registrarSaidaControleEstoque(sol) {
   const observacao = `Saída via produção – ${sol.usuarioNome}`;
   const numeroOS   = sol.numeroOS;
 
+  // Busca o preço do material (último valor pago registrado)
+  const material = sol.material ?? await prisma.material.findUnique({
+    where: { id: sol.materialId },
+    select: { ultimoValorPago: true, ultimoValorPagoM2: true },
+  });
+  const precoUnitario = material?.ultimoValorPago   ? Number(material.ultimoValorPago)   : null;
+  const precoM2       = material?.ultimoValorPagoM2 ? Number(material.ultimoValorPagoM2) : null;
+
+  // Para material específico (filho), tenta pegar o preço do estoque específico
+  let precoUnitarioFinal = precoUnitario;
+  let precoM2Final       = precoM2;
+  if (sol.descricaoItem) {
+    const filho = await prisma.estoqueEspecifico.findUnique({
+      where: { materialId_descricao: { materialId: sol.materialId, descricao: sol.descricaoItem.trim() } },
+      select: { ultimoValorPago: true, ultimoValorPagoM2: true },
+    }).catch(() => null);
+    if (filho?.ultimoValorPago)   precoUnitarioFinal = Number(filho.ultimoValorPago);
+    if (filho?.ultimoValorPagoM2) precoM2Final       = Number(filho.ultimoValorPagoM2);
+  }
+
   const relacao = await prisma.relacaoOS.upsert({
     where:  { numeroOS },
     create: { numeroOS, status: 'EM_ANDAMENTO' },
@@ -266,6 +299,8 @@ async function _registrarSaidaControleEstoque(sol) {
       relacaoOSId:   relacao.id,
       descricaoItem: sol.descricaoItem ?? null,
       observacao,
+      precoUnitario: precoUnitarioFinal ?? undefined,
+      precoM2:       precoM2Final       ?? undefined,
     },
   });
 }

@@ -423,6 +423,19 @@ class OrcamentoProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Verifica se já existe uma aba aberta com o [servidorId] informado.
+  /// Se sim, ativa essa aba e retorna seu índice.
+  /// Se não, retorna -1 (chamador deve criar a aba normalmente).
+  int ativarAbaExistente(int servidorId) {
+    final idx = _abas.indexWhere((a) => a.servidorId == servidorId);
+    if (idx >= 0) {
+      _abaAtiva = idx;
+      _salvarAbas();
+      notifyListeners();
+    }
+    return idx;
+  }
+
   /// Inicia uma nova aba de edição SEM criar nada no servidor ainda.
   /// O servidorId será preenchido apenas ao salvar ou enviar para aprovação.
   void novoOrcamento(String titulo) {

@@ -33,6 +33,8 @@ class RelatorioOSProvider extends ChangeNotifier {
   String? _materialIdentificadorAtivo;
   String? _materialMedidaAtiva;
   String? _materialEspessuraAtiva;
+  DateTime? _dataInicioAtiva;
+  DateTime? _dataFimAtiva;
 
   bool get temFiltroMaterial =>
       (_materialIdAtivo?.isNotEmpty ?? false) ||
@@ -48,6 +50,8 @@ class RelatorioOSProvider extends ChangeNotifier {
     String? materialIdentificador,
     String? materialMedida,
     String? materialEspessura,
+    DateTime? dataInicio,
+    DateTime? dataFim,
   }) async {
     _buscaAtiva                  = busca;
     _materialIdAtivo             = materialId;
@@ -55,6 +59,8 @@ class RelatorioOSProvider extends ChangeNotifier {
     _materialIdentificadorAtivo  = materialIdentificador;
     _materialMedidaAtiva         = materialMedida;
     _materialEspessuraAtiva      = materialEspessura;
+    _dataInicioAtiva             = dataInicio;
+    _dataFimAtiva                = dataFim;
     _carregando = true;
     _erro = null;
     notifyListeners();
@@ -66,6 +72,8 @@ class RelatorioOSProvider extends ChangeNotifier {
         materialIdentificador: materialIdentificador,
         materialMedida:        materialMedida,
         materialEspessura:     materialEspessura,
+        dataInicio:            dataInicio,
+        dataFim:               dataFim,
       );
     } catch (e) {
       _erro = _mensagemErro(e);
@@ -83,6 +91,8 @@ class RelatorioOSProvider extends ChangeNotifier {
         materialIdentificador: _materialIdentificadorAtivo,
         materialMedida:        _materialMedidaAtiva,
         materialEspessura:     _materialEspessuraAtiva,
+        dataInicio:            _dataInicioAtiva,
+        dataFim:               _dataFimAtiva,
       );
 
   Future<void> selecionar(String numeroOS) async {

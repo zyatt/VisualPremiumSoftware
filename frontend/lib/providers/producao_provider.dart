@@ -12,6 +12,8 @@ class ProducaoProvider with ChangeNotifier {
 
   List<String> _categorias = [];
   List<String> get categorias => _categorias;
+  bool _carregandoCategorias = false;
+  bool get carregandoCategorias => _carregandoCategorias;
 
   List<MaterialProducaoModel> _materiais = [];
   List<MaterialProducaoModel> get materiais => _materiais;
@@ -27,11 +29,15 @@ class ProducaoProvider with ChangeNotifier {
   String? get erro => _erro;
 
   Future<void> carregarCategorias() async {
+    _carregandoCategorias = true;
+    notifyListeners();
     try {
       _categorias = await _repo.listarCategorias();
-      notifyListeners();
     } catch (e) {
       debugPrint('Erro ao carregar categorias: $e');
+    } finally {
+      _carregandoCategorias = false;
+      notifyListeners();
     }
   }
 

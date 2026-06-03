@@ -42,6 +42,7 @@ class MaterialProvider extends ChangeNotifier {
     String identificador = '',
     String medida = '',
     String espessura = '',
+    bool? ativo,
   }) async {
     _busca = busca;
     _categoriaFiltro = categoria;
@@ -62,6 +63,7 @@ class MaterialProvider extends ChangeNotifier {
         identificador: identificador,
         medida:       medida,
         espessura:    espessura,
+        ativo:        ativo,
       );
     } catch (e) {
       _erro = _mensagemErro(e);
@@ -174,9 +176,9 @@ class MaterialProvider extends ChangeNotifier {
 
   /// Busca rápida para autocomplete — retorna até [limite] materiais sem
   /// alterar o estado da lista principal nem disparar notifyListeners.
-  Future<List<MaterialModel>> buscarSugestoes(String busca, {int limite = 10}) async {
+  Future<List<MaterialModel>> buscarSugestoes(String busca, {int limite = 10, bool apenasAtivos = false}) async {
     try {
-      final lista = await _repo.listar(busca: busca);
+      final lista = await _repo.listar(busca: busca, ativo: apenasAtivos ? true : null);
       return lista.take(limite).toList();
     } catch (_) {
       return [];

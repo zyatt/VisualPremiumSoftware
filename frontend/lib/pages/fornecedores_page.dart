@@ -881,172 +881,206 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    return Dialog(
       backgroundColor: AppTheme.surface,
-      title: Text(_editando ? 'Editar fornecedor' : 'Novo fornecedor'),
-      content: SizedBox(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SizedBox(
         width: 480,
-        child: SingleChildScrollView(
-          child: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_erroDialog != null) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.error.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                          color: AppTheme.error.withValues(alpha: 0.3)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Cabeçalho ────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _editando ? 'Editar fornecedor' : 'Novo fornecedor',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: AppTheme.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.error_outline,
-                            color: AppTheme.error, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _erroDialog!,
-                            style: const TextStyle(
-                                color: AppTheme.error, fontSize: 13),
+                  ),
+                  if (_editando && widget.onRemover != null)
+                    TextButton.icon(
+                      onPressed: _salvando
+                          ? null
+                          : () {
+                              Navigator.of(context).pop(false);
+                              widget.onRemover!(widget.fornecedor!);
+                            },
+                      icon: const Icon(Icons.delete_outline, size: 16),
+                      label: const Text('Remover'),
+                      style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+                    ),
+                ],
+              ),
+            ),
+
+            // ── Corpo com scroll ──────────────────────────────────────
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_erroDialog != null) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.error.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                                color: AppTheme.error.withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.error_outline,
+                                  color: AppTheme.error, size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _erroDialog!,
+                                  style: const TextStyle(
+                                      color: AppTheme.error, fontSize: 13),
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () =>
+                                    setState(() => _erroDialog = null),
+                                child: const Icon(Icons.close,
+                                    color: AppTheme.error, size: 16),
+                              ),
+                            ],
                           ),
                         ),
-                        GestureDetector(
-                          onTap: () =>
-                              setState(() => _erroDialog = null),
-                          child: const Icon(Icons.close,
-                              color: AppTheme.error, size: 16),
+                        const SizedBox(height: 16),
+                      ],
+
+                      TextFormField(
+                        controller: _nomeFantasiaCtrl,
+                        decoration:
+                            const InputDecoration(labelText: 'Nome fantasia *'),
+                        inputFormatters: [_UpperCaseFormatter()],
+                        onChanged: (_) {
+                          if (_erroDialog != null) {
+                            setState(() => _erroDialog = null);
+                          }
+                        },
+                        validator: (v) => v == null || v.trim().isEmpty
+                            ? 'Nome Fantasia é obrigatório'
+                            : null,
+                      ),
+                      const SizedBox(height: 12),
+
+                      TextFormField(
+                        controller: _razaoSocialCtrl,
+                        decoration:
+                            const InputDecoration(labelText: 'Razão social'),
+                        inputFormatters: [_UpperCaseFormatter()],
+                      ),
+                      const SizedBox(height: 12),
+
+                      Row(children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _cnpjCtrl,
+                            decoration: const InputDecoration(labelText: 'CNPJ'),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [_CnpjInputFormatter()],
+                          ),
                         ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _telefoneCtrl,
+                            decoration:
+                                const InputDecoration(labelText: 'WhatsAPP'),
+                            keyboardType: TextInputType.phone,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                  RegExp(r'[\d() \-]')),
+                              LengthLimitingTextInputFormatter(14),
+                              _TelefoneFormatter(),
+                            ],
+                            validator: (v) {
+                              if (v == null || v.trim().isEmpty) return null;
+                              final digits = v.replaceAll(RegExp(r'\D'), '');
+                              if (digits.length != 10) {
+                                return 'Use DDD (2) + 8 dígitos: (42) 9999-9999';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                      ]),
+                      const SizedBox(height: 12),
 
-                TextFormField(
-                  controller: _nomeFantasiaCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'Nome fantasia *'),
-                  inputFormatters: [_UpperCaseFormatter()],
-                  onChanged: (_) {
-                    if (_erroDialog != null) {
-                      setState(() => _erroDialog = null);
-                    }
-                  },
-                  validator: (v) => v == null || v.trim().isEmpty
-                      ? 'Nome Fantasia é obrigatório'
-                      : null,
+                      Row(children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _nomeVendedorCtrl,
+                            decoration: const InputDecoration(
+                                labelText: 'Nome do vendedor'),
+                            inputFormatters: [_UpperCaseFormatter()],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _tipoCtrl,
+                            decoration: const InputDecoration(
+                                labelText: 'Tipo de fornecedor'),
+                            inputFormatters: [_UpperCaseFormatter()],
+                          ),
+                        ),
+                      ]),
+
+                      const SizedBox(height: 8),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-
-                TextFormField(
-                  controller: _razaoSocialCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'Razão social'),
-                  inputFormatters: [_UpperCaseFormatter()],
-                ),
-                const SizedBox(height: 12),
-
-                Row(children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _cnpjCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'CNPJ',
-                      ),
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        _CnpjInputFormatter(),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _telefoneCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'WhatsAPP',
-                      ),
-                      keyboardType: TextInputType.phone,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                            RegExp(r'[\d() \-]')),
-                        LengthLimitingTextInputFormatter(14),
-                        _TelefoneFormatter(),
-                      ],
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return null;
-                        final digits = v.replaceAll(RegExp(r'\D'), '');
-                        if (digits.length != 10) {
-                          return 'Use DDD (2) + 8 dígitos: (42) 9999-9999';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 12),
-
-                Row(children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _nomeVendedorCtrl,
-                      decoration:
-                          const InputDecoration(labelText: 'Nome do vendedor'),
-                      inputFormatters: [_UpperCaseFormatter()],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _tipoCtrl,
-                      decoration: const InputDecoration(
-                          labelText: 'Tipo de fornecedor'),
-                      inputFormatters: [_UpperCaseFormatter()],
-                    ),
-                  ),
-                ]),
-              ],
+              ),
             ),
-          ),
+
+            // ── Rodapé com ações ──────────────────────────────────────
+            const Divider(height: 1, color: AppTheme.divider),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _salvando ? null : () => Navigator.pop(context),
+                    child: const Text('Cancelar'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: _salvando ? null : _salvar,
+                    style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary),
+                    child: _salvando
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : Text(_editando ? 'Salvar' : 'Criar'),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
-      actions: [
-        if (_editando && widget.onRemover != null) ...[
-          TextButton.icon(
-            onPressed: _salvando
-                ? null
-                : () {
-                    Navigator.of(context).pop(false);
-                    widget.onRemover!(widget.fornecedor!);
-                  },
-            icon: const Icon(Icons.delete_outline, size: 16),
-            label: const Text('Remover'),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
-          ),
-          const Spacer(),
-        ],
-        TextButton(
-          onPressed: _salvando ? null : () => Navigator.pop(context),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: _salvando ? null : _salvar,
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-          child: _salvando
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : Text(_editando ? 'Salvar' : 'Criar'),
-        ),
-      ],
     );
   }
 }

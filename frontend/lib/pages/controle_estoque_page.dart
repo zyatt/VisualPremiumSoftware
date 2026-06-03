@@ -68,6 +68,65 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     with SingleTickerProviderStateMixin {
   final TextEditingController _buscaCtrl = TextEditingController();
   late TabController _tabController;
+  Timer? _timerFechamentoAutomatico;
+
+  // ── Calcula quanto tempo falta até a meia-noite ────────────────────────────
+  Duration get _duracaoAteMeiaNoite {
+    final agora = DateTime.now();
+    final meiaNoite = DateTime(agora.year, agora.month, agora.day + 1);
+    return meiaNoite.difference(agora);
+  }
+
+  // ── Verifica se o número da OS é NÃO numérico (textual) ───────────────────
+  bool _osEhTextual(String numeroOS) {
+    // Remove sufixos internos (#OC, #S, #E) antes de avaliar
+    final semSufixo = numeroOS.replaceAll(RegExp(r'#(OC|S|E)\d*$'), '').trim();
+    return int.tryParse(semSufixo) == null;
+  }
+
+  // ── Fecha automaticamente todas as OS textuais em andamento ───────────────
+  Future<void> _fecharOSTextuaisAutomaticamente() async {
+    if (!mounted) return;
+    final provider = context.read<EstoqueProvider>();
+
+    // Garante que a lista está atualizada
+    await provider.carregarRelacoesOS();
+    if (!mounted) return;
+
+    final osTextuaisEmAndamento = provider.relacoesOS
+        .where((r) => r.status == 'EM_ANDAMENTO' && _osEhTextual(r.numeroOS))
+        .toList();
+
+    for (final os in osTextuaisEmAndamento) {
+      await provider.fecharOS(os.id);
+    }
+
+    if (mounted && osTextuaisEmAndamento.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${osTextuaisEmAndamento.length} OS textual(is) fechada(s) automaticamente.',
+          ),
+          backgroundColor: _corFechada,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+      // Recarrega para refletir o novo estado
+      await provider.carregarRelacoesOS();
+    }
+
+    // Agenda o próximo fechamento automático para a meia-noite seguinte
+    if (mounted) _agendarFechamentoAutomatico();
+  }
+
+  // ── Agenda o timer para a próxima meia-noite ──────────────────────────────
+  void _agendarFechamentoAutomatico() {
+    _timerFechamentoAutomatico?.cancel();
+    _timerFechamentoAutomatico = Timer(
+      _duracaoAteMeiaNoite,
+      _fecharOSTextuaisAutomaticamente,
+    );
+  }
 
   @override
   void initState() {
@@ -75,11 +134,13 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<EstoqueProvider>().carregarRelacoesOS();
+      _agendarFechamentoAutomatico();
     });
   }
 
   @override
   void dispose() {
+    _timerFechamentoAutomatico?.cancel();
     _tabController.dispose();
     _buscaCtrl.dispose();
     super.dispose();
@@ -2030,11 +2091,15 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
     final messenger = ScaffoldMessenger.of(context);
 
     setState(() => _enviando = true);
+    
+    // ╔════════════════════════════════════════════════════════════════════╗
+    // ║ Usa o numeroOS completo (com sufixo) que veio do context          ║
+    // ╚════════════════════════════════════════════════════════════════════╝
     final ok = await provider.registrarMovimentacao(
       materialId:    widget.materialId,
       tipo:          widget.tipo,
       quantidade:    quant!,
-      numeroOS:      widget.numeroOS,
+      numeroOS:      widget.numeroOS,  // já vem com sufixo quando necessário
       descricaoItem: widget.descricaoItem,
       precoUnitario: widget.precoUnitario,
       precoM2:       widget.precoM2,
@@ -2042,8 +2107,10 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
           ? null
           : _obsCtrl.text.trim(),
     );
+    
     if (!mounted) return;
     setState(() => _enviando = false);
+    
     if (ok) {
       provider.selecionarRelacaoOS(widget.numeroOS);
       navigator.pop();
@@ -2358,8 +2425,23 @@ class _MovimentacaoGlobalDialogState
       return;
     }
 
-    // Se há uma OS fixada (context de detalhe), usa o valor real com sufixo
-    final numeroOS  = widget.numeroOSFixo ?? _numeroOSCtrl.text.trim();
+    // Se há uma OS fixada (context detalhe), usa o valor real com sufixo
+    String numeroOS = widget.numeroOSFixo ?? _numeroOSCtrl.text.trim();
+
+    // Sufixo único para OS textuais — apenas quando a OS foi digitada agora
+    // (numeroOSFixo == null). OS vindas de detalhe já têm o numeroOS correto
+    // do banco e não devem ser modificadas, senão cria uma RelacaoOS nova.
+    if (widget.numeroOSFixo == null) {
+      final osEhNumerica = RegExp(r'^\d+$').hasMatch(numeroOS);
+      final osTemSufixo  = RegExp(r'#(OC|S|E)').hasMatch(numeroOS);
+      if (!osEhNumerica && !osTemSufixo) {
+        final sufixo = widget.tipo == 'SAIDA'
+            ? '#S${DateTime.now().millisecondsSinceEpoch}'
+            : '#E${DateTime.now().millisecondsSinceEpoch}';
+        numeroOS = '$numeroOS$sufixo';
+      }
+    }
+
     final provider  = context.read<EstoqueProvider>();
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -2367,23 +2449,24 @@ class _MovimentacaoGlobalDialogState
     setState(() => _enviando = true);
     bool todosOk = true;
 
+    // Usa registrarMovimentacaoSilencioso para não recarregar a cada iteração
     for (final item in _itensSelecionados) {
-      final quant =
-          double.parse(item.quantCtrl.text.replaceAll(',', '.'));
+      final quant = double.parse(item.quantCtrl.text.replaceAll(',', '.'));
       final obs = item.obsCtrl.text.trim().isEmpty
           ? null
           : item.obsCtrl.text.trim();
 
-      final ok = await provider.registrarMovimentacao(
+      final ok = await provider.registrarMovimentacaoSilencioso(
         materialId:    item.material.id,
         tipo:          widget.tipo,
         quantidade:    quant,
-        numeroOS:      numeroOS,
+        numeroOS:      numeroOS,  // ← Agora usa o mesmo numeroOS com sufixo
         precoUnitario: item.precoUnitarioSugerido,
         precoM2:       item.precoM2Sugerido,
         observacao:    obs,
         descricaoItem: item.descricaoItem,
       );
+      
       if (!ok) {
         todosOk = false;
         final erro = provider.erro ?? 'Erro desconhecido';
@@ -2398,15 +2481,22 @@ class _MovimentacaoGlobalDialogState
       }
     }
 
+    // Recarrega apenas uma vez ao final
+    if (todosOk) {
+      await provider.carregarRelacoesOS();
+    }
+
     if (!mounted) return;
     setState(() => _enviando = false);
 
     if (todosOk) {
+      // Remove o sufixo para exibir ao usuário (se foi adicionado)
+      final numeroOSDisplay = numeroOS.replaceFirst(RegExp(r'#(S|E)\d+$'), '');
       navigator.pop();
       messenger.showSnackBar(SnackBar(
         content: Text(
             '${widget.tipo == 'ENTRADA' ? 'Entrada' : 'Saída'} '
-            'registrada para OS $numeroOS'),
+            'registrada para OS $numeroOSDisplay'),
         backgroundColor:
             widget.tipo == 'ENTRADA' ? AppTheme.success : AppTheme.error,
       ));

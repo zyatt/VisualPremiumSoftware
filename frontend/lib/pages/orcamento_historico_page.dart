@@ -76,6 +76,27 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
   List<dynamic> _rejeitados = [];
   List<dynamic> _cancelados = [];
 
+  // ── Busca por material ────────────────────────────────────────────────────
+  final TextEditingController _buscaController = TextEditingController();
+  String _buscaMaterial = '';
+
+  List<dynamic> get _salvosFiltered    => _filtrar(_salvos);
+  List<dynamic> get _aprovadosFiltered => _filtrar(_aprovados);
+  List<dynamic> get _rejeitadosFiltered => _filtrar(_rejeitados);
+  List<dynamic> get _canceladosFiltered => _filtrar(_cancelados);
+
+  List<dynamic> _filtrar(List<dynamic> lista) {
+    final q = _buscaMaterial.trim().toLowerCase();
+    if (q.isEmpty) return lista;
+    return lista.where((orc) {
+      final itens = (orc['itens'] as List? ?? []);
+      return itens.any((item) {
+        final nome = (item['material']?['nome'] as String? ?? '').toLowerCase();
+        return nome.contains(q);
+      });
+    }).toList();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -86,6 +107,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
   @override
   void dispose() {
     _tabController.dispose();
+    _buscaController.dispose();
     super.dispose();
   }
 
@@ -244,8 +266,8 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${_salvos.length + _aprovados.length + _rejeitados.length + _cancelados.length} '
-                      '${(_salvos.length + _aprovados.length + _rejeitados.length + _cancelados.length) == 1 ? 'orçamento' : 'orçamentos'} no histórico',
+                      '${_salvosFiltered.length + _aprovadosFiltered.length + _rejeitadosFiltered.length + _canceladosFiltered.length} '
+                      '${(_salvosFiltered.length + _aprovadosFiltered.length + _rejeitadosFiltered.length + _canceladosFiltered.length) == 1 ? 'orçamento' : 'orçamentos'} no histórico',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
@@ -268,7 +290,46 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
+
+            // ── Busca por material ────────────────────────────────────────
+            TextField(
+              controller: _buscaController,
+              onChanged: (v) => setState(() => _buscaMaterial = v),
+              style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+              decoration: InputDecoration(
+                hintText: 'Buscar por nome do material...',
+                hintStyle: const TextStyle(fontSize: 13, color: AppTheme.textHint),
+                prefixIcon: const Icon(Icons.search, size: 18, color: AppTheme.textHint),
+                suffixIcon: _buscaMaterial.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.close, size: 16, color: AppTheme.textHint),
+                        onPressed: () {
+                          _buscaController.clear();
+                          setState(() => _buscaMaterial = '');
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: AppTheme.surface,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: AppTheme.divider),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: AppTheme.divider),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide:
+                      const BorderSide(color: AppTheme.primary, width: 1.5),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
 
             // ── Abas ─────────────────────────────────────────────────────────
             Container(
@@ -286,10 +347,10 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                 labelStyle: const TextStyle(
                     fontWeight: FontWeight.w600, fontSize: 13),
                 tabs: [
-                  Tab(text: 'Salvos (${_salvos.length})'),
-                  Tab(text: 'Aprovados (${_aprovados.length})'),
-                  Tab(text: 'Rejeitados (${_rejeitados.length})'),
-                  Tab(text: 'Cancelados (${_cancelados.length})'),
+                  Tab(text: 'Salvos (${_salvosFiltered.length})'),
+                  Tab(text: 'Aprovados (${_aprovadosFiltered.length})'),
+                  Tab(text: 'Rejeitados (${_rejeitadosFiltered.length})'),
+                  Tab(text: 'Cancelados (${_canceladosFiltered.length})'),
                 ],
               ),
             ),
@@ -327,45 +388,67 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                           children: [
                             // ── Salvos ────────────────────────────────────
                             _buildLista(
-                              lista: _salvos,
-                              emptyMessage: 'Nenhum orçamento salvo',
+                              lista: _salvosFiltered,
+                              emptyMessage: _buscaMaterial.isNotEmpty
+                                  ? 'Nenhum orçamento salvo com esse material'
+                                  : 'Nenhum orçamento salvo',
                               emptyIcon: Icons.save_outlined,
                               emptyColor: AppTheme.success,
+                              buscaMaterial: _buscaMaterial,
                               itemBuilder: (orc) =>
                                   _OrcamentoHistoricoCard(
                                 orcamento: orc,
+                                buscaMaterial: _buscaMaterial,
                                 onReabrir: () => _reabrirOrcamento(orc),
                               ),
                             ),
 
                             // ── Aprovados ─────────────────────────────────
                             _buildLista(
-                              lista: _aprovados,
-                              emptyMessage: 'Nenhum orçamento aprovado',
+                              lista: _aprovadosFiltered,
+                              emptyMessage: _buscaMaterial.isNotEmpty
+                                  ? 'Nenhum orçamento aprovado com esse material'
+                                  : 'Nenhum orçamento aprovado',
                               emptyIcon: Icons.check_circle_outline,
                               emptyColor: AppTheme.success,
+                              buscaMaterial: _buscaMaterial,
                               itemBuilder: (orc) =>
-                                  _OrcamentoHistoricoCard(orcamento: orc),
+                                  _OrcamentoHistoricoCard(
+                                orcamento: orc,
+                                buscaMaterial: _buscaMaterial,
+                              ),
                             ),
 
                             // ── Rejeitados ────────────────────────────────
                             _buildLista(
-                              lista: _rejeitados,
-                              emptyMessage: 'Nenhum orçamento rejeitado',
+                              lista: _rejeitadosFiltered,
+                              emptyMessage: _buscaMaterial.isNotEmpty
+                                  ? 'Nenhum orçamento rejeitado com esse material'
+                                  : 'Nenhum orçamento rejeitado',
                               emptyIcon: Icons.cancel_outlined,
                               emptyColor: AppTheme.warning,
+                              buscaMaterial: _buscaMaterial,
                               itemBuilder: (orc) =>
-                                  _OrcamentoHistoricoCard(orcamento: orc),
+                                  _OrcamentoHistoricoCard(
+                                orcamento: orc,
+                                buscaMaterial: _buscaMaterial,
+                              ),
                             ),
 
                             // ── Cancelados ────────────────────────────────
                             _buildLista(
-                              lista: _cancelados,
-                              emptyMessage: 'Nenhum orçamento cancelado',
+                              lista: _canceladosFiltered,
+                              emptyMessage: _buscaMaterial.isNotEmpty
+                                  ? 'Nenhum orçamento cancelado com esse material'
+                                  : 'Nenhum orçamento cancelado',
                               emptyIcon: Icons.delete_outline,
                               emptyColor: AppTheme.error,
+                              buscaMaterial: _buscaMaterial,
                               itemBuilder: (orc) =>
-                                  _OrcamentoHistoricoCard(orcamento: orc),
+                                  _OrcamentoHistoricoCard(
+                                orcamento: orc,
+                                buscaMaterial: _buscaMaterial,
+                              ),
                             ),
                           ],
                         ),
@@ -382,29 +465,59 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
     required IconData emptyIcon,
     required Color emptyColor,
     required Widget Function(Map<String, dynamic>) itemBuilder,
+    String buscaMaterial = '',
   }) {
     if (lista.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: emptyColor.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(20),
+            if (buscaMaterial.isNotEmpty) ...[
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: AppTheme.textHint.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(Icons.search_off, size: 36, color: AppTheme.textHint),
               ),
-              child: Icon(emptyIcon, size: 36, color: emptyColor),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              emptyMessage,
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall
-                  ?.copyWith(color: AppTheme.textPrimary),
-            ),
+              const SizedBox(height: 20),
+              Text(
+                emptyMessage,
+                style: Theme.of(context)
+                    .textTheme
+                    .headlineSmall
+                    ?.copyWith(color: AppTheme.textPrimary),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Tente buscar por outro nome',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: AppTheme.textSecondary),
+              ),
+            ] else ...[
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: emptyColor.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Icon(emptyIcon, size: 36, color: emptyColor),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                emptyMessage,
+                style: Theme.of(context)
+                    .textTheme
+                    .headlineSmall
+                    ?.copyWith(color: AppTheme.textPrimary),
+              ),
+            ],
           ],
         ),
       );
@@ -425,10 +538,12 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
 class _OrcamentoHistoricoCard extends StatefulWidget {
   final Map<String, dynamic> orcamento;
   final VoidCallback? onReabrir;
+  final String buscaMaterial;
 
   const _OrcamentoHistoricoCard({
     required this.orcamento,
     this.onReabrir,
+    this.buscaMaterial = '',
   });
 
   @override
@@ -439,6 +554,29 @@ class _OrcamentoHistoricoCard extends StatefulWidget {
 class _OrcamentoHistoricoCardState
     extends State<_OrcamentoHistoricoCard> {
   bool _expandido = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-expande se há busca ativa (mostra logo os materiais encontrados)
+    if (widget.buscaMaterial.isNotEmpty) _expandido = true;
+  }
+
+  @override
+  void didUpdateWidget(_OrcamentoHistoricoCard old) {
+    super.didUpdateWidget(old);
+    if (old.buscaMaterial != widget.buscaMaterial) {
+      setState(() => _expandido = widget.buscaMaterial.isNotEmpty);
+    }
+  }
+
+  // Verifica se o nome do material do grupo contém a busca
+  bool _grupoCorresponde(List<Map<String, dynamic>> grupo) {
+    final q = widget.buscaMaterial.trim().toLowerCase();
+    if (q.isEmpty) return false;
+    final nome = (grupo.first['material']?['nome'] as String? ?? '').toLowerCase();
+    return nome.contains(q);
+  }
 
   // Agrupa os itens por material (mesmo material com múltiplos fornecedores
   // vira um único grupo). Retorna lista de grupos onde cada grupo contém
@@ -644,16 +782,38 @@ class _OrcamentoHistoricoCardState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Materiais cotados',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textSecondary,
-                    ),
+                  Row(
+                    children: [
+                      const Text(
+                        'Materiais cotados',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      if (widget.buscaMaterial.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '${grupos.where(_grupoCorresponde).length} encontrado(s)',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 8),
-                  ...grupos.map((grupo) => _buildGrupoMaterial(grupo)),
+                  ...grupos.map((grupo) => _buildGrupoMaterial(grupo, destacado: _grupoCorresponde(grupo))),
                 ],
               ),
             ),
@@ -676,7 +836,8 @@ class _OrcamentoHistoricoCardState
 
   /// Constrói o card de um grupo de material (similar ao visual da página principal).
   /// Um grupo = mesmo material com N linhas de fornecedores.
-  Widget _buildGrupoMaterial(List<Map<String, dynamic>> grupo) {
+  /// [destacado] indica se este grupo corresponde ao filtro de busca atual.
+  Widget _buildGrupoMaterial(List<Map<String, dynamic>> grupo, {bool destacado = false}) {
     final primeiroItem = grupo.first;
     final materialData =
         primeiroItem['material'] as Map<String, dynamic>?;
@@ -715,9 +876,16 @@ class _OrcamentoHistoricoCardState
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceVariant,
+        color: destacado
+            ? AppTheme.primary.withValues(alpha: 0.04)
+            : AppTheme.surfaceVariant,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(
+          color: destacado
+              ? AppTheme.primary.withValues(alpha: 0.35)
+              : AppTheme.divider,
+          width: destacado ? 1.5 : 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
