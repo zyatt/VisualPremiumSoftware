@@ -30,10 +30,24 @@ class UsuarioProvider extends ChangeNotifier {
     try {
       final sessao = await _repo.carregarSessao();
       if (sessao != null) {
-        _token         = sessao.token;
-        _usuarioLogado = sessao.usuario;
-        ApiClient.setToken(_token);
-        await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
+        // Seta o token salvo para poder chamar /auth/refresh
+        ApiClient.setToken(sessao.token);
+        try {
+          // Renova o token (útil para usuários que tinham token com expiresIn antigo)
+          final data = await ApiClient.post('/auth/refresh', {});
+          final novoToken = data['token'] as String;
+          _token         = novoToken;
+          _usuarioLogado = sessao.usuario;
+          ApiClient.setToken(novoToken);
+          await _repo.salvarSessao(novoToken, sessao.usuario);
+          await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
+        } catch (_) {
+          // Token rejeitado pelo servidor — limpa e vai para login
+          _token         = null;
+          _usuarioLogado = null;
+          ApiClient.setToken(null);
+          await _repo.limparSessao();
+        }
       }
     } catch (_) {
       // Sessão corrompida — ignora e segue para login

@@ -199,8 +199,10 @@ async function validarParaOC(orcamentoId) {
 
   if (!orcamento) throw { status: 404, message: 'Orçamento não encontrado' };
 
-  if (orcamento.status !== 'APROVADO')
-    throw { status: 400, message: 'Apenas orçamentos aprovados podem gerar ordem de compra' };
+  // Aceita APROVADO (fluxo normal) ou ABERTO (orçamento reaberto do estado
+  // APROVADO para que o usuário selecione fornecedores antes de gerar a OC).
+  if (orcamento.status !== 'APROVADO' && orcamento.status !== 'ABERTO')
+    throw { status: 400, message: 'Apenas orçamentos aprovados (ou reabertos de aprovado) podem gerar ordem de compra' };
 
   if (orcamento.itens.length === 0)
     throw { status: 400, message: 'Orçamento não possui itens' };

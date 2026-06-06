@@ -18,12 +18,13 @@ class UsuarioRepository {
     final token   = data['token'] as String;
     final usuario = UsuarioModel.fromJson(data['usuario'] as Map<String, dynamic>);
 
-    await _salvarSessao(token, usuario);
+    await salvarSessao(token, usuario);
     return (token: token, usuario: usuario);
   }
 
   // ── Persistência local ────────────────────────────────────────────────────
-  Future<void> _salvarSessao(String token, UsuarioModel usuario) async {
+  // Público para permitir salvar token renovado via /auth/refresh
+  Future<void> salvarSessao(String token, UsuarioModel usuario) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyToken,   token);
     await prefs.setString(_keyUsuario, jsonEncode(usuario.toJson()));

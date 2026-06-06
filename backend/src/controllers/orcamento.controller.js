@@ -123,13 +123,100 @@ const rejeitar = async (req, res, next) => {
 
 const gerarOrdemCompra = async (req, res, next) => {
   try {
-    await svc.validarParaOC(+req.params.id);
-    const orcamento = await svc.buscarPorId(+req.params.id);
-    res.json({ orcamento, pronto: true });
+    const orcamentoId = +req.params.id;
+    
+    // Valida que o orçamento está aprovado
+    await svc.validarParaOC(orcamentoId);
+    
+    // Busca o orçamento completo com itens
+    const orcamento = await svc.buscarPorId(orcamentoId);
+    
+    // Agrupa itens por fornecedor (apenas os selecionados)
+    const itensPorFornecedor = new Map();
+    
+    for (const item of orcamento.itens || []) {
+      if (!item.selecionado || !item.fornecedorId) continue;
+      
+      if (!itensPorFornecedor.has(item.fornecedorId)) {
+        itensPorFornecedor.set(item.fornecedorId, {
+          fornecedorId: item.fornecedorId,
+          fornecedorNome: item.fornecedor?.nomeFantasia || `Fornecedor #${item.fornecedorId}`,
+          itens: [],
+        });
+      }
+      
+      itensPorFornecedor.get(item.fornecedorId).itens.push(item);
+    }
+    
+    if (itensPorFornecedor.size === 0) {
+      throw { status: 400, message: 'Nenhum item com fornecedor selecionado no orçamento' };
+    }
+    
+    // Cria uma OC para cada fornecedor
+    const ocsCriadas = [];
+    const ocService = require('../services/ordemCompra.service');
+    
+    for (const [fornecedorId, grupo] of itensPorFornecedor) {
+      // Extrai números de OS únicos dos itens deste fornecedor
+      const numerosOS = [...new Set(
+        grupo.itens
+          .map(i => i.descricaoItem?.trim())
+          .filter(Boolean)
+      )];
+      
+      // Se nenhum item tem OS, usa 'EMPRESA' como padrão
+      if (numerosOS.length === 0) {
+        numerosOS.push('EMPRESA');
+      }
+      
+      // Monta os itens da OC
+      const itensOC = grupo.itens.map(item => ({
+        materialId: item.materialId,
+        descricaoItem: item.descricaoItem || null,
+        numeroOS: item.descricaoItem?.trim() || numerosOS[0],
+        quantidade: item.quantidade,
+        precoUnitario: item.usarM2 ? 0 : (item.precoUnitario || 0),
+        precoMetroQuadrado: item.usarM2 ? (item.precoM2 || 0) : 0,
+        usarM2: item.usarM2 || false,
+      }));
+      
+      // Cria a OC
+      const oc = await ocService.criar({
+        fornecedorId,
+        requisitante: req.usuario?.nome || 'Sistema',
+        formaPagamento: null,
+        prazoPagamento: null,
+        observacoes: `Gerada a partir do orçamento #${orcamentoId}`,
+        empresa: 'VISUAL PREMIUM', // ou pegar do orçamento se disponível
+        data: new Date(),
+        status: 'EM_ANDAMENTO',
+        orcamentoId,
+        numerosOS,
+        itens: itensOC,
+      }, req.usuario.id);
+      
+      ocsCriadas.push({
+        id: oc.id,
+        fornecedorId,
+        fornecedorNome: grupo.fornecedorNome,
+        quantidadeItens: itensOC.length,
+      });
+    }
+    
+    // Marca o orçamento como convertido
+    await svc.atualizar(orcamentoId, { status: 'CONVERTIDO' });
+    
+    res.json({
+      pronto: true,
+      orcamento,
+      ocsCriadas,
+      mensagem: `${ocsCriadas.length} ${ocsCriadas.length === 1 ? 'OC criada' : 'OCs criadas'} com sucesso`,
+    });
   } catch (e) {
     next(e);
   }
 };
+
 
 const reabrir = async (req, res, next) => {
   try {

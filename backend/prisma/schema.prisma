@@ -30,6 +30,8 @@ model Material {
   categoria            String?
   medida               String?
   espessura            String?
+  largura              Decimal?                 @db.Decimal(10, 4)
+  comprimento          Decimal?                 @db.Decimal(10, 4)
   identificador        String?
   valor                Decimal?                 @db.Decimal(10, 2)
   valorMetroQuadrado   Decimal?                 @db.Decimal(10, 2)
@@ -50,6 +52,7 @@ model Material {
   orcamentoItens       OrcamentoItem[]
   ordemItens           OrdemCompraItem[]
   SolicitacoesProducao SolicitacaoProducao[]
+  auditLogs  AuditLogMaterial[]
 
   @@unique([nome, medida, espessura])
   @@map("materiais")
@@ -321,4 +324,21 @@ enum StatusSolicitacaoProducao {
   ABERTA
   EM_USO
   FINALIZADA
+}
+
+model AuditLogMaterial {
+  id           Int      @id @default(autoincrement())
+  materialId   Int
+  acao         String   // 'CADASTRO' | 'EDICAO' | 'DESATIVACAO' | 'REATIVACAO' | 'EXCLUSAO' | 'ESTOQUE_CONFIRMADO' | 'FILHO_EDITADO' | 'FILHO_EXCLUIDO'
+  campo        String?  // campo alterado (só em EDICAO / FILHO_EDITADO)
+  valorAntes   String?  // valor anterior (serializado como string/JSON)
+  valorDepois  String?  // novo valor
+  usuarioId    Int?
+  usuarioNome  String?
+  criadoEm     DateTime @default(now())
+  material     Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([materialId])
+  @@index([criadoEm])
+  @@map("audit_log_materiais")
 }

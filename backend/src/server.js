@@ -21,6 +21,7 @@ app.use('/api/estoque',         require('./routes/estoque.routes'));
 app.use('/api/historico',       require('./routes/historico.routes'));
 app.use('/api/relatorios-os',   require('./routes/relatorioOS.routes'));
 app.use('/api/producao',        require('./routes/producao.routes'));
+app.use('/api/audit-log',       require('./routes/audit-log.routes'));
 
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 

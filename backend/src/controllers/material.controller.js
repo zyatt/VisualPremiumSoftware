@@ -1,5 +1,11 @@
 const svc = require('../services/material.service');
 
+// Helper: extrai usuário do token JWT (populado pelo authMiddleware)
+const _usuario = (req) => ({
+  usuarioId:   req.usuario?.id,
+  usuarioNome: req.usuario?.nome,
+});
+
 const listar = async (req, res, next) => {
   try { res.json(await svc.listar(req.query)); } catch (e) { next(e); }
 };
@@ -9,27 +15,45 @@ const buscarPorId = async (req, res, next) => {
 };
 
 const criar = async (req, res, next) => {
-  try { res.status(201).json(await svc.criar(req.body)); } catch (e) { next(e); }
+  try {
+    const { usuarioId, usuarioNome } = _usuario(req);
+    res.status(201).json(await svc.criar(req.body, usuarioId, usuarioNome));
+  } catch (e) { next(e); }
 };
 
 const atualizar = async (req, res, next) => {
-  try { res.json(await svc.atualizar(+req.params.id, req.body)); } catch (e) { next(e); }
+  try {
+    const { usuarioId, usuarioNome } = _usuario(req);
+    res.json(await svc.atualizar(+req.params.id, req.body, usuarioId, usuarioNome));
+  } catch (e) { next(e); }
 };
 
 const desativar = async (req, res, next) => {
-  try { res.json(await svc.desativar(+req.params.id)); } catch (e) { next(e); }
+  try {
+    const { usuarioId, usuarioNome } = _usuario(req);
+    res.json(await svc.desativar(+req.params.id, usuarioId, usuarioNome));
+  } catch (e) { next(e); }
 };
 
 const reativar = async (req, res, next) => {
-  try { res.json(await svc.reativar(+req.params.id)); } catch (e) { next(e); }
+  try {
+    const { usuarioId, usuarioNome } = _usuario(req);
+    res.json(await svc.reativar(+req.params.id, usuarioId, usuarioNome));
+  } catch (e) { next(e); }
 };
 
 const excluir = async (req, res, next) => {
-  try { res.json(await svc.excluir(+req.params.id)); } catch (e) { next(e); }
+  try {
+    const { usuarioId, usuarioNome } = _usuario(req);
+    res.json(await svc.excluir(+req.params.id, usuarioId, usuarioNome));
+  } catch (e) { next(e); }
 };
 
 const confirmarEstoque = async (req, res, next) => {
-  try { res.json(await svc.confirmarEstoque(+req.params.id)); } catch (e) { next(e); }
+  try {
+    const { usuarioId, usuarioNome } = _usuario(req);
+    res.json(await svc.confirmarEstoque(+req.params.id, usuarioId, usuarioNome));
+  } catch (e) { next(e); }
 };
 
 const listarCategorias = async (req, res, next) => {
@@ -45,13 +69,19 @@ const listarHistoricoPrecos = async (req, res, next) => {
 
 const atualizarFilhoEspecifico = async (req, res, next) => {
   try {
-    res.json(await svc.atualizarFilhoEspecifico(+req.params.id, +req.params.filhoId, req.body));
+    const { usuarioId, usuarioNome } = _usuario(req);
+    res.json(await svc.atualizarFilhoEspecifico(
+      +req.params.id, +req.params.filhoId, req.body, usuarioId, usuarioNome,
+    ));
   } catch (e) { next(e); }
 };
 
 const excluirFilhoEspecifico = async (req, res, next) => {
   try {
-    await svc.excluirFilhoEspecifico(+req.params.id, +req.params.filhoId);
+    const { usuarioId, usuarioNome } = _usuario(req);
+    await svc.excluirFilhoEspecifico(
+      +req.params.id, +req.params.filhoId, usuarioId, usuarioNome,
+    );
     res.status(204).send();
   } catch (e) { next(e); }
 };

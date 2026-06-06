@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
@@ -25,6 +26,27 @@ class _HorizontalScrollBehavior extends MaterialScrollBehavior {
     PointerDeviceKind.mouse,
     PointerDeviceKind.stylus,
   };
+}
+
+// ─── Scroll Metrics Notifier ──────────────────────────────────────────────────
+
+class _ScrollMetricsNotifier extends ValueNotifier<ScrollMetrics> {
+  _ScrollMetricsNotifier() : super(_emptyMetrics());
+
+  static ScrollMetrics _emptyMetrics() => FixedScrollMetrics(
+    minScrollExtent: 0,
+    maxScrollExtent: 0,
+    pixels: 0,
+    viewportDimension: 0,
+    axisDirection: AxisDirection.right,
+    devicePixelRatio: 1,
+  );
+
+  void update(ScrollController ctrl) {
+    if (ctrl.hasClients) {
+      value = ctrl.position;
+    }
+  }
 }
 
 // ─── Formatters ───────────────────────────────
@@ -64,14 +86,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
   final _searchIdentificadorCtrl = TextEditingController();
   final _searchMedidaCtrl = TextEditingController();
   final _searchEspCtrl = TextEditingController();
-  final _tabelaHScrollCtrlHeader = ScrollController();
-  final _tabelaHScrollCtrlBody = ScrollController();
-  final _tabelaHScrollCtrlFooter = ScrollController();
-  final _tabelaVScrollCtrlLeft = ScrollController();
-  final _tabelaVScrollCtrlRight = ScrollController();
-  bool _syncingHScroll = false;
-  bool _syncingScroll = false;
+  final _tabelaHScrollCtrl = ScrollController();
+  final _tabelaVScrollCtrl = ScrollController();
   Timer? _debounceMatBusca;
+  late final _ScrollMetricsNotifier _tabelaHScrollHintNotifier;
 
   List<MaterialModel> _resultadosBusca = [];
   bool _buscando = false;
@@ -82,40 +100,18 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
   @override
   void initState() {
     super.initState();
+    _tabelaHScrollHintNotifier = _ScrollMetricsNotifier();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FornecedorProvider>().carregar();
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted && _tabelaHScrollCtrl.hasClients) {
+          _tabelaHScrollHintNotifier.update(_tabelaHScrollCtrl);
+        }
+      });
     });
-    _tabelaVScrollCtrlLeft.addListener(_syncVScrollLR);
-    _tabelaVScrollCtrlRight.addListener(_syncVScrollRL);
-    _tabelaHScrollCtrlHeader.addListener(() => _syncHScroll(_tabelaHScrollCtrlHeader));
-    _tabelaHScrollCtrlBody.addListener(() => _syncHScroll(_tabelaHScrollCtrlBody));
-    _tabelaHScrollCtrlFooter.addListener(() => _syncHScroll(_tabelaHScrollCtrlFooter));
-  }
-
-  void _syncVScrollLR() {
-    if (_syncingScroll) return;
-    _syncingScroll = true;
-    if (_tabelaVScrollCtrlRight.hasClients) _tabelaVScrollCtrlRight.jumpTo(_tabelaVScrollCtrlLeft.offset);
-    _syncingScroll = false;
-  }
-
-  void _syncVScrollRL() {
-    if (_syncingScroll) return;
-    _syncingScroll = true;
-    if (_tabelaVScrollCtrlLeft.hasClients) _tabelaVScrollCtrlLeft.jumpTo(_tabelaVScrollCtrlRight.offset);
-    _syncingScroll = false;
-  }
-
-  void _syncHScroll(ScrollController source) {
-    if (_syncingHScroll) return;
-    _syncingHScroll = true;
-    final offset = source.offset;
-    for (final ctrl in [_tabelaHScrollCtrlHeader, _tabelaHScrollCtrlBody, _tabelaHScrollCtrlFooter]) {
-      if (ctrl != source && ctrl.hasClients && ctrl.position.maxScrollExtent > 0) {
-        ctrl.jumpTo(offset.clamp(0.0, ctrl.position.maxScrollExtent));
-      }
-    }
-    _syncingHScroll = false;
+    _tabelaHScrollCtrl.addListener(() {
+      _tabelaHScrollHintNotifier.update(_tabelaHScrollCtrl);
+    });
   }
 
   @override
@@ -126,11 +122,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     _searchIdentificadorCtrl.dispose();
     _searchMedidaCtrl.dispose();
     _searchEspCtrl.dispose();
-    _tabelaHScrollCtrlHeader.dispose();
-    _tabelaHScrollCtrlBody.dispose();
-    _tabelaHScrollCtrlFooter.dispose();
-    _tabelaVScrollCtrlLeft.dispose();
-    _tabelaVScrollCtrlRight.dispose();
+    _tabelaHScrollCtrl.dispose();
+    _tabelaVScrollCtrl.dispose();
+    _tabelaHScrollHintNotifier.dispose();
     super.dispose();
   }
 
@@ -461,10 +455,28 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     if (confirmar != true) return;
 
     setState(() => _salvando = true);
+    // Captura provider e tab antes dos awaits para evitar uso de BuildContext
+    // após gaps assíncronos (use_build_context_synchronously).
+    final provider = context.read<OrcamentoProvider>();
+    final tab = provider.tabAtual;
     try {
+      // Sincroniza os itens (com fornecedor selecionado atualizado) antes de
+      // aprovar, garantindo que qualquer seleção feita no editor chegue ao banco.
+      if (tab != null) {
+        final repo = OrcamentoRepository();
+        await repo.limparItens(id);
+        for (final item in tab.itens) {
+          if (item.precos.isEmpty) {
+            await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false, 'descricaoItem': item.descricao});
+          } else {
+            for (final entry in item.precos.entries) {
+              await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'descricaoItem': item.descricao});
+            }
+          }
+        }
+      }
       await OrcamentoRepository().aprovar(id);
       if (!mounted) return;
-      final provider = context.read<OrcamentoProvider>();
       provider.atualizarFlagsTab(aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
       provider.fecharAbaAposOperacao();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Orçamento #$id aprovado com sucesso!'), backgroundColor: AppTheme.success));
@@ -541,10 +553,124 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
   }
 
   Future<void> _gerarOrdemCompra(List<ItemOrcamentoData> itens) async {
-    final opcao = await showDialog<String>(context: context, builder: (ctx) => _DialogOpcaoOC(itens: itens));
-    if (opcao == null) return;
-    if (!mounted) return; // ← guard após o await
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Use a página principal para concluir a geração de OC.'), backgroundColor: AppTheme.warning));
+    final provider = context.read<OrcamentoProvider>();
+    final tab = provider.tabAtual;
+    if (tab == null) return;
+
+    final Map<int, List<ItemOrcamentoData>> porFornecedor = {};
+    for (final item in itens) {
+      final fId = item.fornecedorSelecionado!;
+      porFornecedor.putIfAbsent(fId, () => []).add(item);
+    }
+
+    final fornecedorNomes = porFornecedor.entries.map((e) {
+      final nome = e.value.first.precos[e.key]?.fornecedorNome ?? 'Fornecedor #${e.key}';
+      return '  • $nome (${e.value.length} ${e.value.length == 1 ? "item" : "itens"})';
+    }).join('\n');
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Gerar Ordens de Compra', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Serão geradas ${porFornecedor.length} ${porFornecedor.length == 1 ? "OC" : "OCs"}, uma por fornecedor:',
+              style: const TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+            Text(fornecedorNomes, style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirmar e Gerar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+
+    setState(() => _salvando = true);
+    final repo = OrcamentoRepository();
+
+    int orcId;
+    try {
+      if (tab.servidorId != null) {
+        // Orçamento já existe no servidor — sempre sincroniza os itens com o
+        // estado atual do provider (inclui fornecedorSelecionado atualizado).
+        orcId = tab.servidorId!;
+        await repo.limparItens(orcId);
+        for (final item in tab.itens) {
+          if (item.precos.isEmpty) {
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false, 'descricaoItem': item.descricao});
+          } else {
+            for (final entry in item.precos.entries) {
+              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'descricaoItem': item.descricao});
+            }
+          }
+        }
+      } else {
+        // Orçamento ainda não existe no servidor — cria e insere os itens.
+        final criado = await repo.criar(tab.titulo);
+        orcId = criado['id'] as int;
+        await repo.atualizarOrcamento(orcId, {'titulo': tab.titulo});
+        for (final item in tab.itens) {
+          if (item.precos.isEmpty) {
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false, 'descricaoItem': item.descricao});
+          } else {
+            for (final entry in item.precos.entries) {
+              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'descricaoItem': item.descricao});
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao sincronizar itens: $e'), backgroundColor: AppTheme.error));
+      if (mounted) setState(() => _salvando = false);
+      return;
+    }
+
+   try {
+      final result = await repo.gerarOrdemCompra(orcId);
+      if (!mounted) return;
+
+      if (result['pronto'] == true) {
+        provider.fecharAbaAposOperacao();
+        if (!mounted) return;
+
+        final ocsCriadas = result['ocsCriadas'] as List?;
+        final qtdOCs = ocsCriadas?.length ?? porFornecedor.length;
+        final primeiraOcId = ocsCriadas?.isNotEmpty == true
+            ? (ocsCriadas!.first['id'] as int?)
+            : null;
+
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+            '$qtdOCs ${qtdOCs == 1 ? "OC gerada" : "OCs geradas"} com sucesso!',
+          ),
+          backgroundColor: AppTheme.success,
+          duration: const Duration(seconds: 3),
+        ));
+
+        // Navega para a página de Ordens de Compra e abre a primeira OC criada
+        context.go('/ordem-compra', extra: primeiraOcId);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Erro ao gerar OC: $e'),
+          backgroundColor: AppTheme.error,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _salvando = false);
+    }
   }
 
   bool _podeGerarOC(List<ItemOrcamentoData> itens) {
@@ -553,7 +679,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     for (final item in itens) {
       if (item.materialEspecifico && (item.descricao == null || item.descricao!.trim().isEmpty)) return false;
     }
-    return itens.map((i) => i.fornecedorSelecionado!).toSet().length == 1;
+    return true;
   }
 
   int _fornecedoresSelecionados(List<ItemOrcamentoData> itens) =>
@@ -685,17 +811,20 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
             bottom: PreferredSize(preferredSize: const Size.fromHeight(1), child: Container(height: 1, color: AppTheme.divider)),
           ),
           body: Padding(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(16),
             child: tab == null
                 ? const Center(child: Text('Nenhuma aba aberta', style: TextStyle(color: AppTheme.textHint)))
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildBarraAcoes(provider, itens, tab),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       _buildSelecaoMateriais(provider, itens),
-                      const SizedBox(height: 16),
-                      Expanded(child: itens.isEmpty ? _buildEmptyState() : _buildConteudo(provider, itens)),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        flex: 1,
+                        child: itens.isEmpty ? _buildEmptyState() : _buildConteudo(provider, itens),
+                      ),
                     ],
                   ),
           ),
@@ -747,7 +876,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                   label: const Text('Aprovar', style: TextStyle(fontSize: 12)),
                   style: OutlinedButton.styleFrom(foregroundColor: AppTheme.success, side: const BorderSide(color: AppTheme.success), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
                 )
-              else
+              else if (!tab.modoGerarOC)
                 Tooltip(
                   message: tab.jaFinalizado ? 'Orçamento já aprovado/não aprovado. Reabra para reenviar.' : '',
                   child: OutlinedButton.icon(
@@ -760,11 +889,11 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
               const SizedBox(width: 8),
               if (tab.modoGerarOC)
                 Tooltip(
-                  message: podeGerar ? 'Gerar Ordem de Compra' : matEspSemDesc > 0 ? 'Preencha a descrição dos materiais específicos' : 'Selecione o MESMO fornecedor para todos os materiais',
+                  message: podeGerar ? 'Gerar Ordens de Compra (1 por fornecedor)' : matEspSemDesc > 0 ? 'Preencha a descrição dos materiais específicos' : 'Selecione um fornecedor para cada material',
                   child: FilledButton.icon(
                     onPressed: podeGerar ? () => _gerarOrdemCompra(itens) : null,
                     icon: const Icon(Icons.shopping_cart_checkout, size: 16),
-                    label: Text('Gerar OC (${itens.length})', style: const TextStyle(fontSize: 12)),
+                    label: Text('Gerar OC (${_fornecedoresSelecionados(itens)} forn.)', style: const TextStyle(fontSize: 12)),
                     style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)),
                   ),
                 ),
@@ -808,7 +937,16 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
             ],
             const Spacer(),
             if (itens.isNotEmpty)
-              TextButton.icon(onPressed: provider.limparAba, icon: const Icon(Icons.close, size: 14), label: const Text('Limpar', style: TextStyle(fontSize: 13)), style: TextButton.styleFrom(foregroundColor: AppTheme.textSecondary, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6))),
+              TextButton.icon(
+                onPressed: () {
+                  for (final item in List.from(itens)) {
+                    provider.removerItem(item.itemId);
+                  }
+                },
+                icon: const Icon(Icons.close, size: 14),
+                label: const Text('Limpar', style: TextStyle(fontSize: 13)),
+                style: TextButton.styleFrom(foregroundColor: AppTheme.textSecondary, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6)),
+              ),
           ]),
         ),
         Padding(
@@ -886,17 +1024,69 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                           );
                         },
                       ),
-                      ),
           ),
+        ),
         if (itens.isNotEmpty)
           Container(
-            width: double.infinity, padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-            child: Wrap(spacing: 8, runSpacing: 8, children: itens.asMap().entries.map((e) {
-              final item = e.value;
-              return _MaterialChip(nome: item.materialNome, selecionado: item.fornecedorSelecionado != null, especifico: item.materialEspecifico, descricao: item.descricao, onRemover: () => provider.removerItem(item.itemId));
-            }).toList()),
+            width: double.infinity, padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            constraints: const BoxConstraints(maxHeight: 80),
+            child: SingleChildScrollView(
+              child: Wrap(spacing: 8, runSpacing: 6, children: itens.asMap().entries.map((e) {
+                final item = e.value;
+                return _MaterialChip(nome: item.materialNome, selecionado: item.fornecedorSelecionado != null, especifico: item.materialEspecifico, descricao: item.descricao, onRemover: () => provider.removerItem(item.itemId));
+              }).toList()),
+            ),
           ),
       ]),
+    );
+  }
+
+  Widget _buildScrollHint() {
+    return ValueListenableBuilder<ScrollMetrics>(
+      valueListenable: _tabelaHScrollHintNotifier,
+      builder: (context, metrics, _) {
+        final canScrollLeft = metrics.pixels > 4;
+        final canScrollRight = metrics.maxScrollExtent > 0 && metrics.pixels < metrics.maxScrollExtent - 4;
+        final showHint = canScrollLeft || canScrollRight;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          height: showHint ? 28 : 0,
+          clipBehavior: Clip.hardEdge,
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: 0.06),
+            border: Border(
+              bottom: BorderSide(color: AppTheme.primary.withValues(alpha: 0.15)),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (canScrollLeft) ...[
+                Icon(Icons.chevron_left, size: 16, color: AppTheme.primary.withValues(alpha: 0.7)),
+                const SizedBox(width: 2),
+              ],
+              Icon(Icons.drag_indicator, size: 14, color: AppTheme.primary.withValues(alpha: 0.5)),
+              const SizedBox(width: 4),
+              Text(
+                canScrollLeft && canScrollRight
+                    ? 'Deslize para ver fornecedores e Melhor Preço'
+                    : canScrollRight
+                        ? 'Deslize para ver fornecedores e Melhor Preço →'
+                        : '← Melhor Preço e demais colunas',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: AppTheme.primary.withValues(alpha: 0.75),
+                ),
+              ),
+              if (canScrollRight) ...[
+                const SizedBox(width: 2),
+                Icon(Icons.chevron_right, size: 16, color: AppTheme.primary.withValues(alpha: 0.7)),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -904,16 +1094,17 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     return _buildTabelaMatriz(provider, itens);
   }
 
-  // ── Nova tabela matricial: materiais × fornecedores ─────────────────────────
   Widget _buildTabelaMatriz(OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _tabelaHScrollCtrl.hasClients) {
+        _tabelaHScrollHintNotifier.update(_tabelaHScrollCtrl);
+      }
+    });
     final fornIdsRaw = _todosFornecedoresIds(itens).toList();
     final usarM2 = _ordemTotais == 'm2';
 
-    // ── Totais por fornecedor (apenas materiais COM preço) ────────────────────
-    // total: soma dos preços onde o fornecedor TEM preço
-    // cobertura: quantos materiais o fornecedor tem preço
     Map<int, double> totaisForn = {};
-    Map<int, int> cobertura = {}; // materiais com preço
+    Map<int, int> cobertura = {};
     for (final fId in fornIdsRaw) {
       double soma = 0;
       int cnt = 0;
@@ -931,7 +1122,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
       cobertura[fId] = cnt;
     }
 
-    // ── Ordenar fornecedores: menor total à esquerda; sem total ao final ──────
     final todosFornIds = List<int>.from(fornIdsRaw)
       ..sort((a, b) {
         final ta = totaisForn[a] ?? 0;
@@ -942,8 +1132,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
         return ta.compareTo(tb);
       });
 
-    // ── Melhor preço por material (coluna extra) ──────────────────────────────
-    // Para cada material, o menor preço entre fornecedores (ignora sem preço)
     List<double?> melhorPorMaterial = itens.map((item) {
       double? menor;
       for (final fId in todosFornIds) {
@@ -955,7 +1143,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
       return menor;
     }).toList();
 
-    // Total da coluna "Melhor Preço" (menor de cada material somados)
     double totalMelhor = 0;
     int materiaisComMelhor = 0;
     for (int i = 0; i < itens.length; i++) {
@@ -966,8 +1153,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
       }
     }
 
-    // ── Sugestão: qual fornecedor tem todos vs compra separada ────────────────
-    // Fornecedor com maior cobertura (e menor total entre os de mesma cobertura)
     int maxCobertura = cobertura.values.fold(0, (a, b) => b > a ? b : a);
     int? fornComTodos;
     double? menorTotalComTodos;
@@ -981,7 +1166,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
       }
     }
 
-    // Diferença entre comprar do melhor fornecedor único vs compra separada otimizada
     double? diferenca;
     String? nomeFornComTodos;
     if (fornComTodos != null && menorTotalComTodos != null && materiaisComMelhor == itens.length) {
@@ -992,11 +1176,131 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           .firstOrNull;
     }
 
-    // Larguras mínimas por coluna
     const double colMaterial = 180;
     const double colQtd = 60;
     const double colFornMin = 120;
     const double colMelhor = 120;
+
+    // Largura total da tabela inteira (tudo dentro do scroll horizontal)
+    final double totalWidth = colMaterial + 1 + colQtd + 1 + 12
+        + (colFornMin * todosFornIds.length)
+        + todosFornIds.length.toDouble()
+        + 1 + colMelhor;
+
+    // ── Helpers de célula ──────────────────────────────────────────────────────
+
+    Widget cabecalho() => Container(
+      color: AppTheme.surfaceVariant,
+      child: Row(children: [
+        SizedBox(
+          width: colMaterial,
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Text('Material',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.textSecondary)),
+          ),
+        ),
+        Container(width: 1, color: AppTheme.divider),
+        SizedBox(
+          width: colQtd,
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Text('Qtd',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.textSecondary),
+              textAlign: TextAlign.center),
+          ),
+        ),
+        Container(width: 1, color: AppTheme.divider),
+        const SizedBox(width: 12),
+        ...todosFornIds.map((fId) {
+          final nome = itens
+              .expand((i) => i.precos.entries)
+              .where((e) => e.key == fId)
+              .map((e) => e.value.fornecedorNome)
+              .firstOrNull ?? 'Fornecedor';
+          final isLast = fId == todosFornIds.last;
+          return Row(mainAxisSize: MainAxisSize.min, children: [
+            SizedBox(
+              width: colFornMin,
+              child: Center(child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                child: Text(nome,
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.textSecondary),
+                  textAlign: TextAlign.center, softWrap: true),
+              )),
+            ),
+            if (!isLast) Container(width: 1, height: 20, color: AppTheme.divider),
+          ]);
+        }),
+        Container(width: 1, height: 20, color: AppTheme.divider),
+        SizedBox(
+          width: colMelhor,
+          child: const Center(child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Text('Melhor Preço',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.primary),
+              textAlign: TextAlign.center),
+          )),
+        ),
+      ]),
+    );
+
+    Widget totais() => Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceVariant,
+        border: Border(top: BorderSide(color: AppTheme.divider, width: 1.5)),
+      ),
+      child: Row(children: [
+        SizedBox(
+          width: colMaterial,
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Text('Total por Fornecedor',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+          ),
+        ),
+        Container(width: 1, color: AppTheme.divider),
+        SizedBox(width: colQtd),
+        Container(width: 1, color: AppTheme.divider),
+        const SizedBox(width: 12),
+        ...todosFornIds.map((fId) {
+          final total = totaisForn[fId] ?? 0;
+          final cob = cobertura[fId] ?? 0;
+          final isMenorTotal = todosFornIds.isNotEmpty && total > 0 &&
+              total == todosFornIds.map((id) => totaisForn[id] ?? double.infinity).reduce((a, b) => a < b ? a : b);
+          final semPrecoCount = itens.length - cob;
+          final isLast = fId == todosFornIds.last;
+          return Row(mainAxisSize: MainAxisSize.min, children: [
+            SizedBox(width: colFornMin, child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                Text(total > 0 ? _brl(total) : '—',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: isMenorTotal ? AppTheme.success : AppTheme.textPrimary),
+                  textAlign: TextAlign.center),
+                Text('$cob/${itens.length} mat.',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: isMenorTotal ? AppTheme.success : AppTheme.textSecondary),
+                  textAlign: TextAlign.center),
+                if (semPrecoCount > 0)
+                  Text('$semPrecoCount sem preço', style: const TextStyle(fontSize: 9, color: AppTheme.warning, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+              ]),
+            )),
+            if (!isLast) Container(width: 1, height: 36, color: AppTheme.divider),
+          ]);
+        }),
+        Container(width: 1, height: 36, color: AppTheme.divider),
+        SizedBox(width: colMelhor, child: Center(child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6), border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3))),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
+            Text(materiaisComMelhor > 0 ? _brl(totalMelhor) : '—',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.primary), textAlign: TextAlign.center),
+            Text('$materiaisComMelhor/${itens.length} mat.',
+              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppTheme.primary), textAlign: TextAlign.center),
+          ]),
+        ))),
+      ]),
+    );
 
     return Container(
       decoration: BoxDecoration(
@@ -1005,7 +1309,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
         border: Border.all(color: AppTheme.divider),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // ── Cabeçalho da tabela ──────────────────────────────────────────────
+        // ── Barra de título (não rola) ─────────────────────────────────────────
         Container(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
           decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppTheme.divider))),
@@ -1027,282 +1331,144 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           ]),
         ),
 
-        // ── Tabela com colunas fixas (Material + Qtd) e scroll horizontal nos fornecedores ──
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final fixedColsWidth = colMaterial + colQtd;
-              final numForn = todosFornIds.length;
-              final efectiveColForn = colFornMin;
-              final efectiveColMelhor = colMelhor;
-              const double scrollLeftPadding = 12;
-              // Divisores: (N-1) entre fornecedores + 1 antes de "Melhor Preço" = N divisores quando N>0, ou 1 quando N=0
-              final dividersTotalWidth = numForn > 0 ? numForn.toDouble() : 1.0;
-              final scrollableWidth = efectiveColForn * numForn + efectiveColMelhor + scrollLeftPadding + dividersTotalWidth;
+        _buildScrollHint(),
 
-              return Listener(
-                onPointerSignal: (event) {
-                  if (event is PointerScrollEvent) {
-                    final ctrl = _tabelaHScrollCtrlBody;
-                    if (!ctrl.hasClients) return;
-                    final delta = event.scrollDelta.dy != 0
-                        ? event.scrollDelta.dy
-                        : event.scrollDelta.dx;
-                    final newOffset = (ctrl.offset + delta)
-                        .clamp(0.0, ctrl.position.maxScrollExtent);
-                    ctrl.jumpTo(newOffset);
-                  }
-                },
-                child: Column(children: [
-                // ── Linha de cabeçalho ─────────────────────────────────────
-                Container(
-                  color: AppTheme.surfaceVariant,
-                  child: Row(children: [
-                    // Cabeçalho fixo (Material + Qtd)
-                    SizedBox(
-                      width: fixedColsWidth,
-                      child: Row(children: [
-                        SizedBox(
-                          width: colMaterial,
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            child: Text('Material', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.textSecondary)),
-                          ),
-                        ),
-                        SizedBox(
-                          width: colQtd,
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                            child: Text('Qtd', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.textSecondary), textAlign: TextAlign.center),
-                          ),
-                        ),
-                      ]),
-                    ),
-                    // Divisor vertical
-                    Container(width: 1, height: 36, color: AppTheme.divider),
-                    // Cabeçalho scrollável (Fornecedores + Melhor Preço)
-                    Expanded(
-                      child: ScrollConfiguration(
-                        behavior: _HorizontalScrollBehavior(),
-                        child: SingleChildScrollView(
-                        controller: _tabelaHScrollCtrlHeader,
-                        scrollDirection: Axis.horizontal,
-                        physics: const ClampingScrollPhysics(),
-                        child: SizedBox(
-                          width: scrollableWidth,
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 12, top: 8, bottom: 8),
-                            child: Row(children: [
-                              ...todosFornIds.map((fId) {
-                                final nome = itens
-                                    .expand((i) => i.precos.entries)
-                                    .where((e) => e.key == fId)
-                                    .map((e) => e.value.fornecedorNome)
-                                    .firstOrNull ?? 'Fornecedor';
-                                final isLast = fId == todosFornIds.last;
-                                return Row(mainAxisSize: MainAxisSize.min, children: [
-                                  SizedBox(
-                                    width: efectiveColForn,
-                                    child: Center(
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                                        child: Text(
-                                          nome,
-                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.textSecondary),
-                                          textAlign: TextAlign.center,
-                                          softWrap: true,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  if (!isLast)
-                                    Container(width: 1, height: 20, color: AppTheme.divider),
-                                ]);
-                              }),
-                              Container(width: 1, height: 20, color: AppTheme.divider),
-                              SizedBox(
-                                width: efectiveColMelhor,
-                                child: const Center(
-                                  child: Padding(
-                                    padding: EdgeInsets.symmetric(horizontal: 4),
-                                    child: Text('Melhor Preço', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.primary), textAlign: TextAlign.center),
-                                  ),
-                                ),
-                              ),
-                            ]),
-                          ),
-                        ),
-                        ),
-                      ),
-                    ),
-                  ]),
-                ),
-                // ── Corpo da tabela ────────────────────────────────────────
-                Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+        // ── Área principal: UM único scroll horizontal ─────────────────────────
+        // Cabeçalho (pinned) + linhas (scroll vertical) + totais (pinned)
+        // tudo compartilha o mesmo SingleChildScrollView horizontal
+        Expanded(
+          child: ScrollConfiguration(
+            behavior: _HorizontalScrollBehavior(),
+            child: Scrollbar(
+              controller: _tabelaHScrollCtrl,
+              child: SingleChildScrollView(
+                controller: _tabelaHScrollCtrl,
+                scrollDirection: Axis.horizontal,
+                physics: const ClampingScrollPhysics(),
+                child: SizedBox(
+                  width: totalWidth,
+                  child: Column(
                     children: [
-                    // ── PAINEL FIXO: Material + Qtd ──────────────────────
-                    SizedBox(
-                      width: fixedColsWidth,
-                      child: ListView.separated(
-                        controller: _tabelaVScrollCtrlLeft,
-                        itemCount: itens.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1, color: AppTheme.divider),
-                        itemBuilder: (ctx, idx) {
-                          final item = itens[idx];
-                          final isSelected = item.fornecedorSelecionado != null;
-                          // Largura real disponível para texto: colMaterial menos o ícone X e padding
-                          const double iconX = 18;
-                          const double padH = 6;
-                          final double textWidth = colMaterial - iconX - padH * 2;
-                          return Container(
-                            color: isSelected ? AppTheme.primary.withValues(alpha: 0.03) : null,
-                            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              // ── Coluna Material (largura fixa) ──────────────
-                              SizedBox(
-                                width: colMaterial,
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: padH, vertical: 8),
-                                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                    // Botão X
-                                    GestureDetector(
-                                      onTap: () => provider.removerItem(item.itemId),
-                                      child: const Padding(
-                                        padding: EdgeInsets.only(top: 1, right: 3),
-                                        child: Icon(Icons.close, size: 14, color: AppTheme.textHint),
-                                      ),
-                                    ),
-                                    // Conteúdo textual
-                                    SizedBox(
-                                      width: textWidth,
-                                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                          Expanded(
-                                            child: Text(
-                                              item.materialNome,
-                                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
-                                              softWrap: true,
-                                            ),
-                                          ),
-                                          if (item.materialEspecifico)
-                                            Container(
-                                              margin: const EdgeInsets.only(left: 4),
-                                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                              decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(3)),
-                                              child: const Text('ESP', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700, color: AppTheme.primary)),
-                                            ),
-                                        ]),
-                                        if ([item.materialCategoria, item.materialMedida, item.materialEspessura, item.materialIdentificador].any((s) => s != null && s.isNotEmpty))
-                                          Text(
-                                            [item.materialCategoria, item.materialMedida, item.materialEspessura, item.materialIdentificador].where((s) => s != null && s.isNotEmpty).join(' · '),
-                                            style: const TextStyle(fontSize: 9, color: AppTheme.textSecondary),
-                                            softWrap: true,
-                                          ),
-                                        if (item.materialEspecifico)
-                                          TextField(
-                                            controller: TextEditingController(text: item.descricao),
-                                            decoration: InputDecoration(hintText: 'Descrição *', isDense: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)), contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4)),
-                                            style: const TextStyle(fontSize: 10),
-                                            onChanged: (d) => provider.atualizarItemParcial(item.itemId, descricao: d),
-                                          ),
-                                        const SizedBox(height: 4),
+                      // Cabeçalho — não rola verticalmente
+                      cabecalho(),
+                      const Divider(height: 1, color: AppTheme.divider),
+
+                      // Linhas — rolam verticalmente
+                      Expanded(
+                        child: ListView.separated(
+                          controller: _tabelaVScrollCtrl,
+                          itemCount: itens.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1, color: AppTheme.divider),
+                          itemBuilder: (ctx, idx) {
+                            final item = itens[idx];
+                            final isSelected = item.fornecedorSelecionado != null;
+                            final melhor = melhorPorMaterial[idx];
+                            const double iconX = 18;
+                            const double padH = 6;
+                            final double textWidth = colMaterial - iconX - padH * 2;
+
+                            return Container(
+                              color: isSelected
+                                  ? Color.alphaBlend(AppTheme.primary.withValues(alpha: 0.05), AppTheme.surface)
+                                  : AppTheme.surface,
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Coluna: Material
+                                  SizedBox(
+                                    width: colMaterial,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: padH, vertical: 8),
+                                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                         GestureDetector(
-                                          onTap: () => _vincularFornecedores(idx),
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                            decoration: BoxDecoration(
-                                              color: AppTheme.primary.withValues(alpha: 0.08),
-                                              borderRadius: BorderRadius.circular(6),
-                                              border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
-                                            ),
-                                            child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                                              Icon(Icons.person_add_outlined, size: 13, color: AppTheme.primary),
-                                              SizedBox(width: 4),
-                                              Text('Adicionar fornecedor', style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w600)),
-                                            ]),
+                                          onTap: () => provider.removerItem(item.itemId),
+                                          child: const Padding(
+                                            padding: EdgeInsets.only(top: 1, right: 3),
+                                            child: Icon(Icons.close, size: 14, color: AppTheme.textHint),
                                           ),
+                                        ),
+                                        SizedBox(
+                                          width: textWidth,
+                                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                              Expanded(child: Text(item.materialNome,
+                                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+                                                softWrap: true)),
+                                              if (item.materialEspecifico)
+                                                Container(
+                                                  margin: const EdgeInsets.only(left: 4),
+                                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                                  decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(3)),
+                                                  child: const Text('ESP', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700, color: AppTheme.primary)),
+                                                ),
+                                            ]),
+                                            if ([item.materialCategoria, item.materialMedida, item.materialEspessura, item.materialIdentificador].any((s) => s != null && s.isNotEmpty))
+                                              Text(
+                                                [item.materialCategoria, item.materialMedida, item.materialEspessura, item.materialIdentificador].where((s) => s != null && s.isNotEmpty).join(' · '),
+                                                style: const TextStyle(fontSize: 9, color: AppTheme.textSecondary),
+                                                softWrap: true,
+                                              ),
+                                            if (item.materialEspecifico)
+                                              TextField(
+                                                controller: TextEditingController(text: item.descricao),
+                                                decoration: InputDecoration(hintText: 'Descrição *', isDense: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)), contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4)),
+                                                style: const TextStyle(fontSize: 10),
+                                                onChanged: (d) => provider.atualizarItemParcial(item.itemId, descricao: d),
+                                              ),
+                                            const SizedBox(height: 4),
+                                            GestureDetector(
+                                              onTap: () => _vincularFornecedores(idx),
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                                decoration: BoxDecoration(
+                                                  color: AppTheme.primary.withValues(alpha: 0.08),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
+                                                ),
+                                                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                                                  Icon(Icons.person_add_outlined, size: 13, color: AppTheme.primary),
+                                                  SizedBox(width: 4),
+                                                  Text('Adicionar fornecedor', style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                                                ]),
+                                              ),
+                                            ),
+                                          ]),
                                         ),
                                       ]),
                                     ),
-                                  ]),
-                                ),
-                              ),
-                              // ── Coluna Qtd (largura fixa) ───────────────────
-                              SizedBox(
-                                width: colQtd,
-                                child: Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 8),
-                                    child: SizedBox(
-                                      width: 50,
-                                      child: _QuantidadeField(
-                                        value: item.quantidade,
-                                        onChanged: (q) => provider.atualizarItemParcial(item.itemId, quantidade: q),
-                                      ),
+                                  ),
+                                  Container(width: 1, color: AppTheme.divider),
+                                  // Coluna: Qtd
+                                  Container(
+                                    width: colQtd,
+                                    alignment: Alignment.center,
+                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                                    child: _QuantidadeField(
+                                      value: item.quantidade,
+                                      onChanged: (q) => provider.atualizarItemParcial(item.itemId, quantidade: q),
                                     ),
                                   ),
-                                ),
-                              ),
-                            ]),
-                          );
-                        },
-                      ),
-                    ),
-
-                    // Divisor vertical
-                    Container(width: 1, color: AppTheme.divider),
-
-                    // ── PAINEL DIREITO: Fornecedores (scroll horizontal) ──
-                    Expanded(
-                      child: ScrollConfiguration(
-                        behavior: _HorizontalScrollBehavior(),
-                        child: SingleChildScrollView(
-                          controller: _tabelaHScrollCtrlBody,
-                          scrollDirection: Axis.horizontal,
-                          physics: const ClampingScrollPhysics(),
-                          child: SizedBox(
-                          width: scrollableWidth,
-                          child: Padding(
-                          padding: const EdgeInsets.only(left: 12),
-                          child: ListView.separated(
-                            controller: _tabelaVScrollCtrlRight,
-                            itemCount: itens.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1, color: AppTheme.divider),
-                            itemBuilder: (ctx, idx) {
-                              final item = itens[idx];
-                              final melhor = melhorPorMaterial[idx];
-                              final isSelected = item.fornecedorSelecionado != null;
-                              return Container(
-                                color: isSelected ? AppTheme.primary.withValues(alpha: 0.03) : null,
-                                child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-                                  // Colunas de fornecedores
+                                  Container(width: 1, color: AppTheme.divider),
+                                  const SizedBox(width: 12),
+                                  // Colunas: fornecedores
                                   ...todosFornIds.map((fId) {
                                     final pf = item.precos[fId];
                                     final isLast = fId == todosFornIds.last;
                                     if (pf == null) {
                                       return Row(mainAxisSize: MainAxisSize.min, children: [
-                                        SizedBox(
-                                          width: efectiveColForn,
-                                          child: Center(
-                                            child: Container(
-                                              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                              decoration: BoxDecoration(color: AppTheme.surfaceVariant, borderRadius: BorderRadius.circular(4), border: Border.all(color: AppTheme.divider)),
-                                              child: const Text('Não tem', style: TextStyle(fontSize: 10, color: AppTheme.textHint, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
-                                            ),
-                                          ),
-                                        ),
-                                        if (!isLast)
-                                          Container(width: 1, height: 40, color: AppTheme.divider),
+                                        SizedBox(width: colFornMin, child: Center(child: Container(
+                                          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                          decoration: BoxDecoration(color: AppTheme.surfaceVariant, borderRadius: BorderRadius.circular(4), border: Border.all(color: AppTheme.divider)),
+                                          child: const Text('Não tem', style: TextStyle(fontSize: 10, color: AppTheme.textHint, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+                                        ))),
+                                        if (!isLast) Container(width: 1, color: AppTheme.divider),
                                       ]);
                                     }
-
                                     final preco = usarM2 ? (pf.precoM2 ?? pf.preco) : pf.preco;
                                     final total = preco != null ? preco * item.quantidade : null;
                                     final isMenorNaLinha = melhor != null && preco != null && preco == melhor;
                                     final isSelectedForn = item.fornecedorSelecionado == fId;
-
                                     return Row(mainAxisSize: MainAxisSize.min, children: [
                                       GestureDetector(
                                         onTap: () {
@@ -1312,225 +1478,109 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                                             provider.atualizarItemParcial(item.itemId, fornecedorSelecionado: fId);
                                           }
                                         },
-                                        child: SizedBox(
-                                          width: efectiveColForn,
-                                          child: Center(
-                                            child: Container(
-                                              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-                                              decoration: BoxDecoration(
-                                                color: isSelectedForn
-                                                    ? AppTheme.primary.withValues(alpha: 0.1)
-                                                    : isMenorNaLinha
-                                                        ? AppTheme.success.withValues(alpha: 0.07)
-                                                        : null,
-                                                borderRadius: BorderRadius.circular(6),
-                                                border: Border.all(
-                                                  color: isSelectedForn
-                                                      ? AppTheme.primary.withValues(alpha: 0.4)
-                                                      : isMenorNaLinha
-                                                          ? AppTheme.success.withValues(alpha: 0.3)
-                                                          : Colors.transparent,
-                                                ),
-                                              ),
-                                              child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
-                                                preco != null
-                                                    ? Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                                                        if (isMenorNaLinha)
-                                                          const Padding(padding: EdgeInsets.only(right: 3), child: Icon(Icons.arrow_downward, size: 10, color: AppTheme.success)),
-                                                        Flexible(
-                                                          child: Text(
-                                                            usarM2 ? '${_brl(preco)}/m²' : _brl(preco),
-                                                            style: TextStyle(fontSize: 13, fontWeight: isMenorNaLinha ? FontWeight.w700 : FontWeight.w500, color: isMenorNaLinha ? AppTheme.success : AppTheme.textPrimary),
-                                                            overflow: TextOverflow.ellipsis,
-                                                            textAlign: TextAlign.center,
-                                                          ),
-                                                        ),
-                                                      ])
-                                                    : const Text('Sem preço', style: TextStyle(fontSize: 10, color: AppTheme.textHint, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
-                                                if (total != null)
-                                                  Text(_brl(total), style: TextStyle(fontSize: 11, color: isMenorNaLinha ? AppTheme.success.withValues(alpha: 0.8) : AppTheme.textSecondary), textAlign: TextAlign.center),
-                                                GestureDetector(
-                                                  onTap: () => _editarPreco(idx, fId),
-                                                  child: const Text('editar', style: TextStyle(fontSize: 10, color: AppTheme.primary, decoration: TextDecoration.underline), textAlign: TextAlign.center),
-                                                ),
-                                                if (isSelectedForn)
-                                                  const Row(mainAxisSize: MainAxisSize.min, children: [
-                                                    Icon(Icons.check_circle, size: 10, color: AppTheme.primary),
-                                                    SizedBox(width: 2),
-                                                    Text('Escolhido', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppTheme.primary)),
-                                                  ]),
-                                              ]),
-                                            ),
+                                        child: SizedBox(width: colFornMin, child: Center(child: Container(
+                                          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                                          decoration: BoxDecoration(
+                                            color: isSelectedForn ? AppTheme.primary.withValues(alpha: 0.1) : isMenorNaLinha ? AppTheme.success.withValues(alpha: 0.07) : null,
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(color: isSelectedForn ? AppTheme.primary.withValues(alpha: 0.4) : isMenorNaLinha ? AppTheme.success.withValues(alpha: 0.3) : Colors.transparent),
                                           ),
-                                        ),
+                                          child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                                            preco != null
+                                                ? Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                                    if (isMenorNaLinha) const Padding(padding: EdgeInsets.only(right: 3), child: Icon(Icons.arrow_downward, size: 10, color: AppTheme.success)),
+                                                    Flexible(child: Text(
+                                                      usarM2 ? '${_brl(preco)}/m²' : _brl(preco),
+                                                      style: TextStyle(fontSize: 13, fontWeight: isMenorNaLinha ? FontWeight.w700 : FontWeight.w500, color: isMenorNaLinha ? AppTheme.success : AppTheme.textPrimary),
+                                                      overflow: TextOverflow.ellipsis, textAlign: TextAlign.center)),
+                                                  ])
+                                                : const Text('Sem preço', style: TextStyle(fontSize: 10, color: AppTheme.textHint, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+                                            if (total != null)
+                                              Text(_brl(total), style: TextStyle(fontSize: 11, color: isMenorNaLinha ? AppTheme.success.withValues(alpha: 0.8) : AppTheme.textSecondary), textAlign: TextAlign.center),
+                                            GestureDetector(
+                                              onTap: () => _editarPreco(idx, fId),
+                                              child: const Text('editar', style: TextStyle(fontSize: 10, color: AppTheme.primary, decoration: TextDecoration.underline), textAlign: TextAlign.center),
+                                            ),
+                                            if (isSelectedForn)
+                                              const Row(mainAxisSize: MainAxisSize.min, children: [
+                                                Icon(Icons.check_circle, size: 10, color: AppTheme.primary),
+                                                SizedBox(width: 2),
+                                                Text('Escolhido', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppTheme.primary)),
+                                              ]),
+                                          ]),
+                                        ))),
                                       ),
-                                      if (!isLast)
-                                        Container(width: 1, height: 60, color: AppTheme.divider),
+                                      if (!isLast) Container(width: 1, color: AppTheme.divider),
                                     ]);
                                   }),
-
-                                  // Divisor antes de Melhor Preço
-                                  Container(width: 1, height: 60, color: AppTheme.divider),
-
-                                  // Coluna Melhor Preço
-                                  SizedBox(
-                                    width: efectiveColMelhor,
-                                    child: Center(
-                                      child: melhor != null
-                                          ? Container(
-                                              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.primary.withValues(alpha: 0.06),
-                                                borderRadius: BorderRadius.circular(6),
-                                                border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
-                                              ),
-                                              child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
-                                                Text(_brl(melhor), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.primary), textAlign: TextAlign.center),
-                                                Text(_brl(melhor * item.quantidade), style: TextStyle(fontSize: 10, color: AppTheme.primary.withValues(alpha: 0.7)), textAlign: TextAlign.center),
-                                              ]),
-                                            )
-                                          : const Text('—', style: TextStyle(fontSize: 12, color: AppTheme.textHint), textAlign: TextAlign.center),
-                                    ),
-                                  ),
-                                ]),
-                              );
-                            },
-                          ),
-                          ), // end Padding left:12
-                        ),
-                        ),
-                      ),
-                    ),
-                  ]),
-                ),
-
-                // ── Linha de totais ────────────────────────────────────────
-                Container(
-                  decoration: const BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    border: Border(top: BorderSide(color: AppTheme.divider, width: 1.5)),
-                  ),
-                  child: Row(children: [
-                    // Total fixo
-                    SizedBox(
-                      width: fixedColsWidth,
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                        child: Text('Total por Fornecedor', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-                      ),
-                    ),
-                    Container(width: 1, height: 40, color: AppTheme.divider),
-                    // Totais scrolláveis
-                    Expanded(
-                      child: ScrollConfiguration(
-                        behavior: _HorizontalScrollBehavior(),
-                        child: SingleChildScrollView(
-                        controller: _tabelaHScrollCtrlFooter,
-                        scrollDirection: Axis.horizontal,
-                        physics: const ClampingScrollPhysics(),
-                        child: SizedBox(
-                          width: scrollableWidth,
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 12, top: 8, bottom: 8),
-                            child: Row(children: [
-                              ...todosFornIds.map((fId) {
-                                final total = totaisForn[fId] ?? 0;
-                                final cob = cobertura[fId] ?? 0;
-                                final isMenorTotal = todosFornIds.isNotEmpty && total > 0 && total == todosFornIds.map((id) => totaisForn[id] ?? double.infinity).reduce((a, b) => a < b ? a : b);
-                                final semPrecoCount = itens.length - cob;
-                                final isLast = fId == todosFornIds.last;
-                                return Row(mainAxisSize: MainAxisSize.min, children: [
-                                  SizedBox(
-                                    width: efectiveColForn,
-                                    child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
-                                      Text(
-                                        total > 0 ? _brl(total) : '—',
-                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: isMenorTotal ? AppTheme.success : AppTheme.textPrimary),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                      Text('$cob/${itens.length} mat.', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: isMenorTotal ? AppTheme.success : AppTheme.textSecondary), textAlign: TextAlign.center),
-                                      if (semPrecoCount > 0)
-                                        Text('$semPrecoCount sem preço', style: const TextStyle(fontSize: 9, color: AppTheme.warning, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
-                                    ]),
-                                  ),
-                                  if (!isLast)
-                                    Container(width: 1, height: 36, color: AppTheme.divider),
-                                ]);
-                              }),
-                              // Divisor antes de Melhor Preço
-                              Container(width: 1, height: 36, color: AppTheme.divider),
-                              // Melhor preço total
-                              SizedBox(
-                                width: efectiveColMelhor,
-                                child: Center(
-                                  child: Container(
-                                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                    decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6), border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3))),
-                                    child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
-                                      Text(materiaisComMelhor > 0 ? _brl(totalMelhor) : '—', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.primary), textAlign: TextAlign.center),
-                                      Text('$materiaisComMelhor/${itens.length} mat.', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppTheme.primary), textAlign: TextAlign.center),
-                                    ]),
-                                  ),
-                                ),
+                                  // Coluna: Melhor Preço
+                                  Container(width: 1, color: AppTheme.divider),
+                                  SizedBox(width: colMelhor, child: Center(child: melhor != null
+                                    ? Container(
+                                        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                        decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(6), border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2))),
+                                        child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                                          Text(_brl(melhor), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.primary), textAlign: TextAlign.center),
+                                          Text(_brl(melhor * item.quantidade), style: TextStyle(fontSize: 10, color: AppTheme.primary.withValues(alpha: 0.7)), textAlign: TextAlign.center),
+                                        ]))
+                                    : const Text('—', style: TextStyle(fontSize: 12, color: AppTheme.textHint), textAlign: TextAlign.center),
+                                  )),
+                                ],
                               ),
-                            ]),
-                          ),
-                        ),
+                            );
+                          },
                         ),
                       ),
-                    ),
-                  ]),
-                ),
 
-                // ── Linha de sugestão de economia ─────────────────────────
-                if (diferenca != null && diferenca > 0 && nomeFornComTodos != null)
-                  Container(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.warning.withValues(alpha: 0.12),
-                      border: Border(top: BorderSide(color: AppTheme.warning.withValues(alpha: 0.4), width: 1.5)),
-                    ),
-                    child: Row(children: [
-                      Icon(Icons.info_outline, size: 16, color: AppTheme.warning),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          'Comprando tudo de "$nomeFornComTodos" (${_brl(menorTotalComTodos)}) vs melhor por item separado (${_brl(totalMelhor)}): diferença de ${_brl(diferenca)} a mais.',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.warning),
-                        ),
-                      ),
-                    ]),
-                  )
-                else if (diferenca != null && diferenca <= 0 && nomeFornComTodos != null)
-                  Container(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.success.withValues(alpha: 0.06),
-                      border: Border(top: BorderSide(color: AppTheme.success.withValues(alpha: 0.2))),
-                    ),
-                    child: Row(children: [
-                      const Icon(Icons.check_circle_outline, size: 14, color: AppTheme.success),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          '"$nomeFornComTodos" já é o mais vantajoso com ${_brl(menorTotalComTodos)} — mesmo comprando tudo de um único fornecedor.',
-                          style: const TextStyle(fontSize: 11, color: AppTheme.success),
-                        ),
-                      ),
-                    ]),
+                      // Totais — não rolam verticalmente
+                      totais(),
+                    ],
                   ),
-              ]),
-              );
-            },
+                ),
+              ),
+            ),
           ),
         ),
+
+        if (diferenca != null && diferenca > 0 && nomeFornComTodos != null)
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+            decoration: BoxDecoration(
+              color: AppTheme.warning.withValues(alpha: 0.12),
+              border: Border(top: BorderSide(color: AppTheme.warning.withValues(alpha: 0.4), width: 1.5)),
+            ),
+            child: Row(children: [
+              Icon(Icons.info_outline, size: 16, color: AppTheme.warning),
+              const SizedBox(width: 8),
+              Flexible(child: Text(
+                'Comprando tudo de "$nomeFornComTodos" (${_brl(menorTotalComTodos)}) vs melhor por item separado (${_brl(totalMelhor)}): diferença de ${_brl(diferenca)} a mais.',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.warning),
+              )),
+            ]),
+          )
+        else if (diferenca != null && diferenca <= 0 && nomeFornComTodos != null)
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+            decoration: BoxDecoration(
+              color: AppTheme.success.withValues(alpha: 0.06),
+              border: Border(top: BorderSide(color: AppTheme.success.withValues(alpha: 0.2))),
+            ),
+            child: Row(children: [
+              const Icon(Icons.check_circle_outline, size: 14, color: AppTheme.success),
+              const SizedBox(width: 8),
+              Flexible(child: Text(
+                '"$nomeFornComTodos" já é o mais vantajoso com ${_brl(menorTotalComTodos)} — mesmo comprando tudo de um único fornecedor.',
+                style: const TextStyle(fontSize: 11, color: AppTheme.success),
+              )),
+            ]),
+          ),
       ]),
     );
   }
 }
+
 // ─── Sub-widgets (reutilizados) ───────────────────────────────────────────────
 
 class _MaterialChip extends StatelessWidget {
@@ -2053,52 +2103,6 @@ class _DialogDescartarOrcamentoState
             Navigator.pop(context, _ctrl.text.trim());
           },
           child: const Text('Cancelar Orçamento'),
-        ),
-      ],
-    );
-  }
-}
-
-class _DialogOpcaoOC extends StatelessWidget {
-  final List<ItemOrcamentoData> itens;
-  const _DialogOpcaoOC({required this.itens});
-
-  @override
-  Widget build(BuildContext context) {
-    final fornecedores = itens
-        .where((i) => i.fornecedorSelecionado != null)
-        .map((i) => i.precos[i.fornecedorSelecionado!]?.fornecedorNome ?? '')
-        .toSet();
-
-    return AlertDialog(
-      title: const Text('Gerar Ordem de Compra',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${itens.length} ${itens.length == 1 ? 'material' : 'materiais'} selecionados · '
-            '${fornecedores.length} ${fornecedores.length == 1 ? 'fornecedor' : 'fornecedores'}',
-            style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
-          ),
-          const SizedBox(height: 16),
-          const Text('Como deseja gerar a OC?',
-              style: TextStyle(fontSize: 13)),
-        ],
-      ),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar')),
-        OutlinedButton(
-          onPressed: () => Navigator.pop(context, 'existente'),
-          child: const Text('Adicionar a OC existente'),
-        ),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-          onPressed: () => Navigator.pop(context, 'nova'),
-          child: const Text('Criar nova OC'),
         ),
       ],
     );

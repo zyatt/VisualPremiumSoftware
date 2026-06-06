@@ -5,6 +5,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'rotas/app_router.dart';
 import 'theme/app_theme.dart';
+
 import 'providers/usuario_provider.dart';
 import 'providers/material_provider.dart';
 import 'providers/estoque_provider.dart';
@@ -14,6 +15,8 @@ import 'providers/ordem_compra_provider.dart';
 import 'providers/historico_provider.dart';
 import 'providers/relatorio_os_provider.dart';
 import 'providers/producao_provider.dart';
+import 'providers/audit_log_provider.dart';
+
 import 'widgets/update_checker_widget.dart';
 
 Future<void> main() async {
@@ -57,6 +60,8 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => HistoricoProvider()),
         ChangeNotifierProvider(create: (_) => RelatorioOSProvider()),
         ChangeNotifierProvider(create: (_) => ProducaoProvider()),
+        ChangeNotifierProvider(create: (_) => AuditLogProvider()),
+
       ],
       child: MaterialApp.router(
         title: 'Visual Premium',

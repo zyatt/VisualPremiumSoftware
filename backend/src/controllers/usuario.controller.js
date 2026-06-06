@@ -8,6 +8,13 @@ async function login(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function refresh(req, res, next) {
+  try {
+    const result = await usuarioService.refresh(req.usuario);
+    res.json(result);
+  } catch (err) { next(err); }
+}
+
 async function listar(req, res, next) {
   try {
     const usuarios = await usuarioService.listar();
@@ -36,4 +43,4 @@ async function remover(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { login, listar, criar, atualizar, remover };
+module.exports = { login, refresh, listar, criar, atualizar, remover };

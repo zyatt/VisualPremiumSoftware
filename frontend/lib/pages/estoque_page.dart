@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'historico_material_page.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -994,6 +995,20 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         );
   }
 
+  /// Recarrega a lista mantendo a página e o scroll atuais.
+  /// Usar após editar/desativar/reativar um material.
+  void _recarregarSemResetarPagina() {
+    context.read<MaterialProvider>().carregar(
+          busca:         _buscaCtrl.text,
+          categoria:     _categoriaParaProvider(),
+          status:        _statusFiltro,
+          id:            _buscaIdCtrl.text.trim(),
+          identificador: _identificadorCtrl.text.trim(),
+          medida:        _medidaCtrl.text.trim(),
+          espessura:     _espessuraCtrl.text.trim(),
+        );
+  }
+
   // ── Ações de material ──────────────────────────────────────────────────────
 
   void _abrirHistoricoPrecos(MaterialModel material) {
@@ -1027,7 +1042,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     if (!mounted) return;
     if (salvou == true) {
       context.read<MaterialProvider>().carregarCategorias();
-      _aplicarFiltros();
+      _recarregarSemResetarPagina();
     }
   }
 
@@ -1256,17 +1271,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     if (!mounted) return;
     context.read<OrcamentoProvider>().adicionarItensEmLote(titulo, itens);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${itens.length} material(is) adicionado(s) ao orçamento "$titulo".'),
-        backgroundColor: AppTheme.success,
-        action: SnackBarAction(
-          label: 'Ver orçamento',
-          textColor: Colors.white,
-          onPressed: () => context.go('/orcamento'),
-        ),
-      ),
-    );
+    context.go('/orcamento');
   }
 
   // ── BUILD ──────────────────────────────────────────────────────────────────
@@ -1376,6 +1381,24 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   ],
                 ),
                 const Spacer(),
+                // ▼ NOVO — botão Histórico à esquerda do Orçar filtrados
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const HistoricoMaterialPage(),
+                    ),
+                  ),
+                  icon: const Icon(Icons.history, size: 18),
+                  label: const Text('Histórico'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF7C3AED),
+                    side: const BorderSide(color: Color(0xFF7C3AED)),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // ── fim da adição ──────────────────────────────────────────
                 Consumer<MaterialProvider>(
                   builder: (_, mp, __) {
                     final temMateriais = !mp.carregando && mp.materiais.isNotEmpty;
@@ -2100,6 +2123,8 @@ class _TabelaMateriais extends StatefulWidget {
     _ColDef(label: 'Categoria',                   flex: 1.0,  sortKey: 'categoria'),
     _ColDef(label: 'Medida',                      flex: 0.8,  sortKey: 'medida'),
     _ColDef(label: 'Espessura',                   flex: 0.7,  sortKey: 'espessura'),
+    _ColDef(label: 'Largura',                     flex: 0.7,  sortKey: 'largura'),
+    _ColDef(label: 'Comprimento',                 flex: 0.8,  sortKey: 'comprimento'),
     _ColDef(label: 'Estoque atual',               flex: 0.6,  sortKey: 'quantidade'),
     _ColDef(label: 'Estoque mínimo',              flex: 0.6,  sortKey: 'estoqueMinimo'),
     _ColDef(label: 'Unidade',                     flex: 0.9,  sortKey: 'unidade'),
@@ -2108,6 +2133,7 @@ class _TabelaMateriais extends StatefulWidget {
     _ColDef(label: 'Custo (Últimas compras)',     flex: 0.9,  sortKey: 'ultimoValorPago'),
     _ColDef(label: 'Custo m² (Últimas compras)',  flex: 0.9,  sortKey: 'ultimoValorPagoM2'),
     _ColDef(label: 'Status',                      flex: 0.8,  sortKey: 'status'),
+    _ColDef(label: '',                             fixed: 40),
   ];
 
   static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
@@ -2121,6 +2147,13 @@ class _TabelaMateriais extends StatefulWidget {
 class _TabelaMateriaisState extends State<_TabelaMateriais> {
   String? _colunaOrdem;
   bool    _crescente = true;
+  final ScrollController _scrollCtrl = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
 
   List<_ColDef> get _cols => widget.mostrarCategoria
       ? _TabelaMateriais._colsBase
@@ -2138,6 +2171,8 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
         case 'categoria':        va = a.categoria;        vb = b.categoria;        break;
         case 'medida':           va = a.medida;           vb = b.medida;           break;
         case 'espessura':        va = a.espessura;        vb = b.espessura;        break;
+        case 'largura':          va = a.largura;          vb = b.largura;          break;
+        case 'comprimento':      va = a.comprimento;      vb = b.comprimento;      break;
         case 'quantidade':       va = a.quantidade;       vb = b.quantidade;       break;
         case 'estoqueMinimo':    va = a.estoqueMinimo;    vb = b.estoqueMinimo;    break;
         case 'unidade':          va = a.unidade;          vb = b.unidade;          break;
@@ -2210,6 +2245,7 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
 
     // Corpo rolável (sem o cabeçalho — ele fica fixo acima)
     Widget corpoRolavel = SingleChildScrollView(
+      controller: _scrollCtrl,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -2534,37 +2570,45 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _colWrap(cols[widget.mostrarCategoria ? 5 : 4], maybeOpacity(_cell(m.espessura ?? '—', inativo: inativo))),
                 _vDivider(),
  
+                // Largura
+                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], maybeOpacity(_cell(m.largura != null ? m.largura!.toStringAsFixed((m.largura! % 1 == 0 ? 0 : 2).toInt()) : '—', inativo: inativo))),
+                _vDivider(),
+ 
+                // Comprimento
+                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], maybeOpacity(_cell(m.comprimento != null ? m.comprimento!.toStringAsFixed((m.comprimento! % 1 == 0 ? 0 : 2).toInt()) : '—', inativo: inativo))),
+                _vDivider(),
+ 
                 // Estoque atual (com lógica especial para específico)
-                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], estoqueAtualCell()),
+                _colWrap(cols[widget.mostrarCategoria ? 8 : 7], estoqueAtualCell()),
                 _vDivider(),
  
                 // Estoque mínimo
-                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], maybeOpacity(_cell(
+                _colWrap(cols[widget.mostrarCategoria ? 9 : 8], maybeOpacity(_cell(
                   m.estoqueMinimo.toStringAsFixed(m.estoqueMinimo % 1 == 0 ? 0 : 2),
                   inativo: inativo,
                 ))),
                 _vDivider(),
  
                 // Unidade
-                _colWrap(cols[widget.mostrarCategoria ? 8 : 7], maybeOpacity(_cell(m.unidade ?? '—', inativo: inativo))),
+                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], maybeOpacity(_cell(m.unidade ?? '—', inativo: inativo))),
                 _vDivider(),
  
                 // Valor intermediário
-                _colWrap(cols[widget.mostrarCategoria ? 9 : 8], maybeOpacity(valorCell(
+                _colWrap(cols[widget.mostrarCategoria ? 11 : 10], maybeOpacity(valorCell(
                   m.precoMediano,
                   m.fornecedorMateriais.isNotEmpty,
                 ))),
                 _vDivider(),
  
                 // Valor m² intermediário
-                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], maybeOpacity(valorCell(
+                _colWrap(cols[widget.mostrarCategoria ? 12 : 11], maybeOpacity(valorCell(
                   m.precoM2Mediano,
                   m.fornecedorMateriais.isNotEmpty,
                 ))),
                 _vDivider(),
  
                 // Custo última compra
-                _colWrap(cols[widget.mostrarCategoria ? 11 : 10], maybeOpacity(_CustoCell(
+                _colWrap(cols[widget.mostrarCategoria ? 13 : 12], maybeOpacity(_CustoCell(
                   valor:       m.ultimoValorPago,
                   temHistorico: true,
                   onTap:       () => widget.onVerHistoricoPrecos(m),
@@ -2572,7 +2616,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _vDivider(),
  
                 // Custo m² última compra
-                _colWrap(cols[widget.mostrarCategoria ? 12 : 11], maybeOpacity(_CustoCell(
+                _colWrap(cols[widget.mostrarCategoria ? 14 : 13], maybeOpacity(_CustoCell(
                   valor:       m.ultimoValorPagoM2,
                   temHistorico: true,
                   onTap:       () => widget.onVerHistoricoPrecos(m),
@@ -2580,12 +2624,34 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _vDivider(),
  
                 // Status
-                _colWrap(cols[widget.mostrarCategoria ? 13 : 12], maybeOpacity(Center(
+                _colWrap(cols[widget.mostrarCategoria ? 15 : 14], maybeOpacity(Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                     child: _StatusBadge(status: m.status),
                   ),
                 ))),
+
+                // botão Histórico de audit por material
+                _colWrap(
+                  cols[widget.mostrarCategoria ? 16 : 15],
+                  Center(
+                    child: IconButton(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => HistoricoMaterialPage(
+                            materialIdInicial:   m.id,
+                            materialNomeInicial: m.nome,
+                          ),
+                        ),
+                      ),
+                      icon: const Icon(Icons.history, size: 18),
+                      tooltip: 'Histórico deste material',
+                      color: const Color(0xFF7C3AED),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -2863,6 +2929,8 @@ class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
 
                 // col Status — vazio
                 _colWrap(cols[widget.mostrarCategoria ? 13 : 12], _emptyCell()),
+                // col Histórico — vazio
+                _colWrap(cols[widget.mostrarCategoria ? 14 : 13], _emptyCell()),
               ],
             ),
           ),
@@ -3769,6 +3837,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   late final TextEditingController _categoria;
   late final TextEditingController _medida;
   late final TextEditingController _espessura;
+  late final TextEditingController _largura;
+  late final TextEditingController _comprimento;
   late final TextEditingController _quantidade;
   late final TextEditingController _estoqueMinimo;
 
@@ -3788,6 +3858,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     _categoria     = TextEditingController(text: m?.categoria ?? '');
     _medida        = TextEditingController(text: m?.medida ?? '');
     _espessura     = TextEditingController(text: m?.espessura ?? '');
+    _largura       = TextEditingController(text: m?.largura != null ? m!.largura!.toStringAsFixed((m.largura! % 1 == 0 ? 0 : 4).toInt()) : '');
+    _comprimento   = TextEditingController(text: m?.comprimento != null ? m!.comprimento!.toStringAsFixed((m.comprimento! % 1 == 0 ? 0 : 4).toInt()) : '');
     _quantidade    = TextEditingController(
         text: m != null ? m.quantidade.toString() : '0');
     _estoqueMinimo = TextEditingController(
@@ -3798,7 +3870,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   void dispose() {
     for (final c in [
       _nome, _identificador, _unidade, _categoria, _medida, _espessura,
-      _quantidade, _estoqueMinimo,
+      _largura, _comprimento, _quantidade, _estoqueMinimo,
     ]) {
       c.dispose();
     }
@@ -3816,6 +3888,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       'categoria':     _categoria.text.trim().isEmpty ? null : _categoria.text.trim(),
       'medida':        _medida.text.trim().isEmpty ? null : _medida.text.trim(),
       'espessura':     _espessura.text.trim().isEmpty ? null : _espessura.text.trim(),
+      'largura':       _largura.text.trim().isEmpty ? null : double.tryParse(_largura.text.trim()),
+      'comprimento':   _comprimento.text.trim().isEmpty ? null : double.tryParse(_comprimento.text.trim()),
       'quantidade':    double.tryParse(_quantidade.text) ?? 0,
       'estoqueMinimo': double.tryParse(_estoqueMinimo.text) ?? 0,
       'estoqueConfirmado': _estoqueConfirmado,
@@ -3945,6 +4019,28 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   decoration: const InputDecoration(labelText: 'Espessura'),
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [_UpperCaseFormatter()],
+                  onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
+                ),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(
+                child: TextFormField(
+                  controller: _largura,
+                  decoration: const InputDecoration(labelText: 'Largura (m)'),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_DecimalInputFormatter()],
+                  onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextFormField(
+                  controller: _comprimento,
+                  decoration: const InputDecoration(labelText: 'Comprimento (m)'),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_DecimalInputFormatter()],
                   onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                 ),
               ),

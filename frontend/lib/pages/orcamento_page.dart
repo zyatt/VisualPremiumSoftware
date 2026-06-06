@@ -251,93 +251,109 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   }
 
   // ── Gerar OC a partir de orçamento aprovado ───────────────────────────────────
+  // Abre o orçamento no editor com modoGerarOC=true para que a OC seja gerada
+  // de lá, após o usuário selecionar os fornecedores desejados.
 
   Future<void> _gerarOCDeOrcamentoAprovado(Map<String, dynamic> orc) async {
+    final provider = context.read<OrcamentoProvider>();
+    final orcId = orc['id'] as int;
+
+    // Se já existe uma aba aberta com esse servidorId, apenas navega para ela
+    final abaExistente = provider.ativarAbaExistente(orcId);
+    if (abaExistente >= 0) {
+      if (mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+        );
+        if (mounted) _carregarOrcamentosServidor();
+      }
+      return;
+    }
+
     setState(() => _salvandoPreco = true);
     try {
-      final result = await OrcamentoRepository().gerarOrdemCompra(orc['id'] as int);
-      if (!mounted) return;
-      if (result['pronto'] == true) {
-        final orcamento = result['orcamento'] as Map<String, dynamic>;
-        final itens = (orcamento['itens'] as List? ?? []);
-        
-        // Agrupa por material, usando chave composta para não colapsar
-        // materiais específicos com mesmo materialId.
-        final Map<String, ItemOrcamentoData> itensPorChave = {};
-        
-        for (final item in itens) {
-          final materialId = item['materialId'] as int;
-          final materialData = item['material'] as Map<String, dynamic>?;
-          final fornecedorId = item['fornecedorId'] as int?;
-          final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
-          final especifico = materialData?['especifico'] as bool? ?? false;
+      // Busca o orçamento completo sem alterar o status no servidor
+      final orcamentoCompleto = await OrcamentoRepository().buscarPorId(orcId);
+      final itens = (orcamentoCompleto['itens'] as List? ?? []);
 
-          final chave = especifico
-              ? 'esp_${materialId}_${(item['descricaoItem'] as String? ?? '').trim().toLowerCase()}'
-              : 'mat_$materialId';
-          
-          if (!itensPorChave.containsKey(chave)) {
-            itensPorChave[chave] = ItemOrcamentoData(
-              materialId: materialId,
-              materialNome: materialData?['nome'] as String? ?? '',
-              materialUnidade: materialData?['unidade'] as String?,
-              materialCategoria: materialData?['categoria'] as String?,
-              materialMedida: materialData?['medida'] as String?,
-              materialEspessura: materialData?['espessura'] as String?,
-              materialIdentificador: materialData?['identificador'] as String?,
-              materialEspecifico: especifico,
-              descricao: item['descricaoItem'] as String?,
-              quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
-              precos: {},
-              modoOrcamento: (item['usarM2'] as bool? ?? false)
-                  ? ModoOrcamento.metroQuadrado
-                  : ModoOrcamento.unitario,
-            );
-          }
-          if (fornecedorId != null && fornecedorData != null) {
-            itensPorChave[chave]!.precos[fornecedorId] = PrecoFornecedorData(
-              fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
-              preco: item['precoUnitario'] != null
-                  ? double.tryParse(item['precoUnitario'].toString())
-                  : null,
-              precoM2: item['precoM2'] != null
-                  ? double.tryParse(item['precoM2'].toString())
-                  : null,
-            );
-            
-            if (item['selecionado'] as bool? ?? false) {
-              itensPorChave[chave]!.fornecedorSelecionado = fornecedorId;
-            }
-          }
+      final Map<String, ItemOrcamentoData> itensPorChave = {};
+
+      for (final item in itens) {
+        final materialId = item['materialId'] as int;
+        final materialData = item['material'] as Map<String, dynamic>?;
+        final fornecedorId = item['fornecedorId'] as int?;
+        final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
+        final especifico = materialData?['especifico'] as bool? ?? false;
+
+        final chave = especifico
+            ? 'esp_${materialId}_${(item['descricaoItem'] as String? ?? '').trim().toLowerCase()}'
+            : 'mat_$materialId';
+
+        if (!itensPorChave.containsKey(chave)) {
+          itensPorChave[chave] = ItemOrcamentoData(
+            materialId: materialId,
+            materialNome: materialData?['nome'] as String? ?? '',
+            materialUnidade: materialData?['unidade'] as String?,
+            materialCategoria: materialData?['categoria'] as String?,
+            materialMedida: materialData?['medida'] as String?,
+            materialEspessura: materialData?['espessura'] as String?,
+            materialIdentificador: materialData?['identificador'] as String?,
+            materialEspecifico: especifico,
+            descricao: item['descricaoItem'] as String?,
+            quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
+            precos: {},
+            modoOrcamento: (item['usarM2'] as bool? ?? false)
+                ? ModoOrcamento.metroQuadrado
+                : ModoOrcamento.unitario,
+          );
         }
 
-        final provider = context.read<OrcamentoProvider>();
-        provider.adicionarItensEmLote(
-          'OC - ${orcamento['titulo'] ?? '#${orcamento['id']}'}',
-          itensPorChave.values.toList(),
-        );
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Itens carregados no orçamento. Agora gere a OC normalmente.'),
-            backgroundColor: AppTheme.success,
-          ),
-        );
-        
-        context.read<OrcamentoProvider>().atualizarFlagsTab(modoGerarOC: true);
-        // Abre o editor na página de edição
-        if (mounted) {
-          await Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+        if (fornecedorId != null && fornecedorData != null) {
+          itensPorChave[chave]!.precos[fornecedorId] = PrecoFornecedorData(
+            fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
+            preco: item['precoUnitario'] != null
+                ? double.tryParse(item['precoUnitario'].toString())
+                : null,
+            precoM2: item['precoM2'] != null
+                ? double.tryParse(item['precoM2'].toString())
+                : null,
           );
-          if (mounted) _carregarOrcamentosServidor();
+
+          if (item['selecionado'] as bool? ?? false) {
+            itensPorChave[chave]!.fornecedorSelecionado = fornecedorId;
+          }
         }
       }
+
+      if (!mounted) return;
+
+      provider.adicionarItensEmLote(
+        orcamentoCompleto['titulo'] as String? ?? 'Orçamento #$orcId',
+        itensPorChave.values.toList(),
+      );
+
+      provider.setServidorIdTab(orcId);
+      // jaFinalizado=true mantém o orçamento somente-leitura, modoGerarOC=true
+      // exibe o botão "Gerar OC" no editor.
+      provider.atualizarFlagsTab(jaFinalizado: true, modoGerarOC: true);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Orçamento #$orcId aberto. Selecione os fornecedores e gere a OC.'),
+          backgroundColor: AppTheme.success,
+        ),
+      );
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+      );
+      if (mounted) _carregarOrcamentosServidor();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao gerar OC: $e'),
+            content: Text('Erro ao abrir orçamento: $e'),
             backgroundColor: AppTheme.error,
           ),
         );
@@ -1223,20 +1239,8 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
                         ),
                       ),
                     ]
-                    // Aba "Aprovados": Reabrir (secundário) + Gerar OC (primário)
+                    // Aba "Aprovados": apenas Gerar OC
                     else if (onGerarOC != null) ...[
-                      OutlinedButton.icon(
-                        onPressed: onReabrir,
-                        icon: const Icon(Icons.edit_outlined, size: 14),
-                        label: const Text('Reabrir', style: TextStyle(fontSize: 12)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTheme.textSecondary,
-                          side: const BorderSide(color: AppTheme.divider),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
                       FilledButton.icon(
                         onPressed: onGerarOC,
                         icon: const Icon(Icons.shopping_cart_checkout, size: 14),

@@ -11,14 +11,23 @@ async function login(username, senha) {
 
   const token = jwt.sign(
     { id: usuario.id, username: usuario.username, role: usuario.role },
-    process.env.JWT_SECRET,
-    { expiresIn: '8h' }
+    process.env.JWT_SECRET
+    // sem expiresIn — token não expira
   );
 
   return {
     token,
     usuario: { id: usuario.id, nome: usuario.nome, username: usuario.username, role: usuario.role },
   };
+}
+
+async function refresh(payload) {
+  const token = jwt.sign(
+    { id: payload.id, username: payload.username, role: payload.role },
+    process.env.JWT_SECRET
+    // sem expiresIn
+  );
+  return { token };
 }
 
 async function listar() {
@@ -45,4 +54,4 @@ async function remover(id) {
   return prisma.usuario.delete({ where: { id } });
 }
 
-module.exports = { login, listar, criar, atualizar, remover };
+module.exports = { login, refresh, listar, criar, atualizar, remover };

@@ -1,4 +1,5 @@
 const prisma = require('../utils/prisma');
+const auditSvc = require('./audit-log.service');
 
 function calcularStatus(quantidade, estoqueMinimo, ativo) {
   if (!ativo) return 'INATIVO';
@@ -26,7 +27,7 @@ function _normalizarPreco(valor) {
 }
 
 async function listar(filtros = {}) {
-  const { busca, categoria, semCategoria, status, comFornecedor, id, medida, espessura, identificador, ativo } = filtros;
+  const { busca, categoria, semCategoria, status, comFornecedor, id, medida, espessura, largura, comprimento, identificador, ativo } = filtros;
 
   const where = {};
   if (ativo === 'true') where.ativo = true;
@@ -44,6 +45,8 @@ async function listar(filtros = {}) {
   if (identificador) where.identificador = { contains: identificador, mode: 'insensitive' };
   if (medida)        where.medida        = { contains: medida,        mode: 'insensitive' };
   if (espessura)     where.espessura     = { contains: espessura,     mode: 'insensitive' };
+  if (largura !== undefined && largura !== '')     where.largura     = Number(largura);
+  if (comprimento !== undefined && comprimento !== '') where.comprimento = Number(comprimento);
   if (semCategoria === 'true') {
     where.categoria = null;
   } else if (categoria) {
@@ -215,10 +218,10 @@ async function buscarPorId(id) {
   };
 }
 
-async function criar(data) {
+async function criar(data, usuarioId, usuarioNome) {
   const nomeTrimmed      = data.nome?.trim();
-  const medidaTrimmed    = data.medida?.trim()    ?? null;
-  const espessuraTrimmed = data.espessura?.trim() ?? null;
+  const medidaTrimmed    = data.medida?.trim()       ?? null;
+  const espessuraTrimmed = data.espessura?.trim()    ?? null;
 
   const duplicado = await prisma.material.findFirst({
     where: {
@@ -237,19 +240,27 @@ async function criar(data) {
   data.ultimoValorPagoM2 = _normalizarPreco(data.ultimoValorPagoM2);
 
   try {
-    return await prisma.material.create({ data: { ...data, status } });
+    const material = await prisma.material.create({ data: { ...data, status } });
+
+    await auditSvc.registrar(material.id, 'CADASTRO', {
+      valorDepois: material.nome,
+      usuarioId,
+      usuarioNome,
+    });
+
+    return material;
   } catch (e) {
     if (e?.code === 'P2002') _throwDuplicado(medidaTrimmed, espessuraTrimmed);
     throw e;
   }
 }
 
-async function atualizar(id, data) {
+async function atualizar(id, data, usuarioId, usuarioNome) {
   const atual = await prisma.material.findUnique({ where: { id } });
 
-  const nomeTrimmed      = (data.nome      ?? atual.nome)?.trim();
-  const medidaTrimmed    = (data.medida     ?? atual.medida)?.trim()    ?? null;
-  const espessuraTrimmed = (data.espessura  ?? atual.espessura)?.trim() ?? null;
+  const nomeTrimmed        = (data.nome        ?? atual.nome)?.trim();
+  const medidaTrimmed      = (data.medida       ?? atual.medida)?.trim()       ?? null;
+  const espessuraTrimmed   = (data.espessura    ?? atual.espessura)?.trim()    ?? null;
 
   const duplicado = await prisma.material.findFirst({
     where: {
@@ -274,15 +285,21 @@ async function atualizar(id, data) {
     data.ultimoValorPagoM2 = _normalizarPreco(data.ultimoValorPagoM2);
   }
 
+  const snapAntes = await prisma.material.findUnique({ where: { id } });
+
   try {
-    return await prisma.material.update({ where: { id }, data: { ...data, status } });
+    const material = await prisma.material.update({ where: { id }, data: { ...data, status } });
+
+    await auditSvc.registrarEdicao(id, snapAntes, material, usuarioId, usuarioNome);
+
+    return material;
   } catch (e) {
     if (e?.code === 'P2002') _throwDuplicado(medidaTrimmed, espessuraTrimmed);
     throw e;
   }
 }
 
-async function desativar(id) {
+async function desativar(id, usuarioId, usuarioNome) {
   const material = await prisma.material.findUnique({
     where: { id },
     include: {
@@ -303,33 +320,49 @@ async function desativar(id) {
     throw { status: 400, message: `Material vinculado a ${ordensAtivas} ordem(ns) em andamento` };
   }
 
-  return prisma.material.update({
+  const result = await prisma.material.update({
     where: { id },
     data: { ativo: false, status: 'INATIVO' },
   });
+
+  await auditSvc.registrar(id, 'DESATIVACAO', { usuarioId, usuarioNome });
+  return result;
 }
 
-async function reativar(id) {
+async function reativar(id, usuarioId, usuarioNome) {
   const material = await prisma.material.findUnique({ where: { id } });
   if (!material) throw { status: 404, message: 'Material não encontrado' };
   if (material.ativo) throw { status: 400, message: 'Material já está ativo' };
 
   const status = calcularStatus(material.quantidade, material.estoqueMinimo, true);
 
-  return prisma.material.update({
+  const result = await prisma.material.update({
     where: { id },
     data: { ativo: true, status },
   });
+
+  await auditSvc.registrar(id, 'REATIVACAO', { usuarioId, usuarioNome });
+  return result;
 }
 
-async function excluir(id) {
+async function excluir(id, usuarioId, usuarioNome) {
   const material = await prisma.material.findUnique({ where: { id } });
   if (material.ativo) throw { status: 400, message: 'Desative o material antes de excluí-lo' };
+
+  await auditSvc.registrar(id, 'EXCLUSAO', {
+    valorAntes: material.nome,
+    usuarioId,
+    usuarioNome,
+  });
+
   return prisma.material.delete({ where: { id } });
 }
 
-async function confirmarEstoque(id) {
-  return prisma.material.update({ where: { id }, data: { estoqueConfirmado: true } });
+async function confirmarEstoque(id, usuarioId, usuarioNome) {
+  const result = await prisma.material.update({ where: { id }, data: { estoqueConfirmado: true } });
+
+  await auditSvc.registrar(id, 'ESTOQUE_CONFIRMADO', { usuarioId, usuarioNome });
+  return result;
 }
 
 async function listarCategorias() {
@@ -354,15 +387,23 @@ async function listarHistoricoPrecos(materialId, limite = 50) {
   });
 }
 
-async function excluirFilhoEspecifico(materialId, filhoId) {
+async function excluirFilhoEspecifico(materialId, filhoId, usuarioId, usuarioNome) {
   const filho = await prisma.estoqueEspecifico.findUnique({ where: { id: filhoId } });
   if (!filho || filho.materialId !== materialId) {
     throw { status: 404, message: 'Variação não encontrada' };
   }
+
+  await auditSvc.registrar(materialId, 'FILHO_EXCLUIDO', {
+    campo:      filho.descricao,
+    valorAntes: `qtd ${filho.quantidade}`,
+    usuarioId,
+    usuarioNome,
+  });
+
   await prisma.estoqueEspecifico.delete({ where: { id: filhoId } });
 }
 
-async function atualizarFilhoEspecifico(materialId, filhoId, data) {
+async function atualizarFilhoEspecifico(materialId, filhoId, data, usuarioId, usuarioNome) {
   const filho = await prisma.estoqueEspecifico.findUnique({ where: { id: filhoId } });
   if (!filho || filho.materialId !== materialId) {
     throw { status: 404, message: 'Variação não encontrada' };
@@ -387,10 +428,32 @@ async function atualizarFilhoEspecifico(materialId, filhoId, data) {
     updateData.quantidade = novaQtd;
   }
 
-  return prisma.estoqueEspecifico.update({
+  const snapAntes = await prisma.estoqueEspecifico.findUnique({ where: { id: filhoId } });
+
+  const result = await prisma.estoqueEspecifico.update({
     where: { id: filhoId },
     data:  updateData,
   });
+
+  const partes = [];
+  if (data.descricao && data.descricao.trim() !== snapAntes.descricao) {
+    partes.push(`descrição: "${snapAntes.descricao}" → "${data.descricao.trim()}"`);
+  }
+  if (data.quantidade !== undefined && Number(data.quantidade) !== Number(snapAntes.quantidade)) {
+    partes.push(`qtd: ${snapAntes.quantidade} → ${data.quantidade}`);
+  }
+
+  if (partes.length > 0) {
+    await auditSvc.registrar(materialId, 'FILHO_EDITADO', {
+      campo:       snapAntes.descricao,
+      valorAntes:  partes.map(p => p.split(' → ')[0].split(': ')[1]).join(' | '),
+      valorDepois: partes.map(p => p.split(' → ')[1]).join(' | '),
+      usuarioId,
+      usuarioNome,
+    });
+  }
+
+  return result;
 }
 
 module.exports = {

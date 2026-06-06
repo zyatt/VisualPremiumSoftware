@@ -1169,6 +1169,18 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(item.materialNome, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.textPrimary)),
+                        Builder(builder: (_) {
+                          final sub = [
+                            if (item.materialMedida != null && item.materialMedida!.isNotEmpty) item.materialMedida!,
+                            if (item.materialEspessura != null && item.materialEspessura!.isNotEmpty) item.materialEspessura!,
+                            if (item.materialIdentificador != null && item.materialIdentificador!.isNotEmpty) item.materialIdentificador!,
+                          ].join(' · ');
+                          if (sub.isEmpty) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(sub, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                          );
+                        }),
                         if (item.descricaoItem != null && item.descricaoItem!.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
@@ -1427,6 +1439,9 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     _itens = widget.ordem.itens.map((i) => _ItemRascunho(
       materialId: i.materialId,
       materialNome: i.materialNome,
+      materialMedida: i.materialMedida,
+      materialEspessura: i.materialEspessura,
+      materialIdentificador: i.materialIdentificador,
       descricaoItem: i.descricaoItem,
       materialEspecifico: i.materialEspecifico,
       numeroOS: i.numeroOS,
@@ -1504,15 +1519,18 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     final osAuto = _numerosOS.length == 1 ? _numerosOS.first : '';
     setState(() {
       _itens.add(_ItemRascunho(
-        materialId:         vinculo.materialId,
-        materialNome:       vinculo.descricaoCompleta,
-        materialEspecifico: vinculo.materialEspecifico,
-        numeroOS:           osAuto,
-        quantidade:         1,
-        precoUnitario:      vinculo.preco,
+        materialId:             vinculo.materialId,
+        materialNome:           vinculo.descricaoCompleta,
+        materialMedida:         vinculo.materialMedida,
+        materialEspessura:      vinculo.materialEspessura,
+        materialIdentificador:  vinculo.materialIdentificador,
+        materialEspecifico:     vinculo.materialEspecifico,
+        numeroOS:               osAuto,
+        quantidade:             1,
+        precoUnitario:          vinculo.preco,
         precoMetroQuadrado:
             vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
-        usarM2:             false,
+        usarM2:                 false,
       ));
     });
   }
@@ -2125,15 +2143,18 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
     final osAuto = _numerosOS.length == 1 ? _numerosOS.first : '';
     setState(() {
       _itens.add(_ItemRascunho(
-        materialId:         vinculo.materialId,
-        materialNome:       vinculo.descricaoCompleta,
-        materialEspecifico: vinculo.materialEspecifico,
-        numeroOS:           osAuto,
-        quantidade:         1,
-        precoUnitario:      vinculo.preco,
+        materialId:             vinculo.materialId,
+        materialNome:           vinculo.descricaoCompleta,
+        materialMedida:         vinculo.materialMedida,
+        materialEspessura:      vinculo.materialEspessura,
+        materialIdentificador:  vinculo.materialIdentificador,
+        materialEspecifico:     vinculo.materialEspecifico,
+        numeroOS:               osAuto,
+        quantidade:             1,
+        precoUnitario:          vinculo.preco,
         precoMetroQuadrado:
             vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
-        usarM2:             false,
+        usarM2:                 false,
       ));
     });
   }
@@ -2895,6 +2916,9 @@ class _OsInputSectionState extends State<_OsInputSection> {
 class _ItemRascunho {
   int materialId;
   String materialNome;
+  String? materialMedida;
+  String? materialEspessura;
+  String? materialIdentificador;
   /// Indica se o material é específico (exige descrição personalizada na OC).
   bool? materialEspecifico;
   /// Descrição personalizada na OC (ex: "Tinta Branca Fosca 18L").
@@ -2910,6 +2934,9 @@ class _ItemRascunho {
   _ItemRascunho({
     required this.materialId,
     required this.materialNome,
+    this.materialMedida,
+    this.materialEspessura,
+    this.materialIdentificador,
     this.materialEspecifico,
     this.descricaoItem,
     required this.numeroOS,
@@ -3030,11 +3057,28 @@ class _ItemFormCardState extends State<_ItemFormCard> {
           Row(
             children: [
               Expanded(
-                child: Text(widget.item.materialNome,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                        color: AppTheme.textPrimary)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.item.materialNome,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: AppTheme.textPrimary)),
+                    Builder(builder: (_) {
+                      final sub = [
+                        if (widget.item.materialMedida != null && widget.item.materialMedida!.isNotEmpty) widget.item.materialMedida!,
+                        if (widget.item.materialEspessura != null && widget.item.materialEspessura!.isNotEmpty) widget.item.materialEspessura!,
+                        if (widget.item.materialIdentificador != null && widget.item.materialIdentificador!.isNotEmpty) widget.item.materialIdentificador!,
+                      ].join(' · ');
+                      if (sub.isEmpty) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(sub, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                      );
+                    }),
+                  ],
+                ),
               ),
               IconButton(
                 onPressed: widget.onRemover,

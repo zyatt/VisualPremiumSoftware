@@ -47,6 +47,9 @@ async function listar(status) {
               nome: true,
               unidade: true,
               especifico: true,
+              medida: true,
+              espessura: true,
+              identificador: true,
             },
           },
         },
@@ -146,6 +149,9 @@ async function criar(data, usuarioId) {
               nome: true,
               unidade: true,
               especifico: true,
+              medida: true,
+              espessura: true,
+              identificador: true,
             },
           },
         },
@@ -226,6 +232,9 @@ async function adicionarItem(ordemCompraId, itemData) {
           nome: true,
           unidade: true,
           especifico: true,
+          medida: true,
+          espessura: true,
+          identificador: true,
         },
       },
     },
@@ -597,10 +606,11 @@ async function reverter(id) {
   if (ordem.orcamentoId) {
     await prisma.orcamento.update({
       where: { id: ordem.orcamentoId },
-      data:  { status: 'PENDENTE' },
+      data: {
+        status: "ABERTO"  // ✅ era "PENDENTE", que não existe no enum
+      }
     });
   }
-
   return prisma.ordemCompra.update({
     where: { id },
     data:  { status: 'EM_ANDAMENTO' },

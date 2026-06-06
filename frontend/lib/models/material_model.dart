@@ -129,6 +129,8 @@ class MaterialModel {
   final String? categoria;
   final String? medida;
   final String? espessura;
+  final double? largura;
+  final double? comprimento;
   final String? identificador;
   final double? valor;
   final double? valorMetroQuadrado;
@@ -158,6 +160,8 @@ class MaterialModel {
     this.categoria,
     this.medida,
     this.espessura,
+    this.largura,
+    this.comprimento,
     this.identificador,
     this.valor,
     this.valorMetroQuadrado,
@@ -199,6 +203,8 @@ class MaterialModel {
       categoria:          json['categoria'],
       medida:             json['medida'],
       espessura:          json['espessura'],
+      largura:            parseDoubleOrNull(json['largura']),
+      comprimento:        parseDoubleOrNull(json['comprimento']),
       identificador:      json['identificador'],
       valor:              parseDoubleOrNull(json['valor']),
       valorMetroQuadrado: parseDoubleOrNull(json['valorMetroQuadrado']),

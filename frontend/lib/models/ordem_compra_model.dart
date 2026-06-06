@@ -2,6 +2,9 @@ class OrdemCompraItemModel {
   final int? id;
   final int materialId;
   final String materialNome;
+  final String? materialMedida;
+  final String? materialEspessura;
+  final String? materialIdentificador;
   final String? descricaoItem;   // descrição personalizada na OC (ex: "Tinta Branca Fosca 18L")
   final String numeroOS;
   final double quantidade;
@@ -15,6 +18,9 @@ class OrdemCompraItemModel {
     this.id,
     required this.materialId,
     required this.materialNome,
+    this.materialMedida,
+    this.materialEspessura,
+    this.materialIdentificador,
     this.descricaoItem,
     required this.numeroOS,
     required this.quantidade,
@@ -26,9 +32,12 @@ class OrdemCompraItemModel {
   });
 
   factory OrdemCompraItemModel.fromJson(Map<String, dynamic> json) => OrdemCompraItemModel(
-    id:                 json['id'],
-    materialId:         json['materialId'] ?? 0,
-    materialNome:       json['material']?['nome'] ?? '',
+    id:                     json['id'],
+    materialId:             json['materialId'] ?? 0,
+    materialNome:           json['material']?['nome'] ?? '',
+    materialMedida:         json['material']?['medida'],
+    materialEspessura:      json['material']?['espessura'],
+    materialIdentificador:  json['material']?['identificador'],
     descricaoItem:      json['descricaoItem'],
     numeroOS:           json['numeroOS'] ?? '',
     quantidade:         double.tryParse(json['quantidade']?.toString() ?? '0') ?? 0,
