@@ -66,9 +66,14 @@ class ControleEstoquePage extends StatefulWidget {
 
 class _ControleEstoquePageState extends State<ControleEstoquePage>
     with SingleTickerProviderStateMixin {
-  final TextEditingController _buscaCtrl = TextEditingController();
+  final TextEditingController _buscaCtrl        = TextEditingController();
+  final TextEditingController _buscaMaterialCtrl = TextEditingController();
   late TabController _tabController;
   Timer? _timerFechamentoAutomatico;
+
+  // ── Filtro por material (client-side) ─────────────────────────────────────
+  int?    _materialFiltroId;
+  String  _materialFiltroNome = '';
 
   // ── Calcula quanto tempo falta até a meia-noite ────────────────────────────
   Duration get _duracaoAteMeiaNoite {
@@ -143,6 +148,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     _timerFechamentoAutomatico?.cancel();
     _tabController.dispose();
     _buscaCtrl.dispose();
+    _buscaMaterialCtrl.dispose();
     super.dispose();
   }
 
@@ -159,16 +165,24 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     );
   }
 
+  // ── Aplica filtro de material client-side ────────────────────────────────
+  List<RelacaoOSModel> _filtrarPorMaterial(List<RelacaoOSModel> lista) {
+    if (_materialFiltroId == null) return lista;
+    return lista
+        .where((r) => r.movimentacoes.any((m) => m.materialId == _materialFiltroId))
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<EstoqueProvider>();
 
-    final emAndamento = provider.relacoesOS
-        .where((r) => r.status == 'EM_ANDAMENTO')
-        .toList();
-    final fechadas = provider.relacoesOS
-        .where((r) => r.status == 'FECHADA')
-        .toList();
+    final emAndamento = _filtrarPorMaterial(
+      provider.relacoesOS.where((r) => r.status == 'EM_ANDAMENTO').toList(),
+    );
+    final fechadas = _filtrarPorMaterial(
+      provider.relacoesOS.where((r) => r.status == 'FECHADA').toList(),
+    );
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -239,16 +253,41 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
             ),
             const SizedBox(height: 20),
 
-            // ── Barra de busca ──────────────────────────────────────
-            TextField(
-              controller: _buscaCtrl,
-              onChanged: _buscar,
-              decoration: const InputDecoration(
-                hintText: 'Buscar por número da OS...',
-                prefixIcon:
-                    Icon(Icons.search, color: AppTheme.textHint, size: 20),
-                isDense: true,
-              ),
+            // ── Barras de busca ────────────────────────────────────
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Busca por número da OS
+                Expanded(
+                  child: TextField(
+                    controller: _buscaCtrl,
+                    onChanged: _buscar,
+                    decoration: const InputDecoration(
+                      hintText: 'Buscar por número da OS...',
+                      prefixIcon: Icon(Icons.search,
+                          color: AppTheme.textHint, size: 20),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Busca/filtro por material
+                Expanded(
+                  child: _MaterialFiltroField(
+                    controller:   _buscaMaterialCtrl,
+                    materialNome: _materialFiltroNome,
+                    onSelecionado: (id, nome) => setState(() {
+                      _materialFiltroId   = id;
+                      _materialFiltroNome = nome;
+                    }),
+                    onLimpar: () => setState(() {
+                      _materialFiltroId   = null;
+                      _materialFiltroNome = '';
+                      _buscaMaterialCtrl.clear();
+                    }),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
 
@@ -324,6 +363,228 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
       MaterialPageRoute(
         builder: (_) =>
             _RelacaoDetalhe(relacaoOSId: rel.id, numeroOS: rel.numeroOS),
+      ),
+    );
+  }
+}
+
+// ─── Campo de filtro por material (autocomplete) ──────────────────────────────
+
+class _MaterialFiltroField extends StatefulWidget {
+  final TextEditingController controller;
+  final String materialNome;
+  final void Function(int id, String nome) onSelecionado;
+  final VoidCallback onLimpar;
+
+  const _MaterialFiltroField({
+    required this.controller,
+    required this.materialNome,
+    required this.onSelecionado,
+    required this.onLimpar,
+  });
+
+  @override
+  State<_MaterialFiltroField> createState() => _MaterialFiltroFieldState();
+}
+
+class _MaterialFiltroFieldState extends State<_MaterialFiltroField> {
+  final _focusNode  = FocusNode();
+  final _overlayKey = GlobalKey();
+  OverlayEntry? _overlay;
+  List<MaterialModel> _sugestoes = [];
+  Timer? _debounce;
+  bool _carregando = false;
+
+  @override
+  void dispose() {
+    _fecharOverlay();
+    _debounce?.cancel();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _fecharOverlay() {
+    _overlay?.remove();
+    _overlay = null;
+  }
+
+  Future<void> _buscar(String texto) async {
+    _debounce?.cancel();
+    if (texto.trim().isEmpty) {
+      _fecharOverlay();
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 300), () async {
+      if (!mounted) return;
+      setState(() => _carregando = true);
+      final mp = context.read<MaterialProvider>();
+      final lista = await mp.buscarSugestoes(texto.trim(), limite: 8);
+      if (!mounted) return;
+      setState(() {
+        _sugestoes  = lista;
+        _carregando = false;
+      });
+      _abrirOverlay();
+    });
+  }
+
+  void _abrirOverlay() {
+    _fecharOverlay();
+    if (_sugestoes.isEmpty) return;
+
+    final box = _overlayKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final pos    = box.localToGlobal(Offset.zero);
+    final size   = box.size;
+    final altura = (_sugestoes.length * 56.0).clamp(0.0, 280.0);
+
+    _overlay = OverlayEntry(
+      builder: (_) => Positioned(
+        left:  pos.dx,
+        top:   pos.dy + size.height + 4,
+        width: size.width,
+        child: Material(
+          elevation:    6,
+          borderRadius: BorderRadius.circular(10),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: altura),
+              child: ListView.builder(
+                padding:    EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount:  _sugestoes.length,
+                itemBuilder: (ctx, i) {
+                  final m = _sugestoes[i];
+                  final partes = <String>[
+                    if (m.identificador != null && m.identificador!.isNotEmpty)
+                      m.identificador!,
+                    if (m.medida != null && m.medida!.isNotEmpty) m.medida!,
+                    if (m.espessura != null && m.espessura!.isNotEmpty)
+                      m.espessura!,
+                    if (m.categoria != null && m.categoria!.isNotEmpty)
+                      m.categoria!,
+                  ].join(' · ');
+                  return InkWell(
+                    onTap: () {
+                      _fecharOverlay();
+                      widget.controller.text = m.nome;
+                      widget.onSelecionado(m.id, m.nome);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 36,
+                            child: Text(
+                              '#${m.id}',
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.textHint,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  m.nome,
+                                  style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.textPrimary),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (partes.isNotEmpty)
+                                  Text(
+                                    partes,
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppTheme.textSecondary),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    Overlay.of(context).insert(_overlay!);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final temFiltro = widget.materialNome.isNotEmpty;
+
+    return Focus(
+      focusNode: _focusNode,
+      onFocusChange: (hasFocus) {
+        if (!hasFocus) {
+          Future.delayed(const Duration(milliseconds: 150), _fecharOverlay);
+        }
+      },
+      child: TextField(
+        key:        _overlayKey,
+        controller: widget.controller,
+        onChanged:  (v) {
+          // Se o usuário apaga o campo após ter selecionado, limpa o filtro
+          if (temFiltro && v.isEmpty) widget.onLimpar();
+          _buscar(v);
+        },
+        decoration: InputDecoration(
+          hintText:   'Filtrar por material...',
+          prefixIcon: _carregando
+              ? const Padding(
+                  padding: EdgeInsets.all(10),
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppTheme.primary),
+                  ),
+                )
+              : Icon(
+                  temFiltro ? Icons.filter_alt : Icons.filter_alt_outlined,
+                  color: temFiltro ? AppTheme.primary : AppTheme.textHint,
+                  size: 20,
+                ),
+          suffixIcon: temFiltro
+              ? IconButton(
+                  icon: const Icon(Icons.close,
+                      size: 16, color: AppTheme.textSecondary),
+                  tooltip: 'Limpar filtro de material',
+                  onPressed: widget.onLimpar,
+                )
+              : null,
+          isDense: true,
+          // Destaque visual quando filtro ativo
+          enabledBorder: temFiltro
+              ? OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(
+                      color: AppTheme.primary, width: 1.5),
+                )
+              : null,
+          focusedBorder: temFiltro
+              ? OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      const BorderSide(color: AppTheme.primary, width: 2),
+                )
+              : null,
+        ),
       ),
     );
   }

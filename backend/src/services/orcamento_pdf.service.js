@@ -503,6 +503,21 @@ async function gerarPdfDeItens(dados) {
       menorPorItem.push(menor);
     });
 
+    // Ordena fornecedores pelo total ascendente, zeros por último —
+    // espelha exatamente o sort do Flutter em _buildTabelaMatriz:
+    //   if (ta == 0 && tb == 0) return 0;
+    //   if (ta == 0) return 1;   // zero vai pro fim
+    //   if (tb == 0) return -1;
+    //   return ta.compareTo(tb); // ascendente
+    fornecedores.sort((a, b) => {
+      const ta = totaisForn[a.id]?.total ?? 0;
+      const tb = totaisForn[b.id]?.total ?? 0;
+      if (ta === 0 && tb === 0) return 0;
+      if (ta === 0) return 1;
+      if (tb === 0) return -1;
+      return ta - tb;
+    });
+
     // Total da coluna "Melhor Preço" (soma dos menores por item)
     let totalMelhorPreco  = 0;
     let matComMelhorPreco = 0;

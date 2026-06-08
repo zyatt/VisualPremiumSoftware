@@ -1944,8 +1944,14 @@ class _HistoricoCard extends StatelessWidget {
   final SolicitacaoProducaoModel solicitacao;
   const _HistoricoCard({required this.solicitacao});
 
-  static DateTime _toBrasilia(DateTime utc) =>
-      utc.toUtc().subtract(const Duration(hours: 3));
+  static DateTime _toBrasilia(DateTime dt) {
+    // Garante que o DateTime seja tratado como UTC antes de aplicar o offset de Brasília (UTC-3)
+    final emUtc = dt.isUtc ? dt : DateTime.utc(
+      dt.year, dt.month, dt.day,
+      dt.hour, dt.minute, dt.second, dt.millisecond,
+    );
+    return emUtc.subtract(const Duration(hours: 3));
+  }
 
   Future<void> _confirmarExclusao(BuildContext context) async {
     final confirmar = await showDialog<bool>(

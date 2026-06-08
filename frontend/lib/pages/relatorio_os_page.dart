@@ -41,6 +41,53 @@ String _tituloOS(String numeroOS) {
 
 const _corFechada = Color(0xFF4CAF50);
 
+/// Calcula o custo líquido de uma OS: saídas - entradas, agrupado por material.
+/// Usa o preço da saída como referência. Entradas de materiais sem saída são ignoradas.
+/// Processa em ordem cronológica: apenas entradas POSTERIORES à primeira saída
+/// do material são contadas como devolução (evita somar entradas anteriores à saída).
+double _totalLiquido(List<MovimentacaoModel> movimentacoes) {
+  // materialId → { preco, qtdSaida, qtdEntrada }
+  final porMaterial = <int, Map<String, double>>{};
+
+  // Ordena por criadoEm ascendente (mais antiga primeiro)
+  final ordenadas = [...movimentacoes]
+    ..sort((a, b) {
+      final da = a.criadoEm;
+      final db = b.criadoEm;
+      if (da == null && db == null) return 0;
+      if (da == null) return 1;
+      if (db == null) return -1;
+      return da.compareTo(db);
+    });
+
+  for (final m in ordenadas) {
+    final pu = m.precoUnitario ?? 0.0;
+    final pm = m.precoM2 ?? 0.0;
+    final p  = pu > 0 ? pu : (pm > 0 ? pm : 0.0);
+
+    if (m.tipo == 'SAIDA') {
+      porMaterial.putIfAbsent(
+        m.materialId,
+        () => {'preco': p, 'qtdSaida': 0.0, 'qtdEntrada': 0.0},
+      );
+      final entry = porMaterial[m.materialId]!;
+      if (p > entry['preco']!) entry['preco'] = p;
+      entry['qtdSaida'] = entry['qtdSaida']! + m.quantidade;
+    } else if (m.tipo == 'ENTRADA') {
+      // Só conta como devolução se já houve ao menos uma saída deste material
+      if (porMaterial.containsKey(m.materialId)) {
+        porMaterial[m.materialId]!['qtdEntrada'] =
+            porMaterial[m.materialId]!['qtdEntrada']! + m.quantidade;
+      }
+    }
+  }
+
+  return porMaterial.values.fold(0.0, (acc, e) {
+    final qtdLiquida = (e['qtdSaida']! - e['qtdEntrada']!).clamp(0.0, double.infinity);
+    return acc + e['preco']! * qtdLiquida;
+  });
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // Página principal — lista de OS fechadas
 // ═════════════════════════════════════════════════════════════════════════════
@@ -361,7 +408,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
             Row(
               children: [
                 _DatePickerField(
-                  label: 'Fechado de',
+                  label: 'Criado de',
                   value: _dataInicio,
                   firstDate: DateTime(2020),
                   lastDate: _dataFim ?? DateTime.now(),
@@ -398,16 +445,10 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
             if (!provider.carregando && provider.erro == null && provider.relatorios.isNotEmpty)
               Builder(
                 builder: (_) {
-                  final total = provider.relatorios.fold<double>(0, (acc, rel) {
-                    return acc + rel.movimentacoes
-                        .where((m) => m.tipo == 'SAIDA')
-                        .fold<double>(0, (s, m) {
-                      final pu = m.precoUnitario ?? 0.0;
-                      final pm = m.precoM2 ?? 0.0;
-                      final p  = pu > 0 ? pu : (pm > 0 ? pm : 0.0);
-                      return s + p * m.quantidade;
-                    });
-                  });
+                  final total = provider.relatorios.fold<double>(
+                    0,
+                    (acc, rel) => acc + _totalLiquido(rel.movimentacoes),
+                  );
                   final qtd = provider.relatorios.length;
                   return Container(
                     margin: const EdgeInsets.only(bottom: 12),
@@ -541,23 +582,26 @@ class _RelatorioOSCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final data = relatorio.atualizadoEm ?? relatorio.criadoEm;
-    final dataStr = _fmtData(data);
+    // Data representativa = primeira movimentação (criação real da OS)
+    final todasMovs = relatorio.movimentacoes;
+    DateTime? dataRepresentativa;
+    if (todasMovs.isNotEmpty) {
+      dataRepresentativa = todasMovs
+          .map((m) => m.criadoEm)
+          .whereType<DateTime>()
+          .fold<DateTime?>(null, (min, d) => min == null || d.isBefore(min) ? d : min);
+    }
+    dataRepresentativa ??= relatorio.criadoEm;
+    final dataStr = _fmtData(dataRepresentativa);
 
     final saidas = relatorio.movimentacoes
         .where((m) => m.tipo == 'SAIDA')
         .toList();
+    final entradas = relatorio.movimentacoes
+        .where((m) => m.tipo == 'ENTRADA')
+        .toList();
 
-    final totalGeral = saidas.fold<double>(
-      0,
-      (acc, m) {
-        final pu = m.precoUnitario ?? 0.0;
-        final pm = m.precoM2 ?? 0.0;
-        final p  = pu > 0 ? pu : (pm > 0 ? pm : 0.0);
-        return acc + p * m.quantidade;
-      },
-    );
-
+    final totalGeral = _totalLiquido(relatorio.movimentacoes);
     final materiaisUnicos =
         relatorio.movimentacoes.map((m) => m.materialNome).toSet().length;
 
@@ -627,6 +671,12 @@ class _RelatorioOSCard extends StatelessWidget {
                     style: const TextStyle(
                         fontSize: 11, color: AppTheme.textSecondary),
                   ),
+                  if (entradas.isNotEmpty)
+                    Text(
+                      '${entradas.length} entrada(s). · ${saidas.length} saída(s).',
+                      style: const TextStyle(
+                          fontSize: 11, color: AppTheme.textSecondary),
+                    ),
                   if (totalGeral > 0)
                     Text(
                       _brl(totalGeral),
@@ -945,16 +995,10 @@ class _RelatorioDetalheBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final saidas =
         rel.movimentacoes.where((m) => m.tipo == 'SAIDA').toList();
+    final entradas =
+        rel.movimentacoes.where((m) => m.tipo == 'ENTRADA').toList();
 
-    final totalGeral = saidas.fold<double>(
-      0,
-      (acc, m) {
-        final pu = m.precoUnitario ?? 0.0;
-        final pm = m.precoM2 ?? 0.0;
-        final p  = pu > 0 ? pu : (pm > 0 ? pm : 0.0);
-        return acc + p * m.quantidade;
-      },
-    );
+    final totalGeral = _totalLiquido(rel.movimentacoes);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -972,6 +1016,13 @@ class _RelatorioDetalheBody extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               _SummaryCard(
+                icon: Icons.input_rounded,
+                label: 'Entradas',
+                valor: '${entradas.length}',
+                cor: AppTheme.primary,
+              ),
+              const SizedBox(width: 12),
+              _SummaryCard(
                 icon: Icons.attach_money_rounded,
                 label: 'Total em saídas',
                 valor: _brl(totalGeral),
@@ -980,6 +1031,21 @@ class _RelatorioDetalheBody extends StatelessWidget {
               const SizedBox(width: 12),
               _SummaryCard(
                 icon: Icons.calendar_today_outlined,
+                label: 'Criada em',
+                valor: () {
+                  final movs = rel.movimentacoes;
+                  if (movs.isEmpty) return _fmtData(rel.criadoEm);
+                  final primeira = movs
+                      .map((m) => m.criadoEm)
+                      .whereType<DateTime>()
+                      .fold<DateTime?>(null, (min, d) => min == null || d.isBefore(min) ? d : min);
+                  return _fmtData(primeira ?? rel.criadoEm);
+                }(),
+                cor: AppTheme.textSecondary,
+              ),
+              const SizedBox(width: 12),
+              _SummaryCard(
+                icon: Icons.lock_outline_rounded,
                 label: 'Fechada em',
                 valor: _fmtData(rel.atualizadoEm ?? rel.criadoEm),
                 cor: AppTheme.primary,
@@ -996,6 +1062,18 @@ class _RelatorioDetalheBody extends StatelessWidget {
             movimentacoes: saidas,
             mostrarPreco: true,
           ),
+
+          // ── Entradas ─────────────────────────────────────────────
+          if (entradas.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _MovimentacaoSection(
+              titulo: 'Entradas de material',
+              icone: Icons.input_rounded,
+              cor: AppTheme.primary,
+              movimentacoes: entradas,
+              mostrarPreco: true,
+            ),
+          ],
         ],
       ),
     );
@@ -1383,6 +1461,8 @@ class _MovimentacaoSection extends StatelessWidget {
                     const SizedBox(width: 12),
                     Text(
                       _brl(movimentacoes.fold(0.0, (acc, m) {
+                        // rodapé da tabela: soma bruta das linhas exibidas
+                        // (já filtradas por tipo pela chamada — só saídas chegam aqui)
                         final pu = m.precoUnitario ?? 0.0;
                         final pm = m.precoM2 ?? 0.0;
                         final p  = pu > 0 ? pu : (pm > 0 ? pm : 0.0);

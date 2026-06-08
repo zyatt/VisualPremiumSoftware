@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart'; // ← adicionar este import
+import 'package:visual_premium/pages/gastos_categoria_page.dart';
 import '../pages/admin_page.dart';
 import '../pages/login_page.dart';
 import '../pages/inicio_page.dart';
@@ -99,6 +100,8 @@ class AppRouter {
             GoRoute(path: '/relatorio-os',     builder: (_, __) => const RelatorioOSPage()),
             GoRoute(path: '/producao',         builder: (_, __) => const ProducaoPage()),
             GoRoute(path: '/admin',            builder: (_, __) => const AdminPage()),
+            GoRoute(path: '/gastos-categoria', builder: (_, __) => const GastosCategoriaPage()),
+
           ],
         ),
       ],

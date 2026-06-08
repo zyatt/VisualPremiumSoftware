@@ -16,6 +16,8 @@ import 'providers/historico_provider.dart';
 import 'providers/relatorio_os_provider.dart';
 import 'providers/producao_provider.dart';
 import 'providers/audit_log_provider.dart';
+import 'providers/gastos_categoria_provider.dart';
+import 'providers/alertas_estoque_provider.dart';
 
 import 'widgets/update_checker_widget.dart';
 
@@ -61,7 +63,8 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => RelatorioOSProvider()),
         ChangeNotifierProvider(create: (_) => ProducaoProvider()),
         ChangeNotifierProvider(create: (_) => AuditLogProvider()),
-
+        ChangeNotifierProvider(create: (_) => GastosCategoriaProvider()),
+        ChangeNotifierProvider(create: (_) => AlertasEstoqueProvider()),
       ],
       child: MaterialApp.router(
         title: 'Visual Premium',

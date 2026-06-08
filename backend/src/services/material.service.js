@@ -119,10 +119,9 @@ async function listar(filtros = {}) {
       .filter((p) => p > 0)
       .sort((a, b) => a - b);
 
-    const mediana = (arr) => {
+    const media = (arr) => {
       if (!arr.length) return null;
-      const mid = Math.floor(arr.length / 2);
-      return arr.length % 2 !== 0 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+      return arr.reduce((a, b) => a + b, 0) / arr.length;
     };
 
     const custoUltimaCompra   = _normalizarPreco(m.ultimoValorPago);
@@ -140,8 +139,8 @@ async function listar(filtros = {}) {
     return {
       ...m,
       estoquesEspecificos:  estoquesEspecificosEnriquecidos,
-      precoMediano:         mediana(precos),
-      precoM2Mediano:       mediana(precosM2),
+      precoMediano:         media(precos),
+      precoM2Mediano:       media(precosM2),
       custoUltimaCompra,
       custoM2UltimaCompra,
     };

@@ -5,9 +5,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/usuario_provider.dart';
+import '../providers/alertas_estoque_provider.dart';
 import '../theme/app_theme.dart';
 
-class AppShell extends StatelessWidget {
+class AppShell extends StatefulWidget {
   final Widget child;
   const AppShell({super.key, required this.child});
 
@@ -23,6 +24,8 @@ class AppShell extends StatelessWidget {
     _NavItem(icon: Icons.description_rounded,             label: 'Relatório OS',     route: '/relatorio-os'),
     _NavItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção',         route: '/producao'),
     _NavItem(icon: Icons.admin_panel_settings_rounded,    label: 'Admin',            route: '/admin'),
+    _NavItem(icon: Icons.pie_chart_rounded,               label: 'Gastos',           route: '/gastos-categoria'),
+
   ];
 
   // Itens para COMPRAS (sem Admin; pode ver Produção como somente leitura)
@@ -50,24 +53,44 @@ class AppShell extends StatelessWidget {
   }
 
   @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AlertasEstoqueProvider>().iniciarPolling();
+    });
+  }
+
+  @override
+  void dispose() {
+    // O provider é global (MultiProvider no main), não fazemos pararPolling aqui
+    // para que o polling continue mesmo ao navegar entre páginas.
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final location = GoRouterState.of(context).matchedLocation;
     final isWide   = MediaQuery.of(context).size.width >= 800;
 
     final usuario    = context.watch<UsuarioProvider>().usuarioLogado;
-    final isProducao = isProducaoRole(usuario?.role);
+    final isProducao = AppShell.isProducaoRole(usuario?.role);
     final roleUp     = usuario?.role.trim().toUpperCase() ?? '';
     final isAdmin    = roleUp == 'ADMIN';
     final isGerente  = roleUp == 'GERENTE';
 
     final List<_NavItem> items;
     if (isProducao) {
-      items = _navItemsProducao;
+      items = AppShell._navItemsProducao;
     } else if (isAdmin || isGerente) {
-      items = _navItemsCompleto;
+      items = AppShell._navItemsCompleto;
     } else {
       // COMPRAS e qualquer outro role não-produção
-      items = _navItemsCompras;
+      items = AppShell._navItemsCompras;
     }
 
     return Scaffold(
@@ -75,7 +98,7 @@ class AppShell extends StatelessWidget {
         children: [
           if (isWide)
             _Sidebar(currentRoute: location, items: items),
-          Expanded(child: child),
+          Expanded(child: widget.child),
         ],
       ),
       drawer: isWide
@@ -139,7 +162,10 @@ class _SidebarContentState extends State<_SidebarContent> {
 
   @override
   Widget build(BuildContext context) {
-    final usuario = context.watch<UsuarioProvider>().usuarioLogado;
+    final usuario  = context.watch<UsuarioProvider>().usuarioLogado;
+    final alertas  = context.watch<AlertasEstoqueProvider>();
+    final nAlertas = alertas.totalAlertas;
+    final nCriticos = alertas.totalCriticos;
 
     return Container(
       color: AppTheme.sidebar,
@@ -186,7 +212,20 @@ class _SidebarContentState extends State<_SidebarContent> {
 
             const SizedBox(height: 12),
             const Divider(color: Colors.white10, height: 1),
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
+
+            // ── Banner de alertas de estoque ──────────────────────────────
+            if (nAlertas > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                child: _AlertasSidebarBanner(
+                  totalAlertas: nAlertas,
+                  totalCriticos: nCriticos,
+                  onTap: () => _mostrarPainelAlertas(context, alertas),
+                ),
+              ),
+
+            const SizedBox(height: 4),
 
             // ── Itens de navegação ────────────────────────────────────────
             Expanded(
@@ -273,6 +312,13 @@ class _SidebarContentState extends State<_SidebarContent> {
       ),
     );
   }
+
+  void _mostrarPainelAlertas(BuildContext context, AlertasEstoqueProvider alertas) {
+    showDialog(
+      context: context,
+      builder: (_) => _PainelAlertasDialog(alertas: alertas),
+    );
+  }
 }
 
 // ─── Tile individual ────────────────────────────────────────────────────────
@@ -327,6 +373,333 @@ class _SidebarTile extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─── Banner compacto de alertas na sidebar ───────────────────────────────────
+
+class _AlertasSidebarBanner extends StatelessWidget {
+  final int totalAlertas;
+  final int totalCriticos;
+  final VoidCallback onTap;
+
+  const _AlertasSidebarBanner({
+    required this.totalAlertas,
+    required this.totalCriticos,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isCritico = totalCriticos > 0;
+    final cor = isCritico ? const Color(0xFFDC2626) : const Color(0xFFD97706);
+    final corBg = isCritico
+        ? const Color(0xFFDC2626).withValues(alpha: 0.12)
+        : const Color(0xFFD97706).withValues(alpha: 0.10);
+    final icone = isCritico ? Icons.error_outline_rounded : Icons.warning_amber_rounded;
+    final label = isCritico
+        ? '$totalCriticos crítico${totalCriticos > 1 ? 's' : ''}'
+        : '$totalAlertas no limite';
+
+    return Material(
+      color: corBg,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Row(
+            children: [
+              Icon(icone, size: 15, color: cor),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  label,
+                  style: GoogleFonts.nunito(
+                    color: cor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, size: 14, color: cor.withValues(alpha: 0.7)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Dialog / painel completo de alertas ─────────────────────────────────────
+
+class _PainelAlertasDialog extends StatelessWidget {
+  final AlertasEstoqueProvider alertas;
+  const _PainelAlertasDialog({required this.alertas});
+
+  @override
+  Widget build(BuildContext context) {
+    final criticos = alertas.criticos;
+    final limites  = alertas.limites;
+
+    return AlertDialog(
+      backgroundColor: AppTheme.surface,
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 12, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      title: Row(
+        children: [
+          const Icon(Icons.notifications_active_rounded,
+              color: Color(0xFFDC2626), size: 20),
+          const SizedBox(width: 8),
+          Text(
+            'Alertas de Estoque',
+            style: GoogleFonts.nunito(
+              color: AppTheme.textPrimary,
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+            ),
+          ),
+          const Spacer(),
+          // Botão de atualizar
+          IconButton(
+            tooltip: 'Atualizar',
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            color: AppTheme.textSecondary,
+            onPressed: () => alertas.carregar(),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 420,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 480),
+          child: alertas.carregando
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(32),
+                    child: CircularProgressIndicator(color: Color(0xFFDC2626)),
+                  ),
+                )
+              : alertas.totalAlertas == 0
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 32),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.check_circle_outline_rounded,
+                                size: 48, color: Color(0xFF15803D)),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Nenhum material em alerta',
+                              style: GoogleFonts.nunito(
+                                  color: AppTheme.textSecondary, fontSize: 14),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (criticos.isNotEmpty) ...[
+                            _AlertaSecaoHeader(
+                              label: 'Críticos — abaixo do mínimo',
+                              count: criticos.length,
+                              cor: const Color(0xFFDC2626),
+                              icone: Icons.error_outline_rounded,
+                            ),
+                            const SizedBox(height: 6),
+                            ...criticos.map((a) => _AlertaItemTile(alerta: a)),
+                            if (limites.isNotEmpty) const SizedBox(height: 16),
+                          ],
+                          if (limites.isNotEmpty) ...[
+                            _AlertaSecaoHeader(
+                              label: 'No limite — igual ao mínimo',
+                              count: limites.length,
+                              cor: const Color(0xFFD97706),
+                              icone: Icons.warning_amber_rounded,
+                            ),
+                            const SizedBox(height: 6),
+                            ...limites.map((a) => _AlertaItemTile(alerta: a)),
+                          ],
+                        ],
+                      ),
+                    ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(
+            'Fechar',
+            style: GoogleFonts.nunito(color: AppTheme.textSecondary),
+          ),
+        ),
+        FilledButton.icon(
+          onPressed: () {
+            Navigator.of(context).pop();
+            context.go('/estoque');
+          },
+          icon: const Icon(Icons.inventory_2_rounded, size: 15),
+          label: Text('Ir para Estoque', style: GoogleFonts.nunito()),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AlertaSecaoHeader extends StatelessWidget {
+  final String label;
+  final int count;
+  final Color cor;
+  final IconData icone;
+  const _AlertaSecaoHeader({
+    required this.label,
+    required this.count,
+    required this.cor,
+    required this.icone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icone, size: 14, color: cor),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: GoogleFonts.nunito(
+            color: cor,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          decoration: BoxDecoration(
+            color: cor.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            '$count',
+            style: GoogleFonts.nunito(
+              color: cor,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AlertaItemTile extends StatelessWidget {
+  final dynamic alerta; // AlertaEstoqueModel
+  const _AlertaItemTile({required this.alerta});
+
+  @override
+  Widget build(BuildContext context) {
+    final isCritico = alerta.isCritico as bool;
+    final cor = isCritico ? const Color(0xFFDC2626) : const Color(0xFFD97706);
+
+    // Monta subtítulo com unidade, identificador, medida, espessura
+    final partes = <String>[];
+    if ((alerta.categoria as String?) != null &&
+        (alerta.categoria as String).isNotEmpty) {
+      partes.add(alerta.categoria as String);
+    }
+    if ((alerta.identificador as String?) != null &&
+        (alerta.identificador as String).isNotEmpty) {
+      partes.add(alerta.identificador as String);
+    }
+    if ((alerta.medida as String?) != null &&
+        (alerta.medida as String).isNotEmpty) {
+      partes.add(alerta.medida as String);
+    }
+    if ((alerta.espessura as String?) != null &&
+        (alerta.espessura as String).isNotEmpty) {
+      partes.add(alerta.espessura as String);
+    }
+    final subtitulo = partes.join(' · ');
+
+    final unidade = (alerta.unidade as String?) ?? '';
+    final qtd = (alerta.quantidade as double);
+    final min = (alerta.estoqueMinimo as double);
+    final qtdStr = qtd % 1 == 0 ? qtd.toStringAsFixed(0) : qtd.toStringAsFixed(2);
+    final minStr = min % 1 == 0 ? min.toStringAsFixed(0) : min.toStringAsFixed(2);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: cor.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+        border: Border(left: BorderSide(color: cor, width: 3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  alerta.nome as String,
+                  style: GoogleFonts.nunito(
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (subtitulo.isNotEmpty)
+                  Text(
+                    subtitulo,
+                    style: GoogleFonts.nunito(
+                      color: AppTheme.textHint,
+                      fontSize: 10,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '$qtdStr${unidade.isNotEmpty ? ' $unidade' : ''}',
+                style: GoogleFonts.nunito(
+                  color: cor,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
+              ),
+              Text(
+                'mín $minStr',
+                style: GoogleFonts.nunito(
+                  color: AppTheme.textHint,
+                  fontSize: 10,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

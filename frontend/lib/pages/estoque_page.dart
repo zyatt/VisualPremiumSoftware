@@ -11,6 +11,7 @@ import '../models/material_model.dart';
 import '../providers/estoque_provider.dart';
 import '../providers/material_provider.dart';
 import '../providers/orcamento_provider.dart';
+import '../providers/alertas_estoque_provider.dart';
 import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
 
@@ -225,6 +226,17 @@ class _EstoquePageState extends State<EstoquePage> {
               ],
             ),
             const SizedBox(height: 20),
+
+            // ── Banner de alertas de estoque ───────────────────────────────
+            Consumer<AlertasEstoqueProvider>(
+              builder: (_, alertasProv, __) {
+                if (alertasProv.totalAlertas == 0) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: _AlertasBannerEstoque(provider: alertasProv),
+                );
+              },
+            ),
 
             // ── Campo de busca de categorias ───────────────────────────────
             SizedBox(
@@ -2128,8 +2140,6 @@ class _TabelaMateriais extends StatefulWidget {
     _ColDef(label: 'Estoque atual',               flex: 0.6,  sortKey: 'quantidade'),
     _ColDef(label: 'Estoque mínimo',              flex: 0.6,  sortKey: 'estoqueMinimo'),
     _ColDef(label: 'Unidade',                     flex: 0.9,  sortKey: 'unidade'),
-    _ColDef(label: 'Valor Intermediário',         flex: 0.9,  sortKey: 'precoMediano'),
-    _ColDef(label: 'Valor m² Intermediário',      flex: 0.9,  sortKey: 'precoM2Mediano'),
     _ColDef(label: 'Custo (Últimas compras)',     flex: 0.9,  sortKey: 'ultimoValorPago'),
     _ColDef(label: 'Custo m² (Últimas compras)',  flex: 0.9,  sortKey: 'ultimoValorPagoM2'),
     _ColDef(label: 'Status',                      flex: 0.8,  sortKey: 'status'),
@@ -2449,14 +2459,6 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
     Widget maybeOpacity(Widget child) =>
         inativo ? Opacity(opacity: 0.45, child: child) : child;
  
-    Widget valorCell(double? valor, bool temFornecedores) => _ValorCell(
-          valor: valor,
-          temFornecedores: temFornecedores,
-          onTap: () => widget.onVerFornecedores(m),
-        );
- 
-    // Coluna de "Estoque atual" para material específico:
-    // mostra a soma dos filhos + botão de seta para expandir/recolher
     Widget estoqueAtualCell() {
       if (m.especifico) {
         final total = m.quantidadeTotal;
@@ -2593,22 +2595,8 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _colWrap(cols[widget.mostrarCategoria ? 10 : 9], maybeOpacity(_cell(m.unidade ?? '—', inativo: inativo))),
                 _vDivider(),
  
-                // Valor intermediário
-                _colWrap(cols[widget.mostrarCategoria ? 11 : 10], maybeOpacity(valorCell(
-                  m.precoMediano,
-                  m.fornecedorMateriais.isNotEmpty,
-                ))),
-                _vDivider(),
- 
-                // Valor m² intermediário
-                _colWrap(cols[widget.mostrarCategoria ? 12 : 11], maybeOpacity(valorCell(
-                  m.precoM2Mediano,
-                  m.fornecedorMateriais.isNotEmpty,
-                ))),
-                _vDivider(),
- 
                 // Custo última compra
-                _colWrap(cols[widget.mostrarCategoria ? 13 : 12], maybeOpacity(_CustoCell(
+                _colWrap(cols[widget.mostrarCategoria ? 11 : 10], maybeOpacity(_CustoCell(
                   valor:       m.ultimoValorPago,
                   temHistorico: true,
                   onTap:       () => widget.onVerHistoricoPrecos(m),
@@ -2616,7 +2604,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _vDivider(),
  
                 // Custo m² última compra
-                _colWrap(cols[widget.mostrarCategoria ? 14 : 13], maybeOpacity(_CustoCell(
+                _colWrap(cols[widget.mostrarCategoria ? 12 : 11], maybeOpacity(_CustoCell(
                   valor:       m.ultimoValorPagoM2,
                   temHistorico: true,
                   onTap:       () => widget.onVerHistoricoPrecos(m),
@@ -2624,7 +2612,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _vDivider(),
  
                 // Status
-                _colWrap(cols[widget.mostrarCategoria ? 15 : 14], maybeOpacity(Center(
+                _colWrap(cols[widget.mostrarCategoria ? 13 : 12], maybeOpacity(Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                     child: _StatusBadge(status: m.status),
@@ -2633,7 +2621,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
 
                 // botão Histórico de audit por material
                 _colWrap(
-                  cols[widget.mostrarCategoria ? 16 : 15],
+                  cols[widget.mostrarCategoria ? 14 : 13],
                   Center(
                     child: IconButton(
                       onPressed: () => Navigator.of(context).push(
@@ -2905,14 +2893,8 @@ class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
                 _colWrap(cols[widget.mostrarCategoria ? 8 : 7], _emptyCell()),
                 _vDivider(),
 
-                // col Valor Intermediário + m²: vazios
-                _colWrap(cols[widget.mostrarCategoria ? 9 : 8],  _emptyCell()),
-                _vDivider(),
-                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], _emptyCell()),
-                _vDivider(),
-
                 // col Custo última compra do filho
-                _colWrap(cols[widget.mostrarCategoria ? 11 : 10], _CustoCell(
+                _colWrap(cols[widget.mostrarCategoria ? 9 : 8], _CustoCell(
                   valor:        filho.ultimoValorPago,
                   temHistorico: filho.ultimoValorPago != null,
                   onTap:        () => widget.onVerHistoricoPrecos(pai),
@@ -2920,7 +2902,7 @@ class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
                 _vDivider(),
 
                 // col Custo m² última compra do filho
-                _colWrap(cols[widget.mostrarCategoria ? 12 : 11], _CustoCell(
+                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], _CustoCell(
                   valor:        filho.ultimoValorPagoM2,
                   temHistorico: filho.ultimoValorPagoM2 != null,
                   onTap:        () => widget.onVerHistoricoPrecos(pai),
@@ -2928,9 +2910,9 @@ class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
                 _vDivider(),
 
                 // col Status — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 13 : 12], _emptyCell()),
+                _colWrap(cols[widget.mostrarCategoria ? 11 : 10], _emptyCell()),
                 // col Histórico — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 14 : 13], _emptyCell()),
+                _colWrap(cols[widget.mostrarCategoria ? 12 : 11], _emptyCell()),
               ],
             ),
           ),
@@ -3093,19 +3075,10 @@ class _PrecosFornecedoresDialog extends StatelessWidget {
   final MaterialModel material;
   const _PrecosFornecedoresDialog({required this.material});
 
-  static Set<int> _indicesMediano(List<FornecedorMaterialModel> ordenados) {
-    final validos = ordenados.where((f) => f.preco > 0).toList();
-    if (validos.isEmpty) return {};
-    final n = validos.length;
-    if (n % 2 != 0) return {n ~/ 2};
-    return {n ~/ 2 - 1, n ~/ 2};
-  }
-
   @override
   Widget build(BuildContext context) {
     final lista     = material.fornecedorMateriais;
     final ordenados = [...lista]..sort((a, b) => a.preco.compareTo(b.preco));
-    _indicesMediano(ordenados);
 
     final temMediano  = material.precoMediano != null && material.precoMediano! > 0;
     final temM2       = material.precoM2Mediano != null && material.precoM2Mediano! > 0;
@@ -3141,7 +3114,7 @@ class _PrecosFornecedoresDialog extends StatelessWidget {
                               runSpacing: 4,
                               children: [
                                 const Text(
-                                  'Valor intermediário exibido na tabela:',
+                                  'Valor médio entre fornecedores:',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: AppTheme.textSecondary,
@@ -4861,6 +4834,158 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
           child: const Text('Fechar'),
         ),
       ],
+    );
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// BANNER INLINE DE ALERTAS — exibido no topo da EstoquePage
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AlertasBannerEstoque extends StatelessWidget {
+  final AlertasEstoqueProvider provider;
+  const _AlertasBannerEstoque({required this.provider});
+
+  @override
+  Widget build(BuildContext context) {
+    final criticos   = provider.criticos;
+    final limites    = provider.limites;
+    final hasCritico = criticos.isNotEmpty;
+    final corPrincipal = hasCritico
+        ? const Color(0xFFDC2626)
+        : const Color(0xFFD97706);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: corPrincipal.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: corPrincipal.withValues(alpha: 0.30)),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          leading: Icon(
+            hasCritico ? Icons.error_outline_rounded : Icons.warning_amber_rounded,
+            color: corPrincipal,
+            size: 20,
+          ),
+          title: RichText(
+            text: TextSpan(
+              style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+              children: [
+                TextSpan(
+                  text: hasCritico
+                      ? '${criticos.length} material${criticos.length > 1 ? 'is' : ''} com estoque crítico'
+                      : '${limites.length} material${limites.length > 1 ? 'is' : ''} no limite',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                if (hasCritico && limites.isNotEmpty)
+                  TextSpan(
+                    text: ' e ${limites.length} no limite',
+                    style: const TextStyle(
+                        color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+              ],
+            ),
+          ),
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 260),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (criticos.isNotEmpty)
+                      _BannerSecao(
+                        label: 'CRÍTICO — abaixo do mínimo',
+                        cor: const Color(0xFFDC2626),
+                        alertas: criticos,
+                      ),
+                    if (limites.isNotEmpty)
+                      _BannerSecao(
+                        label: 'LIMITE — igual ao mínimo',
+                        cor: const Color(0xFFD97706),
+                        alertas: limites,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BannerSecao extends StatelessWidget {
+  final String label;
+  final Color cor;
+  final List<dynamic> alertas;
+  const _BannerSecao({required this.label, required this.cor, required this.alertas});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: cor,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: alertas.map<Widget>((a) {
+              final unidade = (a.unidade as String?) ?? '';
+              final qtd     = a.quantidade as double;
+              final qtdStr  = qtd % 1 == 0
+                  ? qtd.toStringAsFixed(0)
+                  : qtd.toStringAsFixed(2);
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: cor.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: cor.withValues(alpha: 0.25)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      a.nome as String,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '$qtdStr${unidade.isNotEmpty ? ' $unidade' : ''}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: cor,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
     );
   }
 }

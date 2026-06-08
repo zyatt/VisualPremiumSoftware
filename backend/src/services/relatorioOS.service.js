@@ -16,15 +16,19 @@ async function listar({ busca, materialId, materialNome, materialIdentificador, 
 
   if (busca) where.numeroOS = { contains: busca, mode: 'insensitive' };
 
-  // ── Filtro de período (fechamento = atualizadoEm) ─────────────────────────
+  // ── Filtro de período (criação = criadoEm da OS) ──────────────────────────
   if (dataInicio || dataFim) {
-    where.atualizadoEm = {};
-    if (dataInicio) where.atualizadoEm.gte = new Date(dataInicio);
+    const filtroData = {};
+    if (dataInicio) filtroData.gte = new Date(dataInicio);
     if (dataFim) {
       const fim = new Date(dataFim);
       fim.setHours(23, 59, 59, 999);
-      where.atualizadoEm.lte = fim;
+      filtroData.lte = fim;
     }
+    // Filtra OS que possuam ao menos uma movimentação criada no período
+    where.movimentacoes = where.movimentacoes
+      ? { some: { ...where.movimentacoes.some, criadoEm: filtroData } }
+      : { some: { criadoEm: filtroData } };
   }
 
   // Filtra OS que possuam ao menos uma movimentação cujo material satisfaça
@@ -88,42 +92,88 @@ async function dadosParaPDF(numeroOS) {
   const relacao = await buscarPorNumeroOS(numeroOS);
   if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
 
-  const saidas = relacao.movimentacoes.filter((m) => m.tipo === 'SAIDA');
+  const saidas   = relacao.movimentacoes.filter((m) => m.tipo === 'SAIDA');
+  const entradas = relacao.movimentacoes.filter((m) => m.tipo === 'ENTRADA');
 
-  const totalGeral = saidas.reduce((acc, m) => {
+  const _precoMov = (m) => {
     const precoUnit = Number(m.precoUnitario || 0);
     const precoM2   = Number(m.precoM2       || 0);
-    const preco     = precoUnit > 0 ? precoUnit : precoM2;
-    const qtd       = Number(m.quantidade);
-    return acc + preco * qtd;
+    return precoUnit > 0 ? precoUnit : precoM2;
+  };
+
+  // ── Total líquido: saídas - entradas, agrupado por materialId ──────────────
+  // Processa as movimentações em ordem cronológica para garantir que apenas
+  // entradas que ocorreram APÓS a primeira saída do material sejam contadas
+  // como devoluções (redutoras de custo). Entradas anteriores à primeira saída
+  // são ignoradas no cálculo — eram movimentações independentes de estoque.
+  const porMaterial = new Map(); // materialId → { preco, qtdSaida, qtdEntrada }
+
+  // Ordena todas as movimentações por criadoEm (mais antiga primeiro)
+  const todasOrdenadas = [...relacao.movimentacoes].sort(
+    (a, b) => new Date(a.criadoEm) - new Date(b.criadoEm)
+  );
+
+  for (const m of todasOrdenadas) {
+    const id = m.materialId;
+
+    if (m.tipo === 'SAIDA') {
+      if (!porMaterial.has(id)) {
+        porMaterial.set(id, { preco: _precoMov(m), qtdSaida: 0, qtdEntrada: 0 });
+      }
+      const entry = porMaterial.get(id);
+      // Caso haja múltiplas saídas com preços diferentes, usa o maior preço
+      if (_precoMov(m) > entry.preco) entry.preco = _precoMov(m);
+      entry.qtdSaida += Number(m.quantidade);
+
+    } else if (m.tipo === 'ENTRADA') {
+      // Só conta como devolução se o material já teve ao menos uma saída nessa OS
+      if (porMaterial.has(id)) {
+        porMaterial.get(id).qtdEntrada += Number(m.quantidade);
+      }
+    }
+  }
+
+  const totalGeral = Array.from(porMaterial.values()).reduce((acc, { preco, qtdSaida, qtdEntrada }) => {
+    const qtdLiquida = Math.max(0, qtdSaida - qtdEntrada);
+    return acc + preco * qtdLiquida;
   }, 0);
 
+  const _mapItem = (m) => {
+    const precoUnit = Number(m.precoUnitario || 0);
+    const precoM2v  = Number(m.precoM2       || 0);
+    const usarM2    = precoUnit === 0 && precoM2v > 0;
+    const preco     = usarM2 ? precoM2v : precoUnit;
+    return {
+      material:      m.material.nome,
+      identificador: m.material.identificador ?? null,
+      medida:        m.material.medida        ?? null,
+      espessura:     m.material.espessura     ?? null,
+      unidade:       m.material.unidade,
+      categoria:     m.material.categoria,
+      quantidade:    Number(m.quantidade),
+      precoUnitario: preco,
+      usarM2,
+      total:         Number(m.quantidade) * preco,
+      data:          m.criadoEm,
+      observacao:    m.observacao,
+    };
+  };
+
+  // Data representativa = criadoEm da movimentação mais antiga (criação real da OS)
+  const todasMovs = [...relacao.movimentacoes];
+  const primeiraMovimentacaoEm = todasMovs.length > 0
+    ? todasMovs.reduce((a, b) => new Date(a.criadoEm) < new Date(b.criadoEm) ? a : b).criadoEm
+    : relacao.criadoEm;
+
   return {
-    numeroOS:  relacao.numeroOS,
-    descricao: relacao.descricao,
-    status:    relacao.status,
-    fechadaEm: relacao.atualizadoEm,
-    geradoEm:  new Date(),
-    itens: saidas.map((m) => {
-      const precoUnit = Number(m.precoUnitario || 0);
-      const precoM2v  = Number(m.precoM2       || 0);
-      const usarM2    = precoUnit === 0 && precoM2v > 0;
-      const preco     = usarM2 ? precoM2v : precoUnit;
-      return {
-        material:      m.material.nome,
-        identificador: m.material.identificador ?? null,
-        medida:        m.material.medida        ?? null,
-        espessura:     m.material.espessura     ?? null,
-        unidade:       m.material.unidade,
-        categoria:     m.material.categoria,
-        quantidade:    Number(m.quantidade),
-        precoUnitario: preco,
-        usarM2,
-        total:         Number(m.quantidade) * preco,
-        data:          m.criadoEm,
-        observacao:    m.observacao,
-      };
-    }),
+    numeroOS:              relacao.numeroOS,
+    descricao:             relacao.descricao,
+    status:                relacao.status,
+    criadoEm:              primeiraMovimentacaoEm,
+    fechadaEm:             relacao.atualizadoEm,
+    geradoEm:              new Date(),
+    itens:                 saidas.map(_mapItem),
+    entradas:              entradas.map(_mapItem),
     totalGeral,
   };
 }
