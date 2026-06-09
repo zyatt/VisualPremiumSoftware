@@ -131,10 +131,10 @@ class SolicitacaoProducaoModel {
       quantidadeUsada:     double.tryParse(json['quantidadeUsada']?.toString() ?? '0') ?? 0.0,
       numeroOS:            json['numeroOS']?.toString() ?? '',
       usuarioNome:         json['usuarioNome']?.toString() ?? '',
-      criadoEm:            DateTime.tryParse(json['criadoEm']?.toString() ?? '') ?? DateTime.now(),
-      atualizadoEm:        DateTime.tryParse(json['atualizadoEm']?.toString() ?? '') ?? DateTime.now(),
+      criadoEm:            (DateTime.tryParse(json['criadoEm']?.toString() ?? '') ?? DateTime.now()).toLocal(),
+      atualizadoEm:        (DateTime.tryParse(json['atualizadoEm']?.toString() ?? '') ?? DateTime.now()).toLocal(),
       finalizadoEm:        json['finalizadoEm'] != null
-          ? DateTime.tryParse(json['finalizadoEm'].toString())
+          ? DateTime.tryParse(json['finalizadoEm'].toString())?.toLocal()
           : null,
       baixas: (json['baixas'] as List?)
               ?.map((e) => BaixaProducaoModel.fromJson(e))
@@ -162,7 +162,7 @@ class BaixaProducaoModel {
       id:         (json['id'] as num?)?.toInt() ?? 0,
       quantidade: double.tryParse(json['quantidade']?.toString() ?? '0') ?? 0.0,
       observacao: json['observacao']?.toString(),
-      criadoEm:   DateTime.tryParse(json['criadoEm']?.toString() ?? '') ?? DateTime.now(),
+      criadoEm:   (DateTime.tryParse(json['criadoEm']?.toString() ?? '') ?? DateTime.now()).toLocal(),
     );
   }
 }

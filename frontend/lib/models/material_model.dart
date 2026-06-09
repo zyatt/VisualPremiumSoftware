@@ -80,9 +80,9 @@ class HistoricoPrecoModel {
             : null,
         quantidade: double.tryParse(json['quantidade'].toString()) ?? 0,
         usarM2:     json['usarM2'] ?? false,
-        criadoEm:   DateTime.parse(json['criadoEm']),
+        criadoEm:   DateTime.parse(json['criadoEm']).toLocal(),
         dataOrdem:  json['ordemCompra']?['data'] != null
-            ? DateTime.tryParse(json['ordemCompra']['data'].toString())
+            ? DateTime.tryParse(json['ordemCompra']['data'].toString())?.toLocal()
             : null,
       );
 }

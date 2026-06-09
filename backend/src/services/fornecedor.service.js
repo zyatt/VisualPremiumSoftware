@@ -146,7 +146,29 @@ async function atualizar(id, data) {
 async function remover(id) {
   const atual = await prisma.fornecedor.findUnique({ where: { id } });
   if (!atual) throw { status: 404, message: 'Fornecedor não encontrado' };
-  return prisma.fornecedor.update({ where: { id }, data: { ativo: false } });
+
+  return prisma.$transaction([
+    // Desativa os vínculos com materiais
+    prisma.fornecedorMaterial.updateMany({
+      where: { fornecedorId: id },
+      data: { ativo: false },
+    }),
+    // Limpa o fornecedor de itens de orçamentos ainda abertos
+    prisma.orcamentoItem.updateMany({
+      where: {
+        fornecedorId: id,
+        orcamento: {
+          status: { in: ['ABERTO', 'AGUARDANDO_APROVACAO'] },
+        },
+      },
+      data: { fornecedorId: null, selecionado: false },
+    }),
+    // Por último, desativa o fornecedor
+    prisma.fornecedor.update({
+      where: { id },
+      data: { ativo: false },
+    }),
+  ]);
 }
 
 async function vincularMaterial(fornecedorId, materialId, preco, precoMetroQuadrado) {

@@ -338,6 +338,72 @@ async function listarTodas(busca) {
   });
 }
 
+// ── Atualizar preço de uma movimentação existente ─────────────────────────────
+// Permite corrigir o custo de uma movimentação sem precisar removê-la e
+// recriá-la. A OS deve estar EM_ANDAMENTO.
+async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, precoM2 }) {
+  const mov = await prisma.movimentacaoEstoque.findUnique({
+    where:   { id: movimentacaoId },
+    include: { relacaoOS: true },
+  });
+  if (!mov) throw { status: 404, message: 'Movimentação não encontrada' };
+  if (mov.relacaoOS?.status === 'FECHADA') {
+    throw { status: 400, message: 'Não é possível editar movimentações de uma OS fechada' };
+  }
+
+  const data = {};
+  if (precoUnitario !== undefined) data.precoUnitario = precoUnitario != null && Number(precoUnitario) > 0 ? Number(precoUnitario) : null;
+  if (precoM2       !== undefined) data.precoM2       = precoM2       != null && Number(precoM2)       > 0 ? Number(precoM2)       : null;
+
+  if (Object.keys(data).length === 0) {
+    throw { status: 400, message: 'Nenhum campo de preço informado' };
+  }
+
+  return prisma.movimentacaoEstoque.update({
+    where: { id: movimentacaoId },
+    data,
+    include: {
+      material: {
+        select: {
+          id: true, nome: true, unidade: true,
+          identificador: true, medida: true, espessura: true,
+          especifico: true,
+        },
+      },
+    },
+  });
+}
+
+// ── Renomear OS ───────────────────────────────────────────────────────────────
+async function renomearOS(id, novoNumeroOS) {
+  const novoNome = (novoNumeroOS ?? '').trim().toUpperCase();
+  if (!novoNome) throw { status: 400, message: 'Nome da OS não pode ser vazio' };
+
+  const relacao = await prisma.relacaoOS.findUnique({ where: { id } });
+  if (!relacao) throw { status: 404, message: 'OS não encontrada' };
+
+  // Garante que não existe outra RelacaoOS com o mesmo nome
+  const conflito = await prisma.relacaoOS.findUnique({ where: { numeroOS: novoNome } });
+  if (conflito && conflito.id !== id) {
+    throw { status: 409, message: `Já existe uma OS com o nome "${novoNome}"` };
+  }
+
+  // Atualiza o nome na RelacaoOS
+  const atualizada = await prisma.relacaoOS.update({
+    where: { id },
+    data:  { numeroOS: novoNome },
+    include: _includeMovimentacoes,
+  });
+
+  // Sincroniza o campo numeroOS em todas as movimentações vinculadas
+  await prisma.movimentacaoEstoque.updateMany({
+    where: { relacaoOSId: id },
+    data:  { numeroOS: novoNome },
+  });
+
+  return atualizada;
+}
+
 module.exports = {
   listarEmAndamento,
   buscarPorNumeroOS,
@@ -346,4 +412,6 @@ module.exports = {
   excluirRelacaoOS,
   fecharOS,
   listarTodas,
+  renomearOS,
+  atualizarPrecoMovimentacao,
 };

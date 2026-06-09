@@ -963,7 +963,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   Timer? _debounceTimer;
 
   static const int _itensPorPagina = 50;
-  int _paginaAtual = 0;
+  int     _paginaAtual  = 0;
+  String? _colunaOrdem;
+  bool    _crescente    = true;
 
   String? _categoriaParaProvider() {
     if (widget.categoriaId == _kCategoriaGeral)        return null;
@@ -1019,6 +1021,54 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
           medida:        _medidaCtrl.text.trim(),
           espessura:     _espessuraCtrl.text.trim(),
         );
+  }
+
+  List<MaterialModel> _ordenarLista(List<MaterialModel> lista) {
+    if (_colunaOrdem == null) return lista;
+    final sorted = [...lista];
+    sorted.sort((a, b) {
+      dynamic va, vb;
+      switch (_colunaOrdem) {
+        case 'id':               va = a.id;               vb = b.id;               break;
+        case 'identificador':    va = a.identificador;    vb = b.identificador;    break;
+        case 'nome':             va = a.nome;             vb = b.nome;             break;
+        case 'categoria':        va = a.categoria;        vb = b.categoria;        break;
+        case 'medida':           va = a.medida;           vb = b.medida;           break;
+        case 'espessura':        va = a.espessura;        vb = b.espessura;        break;
+        case 'largura':          va = a.largura;          vb = b.largura;          break;
+        case 'comprimento':      va = a.comprimento;      vb = b.comprimento;      break;
+        case 'quantidade':       va = a.quantidade;       vb = b.quantidade;       break;
+        case 'estoqueMinimo':    va = a.estoqueMinimo;    vb = b.estoqueMinimo;    break;
+        case 'unidade':          va = a.unidade;          vb = b.unidade;          break;
+        case 'precoMediano':     va = a.precoMediano;     vb = b.precoMediano;     break;
+        case 'precoM2Mediano':   va = a.precoM2Mediano;   vb = b.precoM2Mediano;   break;
+        case 'ultimoValorPago':  va = a.ultimoValorPago;  vb = b.ultimoValorPago;  break;
+        case 'ultimoValorPagoM2':va = a.ultimoValorPagoM2;vb = b.ultimoValorPagoM2;break;
+        case 'status':           va = a.status;           vb = b.status;           break;
+        default:                 return 0;
+      }
+      if (va == null && vb == null) return 0;
+      if (va == null) return _crescente ? 1 : -1;
+      if (vb == null) return _crescente ? -1 : 1;
+      final cmp = va is num
+          ? (va).compareTo(vb as num)
+          : va.toString().toLowerCase().compareTo(vb.toString().toLowerCase());
+      return _crescente ? cmp : -cmp;
+    });
+    return sorted;
+  }
+
+  void _toggleOrdem(String sortKey) {
+    setState(() {
+      if (_colunaOrdem == sortKey) {
+        _crescente = !_crescente;
+      } else {
+        _colunaOrdem = sortKey;
+        _crescente   = true;
+      }
+      // Volta para a primeira página ao mudar a ordenação
+      _paginaAtual = 0;
+    });
   }
 
   // ── Ações de material ──────────────────────────────────────────────────────
@@ -1713,11 +1763,12 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   }
 
                   final todos        = provider.materiais;
-                  final totalPaginas = (todos.length / _itensPorPagina).ceil();
+                  final ordenados    = _ordenarLista(todos);
+                  final totalPaginas = (ordenados.length / _itensPorPagina).ceil();
                   final paginaSegura = _paginaAtual.clamp(0, (totalPaginas - 1).clamp(0, 999));
                   final inicio       = paginaSegura * _itensPorPagina;
-                  final fim          = (inicio + _itensPorPagina).clamp(0, todos.length);
-                  final paginados    = todos.sublist(inicio, fim);
+                  final fim          = (inicio + _itensPorPagina).clamp(0, ordenados.length);
+                  final paginados    = ordenados.sublist(inicio, fim);
 
                   final mostrarCat = widget.categoriaId == _kCategoriaGeral ||
                                      widget.categoriaId == _kCategoriaSemCategoria;
@@ -1732,6 +1783,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                             onVerFornecedores:    _abrirPrecosFornecedores,
                             onVerHistoricoPrecos: _abrirHistoricoPrecos,
                             mostrarCategoria:     mostrarCat,
+                            colunaOrdem:          _colunaOrdem,
+                            crescente:            _crescente,
+                            onToggleOrdem:        _toggleOrdem,
                           ),
                         ),
                       ),
@@ -1740,7 +1794,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                         _BarraPaginacao(
                           paginaAtual:     paginaSegura,
                           totalPaginas:    totalPaginas,
-                          totalItens:      todos.length,
+                          totalItens:      ordenados.length,
                           itensPorPagina:  _itensPorPagina,
                           onPaginaChanged: (p) => setState(() => _paginaAtual = p),
                         ),
@@ -2119,6 +2173,9 @@ class _TabelaMateriais extends StatefulWidget {
   final void Function(MaterialModel) onVerFornecedores;
   final void Function(MaterialModel) onVerHistoricoPrecos;
   final bool mostrarCategoria;
+  final String? colunaOrdem;
+  final bool crescente;
+  final void Function(String sortKey) onToggleOrdem;
  
   const _TabelaMateriais({
     required this.materiais,
@@ -2126,6 +2183,9 @@ class _TabelaMateriais extends StatefulWidget {
     required this.onVerFornecedores,
     required this.onVerHistoricoPrecos,
     this.mostrarCategoria = true,
+    required this.colunaOrdem,
+    required this.crescente,
+    required this.onToggleOrdem,
   });
 
   static const List<_ColDef> _colsBase = [
@@ -2155,8 +2215,6 @@ class _TabelaMateriais extends StatefulWidget {
 }
 
 class _TabelaMateriaisState extends State<_TabelaMateriais> {
-  String? _colunaOrdem;
-  bool    _crescente = true;
   final ScrollController _scrollCtrl = ScrollController();
 
   @override
@@ -2169,52 +2227,6 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
       ? _TabelaMateriais._colsBase
       : _TabelaMateriais._colsBase.where((c) => c.label != 'Categoria').toList();
 
-  List<MaterialModel> _ordenar(List<MaterialModel> lista) {
-    if (_colunaOrdem == null) return lista;
-    final sorted = [...lista];
-    sorted.sort((a, b) {
-      dynamic va, vb;
-      switch (_colunaOrdem) {
-        case 'id':               va = a.id;               vb = b.id;               break;
-        case 'identificador':    va = a.identificador;    vb = b.identificador;    break;
-        case 'nome':             va = a.nome;             vb = b.nome;             break;
-        case 'categoria':        va = a.categoria;        vb = b.categoria;        break;
-        case 'medida':           va = a.medida;           vb = b.medida;           break;
-        case 'espessura':        va = a.espessura;        vb = b.espessura;        break;
-        case 'largura':          va = a.largura;          vb = b.largura;          break;
-        case 'comprimento':      va = a.comprimento;      vb = b.comprimento;      break;
-        case 'quantidade':       va = a.quantidade;       vb = b.quantidade;       break;
-        case 'estoqueMinimo':    va = a.estoqueMinimo;    vb = b.estoqueMinimo;    break;
-        case 'unidade':          va = a.unidade;          vb = b.unidade;          break;
-        case 'precoMediano':     va = a.precoMediano;     vb = b.precoMediano;     break;
-        case 'precoM2Mediano':   va = a.precoM2Mediano;   vb = b.precoM2Mediano;   break;
-        case 'ultimoValorPago':  va = a.ultimoValorPago;  vb = b.ultimoValorPago;  break;
-        case 'ultimoValorPagoM2':va = a.ultimoValorPagoM2;vb = b.ultimoValorPagoM2;break;
-        case 'status':           va = a.status;           vb = b.status;           break;
-        default:                 return 0;
-      }
-      if (va == null && vb == null) return 0;
-      if (va == null) return _crescente ? 1 : -1;
-      if (vb == null) return _crescente ? -1 : 1;
-      final cmp = va is num
-          ? (va).compareTo(vb as num)
-          : va.toString().toLowerCase().compareTo(vb.toString().toLowerCase());
-      return _crescente ? cmp : -cmp;
-    });
-    return sorted;
-  }
-
-  void _toggleOrdem(String sortKey) {
-    setState(() {
-      if (_colunaOrdem == sortKey) {
-        _crescente = !_crescente;
-      } else {
-        _colunaOrdem = sortKey;
-        _crescente   = true;
-      }
-    });
-  }
-
   Widget _cabecalho() => Container(
         color: AppTheme.surfaceVariant,
         child: Row(
@@ -2225,9 +2237,9 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
                 col.sortKey != null
                     ? _CabecalhoOrdenavel(
                         label:    col.label,
-                        ativo:    _colunaOrdem == col.sortKey,
-                        crescente: _crescente,
-                        onTap:    () => _toggleOrdem(col.sortKey!),
+                        ativo:    widget.colunaOrdem == col.sortKey,
+                        crescente: widget.crescente,
+                        onTap:    () => widget.onToggleOrdem(col.sortKey!),
                       )
                     : Padding(
                         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -2250,8 +2262,8 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
   
   @override
   Widget build(BuildContext context) {
-    final confirmados = _ordenar(widget.materiais.where((m) =>  m.estoqueConfirmado).toList());
-    final naoConfirm  = _ordenar(widget.materiais.where((m) => !m.estoqueConfirmado).toList());
+    final confirmados = widget.materiais.where((m) =>  m.estoqueConfirmado).toList();
+    final naoConfirm  = widget.materiais.where((m) => !m.estoqueConfirmado).toList();
 
     // Corpo rolável (sem o cabeçalho — ele fica fixo acima)
     Widget corpoRolavel = SingleChildScrollView(
@@ -4377,6 +4389,18 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   }
 }
 
+/// Formata um valor monetário com até 5 casas decimais, removendo zeros
+/// desnecessários à direita (mínimo 2 casas para manter padrão monetário).
+/// Ex: 1.5 → "1,50" | 0.12345 → "0,12345" | 1.00 → "1,00"
+String _formatarCusto(double valor) {
+  // Tenta de 5 até 2 casas decimais e usa a primeira que não tenha zero final
+  for (int casas = 5; casas >= 2; casas--) {
+    final str = valor.toStringAsFixed(casas);
+    if (!str.endsWith('0')) return str;
+  }
+  return valor.toStringAsFixed(2);
+}
+
 class _CustoCell extends StatefulWidget {
   final double? valor;
   final bool temHistorico;
@@ -4398,7 +4422,7 @@ class _CustoCellState extends State<_CustoCell> {
   @override
   Widget build(BuildContext context) {
     final hasValue  = widget.valor != null && widget.valor! > 0;
-    final label     = hasValue ? 'R\$ ${widget.valor!.toStringAsFixed(2)}' : '—';
+    final label     = hasValue ? 'R\$ ${_formatarCusto(widget.valor!)}' : '—';
     final showHover = widget.temHistorico && _hovered;
 
     return MouseRegion(
@@ -4759,7 +4783,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                   width: 90,
                                   child: Text(
                                     !h.usarM2 && h.precoUnitario > 0
-                                        ? 'R\$ ${h.precoUnitario.toStringAsFixed(2)}'
+                                        ? 'R\$ ${h.precoUnitario.toStringAsFixed(5)}'
                                         : '—',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
@@ -4777,7 +4801,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                   width: 90,
                                   child: Text(
                                     h.usarM2 && h.precoM2 != null && h.precoM2! > 0
-                                        ? 'R\$ ${h.precoM2!.toStringAsFixed(2)}'
+                                        ? 'R\$ ${h.precoM2!.toStringAsFixed(5)}'
                                         : '—',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
@@ -4794,7 +4818,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                 SizedBox(
                                   width: 90,
                                   child: Text(
-                                    'R\$ ${h.total.toStringAsFixed(2)}',
+                                    'R\$ ${h.total.toStringAsFixed(5)}',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
                                       fontSize: 13,

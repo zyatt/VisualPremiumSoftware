@@ -24,6 +24,7 @@ app.use('/api/producao',        require('./routes/producao.routes'));
 app.use('/api/audit-log',       require('./routes/audit-log.routes'));
 app.use('/api/gastos-categoria',require('./routes/gastos_categoria_route'));
 app.use('/api/alertas-estoque', require('./routes/alertas_estoque_route'));
+app.use('/api/veiculos',        require('./routes/veiculo_route'));   // ← NOVO
 
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 

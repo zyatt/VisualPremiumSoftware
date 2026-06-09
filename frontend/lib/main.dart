@@ -18,6 +18,7 @@ import 'providers/producao_provider.dart';
 import 'providers/audit_log_provider.dart';
 import 'providers/gastos_categoria_provider.dart';
 import 'providers/alertas_estoque_provider.dart';
+import 'providers/veiculo_provider.dart';           // ← NOVO
 
 import 'widgets/update_checker_widget.dart';
 
@@ -25,12 +26,10 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
 
-  // Cria os providers antes do runApp para poder restaurar a sessão
   final usuarioProvider   = UsuarioProvider();
   final orcamentoProvider = OrcamentoProvider();
   usuarioProvider.setOrcamentoProvider(orcamentoProvider);
 
-  // Restaura sessão salva (token + usuário) antes de exibir qualquer tela
   await usuarioProvider.restaurarSessao();
 
   runApp(VisualPremiumApp(
@@ -65,6 +64,7 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuditLogProvider()),
         ChangeNotifierProvider(create: (_) => GastosCategoriaProvider()),
         ChangeNotifierProvider(create: (_) => AlertasEstoqueProvider()),
+        ChangeNotifierProvider(create: (_) => VeiculoProvider()),  // ← NOVO
       ],
       child: MaterialApp.router(
         title: 'Visual Premium',

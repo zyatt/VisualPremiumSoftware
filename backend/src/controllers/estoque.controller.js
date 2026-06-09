@@ -12,5 +12,10 @@ const renomearOS = async (req, res, next) => {
     res.json(await svc.renomearOS(Number(req.params.id), req.body.novoNumeroOS));
   } catch (e) { next(e); }
 };
+const atualizarPrecoMovimentacao = async (req, res, next) => {
+  try {
+    res.json(await svc.atualizarPrecoMovimentacao(+req.params.movimentacaoId, req.body));
+  } catch (e) { next(e); }
+};
 
-module.exports = { listar, buscarPorNumeroOS, registrarMovimentacao, removerMovimentacao, excluirRelacaoOS, fecharOS, listarTodas, renomearOS };
+module.exports = { listar, buscarPorNumeroOS, registrarMovimentacao, removerMovimentacao, excluirRelacaoOS, fecharOS, listarTodas, renomearOS, atualizarPrecoMovimentacao };

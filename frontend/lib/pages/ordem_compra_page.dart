@@ -2986,12 +2986,17 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   void initState() {
     super.initState();
     _qtdCtrl = TextEditingController(
-        text: widget.item.quantidade
-            .toStringAsFixed(widget.item.quantidade % 1 == 0 ? 0 : 2));
+        text: widget.item.quantidade == 0
+            ? ''
+            : widget.item.quantidade % 1 == 0
+                ? widget.item.quantidade.toInt().toString()
+                : widget.item.quantidade.toString());
     _precoCtrl = TextEditingController(
-        text: widget.item.precoUnitario.toStringAsFixed(2));
+        text: widget.item.precoUnitario == 0 ? '' : widget.item.precoUnitario.toString());
     _precoM2Ctrl = TextEditingController(
-        text: widget.item.precoMetroQuadrado?.toStringAsFixed(2) ?? '');
+        text: widget.item.precoMetroQuadrado != null && widget.item.precoMetroQuadrado! > 0
+            ? widget.item.precoMetroQuadrado!.toString()
+            : '');
     _descricaoCtrl = TextEditingController(
         text: widget.item.descricaoItem ?? '');
   }
@@ -3241,8 +3246,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       keyboardType: const TextInputType.numberWithOptions(
                           decimal: true),
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                            RegExp(r'^\d*\.?\d*'))
+                        FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))
                       ],
                       onChanged: (v) {
                         widget.item.quantidade =
@@ -3281,7 +3285,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       ),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
+                        FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))
                       ],
                       onChanged: (v) {
                         final valor = v.trim().isEmpty ? 0.0 : (double.tryParse(v) ?? 0.0);
@@ -3320,7 +3324,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       ),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
+                        FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))
                       ],
                       onChanged: (v) {
                         final valor = v.trim().isEmpty ? null : double.tryParse(v);

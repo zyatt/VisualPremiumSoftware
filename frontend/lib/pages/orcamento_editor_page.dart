@@ -97,6 +97,40 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
   bool _salvando = false;
   String _ordemTotais = 'unitario';
 
+  // ── Seleção para cópia ────────────────────────────────────────────────────
+  final Set<String> _itensSelecionados = {};
+
+  static String _textoMaterial(dynamic item) {
+    final partes = <String>[item.materialNome as String];
+    final medida = item.materialMedida as String?;
+    final esp    = item.materialEspessura as String?;
+    if (medida != null && medida.isNotEmpty) partes.add(medida);
+    if (esp    != null && esp.isNotEmpty)    partes.add(esp);
+    return partes.join(' · ');
+  }
+
+  void _copiarItem(dynamic item) {
+    Clipboard.setData(ClipboardData(text: _textoMaterial(item)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Copiado: ${_textoMaterial(item)}'),
+      duration: const Duration(seconds: 2),
+      backgroundColor: AppTheme.primary,
+    ));
+  }
+
+  void _copiarSelecionados(List<dynamic> itens) {
+    final sel = itens.where((i) => _itensSelecionados.contains(i.itemId as String)).toList();
+    if (sel.isEmpty) return;
+    final texto = sel.map(_textoMaterial).join('\n');
+    Clipboard.setData(ClipboardData(text: texto));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('${sel.length} ${sel.length == 1 ? 'material copiado' : 'materiais copiados'}'),
+      duration: const Duration(seconds: 2),
+      backgroundColor: AppTheme.primary,
+    ));
+    setState(() => _itensSelecionados.clear());
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1316,6 +1350,23 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           child: Row(children: [
             const Text('Comparativo de Preços', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
             const Spacer(),
+            if (_itensSelecionados.isNotEmpty) ...[
+              FilledButton.icon(
+                onPressed: () => _copiarSelecionados(itens),
+                icon: const Icon(Icons.copy_all, size: 13),
+                label: Text('Copiar ${_itensSelecionados.length}', style: const TextStyle(fontSize: 11)),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => setState(() => _itensSelecionados.clear()),
+                child: const Text('Limpar', style: TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+              ),
+              const SizedBox(width: 12),
+            ],
             const Text('Orçar por', style: TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
             const SizedBox(width: 6),
             _OrdemTotaisBtn(label: 'Unit.', icon: Icons.straighten, ativo: _ordemTotais == 'unitario', onTap: () => setState(() => _ordemTotais = 'unitario')),
@@ -1363,9 +1414,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                             final item = itens[idx];
                             final isSelected = item.fornecedorSelecionado != null;
                             final melhor = melhorPorMaterial[idx];
-                            const double iconX = 18;
                             const double padH = 6;
-                            final double textWidth = colMaterial - iconX - padH * 2;
 
                             return Container(
                               color: isSelected
@@ -1387,11 +1436,30 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                                             child: Icon(Icons.close, size: 14, color: AppTheme.textHint),
                                           ),
                                         ),
+                                        // Checkbox de seleção para cópia
                                         SizedBox(
-                                          width: textWidth,
+                                          width: 18,
+                                          height: 18,
+                                          child: Checkbox(
+                                            value: _itensSelecionados.contains(item.itemId),
+                                            onChanged: (v) => setState(() {
+                                              if (v == true) {
+                                                _itensSelecionados.add(item.itemId);
+                                              } else {
+                                                _itensSelecionados.remove(item.itemId);
+                                              }
+                                            }),
+                                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                            visualDensity: VisualDensity.compact,
+                                            side: const BorderSide(color: AppTheme.textHint, width: 1.2),
+                                            activeColor: AppTheme.primary,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 3),
+                                        Expanded(
                                           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                              Expanded(child: Text(item.materialNome,
+                                              Flexible(child: Text(item.materialNome,
                                                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
                                                 softWrap: true)),
                                               if (item.materialEspecifico)
@@ -1401,10 +1469,20 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                                                   decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(3)),
                                                   child: const Text('ESP', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700, color: AppTheme.primary)),
                                                 ),
+                                              GestureDetector(
+                                                onTap: () => _copiarItem(item),
+                                                child: const Padding(
+                                                  padding: EdgeInsets.only(left: 4, top: 1),
+                                                  child: Tooltip(
+                                                    message: 'Copiar nome',
+                                                    child: Icon(Icons.copy_outlined, size: 12, color: AppTheme.textHint),
+                                                  ),
+                                                ),
+                                              ),
                                             ]),
-                                            if ([item.materialCategoria, item.materialMedida, item.materialEspessura, item.materialIdentificador].any((s) => s != null && s.isNotEmpty))
+                                            if ([item.materialMedida, item.materialEspessura, item.materialIdentificador].any((s) => s != null && s.isNotEmpty))
                                               Text(
-                                                [item.materialCategoria, item.materialMedida, item.materialEspessura, item.materialIdentificador].where((s) => s != null && s.isNotEmpty).join(' · '),
+                                                [item.materialMedida, item.materialEspessura, item.materialIdentificador].where((s) => s != null && s.isNotEmpty).join(' · '),
                                                 style: const TextStyle(fontSize: 9, color: AppTheme.textSecondary),
                                                 softWrap: true,
                                               ),
@@ -1425,10 +1503,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                                                   borderRadius: BorderRadius.circular(6),
                                                   border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
                                                 ),
-                                                child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                                                  Icon(Icons.person_add_outlined, size: 13, color: AppTheme.primary),
-                                                  SizedBox(width: 4),
-                                                  Text('Adicionar fornecedor', style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                                                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                                  const Icon(Icons.person_add_outlined, size: 13, color: AppTheme.primary),
+                                                  const SizedBox(width: 4),
+                                                  const Flexible(child: Text('Adicionar fornecedor', style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
                                                 ]),
                                               ),
                                             ),

@@ -553,16 +553,60 @@ async function gerarPdfDeItens(dados) {
 
     // ── Layout de colunas ────────────────────────────────────────────────
     // Colunas fixas: Material | Qtd | ...Fornecedores... | Melhor Preço
-    const COL_MAT    = 150;
-    const COL_QTD    = 48;
-    const COL_MELHOR = 85;
-    const FOOTER_RES = 100;
-    const fixedW     = COL_MAT + COL_QTD + COL_MELHOR;
+    // Escala automaticamente para acomodar qualquer número de fornecedores
     const nForn      = fornecedores.length;
-    // Cada coluna de fornecedor: divide o espaço restante, mínimo 80
-    const COL_FORN   = nForn > 0
-      ? Math.max(80, (contentW - fixedW) / nForn)
-      : 80;
+    const FOOTER_RES = 100;
+
+    // Largura ideal por fornecedor quando há espaço sobrando
+    const FORN_IDEAL = 85;
+
+    // Calcula quanto espaço é necessário com as proporções padrão
+    // e reduz as colunas fixas proporcionalmente se necessário
+    const calcLayout = () => {
+      // Largura mínima absoluta da coluna Melhor Preço — nunca eliminada
+      const MELHOR_MIN = 60;
+      // Largura mínima por coluna de fornecedor antes de comprimir fixas
+      const FORN_ABS   = 50;
+
+      // Passo 1: tamanhos ideais
+      let mat    = 150;
+      let qtd    = 48;
+      let melhor = 80;
+      let forn   = nForn > 0 ? (contentW - mat - qtd - melhor) / nForn : FORN_IDEAL;
+
+      // Cap superior: não deixar fornecedor ficar largo demais
+      if (forn >= FORN_IDEAL) forn = FORN_IDEAL;
+
+      // Passo 2: comprime colunas fixas moderadamente (mat→110, qtd→36, melhor→70)
+      if (forn < FORN_ABS) {
+        mat    = 110;
+        qtd    = 36;
+        melhor = 70;
+        forn   = nForn > 0 ? (contentW - mat - qtd - melhor) / nForn : FORN_IDEAL;
+      }
+
+      // Passo 3: comprime mais agressivamente (mat→88, qtd→28, melhor→MELHOR_MIN)
+      if (forn < FORN_ABS) {
+        mat    = 88;
+        qtd    = 28;
+        melhor = MELHOR_MIN;
+        forn   = nForn > 0 ? (contentW - mat - qtd - melhor) / nForn : FORN_IDEAL;
+      }
+
+      // Passo 4: aceita forn menor que FORN_ABS — divide o que sobra igualmente
+      // (coluna Melhor jamais é zerada; apenas forn encolhe mais)
+      if (forn < FORN_ABS) {
+        forn = Math.max(38, (contentW - mat - qtd - melhor) / nForn);
+      }
+
+      return { COL_MAT: mat, COL_QTD: qtd, COL_MELHOR: melhor, COL_FORN: forn };
+    };
+
+    const { COL_MAT, COL_QTD, COL_MELHOR, COL_FORN } = calcLayout();
+
+    // Fator de escala para fontes (1.0 em tamanho normal, <1 quando comprimido)
+    const fontScale  = Math.min(1, COL_FORN / FORN_IDEAL);
+    const fornFontSz = Math.max(5, Math.round(6.5 * fontScale * 10) / 10);
 
     // x inicial de cada coluna
     const xMat    = margin;
@@ -608,11 +652,11 @@ async function gerarPdfDeItens(dados) {
              .text('▼ MENOR TOTAL', x + 4, y + 5, { width: COL_FORN - 8, align: 'center', lineBreak: false });
         }
 
-        doc.font('Helvetica-Bold').fontSize(isMenuor ? 7 : 6.5)
+        doc.font('Helvetica-Bold').fontSize(isMenuor ? Math.min(7, fornFontSz + 0.5) : fornFontSz)
            .fillColor(isMenuor ? C.statusOk : C.gray)
            .text(nome, x + 4, isMenuor ? y + 13 : ty - 3, { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
-        doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
+        doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 1)).fillColor(C.lightGray)
            .text(`${cob}/${totalMateriais} mat.`, x + 4, isMenuor ? y + 21 : ty + 8,
                  { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
@@ -652,13 +696,13 @@ async function gerarPdfDeItens(dados) {
         const isMen  = menorTotalForn != null && info.total === menorTotalForn && info.total > 0;
         const semPrc = info.vinculados - info.comPreco;
 
-        doc.font('Helvetica-Bold').fontSize(isMen ? 8 : 7)
+        doc.font('Helvetica-Bold').fontSize(isMen ? Math.min(8, fornFontSz + 1) : fornFontSz)
            .fillColor(isMen ? C.statusOk : (info.total > 0 ? C.black : C.lightGray))
            .text(info.total > 0 ? formatCurrency(info.total) : '—',
                  x + 4, semPrc > 0 ? ty - 3 : ty, { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
         if (semPrc > 0) {
-          doc.font('Helvetica').fontSize(5.5).fillColor(C.statusWarn)
+          doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 1)).fillColor(C.statusWarn)
              .text(`${semPrc} sem preço`, x + 4, ty + 7, { width: COL_FORN - 8, align: 'center', lineBreak: false });
         }
       });
@@ -813,23 +857,23 @@ async function gerarPdfDeItens(dados) {
           if (preco != null) {
             // Seta para baixo + preço
             if (isMen) {
-              doc.font('Helvetica-Bold').fontSize(5.5).fillColor(C.statusOk)
+              doc.font('Helvetica-Bold').fontSize(Math.max(4.5, fornFontSz - 1)).fillColor(C.statusOk)
                  .text('▼ MENOR', x + 4, y + 5, { width: COL_FORN - 8, align: 'center', lineBreak: false });
             }
             const precoY = isMen ? y + 12 : tyCtr - 4;
             doc.font(isMen ? 'Helvetica-Bold' : 'Helvetica')
-               .fontSize(isMen ? 8 : 7.5)
+               .fontSize(isMen ? Math.min(8, fornFontSz + 1) : fornFontSz)
                .fillColor(isMen ? C.statusOk : C.black)
                .text(formatCurrency(preco), x + 4, precoY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
             // Total da linha
             if (total != null) {
-              doc.font('Helvetica').fontSize(5.5)
+              doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 1))
                  .fillColor(isMen ? '#15803D' : C.gray)
                  .text(formatCurrency(total), x + 4, precoY + 9, { width: COL_FORN - 8, align: 'center', lineBreak: false });
             }
           } else {
-            doc.font('Helvetica').fontSize(6).fillColor(C.lightGray)
+            doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 0.5)).fillColor(C.lightGray)
                .text('sem preço', x + 4, tyCtr, { width: COL_FORN - 8, align: 'center', lineBreak: false });
           }
         });

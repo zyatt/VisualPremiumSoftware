@@ -182,4 +182,21 @@ class EstoqueRepository {
     final list = await ApiClient.getList(path);
     return list.map((e) => RelacaoOSModel.fromJson(e as Map<String, dynamic>)).toList();
   }
+
+  /// PATCH /api/estoque/movimentacoes/:id/preco
+  /// Atualiza apenas o custo (precoUnitario e/ou precoM2) de uma movimentação.
+  /// A OS deve estar EM_ANDAMENTO; quantidade e saldo de estoque não são afetados.
+  Future<void> atualizarPrecoMovimentacao(
+    int movimentacaoId, {
+    double? precoUnitario,
+    double? precoM2,
+  }) async {
+    final body = <String, dynamic>{};
+    if (precoUnitario != null) body['precoUnitario'] = precoUnitario;
+    if (precoM2       != null) body['precoM2']       = precoM2;
+    await ApiClient.patch(
+      '/estoque/movimentacoes/$movimentacaoId/preco',
+      body,
+    );
+  }
 }

@@ -1,7 +1,8 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:provider/provider.dart'; // ← adicionar este import
+import 'package:provider/provider.dart';
 import 'package:visual_premium/pages/gastos_categoria_page.dart';
+import 'package:visual_premium/pages/veiculo_page.dart';         // ← NOVO
 import '../pages/admin_page.dart';
 import '../pages/login_page.dart';
 import '../pages/inicio_page.dart';
@@ -59,7 +60,8 @@ class AppRouter {
 
         if (isAdmin || isGerente) return null;
 
-        if (isProducao && _rotasBloqueadasParaProducao.any((r) => path.startsWith(r))) {
+        if (isProducao &&
+            _rotasBloqueadasParaProducao.any((r) => path.startsWith(r))) {
           return '/producao';
         }
         if (isProducao && path.startsWith('/admin')) {
@@ -81,27 +83,48 @@ class AppRouter {
           navigatorKey: _shellNavigatorKey,
           builder: (_, __, child) => AppShell(child: child),
           routes: [
-            GoRoute(path: '/inicio',           builder: (_, __) => const InicioPage()),
+            GoRoute(path: '/inicio', builder: (_, __) => const InicioPage()),
 
-            // ↓ CORREÇÃO: lê o role do provider e passa para EstoquePage
             GoRoute(
               path: '/estoque',
               builder: (context, __) => EstoquePage(
-                roleUsuario: Provider.of<UsuarioProvider>(context, listen: false)
-                    .usuarioLogado?.role ?? '',
+                roleUsuario:
+                    Provider.of<UsuarioProvider>(context, listen: false)
+                            .usuarioLogado
+                            ?.role ??
+                        '',
               ),
             ),
 
-            GoRoute(path: '/fornecedores',     builder: (_, __) => const FornecedoresPage()),
-            GoRoute(path: '/orcamento',        builder: (_, __) => const OrcamentoPage()),
-            GoRoute(path: '/ordem-compra',     builder: (_, state) => OrdemCompraPage(ocIdParaAbrir: state.extra as int?)),
-            GoRoute(path: '/controle-estoque', builder: (_, __) => const ControleEstoquePage()),
-            GoRoute(path: '/historico',        builder: (_, __) => const HistoricoPage()),
-            GoRoute(path: '/relatorio-os',     builder: (_, __) => const RelatorioOSPage()),
-            GoRoute(path: '/producao',         builder: (_, __) => const ProducaoPage()),
-            GoRoute(path: '/admin',            builder: (_, __) => const AdminPage()),
-            GoRoute(path: '/gastos-categoria', builder: (_, __) => const GastosCategoriaPage()),
-
+            GoRoute(
+                path: '/fornecedores',
+                builder: (_, __) => const FornecedoresPage()),
+            GoRoute(
+                path: '/orcamento',
+                builder: (_, __) => const OrcamentoPage()),
+            GoRoute(
+                path: '/ordem-compra',
+                builder: (_, state) =>
+                    OrdemCompraPage(ocIdParaAbrir: state.extra as int?)),
+            GoRoute(
+                path: '/controle-estoque',
+                builder: (_, __) => const ControleEstoquePage()),
+            GoRoute(
+                path: '/historico',
+                builder: (_, __) => const HistoricoPage()),
+            GoRoute(
+                path: '/relatorio-os',
+                builder: (_, __) => const RelatorioOSPage()),
+            GoRoute(
+                path: '/producao',
+                builder: (_, __) => const ProducaoPage()),
+            GoRoute(path: '/admin', builder: (_, __) => const AdminPage()),
+            GoRoute(
+                path: '/gastos-categoria',
+                builder: (_, __) => const GastosCategoriaPage()),
+            GoRoute(
+                path: '/veiculos',                              // ← NOVO
+                builder: (_, __) => const VeiculoPage()),
           ],
         ),
       ],

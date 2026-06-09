@@ -674,7 +674,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                 ],
               ),
               label: const Text(
-                'Em andamento',
+                'Aberto',
                 style: TextStyle(fontSize: 13),
               ),
               style: OutlinedButton.styleFrom(

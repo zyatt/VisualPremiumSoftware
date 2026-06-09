@@ -67,13 +67,14 @@ class ControleEstoquePage extends StatefulWidget {
 class _ControleEstoquePageState extends State<ControleEstoquePage>
     with SingleTickerProviderStateMixin {
   final TextEditingController _buscaCtrl        = TextEditingController();
-  final TextEditingController _buscaMaterialCtrl = TextEditingController();
+  final TextEditingController _buscaNomeCtrl    = TextEditingController();
+  final TextEditingController _buscaIdCtrl      = TextEditingController();
+  final TextEditingController _identificadorCtrl = TextEditingController();
+  final TextEditingController _medidaCtrl        = TextEditingController();
+  final TextEditingController _espessuraCtrl     = TextEditingController();
   late TabController _tabController;
   Timer? _timerFechamentoAutomatico;
-
-  // ── Filtro por material (client-side) ─────────────────────────────────────
-  int?    _materialFiltroId;
-  String  _materialFiltroNome = '';
+  Timer? _debounceTimer;
 
   // ── Calcula quanto tempo falta até a meia-noite ────────────────────────────
   Duration get _duracaoAteMeiaNoite {
@@ -87,6 +88,43 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     // Remove sufixos internos (#OC, #S, #E) antes de avaliar
     final semSufixo = numeroOS.replaceAll(RegExp(r'#(OC|S|E)\d*$'), '').trim();
     return int.tryParse(semSufixo) == null;
+  }
+
+  // ── Fecha OS textuais criadas em dias anteriores ao dia atual ────────────
+  /// Chamado na abertura da página para cobrir o caso em que o app ficou
+  /// fechado durante a virada do dia e o timer nunca disparou.
+  Future<void> _fecharOSTextuaisAtrasadas() async {
+    if (!mounted) return;
+    final provider = context.read<EstoqueProvider>();
+
+    final hoje = DateTime.now();
+    final inicioDoDia = DateTime(hoje.year, hoje.month, hoje.day);
+
+    final atrasadas = provider.relacoesOS.where((r) {
+      if (r.status != 'EM_ANDAMENTO') return false;
+      if (!_osEhTextual(r.numeroOS)) return false;
+      // criadoEm anterior ao início do dia atual = dia diferente
+      final criacao = r.criadoEm;
+      if (criacao == null) return false;
+      return criacao.toLocal().isBefore(inicioDoDia);
+    }).toList();
+
+    for (final os in atrasadas) {
+      await provider.fecharOS(os.id);
+    }
+
+    if (mounted && atrasadas.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${atrasadas.length} OS textual(is) de dia(s) anterior(es) fechada(s) automaticamente.',
+          ),
+          backgroundColor: _corFechada,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+      await provider.carregarRelacoesOS();
+    }
   }
 
   // ── Fecha automaticamente todas as OS textuais em andamento ───────────────
@@ -137,8 +175,9 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<EstoqueProvider>().carregarRelacoesOS();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await context.read<EstoqueProvider>().carregarRelacoesOS();
+      await _fecharOSTextuaisAtrasadas();
       _agendarFechamentoAutomatico();
     });
   }
@@ -146,9 +185,14 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
   @override
   void dispose() {
     _timerFechamentoAutomatico?.cancel();
+    _debounceTimer?.cancel();
     _tabController.dispose();
     _buscaCtrl.dispose();
-    _buscaMaterialCtrl.dispose();
+    _buscaNomeCtrl.dispose();
+    _buscaIdCtrl.dispose();
+    _identificadorCtrl.dispose();
+    _medidaCtrl.dispose();
+    _espessuraCtrl.dispose();
     super.dispose();
   }
 
@@ -165,12 +209,47 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     );
   }
 
-  // ── Aplica filtro de material client-side ────────────────────────────────
+  // ── Aplica filtros de material client-side ────────────────────────────────
   List<RelacaoOSModel> _filtrarPorMaterial(List<RelacaoOSModel> lista) {
-    if (_materialFiltroId == null) return lista;
-    return lista
-        .where((r) => r.movimentacoes.any((m) => m.materialId == _materialFiltroId))
-        .toList();
+    final nome          = _buscaNomeCtrl.text.trim().toLowerCase();
+    final idTexto       = _buscaIdCtrl.text.trim();
+    final identificador = _identificadorCtrl.text.trim().toUpperCase();
+    final medida        = _medidaCtrl.text.trim().toUpperCase();
+    final espessura     = _espessuraCtrl.text.trim().toUpperCase();
+
+    final temFiltro = nome.isNotEmpty ||
+        idTexto.isNotEmpty ||
+        identificador.isNotEmpty ||
+        medida.isNotEmpty ||
+        espessura.isNotEmpty;
+
+    if (!temFiltro) return lista;
+
+    return lista.where((r) {
+      return r.movimentacoes.any((m) {
+        if (nome.isNotEmpty &&
+            !m.materialNome.toLowerCase().contains(nome)) {
+          return false;
+        }
+        if (idTexto.isNotEmpty &&
+            !m.materialId.toString().contains(idTexto)) {
+          return false;
+        }
+        if (identificador.isNotEmpty) {
+          final v = (m.materialIdentificador ?? '').toUpperCase();
+          if (!v.contains(identificador)) return false;
+        }
+        if (medida.isNotEmpty) {
+          final v = (m.materialMedida ?? '').toUpperCase();
+          if (!v.contains(medida)) return false;
+        }
+        if (espessura.isNotEmpty) {
+          final v = (m.materialEspessura ?? '').toUpperCase();
+          if (!v.contains(espessura)) return false;
+        }
+        return true;
+      });
+    }).toList();
   }
 
   @override
@@ -253,7 +332,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
             ),
             const SizedBox(height: 20),
 
-            // ── Barras de busca ────────────────────────────────────
+            // ── Barras de busca — linha 1 ──────────────────────────
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -271,20 +350,139 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   ),
                 ),
                 const SizedBox(width: 10),
-                // Busca/filtro por material
+                // Filtro por nome do material (client-side)
                 Expanded(
-                  child: _MaterialFiltroField(
-                    controller:   _buscaMaterialCtrl,
-                    materialNome: _materialFiltroNome,
-                    onSelecionado: (id, nome) => setState(() {
-                      _materialFiltroId   = id;
-                      _materialFiltroNome = nome;
-                    }),
-                    onLimpar: () => setState(() {
-                      _materialFiltroId   = null;
-                      _materialFiltroNome = '';
-                      _buscaMaterialCtrl.clear();
-                    }),
+                  child: TextField(
+                    controller: _buscaNomeCtrl,
+                    decoration: const InputDecoration(
+                      hintText: 'Filtrar por nome do material...',
+                      prefixIcon: Icon(Icons.filter_alt_outlined,
+                          color: AppTheme.textHint, size: 20),
+                      isDense: true,
+                    ),
+                    onChanged: (_) {
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                        const Duration(milliseconds: 300),
+                        () => setState(() {}),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Limpar todos os filtros
+                IconButton(
+                  tooltip: 'Limpar filtros',
+                  icon: const Icon(Icons.filter_alt_off,
+                      color: AppTheme.textSecondary),
+                  onPressed: () {
+                    _buscaCtrl.clear();
+                    _buscaNomeCtrl.clear();
+                    _buscaIdCtrl.clear();
+                    _identificadorCtrl.clear();
+                    _medidaCtrl.clear();
+                    _espessuraCtrl.clear();
+                    setState(() {});
+                    context.read<EstoqueProvider>().carregarRelacoesOS();
+                  },
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.surface,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppTheme.divider),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // ── Barras de busca — linha 2 (id, identificador, medida, espessura)
+            Row(
+              children: [
+                SizedBox(
+                  width: 110,
+                  child: TextField(
+                    controller: _buscaIdCtrl,
+                    decoration: const InputDecoration(
+                      hintText:   'ID...',
+                      prefixIcon: Icon(Icons.tag,
+                          color: AppTheme.textHint, size: 18),
+                      isDense: true,
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly
+                    ],
+                    onChanged: (_) {
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                        const Duration(milliseconds: 300),
+                        () => setState(() {}),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _identificadorCtrl,
+                    decoration: const InputDecoration(
+                      hintText:   'Identificador...',
+                      prefixIcon: Icon(Icons.qr_code,
+                          color: AppTheme.textHint, size: 18),
+                      isDense: true,
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    onChanged: (_) {
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                        const Duration(milliseconds: 300),
+                        () => setState(() {}),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _medidaCtrl,
+                    decoration: const InputDecoration(
+                      hintText:   'Medida...',
+                      prefixIcon: Icon(Icons.straighten,
+                          color: AppTheme.textHint, size: 18),
+                      isDense: true,
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    onChanged: (_) {
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                        const Duration(milliseconds: 300),
+                        () => setState(() {}),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _espessuraCtrl,
+                    decoration: const InputDecoration(
+                      hintText:   'Espessura...',
+                      prefixIcon: Icon(Icons.layers,
+                          color: AppTheme.textHint, size: 18),
+                      isDense: true,
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    onChanged: (_) {
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                        const Duration(milliseconds: 300),
+                        () => setState(() {}),
+                      );
+                    },
                   ),
                 ),
               ],
@@ -368,229 +566,9 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
   }
 }
 
-// ─── Campo de filtro por material (autocomplete) ──────────────────────────────
-
-class _MaterialFiltroField extends StatefulWidget {
-  final TextEditingController controller;
-  final String materialNome;
-  final void Function(int id, String nome) onSelecionado;
-  final VoidCallback onLimpar;
-
-  const _MaterialFiltroField({
-    required this.controller,
-    required this.materialNome,
-    required this.onSelecionado,
-    required this.onLimpar,
-  });
-
-  @override
-  State<_MaterialFiltroField> createState() => _MaterialFiltroFieldState();
-}
-
-class _MaterialFiltroFieldState extends State<_MaterialFiltroField> {
-  final _focusNode  = FocusNode();
-  final _overlayKey = GlobalKey();
-  OverlayEntry? _overlay;
-  List<MaterialModel> _sugestoes = [];
-  Timer? _debounce;
-  bool _carregando = false;
-
-  @override
-  void dispose() {
-    _fecharOverlay();
-    _debounce?.cancel();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  void _fecharOverlay() {
-    _overlay?.remove();
-    _overlay = null;
-  }
-
-  Future<void> _buscar(String texto) async {
-    _debounce?.cancel();
-    if (texto.trim().isEmpty) {
-      _fecharOverlay();
-      return;
-    }
-    _debounce = Timer(const Duration(milliseconds: 300), () async {
-      if (!mounted) return;
-      setState(() => _carregando = true);
-      final mp = context.read<MaterialProvider>();
-      final lista = await mp.buscarSugestoes(texto.trim(), limite: 8);
-      if (!mounted) return;
-      setState(() {
-        _sugestoes  = lista;
-        _carregando = false;
-      });
-      _abrirOverlay();
-    });
-  }
-
-  void _abrirOverlay() {
-    _fecharOverlay();
-    if (_sugestoes.isEmpty) return;
-
-    final box = _overlayKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null) return;
-    final pos    = box.localToGlobal(Offset.zero);
-    final size   = box.size;
-    final altura = (_sugestoes.length * 56.0).clamp(0.0, 280.0);
-
-    _overlay = OverlayEntry(
-      builder: (_) => Positioned(
-        left:  pos.dx,
-        top:   pos.dy + size.height + 4,
-        width: size.width,
-        child: Material(
-          elevation:    6,
-          borderRadius: BorderRadius.circular(10),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: altura),
-              child: ListView.builder(
-                padding:    EdgeInsets.zero,
-                shrinkWrap: true,
-                itemCount:  _sugestoes.length,
-                itemBuilder: (ctx, i) {
-                  final m = _sugestoes[i];
-                  final partes = <String>[
-                    if (m.identificador != null && m.identificador!.isNotEmpty)
-                      m.identificador!,
-                    if (m.medida != null && m.medida!.isNotEmpty) m.medida!,
-                    if (m.espessura != null && m.espessura!.isNotEmpty)
-                      m.espessura!,
-                    if (m.categoria != null && m.categoria!.isNotEmpty)
-                      m.categoria!,
-                  ].join(' · ');
-                  return InkWell(
-                    onTap: () {
-                      _fecharOverlay();
-                      widget.controller.text = m.nome;
-                      widget.onSelecionado(m.id, m.nome);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 36,
-                            child: Text(
-                              '#${m.id}',
-                              style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppTheme.textHint,
-                                  fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  m.nome,
-                                  style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppTheme.textPrimary),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                if (partes.isNotEmpty)
-                                  Text(
-                                    partes,
-                                    style: const TextStyle(
-                                        fontSize: 11,
-                                        color: AppTheme.textSecondary),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    Overlay.of(context).insert(_overlay!);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final temFiltro = widget.materialNome.isNotEmpty;
-
-    return Focus(
-      focusNode: _focusNode,
-      onFocusChange: (hasFocus) {
-        if (!hasFocus) {
-          Future.delayed(const Duration(milliseconds: 150), _fecharOverlay);
-        }
-      },
-      child: TextField(
-        key:        _overlayKey,
-        controller: widget.controller,
-        onChanged:  (v) {
-          // Se o usuário apaga o campo após ter selecionado, limpa o filtro
-          if (temFiltro && v.isEmpty) widget.onLimpar();
-          _buscar(v);
-        },
-        decoration: InputDecoration(
-          hintText:   'Filtrar por material...',
-          prefixIcon: _carregando
-              ? const Padding(
-                  padding: EdgeInsets.all(10),
-                  child: SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: AppTheme.primary),
-                  ),
-                )
-              : Icon(
-                  temFiltro ? Icons.filter_alt : Icons.filter_alt_outlined,
-                  color: temFiltro ? AppTheme.primary : AppTheme.textHint,
-                  size: 20,
-                ),
-          suffixIcon: temFiltro
-              ? IconButton(
-                  icon: const Icon(Icons.close,
-                      size: 16, color: AppTheme.textSecondary),
-                  tooltip: 'Limpar filtro de material',
-                  onPressed: widget.onLimpar,
-                )
-              : null,
-          isDense: true,
-          // Destaque visual quando filtro ativo
-          enabledBorder: temFiltro
-              ? OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(
-                      color: AppTheme.primary, width: 1.5),
-                )
-              : null,
-          focusedBorder: temFiltro
-              ? OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: AppTheme.primary, width: 2),
-                )
-              : null,
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Grid de OS (widget auxiliar para as abas) ────────────────────────────────
+
+bool _osEhNumerica(String numeroOS) => int.tryParse(numeroOS.trim()) != null;
 
 class _OsGrid extends StatelessWidget {
   final List<RelacaoOSModel> relacoes;
@@ -602,6 +580,44 @@ class _OsGrid extends StatelessWidget {
     required this.emptyMessage,
     required this.onTap,
   });
+
+  SliverToBoxAdapter _cabecalho(String titulo, int count) =>
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.only(top: 20, bottom: 10),
+          child: Row(
+            children: [
+              Text(
+                titulo,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textSecondary,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$count',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(child: Divider(color: AppTheme.divider)),
+            ],
+          ),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -623,22 +639,46 @@ class _OsGrid extends StatelessWidget {
       );
     }
 
-    return GridView.builder(
-      padding: const EdgeInsets.only(top: 16),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 200,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1,
-      ),
-      itemCount: relacoes.length,
-      itemBuilder: (ctx, i) {
-        final rel = relacoes[i];
-        return _RelacaoOSCard(
-          relacao: rel,
-          onTap: () => onTap(rel),
-        );
-      },
+    final numericas = relacoes.where((r) =>  _osEhNumerica(r.numeroOS)).toList();
+    final textuais  = relacoes.where((r) => !_osEhNumerica(r.numeroOS)).toList();
+
+    const gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
+      maxCrossAxisExtent: 200,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      childAspectRatio: 1,
+    );
+
+    return CustomScrollView(
+      slivers: [
+        if (numericas.isNotEmpty) ...[
+          _cabecalho('Ordens de Serviço', numericas.length),
+          SliverGrid(
+            delegate: SliverChildBuilderDelegate(
+              (ctx, i) {
+                final rel = numericas[i];
+                return _RelacaoOSCard(relacao: rel, onTap: () => onTap(rel));
+              },
+              childCount: numericas.length,
+            ),
+            gridDelegate: gridDelegate,
+          ),
+        ],
+        if (textuais.isNotEmpty) ...[
+          _cabecalho('Empresa', textuais.length),
+          SliverGrid(
+            delegate: SliverChildBuilderDelegate(
+              (ctx, i) {
+                final rel = textuais[i];
+                return _RelacaoOSCard(relacao: rel, onTap: () => onTap(rel));
+              },
+              childCount: textuais.length,
+            ),
+            gridDelegate: gridDelegate,
+          ),
+        ],
+        const SliverToBoxAdapter(child: SizedBox(height: 16)),
+      ],
     );
   }
 }
@@ -1543,6 +1583,154 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
   }
 
 
+  // ── Atualizar custo da última compra em todas as movimentações do card ──────
+  Future<void> _abrirAtualizarCusto(BuildContext context) async {
+    final materialProvider = context.read<MaterialProvider>();
+    final estoqueProvider  = context.read<EstoqueProvider>();
+    final messenger        = ScaffoldMessenger.of(context);
+
+    // Busca o material para obter o último valor pago
+    final mat = await materialProvider.buscarPorId(_primeira.materialId);
+    if (!context.mounted) return;
+
+    final temPrecoUnit = mat?.ultimoValorPago    != null && mat!.ultimoValorPago!    > 0;
+    final temPrecoM2   = mat?.ultimoValorPagoM2 != null && mat!.ultimoValorPagoM2! > 0;
+
+    if (!temPrecoUnit && !temPrecoM2) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Nenhum custo de última compra registrado para este material'),
+          backgroundColor: AppTheme.textSecondary,
+        ),
+      );
+      return;
+    }
+
+    String brl(double v) =>
+        'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dlgCtx) => AlertDialog(
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.price_change_outlined,
+                  color: AppTheme.primary, size: 20),
+            ),
+            const SizedBox(width: 12),
+            const Text('Atualizar custo'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Atualizar o custo de todas as movimentações de "${_primeira.materialNome}" nesta OS?',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.07),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: AppTheme.primary.withValues(alpha: 0.22)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Novo custo (última compra):',
+                    style: TextStyle(
+                        fontSize: 11, color: AppTheme.textSecondary),
+                  ),
+                  const SizedBox(height: 4),
+                  if (temPrecoUnit)
+                    Text(
+                      'Unit.: ${brl(mat.ultimoValorPago!)}',
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.primary),
+                    ),
+                  if (temPrecoM2)
+                    Text(
+                      'M²: ${brl(mat.ultimoValorPagoM2!)}',
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.primary),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Somente o custo registrado nas movimentações será alterado — '
+              'as quantidades e o saldo de estoque não mudam.',
+              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dlgCtx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(dlgCtx).pop(true),
+            icon: const Icon(Icons.check, size: 16),
+            label: const Text('Atualizar custo'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+    if (!context.mounted) return;
+
+    // Atualiza todas as movimentações do card em sequência
+    int sucessos = 0;
+    int falhas   = 0;
+    for (final mov in widget.movimentacoes) {
+      final ok = await estoqueProvider.atualizarPrecoMovimentacao(
+        mov.id,
+        precoUnitario: temPrecoUnit ? mat.ultimoValorPago  : null,
+        precoM2:       temPrecoM2  ? mat.ultimoValorPagoM2 : null,
+      );
+      if (ok) {
+        sucessos++;
+      } else {
+        falhas++;
+      }
+    }
+
+    if (!context.mounted) return;
+
+    // Recarrega o detalhe da OS para refletir os novos preços
+    await estoqueProvider.selecionarRelacaoOS(widget.numeroOS);
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          falhas == 0
+              ? 'Custo atualizado em $sucessos movimentação(ões)'
+              : '$sucessos atualizada(s), $falhas com erro',
+        ),
+        backgroundColor: falhas == 0 ? AppTheme.success : AppTheme.error,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final unidade = _primeira.materialUnidade;
@@ -1781,6 +1969,28 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 8),
+                      // ── Atualizar custo da última compra ─────────────────
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(ctx).pop();
+                            _abrirAtualizarCusto(context);
+                          },
+                          icon: const Icon(Icons.price_change_outlined,
+                              size: 16, color: AppTheme.textSecondary),
+                          label: const Text(
+                            'Atualizar custo (última compra)',
+                            style: TextStyle(color: AppTheme.textSecondary),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: AppTheme.divider),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 16),
                     ] else ...[
@@ -2804,6 +3014,8 @@ class _MovimentacaoGlobalDialogState
                         controller: _numeroOSCtrl,
                         // Bloqueado quando a OS já está fixada (contexto de detalhe)
                         enabled: widget.numeroOSFixo == null,
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: [_UpperCaseFormatter()],
                         decoration: InputDecoration(
                           labelText: 'Número da OS *',
                           prefixText: 'OS ',
@@ -3258,8 +3470,11 @@ class _ItemMovimentacao {
   /// Para materiais específicos: a descrição do filho selecionado (ex: "Tinta Branca 18L").
   /// Para materiais normais: null.
   final String? descricaoItem;
-  final TextEditingController quantCtrl = TextEditingController();
-  final TextEditingController obsCtrl   = TextEditingController();
+  final TextEditingController quantCtrl        = TextEditingController();
+  final TextEditingController obsCtrl          = TextEditingController();
+  final TextEditingController larguraUsadaCtrl = TextEditingController();
+  final TextEditingController alturaUsadaCtrl  = TextEditingController();
+  bool usarModoDimensional = false;
   String? erroEstoque;
 
   /// Preço unitário sugerido: vem do filho específico selecionado (ultimoValorPago)
@@ -3294,12 +3509,14 @@ class _ItemMovimentacao {
   void dispose() {
     quantCtrl.dispose();
     obsCtrl.dispose();
+    larguraUsadaCtrl.dispose();
+    alturaUsadaCtrl.dispose();
   }
 }
 
 // ─── Card de item selecionado ─────────────────────────────────────────────────
 
-class _ItemSelecionadoCard extends StatelessWidget {
+class _ItemSelecionadoCard extends StatefulWidget {
   final _ItemMovimentacao item;
   final VoidCallback onRemover;
 
@@ -3310,13 +3527,134 @@ class _ItemSelecionadoCard extends StatelessWidget {
   });
 
   @override
+  State<_ItemSelecionadoCard> createState() => _ItemSelecionadoCardState();
+}
+
+class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
+  _ItemMovimentacao get item => widget.item;
+
+  // ── Detecta medida no formato "LxA" ou "LxAM" (ex: "2X1", "1.20X0.80M") ──
+  bool get _temMedidaDimensional {
+    final medida = item.material.medida;
+    if (medida == null || medida.isEmpty) return false;
+    // Aceita sufixo opcional "M" no final (ex: 1.20X0.80M, 2X1M)
+    return RegExp(r'^\d+([.,]\d+)?\s*[xX]\s*\d+([.,]\d+)?\s*M?$', caseSensitive: false)
+        .hasMatch(medida.trim());
+  }
+
+  /// Parseia "2X1" ou "1.20X0.80M" → (largura: 2.0, comprimento: 1.0).
+  /// Retorna null se inválido.
+  (double l, double a)? get _medidaChapa {
+    final medida = item.material.medida;
+    if (medida == null) return null;
+    // Remove sufixo "M" antes de parsear
+    final semSufixo = medida.trim().replaceFirst(RegExp(r'M\s*$', caseSensitive: false), '').trim();
+    final partes = semSufixo.split(RegExp(r'\s*[xX]\s*'));
+    if (partes.length < 2) return null;
+    final l = double.tryParse(partes[0].replaceAll(',', '.'));
+    final a = double.tryParse(partes[1].replaceAll(',', '.'));
+    if (l == null || l <= 0 || a == null || a <= 0) return null;
+    return (l, a);
+  }
+
+  void _recalcularQtd() {
+    final chapa = _medidaChapa;
+    if (chapa == null) return;
+    final largStr = item.larguraUsadaCtrl.text.replaceAll(',', '.');
+    final altStr  = item.alturaUsadaCtrl.text.replaceAll(',', '.');
+    final larg = double.tryParse(largStr);
+    final alt  = double.tryParse(altStr);
+    if (larg == null || alt == null || larg <= 0 || alt <= 0) {
+      setState(() {}); // ainda atualiza o preview
+      return;
+    }
+    // Arredonda para 4 casas antes de formatar para evitar ruído de ponto flutuante
+    // (ex: 0.6 * 0.4 pode virar 0.23999... ou 0.24000...2 em double)
+    final fracaoBruta = (larg * alt) / (chapa.$1 * chapa.$2);
+    final fracao = double.parse(fracaoBruta.toStringAsFixed(4));
+    final qtdStr = fracao.toStringAsFixed(4).replaceAll(RegExp(r'0+$'), '');
+    item.quantCtrl.text =
+        qtdStr.endsWith('.') ? '${qtdStr}0' : qtdStr;
+    setState(() {});
+  }
+
+  String _fmt(double v) =>
+      v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+
+  @override
   Widget build(BuildContext context) {
     final m = item.material;
     final partes = <String>[
-      if (m.medida != null && m.medida!.isNotEmpty) m.medida!,
+      if (m.medida    != null && m.medida!.isNotEmpty)    m.medida!,
       if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
       if (m.categoria != null && m.categoria!.isNotEmpty) m.categoria!,
     ].join(' · ');
+
+    final chapa        = _medidaChapa;
+    final podeDimensao = _temMedidaDimensional && chapa != null;
+
+    // ── Preview do cálculo dimensional ───────────────────────────────────────
+    Widget? previewDimensional;
+    if (item.usarModoDimensional && podeDimensao) {
+      final largStr = item.larguraUsadaCtrl.text.replaceAll(',', '.');
+      final altStr  = item.alturaUsadaCtrl.text.replaceAll(',', '.');
+      final larg    = double.tryParse(largStr);
+      final alt     = double.tryParse(altStr);
+
+      if (larg != null && larg > 0 && alt != null && alt > 0) {
+        final areaUsada = larg * alt;
+        final areaTotal = chapa.$1 * chapa.$2;
+        final fracao    = areaUsada / areaTotal;
+        final pct       = (fracao * 100).toStringAsFixed(1);
+
+        previewDimensional = Container(
+          margin: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppTheme.primary.withValues(alpha: 0.20)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.calculate_outlined,
+                  size: 14, color: AppTheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: RichText(
+                  text: TextSpan(
+                    style: const TextStyle(
+                        fontSize: 12, color: AppTheme.textSecondary),
+                    children: [
+                      TextSpan(
+                          text: '${_fmt(larg)} × ${_fmt(alt)} m  =  '),
+                      TextSpan(
+                        text: '${_fmt(areaUsada)} m²',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textPrimary),
+                      ),
+                      const TextSpan(text: '  →  '),
+                      TextSpan(
+                        text: item.quantCtrl.text,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.primary),
+                      ),
+                      TextSpan(
+                        text: ' ${m.unidade ?? 'UN'}  ($pct% da chapa)',
+                        style: const TextStyle(
+                            color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+    }
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -3328,6 +3666,7 @@ class _ItemSelecionadoCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── Cabeçalho: nome + botão remover ──────────────────────────────
           Row(
             children: [
               const Icon(Icons.check_circle,
@@ -3346,7 +3685,7 @@ class _ItemSelecionadoCard extends StatelessWidget {
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (item.descricaoItem != null) ...[
+                    if (item.descricaoItem != null)
                       Text(
                         item.descricaoItem!,
                         style: const TextStyle(
@@ -3356,7 +3695,6 @@ class _ItemSelecionadoCard extends StatelessWidget {
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
-                    ],
                     if (partes.isNotEmpty)
                       Text(
                         partes,
@@ -3369,7 +3707,7 @@ class _ItemSelecionadoCard extends StatelessWidget {
                 ),
               ),
               IconButton(
-                onPressed: onRemover,
+                onPressed: widget.onRemover,
                 icon: const Icon(Icons.close,
                     size: 16, color: AppTheme.textSecondary),
                 style: IconButton.styleFrom(
@@ -3382,6 +3720,111 @@ class _ItemSelecionadoCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
+
+          // ── Toggle modo dimensional (só chapas com medida LxA) ───────────
+          if (podeDimensao) ...[
+            InkWell(
+              onTap: () => setState(
+                  () => item.usarModoDimensional = !item.usarModoDimensional),
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      item.usarModoDimensional
+                          ? Icons.toggle_on
+                          : Icons.toggle_off_outlined,
+                      size: 20,
+                      color: item.usarModoDimensional
+                          ? AppTheme.primary
+                          : AppTheme.textHint,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Informar por dimensão usada',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: item.usarModoDimensional
+                            ? AppTheme.primary
+                            : AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Chapa ${_fmt(chapa.$1)}×${_fmt(chapa.$2)} m',
+                        style: const TextStyle(
+                            fontSize: 10,
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+
+          // ── Campos de dimensão (quando modo ativo) ────────────────────────
+          if (item.usarModoDimensional && podeDimensao) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: item.larguraUsadaCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      labelText: 'Largura usada (m)',
+                      isDense: true,
+                      suffixText: '/ ${_fmt(chapa.$1)} m',
+                      suffixStyle: const TextStyle(
+                          fontSize: 11, color: AppTheme.textHint),
+                    ),
+                    onChanged: (_) => _recalcularQtd(),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('×',
+                      style: TextStyle(
+                          fontSize: 16,
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w700)),
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: item.alturaUsadaCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      labelText: 'Comprimento usado (m)',
+                      isDense: true,
+                      suffixText: '/ ${_fmt(chapa.$2)} m',
+                      suffixStyle: const TextStyle(
+                          fontSize: 11, color: AppTheme.textHint),
+                    ),
+                    onChanged: (_) => _recalcularQtd(),
+                  ),
+                ),
+              ],
+            ),
+            if (previewDimensional != null) previewDimensional,
+            const SizedBox(height: 10),
+          ],
+
+          // ── Campos de quantidade e observação ─────────────────────────────
           Row(
             children: [
               SizedBox(
@@ -3390,10 +3833,17 @@ class _ItemSelecionadoCard extends StatelessWidget {
                   controller: item.quantCtrl,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Quantidade *',
                     isDense: true,
+                    suffixText: m.unidade,
+                    helperText: item.usarModoDimensional
+                        ? 'Calculado automaticamente'
+                        : null,
+                    helperStyle: const TextStyle(
+                        fontSize: 10, color: AppTheme.textSecondary),
                   ),
+                  readOnly: item.usarModoDimensional,
                   validator: (v) {
                     if (item.erroEstoque != null) return item.erroEstoque;
                     final quant =
@@ -3420,28 +3870,30 @@ class _ItemSelecionadoCard extends StatelessWidget {
               ),
             ],
           ),
-          // Preço sugerido (último valor pago)
+
+          // ── Preço sugerido ────────────────────────────────────────────────
           Builder(builder: (_) {
             final pu  = item.precoUnitarioSugerido;
             final pm2 = item.precoM2Sugerido;
             if (pu == null && pm2 == null) return const SizedBox.shrink();
-            final partes = <String>[
-              if (pu  != null && pu  > 0) 'Unit.: R\$ ${pu.toStringAsFixed(2).replaceAll('.', ',')}',
-              if (pm2 != null && pm2 > 0) 'M²: R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}',
+            final partesBrl = <String>[
+              if (pu  != null && pu  > 0)
+                'Unit.: R\$ ${pu.toStringAsFixed(2).replaceAll('.', ',')}',
+              if (pm2 != null && pm2 > 0)
+                'M²: R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}',
             ];
-            if (partes.isEmpty) return const SizedBox.shrink();
+            if (partesBrl.isEmpty) return const SizedBox.shrink();
             return Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Row(
                 children: [
-                  const Icon(Icons.price_check, size: 12, color: AppTheme.textSecondary),
+                  const Icon(Icons.price_check,
+                      size: 12, color: AppTheme.textSecondary),
                   const SizedBox(width: 4),
                   Text(
-                    'Último preço: ${partes.join('  ·  ')}',
+                    'Último preço: ${partesBrl.join('  ·  ')}',
                     style: const TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary,
-                    ),
+                        fontSize: 11, color: AppTheme.textSecondary),
                   ),
                 ],
               ),

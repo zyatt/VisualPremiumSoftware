@@ -55,8 +55,6 @@ double _totalLiquido(List<MovimentacaoModel> movimentacoes) {
       final da = a.criadoEm;
       final db = b.criadoEm;
       if (da == null && db == null) return 0;
-      if (da == null) return 1;
-      if (db == null) return -1;
       return da.compareTo(db);
     });
 

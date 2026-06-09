@@ -334,42 +334,21 @@ async function finalizar(id) {
     data: { status: 'FINALIZADO' },
   });
 
-  // Mapa para reutilizar a mesma RelacaoOS dentro desta OC (para OS textuais)
-  // OS numérica → busca/cria única pelo numeroOS (mescla entre OCs)
-  // OS textual  → cria sempre uma nova por OC, reutilizando dentro da mesma OC
-  const relacaoOSPorOC = new Map(); // chave: numeroOS (apenas para textuais, dentro desta OC)
-
   for (const item of ordem.itens) {
     const numeroOSLimpo = item.numeroOS.trim();
     const material      = item.material;
     const eEspecifico   = material?.especifico === true;
 
-    const osEhNumerica = /^\d+$/.test(numeroOSLimpo);
-
-    let relacaoOS;
-
-    if (osEhNumerica) {
-      // OS numérica → mescla na RelacaoOS existente entre OCs
-      relacaoOS = await prisma.relacaoOS.findUnique({
-        where: { numeroOS: numeroOSLimpo },
+    // Busca ou cria a RelacaoOS pelo numeroOS exato — igual para OS numéricas e textuais.
+    // Isso garante que movimentações de produção e de OC com o mesmo nome de OS
+    // sejam sempre agrupadas na mesma RelacaoOS.
+    let relacaoOS = await prisma.relacaoOS.findUnique({
+      where: { numeroOS: numeroOSLimpo },
+    });
+    if (!relacaoOS) {
+      relacaoOS = await prisma.relacaoOS.create({
+        data: { numeroOS: numeroOSLimpo },
       });
-      if (!relacaoOS) {
-        relacaoOS = await prisma.relacaoOS.create({
-          data: { numeroOS: numeroOSLimpo },
-        });
-      }
-    } else {
-      // OS textual → sempre cria uma nova RelacaoOS por OC
-      // Reutiliza a que foi criada para esta OS dentro desta mesma OC
-      if (relacaoOSPorOC.has(numeroOSLimpo)) {
-        relacaoOS = relacaoOSPorOC.get(numeroOSLimpo);
-      } else {
-        // Gera um sufixo único para evitar conflito de unique constraint no numeroOS
-        relacaoOS = await prisma.relacaoOS.create({
-          data: { numeroOS: `${numeroOSLimpo}#OC${id}` },
-        });
-        relacaoOSPorOC.set(numeroOSLimpo, relacaoOS);
-      }
     }
 
     // Lê os preços brutos do item (sem normalizar para null ainda, para não perder zeros)

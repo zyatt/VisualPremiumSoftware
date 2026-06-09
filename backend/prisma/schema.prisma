@@ -33,16 +33,16 @@ model Material {
   largura              Decimal?                 @db.Decimal(10, 4)
   comprimento          Decimal?                 @db.Decimal(10, 4)
   identificador        String?
-  valor                Decimal?                 @db.Decimal(10, 2)
-  valorMetroQuadrado   Decimal?                 @db.Decimal(10, 2)
+  valor                Decimal?                 @db.Decimal(15, 5)
+  valorMetroQuadrado   Decimal?                 @db.Decimal(15, 5)
   quantidade           Decimal                  @default(0) @db.Decimal(10, 3)
   estoqueMinimo        Decimal                  @default(0) @db.Decimal(10, 3)
   status               StatusEstoque            @default(OK)
   estoqueConfirmado    Boolean                  @default(false)
   ativo                Boolean                  @default(true)
   especifico           Boolean                  @default(false)
-  ultimoValorPago      Decimal?                 @db.Decimal(10, 2)
-  ultimoValorPagoM2    Decimal?                 @db.Decimal(10, 2)
+  ultimoValorPago      Decimal?                 @db.Decimal(15, 5)
+  ultimoValorPagoM2    Decimal?                 @db.Decimal(15, 5)
   criadoEm             DateTime                 @default(now())
   atualizadoEm         DateTime                 @updatedAt
   estoquesEspecificos  EstoqueEspecifico[]
@@ -65,8 +65,8 @@ model EstoqueEspecifico {
   quantidade        Decimal  @default(0) @db.Decimal(10, 3)
   criadoEm          DateTime @default(now())
   atualizadoEm      DateTime @updatedAt
-  ultimoValorPago   Decimal? @db.Decimal(10, 4)
-  ultimoValorPagoM2 Decimal? @db.Decimal(10, 4)
+  ultimoValorPago   Decimal? @db.Decimal(15, 5)
+  ultimoValorPagoM2 Decimal? @db.Decimal(15, 5)
   material          Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
   @@unique([materialId, descricao])
@@ -78,8 +78,8 @@ model HistoricoPrecoMaterial {
   materialId    Int
   ordemCompraId Int
   fornecedorId  Int
-  precoUnitario Decimal?    @db.Decimal(10, 2)
-  precoM2       Decimal?    @db.Decimal(10, 2)
+  precoUnitario Decimal?    @db.Decimal(15, 5)
+  precoM2       Decimal?    @db.Decimal(15, 5)
   quantidade    Decimal     @db.Decimal(10, 3)
   usarM2        Boolean     @default(false)
   criadoEm      DateTime    @default(now())
@@ -113,8 +113,8 @@ model FornecedorMaterial {
   id                 Int        @id @default(autoincrement())
   fornecedorId       Int
   materialId         Int
-  preco              Decimal?   @db.Decimal(10, 2)
-  precoMetroQuadrado Decimal?   @db.Decimal(10, 2)
+  preco              Decimal?   @db.Decimal(15, 5)
+  precoMetroQuadrado Decimal?   @db.Decimal(15, 5)
   ativo              Boolean    @default(true)
   criadoEm           DateTime   @default(now())
   atualizadoEm       DateTime   @updatedAt
@@ -149,8 +149,8 @@ model OrcamentoItem {
   materialId    Int
   fornecedorId  Int?
   quantidade    Decimal     @default(1) @db.Decimal(10, 3)
-  precoUnitario Decimal?    @db.Decimal(10, 2)
-  precoM2       Decimal?    @db.Decimal(10, 2)
+  precoUnitario Decimal?    @db.Decimal(15, 5)
+  precoM2       Decimal?    @db.Decimal(15, 5)
   usarM2        Boolean     @default(false)
   selecionado   Boolean     @default(false)
   descricaoItem String?
@@ -175,7 +175,7 @@ model OrdemCompra {
   status          StatusOrdemCompra        @default(EM_ANDAMENTO)
   usuarioId       Int?
   orcamentoId     Int?
-  valorTotal      Decimal                  @default(0) @db.Decimal(10, 2)
+  valorTotal      Decimal                  @default(0) @db.Decimal(15, 5)
   criadoEm        DateTime                 @default(now())
   atualizadoEm    DateTime                 @updatedAt
   historicoPrecos HistoricoPrecoMaterial[]
@@ -205,10 +205,10 @@ model OrdemCompraItem {
   descricaoItem      String?
   numeroOS           String
   quantidade         Decimal     @db.Decimal(10, 3)
-  precoUnitario      Decimal     @db.Decimal(10, 2)
-  precoMetroQuadrado Decimal?    @db.Decimal(10, 2)
+  precoUnitario      Decimal     @db.Decimal(15, 5)
+  precoMetroQuadrado Decimal?    @db.Decimal(15, 5)
   usarM2             Boolean     @default(false)
-  precoTotal         Decimal     @db.Decimal(10, 2)
+  precoTotal         Decimal     @db.Decimal(15, 5)
   criadoEm           DateTime    @default(now())
   material           Material    @relation(fields: [materialId], references: [id])
   ordemCompra        OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
@@ -236,8 +236,8 @@ model MovimentacaoEstoque {
   numeroOS      String
   relacaoOSId   Int
   ordemCompraId Int?
-  precoUnitario Decimal?     @db.Decimal(10, 2)
-  precoM2       Decimal?
+  precoUnitario Decimal?     @db.Decimal(15, 5)
+  precoM2       Decimal?     @db.Decimal(15, 5)
   observacao    String?
   descricaoItem String?
   criadoEm      DateTime     @default(now())
@@ -341,4 +341,31 @@ model AuditLogMaterial {
   @@index([materialId])
   @@index([criadoEm])
   @@map("audit_log_materiais")
+}
+
+model Veiculo {
+  id           Int                  @id @default(autoincrement())
+  nome         String
+  placa        String               @unique
+  ativo        Boolean              @default(true)
+  criadoEm     DateTime             @default(now())
+  atualizadoEm DateTime             @updatedAt
+  manutencoes  ManutencaoVeiculo[]
+
+  @@map("veiculos")
+}
+
+model ManutencaoVeiculo {
+  id          Int       @id @default(autoincrement())
+  veiculoId   Int
+  tipo        String    // "MANUTENCAO" | "LIMPEZA" | "REVISAO" | "PNEU" | "OUTRO"
+  descricao   String?
+  valor       Decimal   @db.Decimal(10, 2)
+  dataEnvio   DateTime
+  dataRetirada DateTime?
+  criadoEm   DateTime  @default(now())
+
+  veiculo     Veiculo   @relation(fields: [veiculoId], references: [id])
+
+  @@map("manutencoes_veiculo")
 }

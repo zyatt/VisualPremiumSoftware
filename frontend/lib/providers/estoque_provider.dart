@@ -225,4 +225,25 @@ class EstoqueProvider extends ChangeNotifier {
       return false;
     }
   }
+
+  /// Atualiza o preço (precoUnitario e/ou precoM2) de uma movimentação existente.
+  /// Não altera quantidade nem saldo de estoque — apenas corrige o custo registrado.
+  Future<bool> atualizarPrecoMovimentacao(
+    int movimentacaoId, {
+    double? precoUnitario,
+    double? precoM2,
+  }) async {
+    try {
+      await _repo.atualizarPrecoMovimentacao(
+        movimentacaoId,
+        precoUnitario: precoUnitario,
+        precoM2: precoM2,
+      );
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      notifyListeners();
+      return false;
+    }
+  }
 }

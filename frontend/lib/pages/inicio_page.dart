@@ -64,16 +64,18 @@ class InicioPage extends StatelessWidget {
       crossAxisSpacing: 16,
       childAspectRatio: 1.8,
       children: [
-        const _DashCard(icon: Icons.inventory_2,                      label: 'Estoque',           route: '/estoque',          color: Color(0xFF6C63FF)),
-        const _DashCard(icon: Icons.people,                           label: 'Fornecedores',       route: '/fornecedores',     color: Color(0xFF03DAC6)),
-        const _DashCard(icon: Icons.request_quote,                    label: 'Orçamento',          route: '/orcamento',        color: Color(0xFFFF9800)),
-        const _DashCard(icon: Icons.shopping_cart,                    label: 'Ordem de Compra',    route: '/ordem-compra',     color: Color(0xFF4CAF50)),
-        const _DashCard(icon: Icons.sync_alt,                         label: 'Controle Estoque',   route: '/controle-estoque', color: Color(0xFFE91E63)),
-        const _DashCard(icon: Icons.history,                          label: 'Histórico',          route: '/historico',        color: Color(0xFF9C27B0)),
-        const _DashCard(icon: Icons.description,                      label: 'Relatório OS',       route: '/relatorio-os',     color: Color(0xFF2196F3)),
-        const _DashCard(icon: Icons.precision_manufacturing_rounded,  label: 'Produção',           route: '/producao',         color: Color(0xFF00BCD4)),
+        const _DashCard(icon: Icons.inventory_2,                      label: 'Estoque',           route: '/estoque',            color: Color(0xFF6C63FF)),
+        const _DashCard(icon: Icons.people,                           label: 'Fornecedores',       route: '/fornecedores',       color: Color(0xFF03DAC6)),
+        const _DashCard(icon: Icons.request_quote,                    label: 'Orçamento',          route: '/orcamento',          color: Color(0xFFFF9800)),
+        const _DashCard(icon: Icons.shopping_cart,                    label: 'Ordem de Compra',    route: '/ordem-compra',       color: Color(0xFF4CAF50)),
+        const _DashCard(icon: Icons.sync_alt,                         label: 'Controle Estoque',   route: '/controle-estoque',   color: Color(0xFFE91E63)),
+        const _DashCard(icon: Icons.history,                          label: 'Histórico',          route: '/historico',          color: Color(0xFF9C27B0)),
+        const _DashCard(icon: Icons.description,                      label: 'Relatório OS',       route: '/relatorio-os',       color: Color(0xFF2196F3)),
+        const _DashCard(icon: Icons.precision_manufacturing_rounded,  label: 'Produção',           route: '/producao',           color: Color(0xFF00BCD4)),
+        const _DashCard(icon: Icons.pie_chart_rounded,                label: 'Gastos',             route: '/gastos-categoria',   color: Color(0xFFFF7043)),
+        const _DashCard(icon: Icons.directions_car_rounded,           label: 'Veículos',           route: '/veiculos',           color: Color(0xFF607D8B)),
         if (isAdmin || isGerente)
-          const _DashCard(icon: Icons.admin_panel_settings_rounded,   label: 'Admin',              route: '/admin',            color: Color(0xFFFF5722)),
+          const _DashCard(icon: Icons.admin_panel_settings_rounded,   label: 'Admin',              route: '/admin',              color: Color(0xFFFF5722)),
       ],
     );
   }

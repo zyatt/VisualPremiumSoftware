@@ -53,7 +53,7 @@ class MovimentacaoModel {
             : null,
         observacao:            json['observacao'],
         descricaoItem:         json['descricaoItem'],
-        criadoEm:              DateTime.parse(json['criadoEm']),
+        criadoEm:              DateTime.parse(json['criadoEm']).toLocal(),
       );
 }
 
@@ -93,10 +93,10 @@ class RelacaoOSModel {
         descricao:    json['descricao'],
         status:       json['status'] ?? 'EM_ANDAMENTO',
         criadoEm:     json['criadoEm'] != null
-            ? DateTime.tryParse(json['criadoEm'].toString())
+            ? DateTime.tryParse(json['criadoEm'].toString())?.toLocal()
             : null,
         atualizadoEm: json['atualizadoEm'] != null
-            ? DateTime.tryParse(json['atualizadoEm'].toString())
+            ? DateTime.tryParse(json['atualizadoEm'].toString())?.toLocal()
             : null,
         movimentacoes: (json['movimentacoes'] as List? ?? [])
             .map((m) => MovimentacaoModel.fromJson(m))
