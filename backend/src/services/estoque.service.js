@@ -8,7 +8,7 @@ const _includeMovimentacoes = {
         select: {
           id: true, nome: true, unidade: true,
           identificador: true, medida: true, espessura: true,
-          especifico: true,
+          especifico: true, qtdPadrao: true, unidPadrao: true,
         },
       },
     },
@@ -43,14 +43,22 @@ async function registrarMovimentacao({
 }) {
   const material = await prisma.material.findUnique({ where: { id: materialId } });
   if (!material) throw { status: 404, message: 'Material não encontrado' };
-
+  
+  const osEhNumerica = /^\d+$/.test(numeroOS);
+  const osTemSufixo  = /#(OC|S|E)/.test(numeroOS);
   // Verifica se OS não está fechada (busca a mais recente com esse numeroOS)
-  const relacaoExistente = await prisma.relacaoOS.findFirst({
-    where:   { numeroOS },
-    orderBy: { criadoEm: 'desc' },
-  });
-  if (relacaoExistente?.status === 'FECHADA') {
-    throw { status: 400, message: `A OS ${numeroOS} está fechada e não aceita novas movimentações` };
+  if (osEhNumerica) {
+    const relacaoExistente = await prisma.relacaoOS.findFirst({
+      where: { numeroOS },
+      orderBy: { criadoEm: 'desc' },
+    });
+
+    if (relacaoExistente?.status === 'FECHADA') {
+      throw {
+        status: 400,
+        message: `A OS ${numeroOS} está fechada e não aceita novas movimentações`,
+      };
+    }
   }
 
   // Material específico: descricaoItem obrigatória
@@ -93,8 +101,7 @@ async function registrarMovimentacao({
   // 2. OS textual sem sufixo: verifica se já existe uma RelacaoOS EM_ANDAMENTO
   //    com esse numeroOS (ex: criada pela produção). Se existir, reutiliza.
   //    Só cria nova com sufixo de timestamp quando não houver nenhuma aberta.
-  const osEhNumerica = /^\d+$/.test(numeroOS);
-  const osTemSufixo  = /#(OC|S|E)/.test(numeroOS);
+  
   let relacao;
 
   if (osEhNumerica || osTemSufixo) {
@@ -106,25 +113,57 @@ async function registrarMovimentacao({
     });
   } else {
     // OS textual sem sufixo: tenta reutilizar RelacaoOS EM_ANDAMENTO existente
+    // (inclui a OS com o nome exato OU com sufixo de data do dia de hoje)
+    const _d   = new Date();
+    const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`; // "DD-MM-YYYY"
+
     const relacaoAberta = await prisma.relacaoOS.findFirst({
-      where:   { numeroOS, status: 'EM_ANDAMENTO' },
+      where: {
+        status:   'EM_ANDAMENTO',
+        OR: [
+          { numeroOS: numeroOS },
+          { numeroOS: { startsWith: `${numeroOS}-${hoje}` } },
+        ],
+      },
       orderBy: { criadoEm: 'asc' },
     });
 
     if (relacaoAberta) {
-      // Já existe uma OS aberta com esse nome — reutiliza (ex: criada pela produção)
+      // Já existe uma OS aberta com esse nome (ou com sufixo de data de hoje) — reutiliza
       relacao = relacaoAberta;
     } else {
-      // Não existe nenhuma aberta: cria nova com sufixo de timestamp
-      const sufixo = tipo === 'SAIDA' ? `#S${Date.now()}` : `#E${Date.now()}`;
-      const numeroOSComSufixo = `${numeroOS}${sufixo}`;
-      relacao = await prisma.relacaoOS.upsert({
-        where:  { numeroOS: numeroOSComSufixo },
-        create: { numeroOS: numeroOSComSufixo, status: 'EM_ANDAMENTO' },
-        update: {},
-      });
+      // Não existe nenhuma aberta: cria nova com sufixo de data (mesmo padrão do producao_service)
+      let candidato  = `${numeroOS}-${hoje}`;
+      let sufixoSeq  = 1;
+
+      while (true) {
+        const existente = await prisma.relacaoOS.findUnique({ where: { numeroOS: candidato } });
+        if (!existente) {
+          relacao = await prisma.relacaoOS.create({ data: { numeroOS: candidato, status: 'EM_ANDAMENTO' } });
+          break;
+        }
+        if (existente.status !== 'FECHADA') {
+          relacao = existente;
+          break;
+        }
+        sufixoSeq += 1;
+        candidato = `${numeroOS}-${hoje}-${sufixoSeq}`;
+      }
     }
   }
+  // ── Custo por unidade menor ───────────────────────────────────────────────
+  // Se o material tem qtdPadrao (ex: thinner 18 L = 18000 ml), o precoUnitario
+  // registrado no estoque deve ser o custo por unidade menor (R$/ml, R$/m etc.).
+  // O front envia o precoUnitarioSugerido que já vem do campo ultimoValorPago
+  // do material — que é o custo por unidade menor gravado pela OC.
+  // Portanto, para movimentações manuais, apenas repassamos o valor sem alterar.
+  // O único ajuste necessário é: se o front ainda não tiver o custo por unidade
+  // menor disponível (ex: primeiro uso, sem OC prévia) e enviar o preço de
+  // embalagem com o flag `precoEhEmbalagem: true`, aí dividimos aqui.
+  // Na prática, o front passa item.precoUnitarioSugerido = material.ultimoValorPago
+  // que a OC já gravou como custo/unidade — logo não é necessário dividir novamente.
+  const precoUnitarioFinal = precoUnitario ?? null;
+
   // Cria a movimentação
   const [movimentacao] = await prisma.$transaction([
     prisma.movimentacaoEstoque.create({
@@ -134,8 +173,8 @@ async function registrarMovimentacao({
         quantidade,
         numeroOS,
         relacaoOSId:   relacao.id,
-        precoUnitario: precoUnitario ?? null,
-        precoM2:       precoM2       ?? null,
+        precoUnitario: precoUnitarioFinal,
+        precoM2:       precoM2 ?? null,
         observacao:    observacao    ?? null,
         ordemCompraId: ordemCompraId ?? null,
         descricaoItem: descricaoItem ?? null,

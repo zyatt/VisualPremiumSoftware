@@ -284,11 +284,62 @@ async function _registrarSaidaControleEstoque(sol) {
     if (filho?.ultimoValorPagoM2) precoM2Final       = Number(filho.ultimoValorPagoM2);
   }
 
-  const relacao = await prisma.relacaoOS.upsert({
-    where:  { numeroOS },
-    create: { numeroOS, status: 'EM_ANDAMENTO' },
-    update: {},
-  });
+  // Busca ou cria a RelacaoOS adequada.
+  //
+  // Regra (espelha estoque_service):
+  //  • OS numérica  → reutiliza sempre (upsert pelo numeroOS exato).
+  //  • OS textual   → reutiliza se EM_ANDAMENTO (nome exato OU sufixo de data de hoje).
+  //    Se já estiver FECHADA, cria uma nova com sufixo de data para não
+  //    contaminar um período anterior já encerrado.
+  const osEhNumerica = /^\d+$/.test(numeroOS);
+
+  const _d   = new Date();
+  const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`; // "DD-MM-YYYY"
+
+  let relacao;
+  if (osEhNumerica) {
+    // OS numérica: upsert garante uma única relação por chave exata
+    relacao = await prisma.relacaoOS.upsert({
+      where:  { numeroOS },
+      create: { numeroOS, status: 'EM_ANDAMENTO' },
+      update: {},
+    });
+  } else {
+    // OS textual: procura qualquer RelacaoOS EM_ANDAMENTO com o nome exato
+    // OU com sufixo de data de hoje (criada pelo controle de estoque no mesmo dia)
+    const relacaoAberta = await prisma.relacaoOS.findFirst({
+      where: {
+        status: 'EM_ANDAMENTO',
+        OR: [
+          { numeroOS: numeroOS },
+          { numeroOS: { startsWith: `${numeroOS}-${hoje}` } },
+        ],
+      },
+      orderBy: { criadoEm: 'asc' },
+    });
+
+    if (relacaoAberta) {
+      relacao = relacaoAberta;
+    } else {
+      // Nenhuma aberta: cria nova com sufixo de data
+      let candidato = `${numeroOS}-${hoje}`;
+      let sufixoSeq = 1;
+
+      while (true) {
+        const existente = await prisma.relacaoOS.findUnique({ where: { numeroOS: candidato } });
+        if (!existente) {
+          relacao = await prisma.relacaoOS.create({ data: { numeroOS: candidato, status: 'EM_ANDAMENTO' } });
+          break;
+        }
+        if (existente.status !== 'FECHADA') {
+          relacao = existente;
+          break;
+        }
+        sufixoSeq += 1;
+        candidato = `${numeroOS}-${hoje}-${sufixoSeq}`;
+      }
+    }
+  }
 
   await prisma.movimentacaoEstoque.create({
     data: {

@@ -3826,6 +3826,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   late final TextEditingController _comprimento;
   late final TextEditingController _quantidade;
   late final TextEditingController _estoqueMinimo;
+  late final TextEditingController _qtdPadrao;
+  late final TextEditingController _unidPadrao;
 
   bool get _editando => widget.material != null;
   late bool _estoqueConfirmado;
@@ -3849,6 +3851,11 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         text: m != null ? m.quantidade.toString() : '0');
     _estoqueMinimo = TextEditingController(
         text: m != null ? m.estoqueMinimo.toString() : '0');
+    _qtdPadrao     = TextEditingController(
+        text: m?.qtdPadrao != null
+            ? m!.qtdPadrao!.toStringAsFixed(m.qtdPadrao! % 1 == 0 ? 0 : 5)
+            : '');
+    _unidPadrao    = TextEditingController(text: m?.unidPadrao ?? '');
   }
 
   @override
@@ -3856,6 +3863,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     for (final c in [
       _nome, _identificador, _unidade, _categoria, _medida, _espessura,
       _largura, _comprimento, _quantidade, _estoqueMinimo,
+      _qtdPadrao, _unidPadrao,
     ]) {
       c.dispose();
     }
@@ -3879,6 +3887,10 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       'estoqueMinimo': double.tryParse(_estoqueMinimo.text) ?? 0,
       'estoqueConfirmado': _estoqueConfirmado,
       'especifico': _especifico,
+      'qtdPadrao':  _qtdPadrao.text.trim().isEmpty
+          ? null
+          : double.tryParse(_qtdPadrao.text.trim().replaceAll(',', '.')),
+      'unidPadrao': _unidPadrao.text.trim().isEmpty ? null : _unidPadrao.text.trim(),
     };
 
     final provider = context.read<MaterialProvider>();
@@ -4056,6 +4068,57 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                       (v == null || v.trim().isEmpty || double.tryParse(v) == null)
                           ? 'Número inválido'
                           : null,
+                ),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            // ── Qtd Padrão / Unid Padrão ────────────────────────────────
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.info_outline, size: 14, color: AppTheme.textHint),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Preenchimento por unidade de compra (opcional). '
+                    'Ex: thinner 18 L → Qtd: 18000, Unid: ml. '
+                    'Ao finalizar uma OC, o custo será dividido por essa qtd '
+                    'e registrado por unidade menor.',
+                    style: const TextStyle(fontSize: 11, color: AppTheme.textHint),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                flex: 2,
+                child: TextFormField(
+                  controller: _qtdPadrao,
+                  decoration: const InputDecoration(
+                    labelText: 'Qtd por embalagem',
+                    hintText:  'Ex: 18000',
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_DecimalInputFormatter()],
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return null;
+                    final n = double.tryParse(v.trim().replaceAll(',', '.'));
+                    if (n == null || n <= 0) return 'Número inválido';
+                    return null;
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextFormField(
+                  controller: _unidPadrao,
+                  decoration: const InputDecoration(
+                    labelText: 'Unid. da embalagem',
+                    hintText:  'Ex: ml, m, L',
+                  ),
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [_UpperCaseFormatter()],
                 ),
               ),
             ]),

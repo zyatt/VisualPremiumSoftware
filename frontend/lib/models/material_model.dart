@@ -146,6 +146,14 @@ class MaterialModel {
   final double? precoMediano;
   final double? precoM2Mediano;
 
+  // ── NOVOS ─────────────────────────────────────────────────────────────────
+  /// Quantidade padrão de compra/uso (opcional).
+  final double? qtdPadrao;
+
+  /// Unidade padrão associada a [qtdPadrao] (opcional, ex: "m²", "kg").
+  final String? unidPadrao;
+  // ──────────────────────────────────────────────────────────────────────────
+
   final List<FornecedorMaterialModel> fornecedorMateriais;
   final List<HistoricoPrecoModel> historicoPrecos;
 
@@ -175,6 +183,8 @@ class MaterialModel {
     this.ultimoValorPagoM2,
     this.precoMediano,
     this.precoM2Mediano,
+    this.qtdPadrao,
+    this.unidPadrao,
     this.fornecedorMateriais = const [],
     this.historicoPrecos = const [],
     this.filhosEspecificos = const [],
@@ -218,13 +228,14 @@ class MaterialModel {
       ultimoValorPagoM2:  parseDoubleOrNull(json['custoM2UltimaCompra']),
       precoMediano:       parseDoubleOrNull(json['precoMediano']),
       precoM2Mediano:     parseDoubleOrNull(json['precoM2Mediano']),
+      qtdPadrao:          parseDoubleOrNull(json['qtdPadrao']),
+      unidPadrao:         json['unidPadrao'],
       fornecedorMateriais: (json['fornecedorMateriais'] as List? ?? [])
           .map((f) => FornecedorMaterialModel.fromJson(f as Map<String, dynamic>))
           .toList(),
       historicoPrecos: (json['historicoPrecos'] as List? ?? [])
           .map((h) => HistoricoPrecoModel.fromJson(h as Map<String, dynamic>))
           .toList(),
-      // ▼ NOVO
       filhosEspecificos: (json['estoquesEspecificos'] as List? ?? [])
           .map((e) => EstoqueEspecificoModel.fromJson(e as Map<String, dynamic>))
           .toList(),

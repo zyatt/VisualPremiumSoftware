@@ -5,14 +5,16 @@ class OrdemCompraItemModel {
   final String? materialMedida;
   final String? materialEspessura;
   final String? materialIdentificador;
-  final String? descricaoItem;   // descrição personalizada na OC (ex: "Tinta Branca Fosca 18L")
+  final double? materialQtdPadrao;
+  final String? materialUnidPadrao;
+  final String? descricaoItem;
   final String numeroOS;
   final double quantidade;
   final double precoUnitario;
   final double? precoMetroQuadrado;
   final double precoTotal;
   final bool usarM2;
-  final bool materialEspecifico; // indica se o material exige descrição personalizada
+  final bool materialEspecifico;
 
   OrdemCompraItemModel({
     this.id,
@@ -21,6 +23,8 @@ class OrdemCompraItemModel {
     this.materialMedida,
     this.materialEspessura,
     this.materialIdentificador,
+    this.materialQtdPadrao,
+    this.materialUnidPadrao,
     this.descricaoItem,
     required this.numeroOS,
     required this.quantidade,
@@ -31,6 +35,34 @@ class OrdemCompraItemModel {
     this.materialEspecifico = false,
   });
 
+  /// Quantidade real que entra/sai do estoque ao finalizar a OC.
+  ///
+  /// Quando o material tem qtdPadrao, o usuário informa quantas embalagens
+  /// comprou e o estoque sobe pela quantidade em unidade menor.
+  /// Exemplo: 2 latas de thinner 18 L (qtdPadrao = 18000 ml) → 36000 ml.
+  ///
+  /// Sem qtdPadrao (ou quando usarM2 está ativo), retorna [quantidade].
+  double get quantidadeEstoque {
+    if (usarM2) return quantidade;
+    final qtd = materialQtdPadrao;
+    if (qtd == null || qtd <= 0) return quantidade;
+    return quantidade * qtd;
+  }
+
+  /// Custo calculado por unidade padrão.
+  ///
+  /// Exemplo: thinner 18 L (qtdPadrao = 18000 ml), precoUnitario = 250
+  ///   → custoPorUnidPadrao = 250 / 18000 ≈ 0.01388 (por ml)
+  ///
+  /// Retorna null quando qtdPadrao não está definida ou usarM2 está ativo.
+  double? get custoPorUnidPadrao {
+    if (usarM2) return null;
+    final qtd = materialQtdPadrao;
+    if (qtd == null || qtd <= 0) return null;
+    if (precoUnitario <= 0) return null;
+    return precoUnitario / qtd;
+  }
+
   factory OrdemCompraItemModel.fromJson(Map<String, dynamic> json) => OrdemCompraItemModel(
     id:                     json['id'],
     materialId:             json['materialId'] ?? 0,
@@ -38,14 +70,20 @@ class OrdemCompraItemModel {
     materialMedida:         json['material']?['medida'],
     materialEspessura:      json['material']?['espessura'],
     materialIdentificador:  json['material']?['identificador'],
-    descricaoItem:      json['descricaoItem'],
-    numeroOS:           json['numeroOS'] ?? '',
-    quantidade:         double.tryParse(json['quantidade']?.toString() ?? '0') ?? 0,
-    precoUnitario:      double.tryParse(json['precoUnitario']?.toString() ?? '0') ?? 0,
-    precoMetroQuadrado: json['precoMetroQuadrado'] != null ? double.tryParse(json['precoMetroQuadrado'].toString()) : null,
-    precoTotal:         double.tryParse(json['precoTotal']?.toString() ?? '0') ?? 0,
-    usarM2:             json['usarM2'] == true,
-    materialEspecifico: json['material']?['especifico'] == true,
+    materialQtdPadrao:      json['material']?['qtdPadrao'] != null
+        ? double.tryParse(json['material']['qtdPadrao'].toString())
+        : null,
+    materialUnidPadrao:     json['material']?['unidPadrao'],
+    descricaoItem:          json['descricaoItem'],
+    numeroOS:               json['numeroOS'] ?? '',
+    quantidade:             double.tryParse(json['quantidade']?.toString() ?? '0') ?? 0,
+    precoUnitario:          double.tryParse(json['precoUnitario']?.toString() ?? '0') ?? 0,
+    precoMetroQuadrado:     json['precoMetroQuadrado'] != null
+        ? double.tryParse(json['precoMetroQuadrado'].toString())
+        : null,
+    precoTotal:             double.tryParse(json['precoTotal']?.toString() ?? '0') ?? 0,
+    usarM2:                 json['usarM2'] == true,
+    materialEspecifico:     json['material']?['especifico'] == true,
   );
 }
 
@@ -82,7 +120,9 @@ class OrdemCompraModel {
 
   factory OrdemCompraModel.fromJson(Map<String, dynamic> json) => OrdemCompraModel(
     id:             json['id'] ?? 0,
-    data:           json['data'] != null ? DateTime.tryParse(json['data'].toString()) ?? DateTime.now() : DateTime.now(),
+    data:           json['data'] != null
+        ? DateTime.tryParse(json['data'].toString()) ?? DateTime.now()
+        : DateTime.now(),
     fornecedorId:   json['fornecedorId'] ?? 0,
     fornecedorNome: json['fornecedor']?['nomeFantasia'],
     requisitante:   json['requisitante'] ?? '',
@@ -96,7 +136,7 @@ class OrdemCompraModel {
         .map((i) => OrdemCompraItemModel.fromJson(i as Map<String, dynamic>))
         .toList(),
     numerosOS: (json['numerosOS'] as List? ?? [])
-      .map((o) => o['numeroOS'].toString())
-      .toList(),
+        .map((o) => o['numeroOS'].toString())
+        .toList(),
   );
 }

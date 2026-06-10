@@ -384,10 +384,10 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
         return;
       }
 
-      // ── Verifica OS fechadas ──────────────────────────────────────────────
+      // ── Verifica OS fechadas (apenas OS numéricas) ────────────────────────
       final osFechadas = context.read<EstoqueProvider>().numerosOSFechadas;
       final osBloqueadas = model.numerosOS
-          .where((os) => osFechadas.contains(os))
+          .where((os) => RegExp(r'^\d+$').hasMatch(os) && osFechadas.contains(os))
           .toList();
       if (osBloqueadas.isNotEmpty) {
         _mostrarDialogOSFechada(context, osBloqueadas);
@@ -916,10 +916,10 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
   }
 
   Future<void> _confirmarFinalizar() async {
-    // ── Verifica OS fechadas antes de abrir o diálogo de confirmação ─────────
+    // ── Verifica OS fechadas antes de abrir o diálogo de confirmação (apenas OS numéricas) ──
     final osFechadas = context.read<EstoqueProvider>().numerosOSFechadas;
     final osBloqueadas = _ordem.numerosOS
-        .where((os) => osFechadas.contains(os))
+        .where((os) => RegExp(r'^\d+$').hasMatch(os) && osFechadas.contains(os))
         .toList();
     if (osBloqueadas.isNotEmpty) {
       if (!mounted) return;
@@ -1207,6 +1207,18 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                           ? 'Qtd (m²): ${item.quantidade}'
                           : 'Qtd: ${item.quantidade}',
                     ),
+                    if (!item.usarM2 && item.materialQtdPadrao != null && item.materialQtdPadrao! > 0)
+                      _itemChip(
+                        Icons.warehouse_outlined,
+                        () {
+                          final real = item.quantidadeEstoque;
+                          final unid = item.materialUnidPadrao ?? '';
+                          final label = real % 1 == 0
+                              ? real.toInt().toString()
+                              : real.toStringAsFixed(2);
+                          return 'Estoque: $label${unid.isNotEmpty ? ' $unid' : ''}';
+                        }(),
+                      ),
                    _itemChipDestaque(
                       Icons.attach_money,
                       item.precoUnitario > 0

@@ -1477,20 +1477,18 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       showDialog(
         context: context,
         builder: (_) => _MovimentacaoItemDialog(
-          tipo:          tipo,
-          materialId:    _primeira.materialId,
-          materialNome:  _primeira.materialNome,
-          numeroOS:      widget.numeroOS,
-          descricaoItem: descricaoItem,
-          // Preço da última entrada deste item — é o valor atual em estoque
-          precoUnitario: ultimaEntrada?.precoUnitario ?? _primeira.precoUnitario,
-          precoM2:       ultimaEntrada?.precoM2       ?? _primeira.precoM2,
+          tipo:                 tipo,
+          materialId:           _primeira.materialId,
+          materialNome:         _primeira.materialNome,
+          numeroOS:             widget.numeroOS,
+          descricaoItem:        descricaoItem,
+          precoUnitario:        ultimaEntrada?.precoUnitario ?? _primeira.precoUnitario,
+          precoM2:              ultimaEntrada?.precoM2       ?? _primeira.precoM2,
+          materialQtdPadrao:    _primeira.materialQtdPadrao,
+          materialUnidPadrao:   _primeira.materialUnidPadrao,
         ),
       );
     } else {
-      // Material normal: usa o preço da última movimentação já registrada
-      // nesta OS para este material — evita puxar o preço atualizado por uma
-      // OC posterior que nada tem a ver com esta OS.
       final ultimaMovOS = widget.movimentacoes
           .where((m) =>
               m.materialId == _primeira.materialId &&
@@ -1502,35 +1500,36 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                   prev == null || m.criadoEm.isAfter(prev.criadoEm) ? m : prev);
 
       if (ultimaMovOS != null) {
-        // Preço já existe nas movimentações desta OS → usa diretamente
         if (!context.mounted) return;
         showDialog(
           context: context,
           builder: (_) => _MovimentacaoItemDialog(
-            tipo:          tipo,
-            materialId:    _primeira.materialId,
-            materialNome:  _primeira.materialNome,
-            numeroOS:      widget.numeroOS,
-            descricaoItem: null,
-            precoUnitario: ultimaMovOS.precoUnitario,
-            precoM2:       ultimaMovOS.precoM2,
+            tipo:               tipo,
+            materialId:         _primeira.materialId,
+            materialNome:       _primeira.materialNome,
+            numeroOS:           widget.numeroOS,
+            descricaoItem:      null,
+            precoUnitario:      ultimaMovOS.precoUnitario,
+            precoM2:            ultimaMovOS.precoM2,
+            materialQtdPadrao:  _primeira.materialQtdPadrao,
+            materialUnidPadrao: _primeira.materialUnidPadrao,
           ),
         );
       } else {
-        // Nenhuma movimentação com preço nesta OS ainda → busca o mais recente
-        // disponível no servidor (fallback seguro para primeira movimentação)
         context.read<MaterialProvider>().buscarPorId(_primeira.materialId).then((mat) {
           if (!context.mounted) return;
           showDialog(
             context: context,
             builder: (_) => _MovimentacaoItemDialog(
-              tipo:          tipo,
-              materialId:    _primeira.materialId,
-              materialNome:  _primeira.materialNome,
-              numeroOS:      widget.numeroOS,
-              descricaoItem: null,
-              precoUnitario: mat?.ultimoValorPago   ?? _primeira.precoUnitario,
-              precoM2:       mat?.ultimoValorPagoM2 ?? _primeira.precoM2,
+              tipo:               tipo,
+              materialId:         _primeira.materialId,
+              materialNome:       _primeira.materialNome,
+              numeroOS:           widget.numeroOS,
+              descricaoItem:      null,
+              precoUnitario:      mat?.ultimoValorPago   ?? _primeira.precoUnitario,
+              precoM2:            mat?.ultimoValorPagoM2 ?? _primeira.precoM2,
+              materialQtdPadrao:  _primeira.materialQtdPadrao,
+              materialUnidPadrao: _primeira.materialUnidPadrao,
             ),
           );
         });
@@ -2521,6 +2520,8 @@ class _MovimentacaoItemDialog extends StatefulWidget {
   final String? descricaoItem;
   final double? precoUnitario;
   final double? precoM2;
+  final double? materialQtdPadrao;
+  final String? materialUnidPadrao;
 
   const _MovimentacaoItemDialog({
     required this.tipo,
@@ -2530,6 +2531,8 @@ class _MovimentacaoItemDialog extends StatefulWidget {
     this.descricaoItem,
     this.precoUnitario,
     this.precoM2,
+    this.materialQtdPadrao,
+    this.materialUnidPadrao,
   });
 
   @override
@@ -2659,12 +2662,35 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
             ),
             // Exibe o preço que será gravado com a movimentação
             Builder(builder: (_) {
-              final pu  = widget.precoUnitario;
-              final pm2 = widget.precoM2;
-              final partes = <String>[
-                if (pu  != null && pu  > 0) 'Unit.: R\$ ${pu.toStringAsFixed(2).replaceAll('.', ',')}',
-                if (pm2 != null && pm2 > 0) 'M²: R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}',
-              ];
+              final pu         = widget.precoUnitario;
+              final pm2        = widget.precoM2;
+              final qtdPadrao  = widget.materialQtdPadrao;
+              final unidPadrao = widget.materialUnidPadrao;
+              final temQtdPad  = qtdPadrao != null && qtdPadrao > 0 &&
+                                 unidPadrao != null && unidPadrao.isNotEmpty;
+
+              String fmtPreco(double v) {
+                if (v >= 1) return v.toStringAsFixed(2).replaceAll('.', ',');
+                String s = v.toStringAsFixed(6).replaceAll('.', ',');
+                while (s.endsWith('0')) {
+                  s = s.substring(0, s.length - 1);
+                }
+                if (s.endsWith(',')) s = '${s}0';
+                return s;
+              }
+
+              final partes = <String>[];
+              if (pu != null && pu > 0) {
+                if (temQtdPad) {
+                  partes.add('Custo: R\$ ${fmtPreco(pu)}/${unidPadrao.toLowerCase()}');
+                  partes.add('≈ R\$ ${fmtPreco(pu * qtdPadrao)}/embalagem');
+                } else {
+                  partes.add('Unit.: R\$ ${pu.toStringAsFixed(2).replaceAll('.', ',')}');
+                }
+              }
+              if (pm2 != null && pm2 > 0) {
+                partes.add('M²: R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}');
+              }
               if (partes.isEmpty) return const SizedBox.shrink();
               return Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -2672,9 +2698,11 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
                   children: [
                     const Icon(Icons.price_check, size: 12, color: AppTheme.textSecondary),
                     const SizedBox(width: 4),
-                    Text(
-                      'Último preço: ${partes.join('  ·  ')}',
-                      style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                    Expanded(
+                      child: Text(
+                        partes.join('  ·  '),
+                        style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                      ),
                     ),
                   ],
                 ),
@@ -2903,14 +2931,7 @@ class _MovimentacaoGlobalDialogState
     // (numeroOSFixo == null). OS vindas de detalhe já têm o numeroOS correto
     // do banco e não devem ser modificadas, senão cria uma RelacaoOS nova.
     if (widget.numeroOSFixo == null) {
-      final osEhNumerica = RegExp(r'^\d+$').hasMatch(numeroOS);
-      final osTemSufixo  = RegExp(r'#(OC|S|E)').hasMatch(numeroOS);
-      if (!osEhNumerica && !osTemSufixo) {
-        final sufixo = widget.tipo == 'SAIDA'
-            ? '#S${DateTime.now().millisecondsSinceEpoch}'
-            : '#E${DateTime.now().millisecondsSinceEpoch}';
-        numeroOS = '$numeroOS$sufixo';
-      }
+      numeroOS = numeroOS.trim();
     }
 
     final provider  = context.read<EstoqueProvider>();
@@ -2962,8 +2983,7 @@ class _MovimentacaoGlobalDialogState
 
     if (todosOk) {
       // Remove o sufixo para exibir ao usuário (se foi adicionado)
-      final numeroOSDisplay = numeroOS.replaceFirst(RegExp(r'#(S|E)\d+$'), '');
-      navigator.pop();
+      final numeroOSDisplay = numeroOS;      navigator.pop();
       messenger.showSnackBar(SnackBar(
         content: Text(
             '${widget.tipo == 'ENTRADA' ? 'Entrada' : 'Saída'} '
@@ -3876,12 +3896,40 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
             final pu  = item.precoUnitarioSugerido;
             final pm2 = item.precoM2Sugerido;
             if (pu == null && pm2 == null) return const SizedBox.shrink();
-            final partesBrl = <String>[
-              if (pu  != null && pu  > 0)
-                'Unit.: R\$ ${pu.toStringAsFixed(2).replaceAll('.', ',')}',
-              if (pm2 != null && pm2 > 0)
-                'M²: R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}',
-            ];
+
+            final qtdPadrao  = m.qtdPadrao;
+            final unidPadrao = m.unidPadrao;
+            final temQtdPad  = qtdPadrao != null && qtdPadrao > 0 && unidPadrao != null && unidPadrao.isNotEmpty;
+
+            // Formata número: sem zeros à direita desnecessários até 6 casas
+            String fmtPreco(double v) {
+              if (v >= 1) return v.toStringAsFixed(2).replaceAll('.', ',');
+              // Custo por unidade menor: pode ter muitas casas (ex: 0.014722...)
+              // Mostra até 6 casas significativas sem zeros no final
+              String s = v.toStringAsFixed(6).replaceAll('.', ',');
+              while (s.endsWith('0')) {
+                s = s.substring(0, s.length - 1);
+              }
+              if (s.endsWith(',')) s = '${s}0';
+              return s;
+            }
+
+            final partesBrl = <String>[];
+
+            if (pu != null && pu > 0) {
+              if (temQtdPad) {
+                // Custo por unidade menor (ex: R$ 0,0147/ml)
+                partesBrl.add('Custo: R\$ ${fmtPreco(pu)}/${unidPadrao.toLowerCase()}');
+                // Custo reconstituído por embalagem (informativo)
+                final porEmbalagem = pu * qtdPadrao;
+                partesBrl.add('≈ R\$ ${fmtPreco(porEmbalagem)}/embalagem');
+              } else {
+                partesBrl.add('Unit.: R\$ ${pu.toStringAsFixed(2).replaceAll('.', ',')}');
+              }
+            }
+            if (pm2 != null && pm2 > 0) {
+              partesBrl.add('M²: R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}');
+            }
             if (partesBrl.isEmpty) return const SizedBox.shrink();
             return Padding(
               padding: const EdgeInsets.only(top: 6),
@@ -3890,10 +3938,12 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                   const Icon(Icons.price_check,
                       size: 12, color: AppTheme.textSecondary),
                   const SizedBox(width: 4),
-                  Text(
-                    'Último preço: ${partesBrl.join('  ·  ')}',
-                    style: const TextStyle(
-                        fontSize: 11, color: AppTheme.textSecondary),
+                  Expanded(
+                    child: Text(
+                      partesBrl.join('  ·  '),
+                      style: const TextStyle(
+                          fontSize: 11, color: AppTheme.textSecondary),
+                    ),
                   ),
                 ],
               ),

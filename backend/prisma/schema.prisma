@@ -37,6 +37,10 @@ model Material {
   valorMetroQuadrado   Decimal?                 @db.Decimal(15, 5)
   quantidade           Decimal                  @default(0) @db.Decimal(10, 3)
   estoqueMinimo        Decimal                  @default(0) @db.Decimal(10, 3)
+  /// Quantidade padrão de cada unidade de compra (ex: 18000 para thinner 18L em ml)
+  qtdPadrao            Decimal?                 @db.Decimal(15, 5)
+  /// Unidade da quantidade padrão (ex: "ml", "m", "L"). Pode diferir de `unidade`.
+  unidPadrao           String?
   status               StatusEstoque            @default(OK)
   estoqueConfirmado    Boolean                  @default(false)
   ativo                Boolean                  @default(true)
@@ -52,7 +56,7 @@ model Material {
   orcamentoItens       OrcamentoItem[]
   ordemItens           OrdemCompraItem[]
   SolicitacoesProducao SolicitacaoProducao[]
-  auditLogs  AuditLogMaterial[]
+  auditLogs            AuditLogMaterial[]
 
   @@unique([nome, medida, espessura])
   @@map("materiais")
@@ -356,16 +360,16 @@ model Veiculo {
 }
 
 model ManutencaoVeiculo {
-  id          Int       @id @default(autoincrement())
-  veiculoId   Int
-  tipo        String    // "MANUTENCAO" | "LIMPEZA" | "REVISAO" | "PNEU" | "OUTRO"
-  descricao   String?
-  valor       Decimal   @db.Decimal(10, 2)
-  dataEnvio   DateTime
+  id           Int       @id @default(autoincrement())
+  veiculoId    Int
+  tipo         String    // "MANUTENCAO" | "LIMPEZA" | "REVISAO" | "PNEU" | "OUTRO"
+  descricao    String?
+  valor        Decimal   @db.Decimal(10, 2)
+  dataEnvio    DateTime
   dataRetirada DateTime?
-  criadoEm   DateTime  @default(now())
+  criadoEm     DateTime  @default(now())
 
-  veiculo     Veiculo   @relation(fields: [veiculoId], references: [id])
+  veiculo      Veiculo   @relation(fields: [veiculoId], references: [id])
 
   @@map("manutencoes_veiculo")
 }

@@ -31,6 +31,52 @@ function _calcularStatus(quantidade, estoqueMinimo, ativo) {
   return 'CRITICO';
 }
 
+/**
+ * Calcula o custo por unidade padrão quando o material possui qtdPadrao.
+ *
+ * Exemplo: thinner 18 L (qtdPadrao = 18000 ml).
+ *   - Comprador registra precoUnitario = 250 (por embalagem de 18 L)
+ *   - custoPorUnidPadrao = 250 / 18000 = 0.013888... (por ml)
+ *
+ * Retorna null quando qtdPadrao não está definida, zero ou usarM2 está ativo
+ * (nesse caso o preço de referência é por m² e não faz sentido dividir).
+ */
+function _calcularCustoPorUnidPadrao({ precoUnitario, usarM2, qtdPadrao }) {
+  if (usarM2) return null;
+  const qtd = Number(qtdPadrao ?? 0);
+  if (!qtd) return null;
+  const preco = Number(precoUnitario ?? 0);
+  if (!preco) return null;
+  return preco / qtd;
+}
+
+/**
+ * Calcula a quantidade real que entra no estoque.
+ *
+ * Quando o material tem qtdPadrao (ex: thinner 18 L = 18000 ml) e o usuário
+ * comprou 2 embalagens, a quantidade real que sobe no estoque é 2 × 18000 = 36000.
+ * Sem qtdPadrao, retorna a quantidade da OC sem alteração.
+ */
+function _calcularQuantidadeReal({ quantidade, usarM2, qtdPadrao }) {
+  if (usarM2) return Number(quantidade);
+  const qtd = Number(qtdPadrao ?? 0);
+  if (!qtd) return Number(quantidade);
+  return Number(quantidade) * qtd;
+}
+
+// ── select de material reutilizável (inclui qtdPadrao e unidPadrao) ───────────
+const _selectMaterial = {
+  id: true,
+  nome: true,
+  unidade: true,
+  especifico: true,
+  medida: true,
+  espessura: true,
+  identificador: true,
+  qtdPadrao: true,
+  unidPadrao: true,
+};
+
 async function listar(status) {
   const where = {};
   if (status) where.status = status;
@@ -40,19 +86,7 @@ async function listar(status) {
       fornecedor: { select: { id: true, nomeFantasia: true } },
       usuario:    { select: { id: true, nome: true } },
       itens: {
-        include: {
-          material: {
-            select: {
-              id: true,
-              nome: true,
-              unidade: true,
-              especifico: true,
-              medida: true,
-              espessura: true,
-              identificador: true,
-            },
-          },
-        },
+        include: { material: { select: _selectMaterial } },
       },
       numerosOS: true,
     },
@@ -128,7 +162,6 @@ async function criar(data, usuarioId) {
                 descricaoItem:      item.descricaoItem?.trim() || null,
                 numeroOS:           item.numeroOS,
                 quantidade:         Number(item.quantidade),
-                // Campos não-nullable no schema: usar 0 quando o campo não se aplica
                 precoUnitario:      usarM2 ? 0 : Number(item.precoUnitario ?? 0),
                 precoMetroQuadrado: usarM2 ? Number(item.precoMetroQuadrado ?? 0) : 0,
                 usarM2,
@@ -142,19 +175,7 @@ async function criar(data, usuarioId) {
     },
     include: {
       itens: {
-        include: {
-          material: {
-            select: {
-              id: true,
-              nome: true,
-              unidade: true,
-              especifico: true,
-              medida: true,
-              espessura: true,
-              identificador: true,
-            },
-          },
-        },
+        include: { material: { select: _selectMaterial } },
       },
       numerosOS: true,
       fornecedor: true,
@@ -192,7 +213,6 @@ async function atualizar(id, data) {
             descricaoItem:      item.descricaoItem?.trim() || null,
             numeroOS:           item.numeroOS,
             quantidade:         Number(item.quantidade),
-            // Campos não-nullable no schema: usar 0 quando o campo não se aplica
             precoUnitario:      usarM2 ? 0 : Number(item.precoUnitario ?? 0),
             precoMetroQuadrado: usarM2 ? Number(item.precoMetroQuadrado ?? 0) : 0,
             usarM2,
@@ -215,7 +235,6 @@ async function adicionarItem(ordemCompraId, itemData) {
     ? Number(itemData.quantidade) * Number(itemData.precoMetroQuadrado)
     : Number(itemData.quantidade) * Number(itemData.precoUnitario);
 
-  // Garante que o campo não-escolhido seja null
   const dadosItem = {
     ...itemData,
     usarM2,
@@ -225,19 +244,7 @@ async function adicionarItem(ordemCompraId, itemData) {
 
   const item = await prisma.ordemCompraItem.create({
     data: { ...dadosItem, ordemCompraId, precoTotal },
-    include: {
-      material: {
-        select: {
-          id: true,
-          nome: true,
-          unidade: true,
-          especifico: true,
-          medida: true,
-          espessura: true,
-          identificador: true,
-        },
-      },
-    },
+    include: { material: { select: _selectMaterial } },
   });
   await recalcularTotal(ordemCompraId);
   return item;
@@ -250,9 +257,9 @@ async function removerItem(ordemCompraId, itemId) {
 
 async function atualizarItem(itemId, data) {
   const item = await prisma.ordemCompraItem.findUnique({ where: { id: itemId } });
-  const quantidade     = data.quantidade    ?? item.quantidade;
-  const precoUnitario  = data.precoUnitario ?? item.precoUnitario;
-  const precoTotal     = Number(quantidade) * Number(precoUnitario);
+  const quantidade    = data.quantidade    ?? item.quantidade;
+  const precoUnitario = data.precoUnitario ?? item.precoUnitario;
+  const precoTotal    = Number(quantidade) * Number(precoUnitario);
   const updated = await prisma.ordemCompraItem.update({
     where: { id: itemId },
     data: { ...data, precoTotal },
@@ -276,6 +283,7 @@ async function finalizar(id) {
     include: {
       itens: {
         include: {
+          // inclui qtdPadrao e unidPadrao para cálculo do custo por unid padrão
           material: true,
         },
       },
@@ -289,12 +297,13 @@ async function finalizar(id) {
     throw { status: 400, message: 'Não é possível finalizar uma OC sem itens' };
   }
 
-  // ── Valida que nenhuma OS da OC está fechada no controle de estoque ──────
+  // ── Valida que nenhuma OS *numérica* da OC está fechada no controle de estoque ──
   const numerosOS = [...new Set(ordem.itens.map((i) => i.numeroOS?.trim()).filter(Boolean))];
-  if (numerosOS.length > 0) {
+  const numerosOSNumericas = numerosOS.filter((os) => /^\d+$/.test(os));
+  if (numerosOSNumericas.length > 0) {
     const relacoesOSFechadas = await prisma.relacaoOS.findMany({
       where: {
-        numeroOS: { in: numerosOS },
+        numeroOS: { in: numerosOSNumericas },
         status: 'FECHADA',
       },
       select: { numeroOS: true },
@@ -307,7 +316,6 @@ async function finalizar(id) {
       };
     }
   }
-  // ─────────────────────────────────────────────────────────────────────────
 
   const itensSemOS = ordem.itens.filter((item) => !item.numeroOS || item.numeroOS.trim() === '');
   if (itensSemOS.length > 0) {
@@ -317,7 +325,6 @@ async function finalizar(id) {
     };
   }
 
-  // Valida que itens de material específico possuem descricaoItem
   const itensSemDescricao = ordem.itens.filter(
     (item) => item.material?.especifico && (!item.descricaoItem || !item.descricaoItem.trim())
   );
@@ -338,43 +345,83 @@ async function finalizar(id) {
     const numeroOSLimpo = item.numeroOS.trim();
     const material      = item.material;
     const eEspecifico   = material?.especifico === true;
+    const osEhNumerica  = /^\d+$/.test(numeroOSLimpo);
 
-    // Busca ou cria a RelacaoOS pelo numeroOS exato — igual para OS numéricas e textuais.
-    // Isso garante que movimentações de produção e de OC com o mesmo nome de OS
-    // sejam sempre agrupadas na mesma RelacaoOS.
-    let relacaoOS = await prisma.relacaoOS.findUnique({
-      where: { numeroOS: numeroOSLimpo },
-    });
-    if (!relacaoOS) {
-      relacaoOS = await prisma.relacaoOS.create({
-        data: { numeroOS: numeroOSLimpo },
-      });
+    let relacaoOS = await prisma.relacaoOS.findUnique({ where: { numeroOS: numeroOSLimpo } });
+
+    if (relacaoOS && !osEhNumerica && relacaoOS.status === 'FECHADA') {
+      const _d   = new Date();
+      const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`;
+      let candidato = `${numeroOSLimpo}-${hoje}`;
+      let sufixoSeq  = 1;
+
+      while (true) {
+        const existente = await prisma.relacaoOS.findUnique({ where: { numeroOS: candidato } });
+        if (!existente) {
+          relacaoOS = await prisma.relacaoOS.create({ data: { numeroOS: candidato } });
+          break;
+        }
+        if (existente.status !== 'FECHADA') {
+          relacaoOS = existente;
+          break;
+        }
+        sufixoSeq += 1;
+        candidato = `${numeroOSLimpo}-${hoje}-${sufixoSeq}`;
+      }
+    } else if (!relacaoOS) {
+      relacaoOS = await prisma.relacaoOS.create({ data: { numeroOS: numeroOSLimpo } });
     }
 
-    // Lê os preços brutos do item (sem normalizar para null ainda, para não perder zeros)
-    const precoUnitarioBruto = Number(item.precoUnitario      ?? 0);
-    const precoM2Bruto       = Number(item.precoMetroQuadrado ?? 0);
+    const precoUnitarioBruto = Number(item.precoUnitario ?? 0);
+    const precoM2Bruto = Number(item.precoMetroQuadrado ?? 0);
 
-    // Determina qual campo é o "efetivo" conforme usarM2
-    // _normalizarPreco converte 0 → null (ausência de informação)
-    const precoUnitarioFinal = item.usarM2 ? null : _normalizarPreco(precoUnitarioBruto);
-    const precoM2Final       = item.usarM2 ? _normalizarPreco(precoM2Bruto) : null;
+    const precoUnitarioFinal = item.usarM2
+      ? null
+      : _normalizarPreco(precoUnitarioBruto);
 
-    // Para o ultimoValorPago: usa o valor efetivo (nunca sobrescreve com null quando há preço)
-    const novoUltimoValorPago   = item.usarM2 ? null : (precoUnitarioFinal ?? null);
-    const novoUltimoValorPagoM2 = item.usarM2 ? (precoM2Final ?? null) : null;
+    const precoM2Final = item.usarM2
+      ? _normalizarPreco(precoM2Bruto)
+      : null;
 
-    // Cria movimentação (igual para específico e não-específico; descricaoItem já está no item)
-    // numeroOS na movimentação sempre usa o valor original (sem sufixo interno da RelacaoOS)
+    // ── Custo por unidade padrão ──────────────────────────────────────────────
+    const custoPorUnidPadrao = _calcularCustoPorUnidPadrao({
+      precoUnitario: precoUnitarioFinal,
+      usarM2: item.usarM2,
+      qtdPadrao: material?.qtdPadrao,
+    });
+
+    const novoUltimoValorPago = item.usarM2
+      ? null
+      : (custoPorUnidPadrao ?? precoUnitarioFinal ?? null);
+
+    const novoUltimoValorPagoM2 = item.usarM2
+      ? (precoM2Final ?? null)
+      : null;
+
+    // O preço que vai para a movimentação:
+    //   • se tem qtdPadrao → custo por unidade menor
+    //   • caso contrário   → preço unitário original
+    const precoUnitarioMovimentacao = custoPorUnidPadrao ?? precoUnitarioFinal;
+
+    // ── Quantidade real no estoque ────────────────────────────────────────────
+    // Se o material tem qtdPadrao, a quantidade comprada (em embalagens) é
+    // multiplicada pela qtdPadrao para refletir a unidade do estoque.
+    // Ex: 2 latas de thinner 18 L (qtdPadrao = 18000 ml) → 36000 ml no estoque.
+    const quantidadeReal = _calcularQuantidadeReal({
+      quantidade: item.quantidade,
+      usarM2:     item.usarM2,
+      qtdPadrao:  material?.qtdPadrao,
+    });
+
     await prisma.movimentacaoEstoque.create({
       data: {
         materialId:    item.materialId,
         tipo:          'ENTRADA',
-        quantidade:    item.quantidade,
-        numeroOS:      numeroOSLimpo,   // valor original sem sufixo
+        quantidade:    quantidadeReal,
+        numeroOS:      numeroOSLimpo,
         relacaoOSId:   relacaoOS.id,
         ordemCompraId: id,
-        precoUnitario: precoUnitarioFinal,
+        precoUnitario: precoUnitarioMovimentacao,
         precoM2:       precoM2Final,
         descricaoItem: item.descricaoItem ?? null,
         observacao:    `Entrada via OC #${id}`,
@@ -382,14 +429,12 @@ async function finalizar(id) {
     });
 
     if (eEspecifico) {
-      // ── Material específico: acumula em EstoqueEspecifico, NÃO altera material.quantidade ──
       const descricao = item.descricaoItem.trim();
       await prisma.estoqueEspecifico.upsert({
         where:  { materialId_descricao: { materialId: item.materialId, descricao } },
-        create: { materialId: item.materialId, descricao, quantidade: item.quantidade },
-        update: { quantidade: { increment: Number(item.quantidade) } },
+        create: { materialId: item.materialId, descricao, quantidade: quantidadeReal },
+        update: { quantidade: { increment: quantidadeReal } },
       });
-      // Atualiza ultimoValorPago somente se o item trouxe preço efetivo
       if (novoUltimoValorPago !== null || novoUltimoValorPagoM2 !== null) {
         await prisma.material.update({
           where: { id: item.materialId },
@@ -400,12 +445,10 @@ async function finalizar(id) {
         });
       }
     } else {
-      // ── Material normal: atualiza material.quantidade ──
-      const matAtual = await prisma.material.findUnique({ where: { id: item.materialId } });
-      const novaQuantidade = Number(matAtual.quantidade) + Number(item.quantidade);
+      const matAtual       = await prisma.material.findUnique({ where: { id: item.materialId } });
+      const novaQuantidade = Number(matAtual.quantidade) + quantidadeReal;
       const novoStatus     = _calcularStatus(novaQuantidade, matAtual.estoqueMinimo, matAtual.ativo);
 
-      // Monta o patch de preço: só sobrescreve se o item trouxe preço efetivo
       const patchPreco = {};
       if (novoUltimoValorPago !== null || novoUltimoValorPagoM2 !== null) {
         patchPreco.ultimoValorPago   = novoUltimoValorPago;
@@ -422,16 +465,15 @@ async function finalizar(id) {
       });
     }
 
-    // Histórico de preços (para todos)
     await prisma.historicoPrecoMaterial.create({
       data: {
-        materialId:    item.materialId,
+        materialId: item.materialId,
         ordemCompraId: id,
-        fornecedorId:  ordem.fornecedorId,
-        precoUnitario: precoUnitarioFinal,
-        precoM2:       precoM2Final,
-        quantidade:    item.quantidade,
-        usarM2:        item.usarM2 ?? false,
+        fornecedorId: ordem.fornecedorId,
+        precoUnitario: precoUnitarioMovimentacao,
+        precoM2: precoM2Final,
+        quantidade: item.quantidade,
+        usarM2: item.usarM2 ?? false,
       },
     });
   }
@@ -471,60 +513,40 @@ async function reverter(id) {
     const material    = item.material;
     if (!material) continue;
 
-    const eEspecifico = material.especifico === true;
-
+    const eEspecifico   = material.especifico === true;
     const numeroOSLimpo = item.numeroOS?.trim() || 'OUTROS';
 
-    const osEhNumerica = /^\d+$/.test(numeroOSLimpo);
-
-    let relacaoOS = await prisma.relacaoOS.findUnique({
-      where: {
-        numeroOS: numeroOSLimpo,
-      },
-    });
-
+    let relacaoOS = await prisma.relacaoOS.findUnique({ where: { numeroOS: numeroOSLimpo } });
     if (!relacaoOS) {
-      relacaoOS = await prisma.relacaoOS.create({
-        data: {
-          numeroOS: numeroOSLimpo,
-        },
-      });
+      relacaoOS = await prisma.relacaoOS.create({ data: { numeroOS: numeroOSLimpo } });
     }
-    const precoUnitarioValor = _normalizarPreco(item.precoUnitario);
-    const precoM2Valor       = _normalizarPreco(item.precoMetroQuadrado);
 
-    // Usa apenas o campo registrado na OC (baseado em usarM2 do item)
-    const precoUnitarioEstorno = item.usarM2 ? null : precoUnitarioValor;
-    const precoM2Estorno       = item.usarM2 ? precoM2Valor : null;
-
-    // Movimentação de estorno (SAIDA)
     await prisma.movimentacaoEstoque.deleteMany({
-      where: {
-        ordemCompraId: id,
-        materialId: item.materialId,
-      },
+      where: { ordemCompraId: id, materialId: item.materialId },
     });
 
-    // ── Remove histórico de preços desta OC (vale para específico e normal) ──
     await prisma.historicoPrecoMaterial.deleteMany({
       where: { materialId: item.materialId, ordemCompraId: id },
     });
 
-    // Registro mais recente que restou após a remoção (para restaurar ultimoValorPago)
     const historicoAnterior = await prisma.historicoPrecoMaterial.findFirst({
       where:   { materialId: item.materialId },
       orderBy: { criadoEm: 'desc' },
     });
 
     if (eEspecifico) {
-      // ── Material específico: decrementa o filho em EstoqueEspecifico ──
       const descricao = (item.descricaoItem ?? '').trim();
       if (descricao) {
         const filho = await prisma.estoqueEspecifico.findUnique({
           where: { materialId_descricao: { materialId: item.materialId, descricao } },
         });
         if (filho) {
-          const novaQtd = Math.max(0, Number(filho.quantidade) - Number(item.quantidade));
+          const quantidadeRealReverter = _calcularQuantidadeReal({
+            quantidade: item.quantidade,
+            usarM2:     item.usarM2,
+            qtdPadrao:  material?.qtdPadrao,
+          });
+          const novaQtd = Math.max(0, Number(filho.quantidade) - quantidadeRealReverter);
           if (novaQtd === 0) {
             await prisma.estoqueEspecifico.delete({
               where: { materialId_descricao: { materialId: item.materialId, descricao } },
@@ -537,8 +559,6 @@ async function reverter(id) {
           }
         }
       }
-      // Restaura ultimoValorPago no material específico:
-      // usa apenas o campo que o histórico anterior registrou (baseado em usarM2)
       const anteriorUsarM2 = historicoAnterior?.usarM2 ?? false;
       await prisma.material.update({
         where: { id: item.materialId },
@@ -548,11 +568,13 @@ async function reverter(id) {
         },
       });
     } else {
-      // ── Material normal: decrementa material.quantidade ──
-      const novaQuantidade = Math.max(0, Number(material.quantidade) - Number(item.quantidade));
+      const quantidadeRealReverter = _calcularQuantidadeReal({
+        quantidade: item.quantidade,
+        usarM2:     item.usarM2,
+        qtdPadrao:  material?.qtdPadrao,
+      });
+      const novaQuantidade = Math.max(0, Number(material.quantidade) - quantidadeRealReverter);
       const novoStatus     = _calcularStatus(novaQuantidade, material.estoqueMinimo, material.ativo);
-
-      // Restaura apenas o campo que o histórico anterior registrou
       const anteriorUsarM2 = historicoAnterior?.usarM2 ?? false;
       await prisma.material.update({
         where: { id: item.materialId },
@@ -566,34 +588,20 @@ async function reverter(id) {
     }
   }
 
-  const relacoes = await prisma.relacaoOS.findMany({
-    include: {
-      movimentacoes: true,
-    },
-  });
-
+  const relacoes = await prisma.relacaoOS.findMany({ include: { movimentacoes: true } });
   for (const relacao of relacoes) {
     if (!relacao.movimentacoes.length) {
-      await prisma.relacaoOS.delete({
-        where: {
-          id: relacao.id,
-        },
-      });
+      await prisma.relacaoOS.delete({ where: { id: relacao.id } });
     }
   }
 
   if (ordem.orcamentoId) {
     await prisma.orcamento.update({
       where: { id: ordem.orcamentoId },
-      data: {
-        status: "ABERTO"  // ✅ era "PENDENTE", que não existe no enum
-      }
+      data:  { status: 'ABERTO' },
     });
   }
-  return prisma.ordemCompra.update({
-    where: { id },
-    data:  { status: 'EM_ANDAMENTO' },
-  });
+  return prisma.ordemCompra.update({ where: { id }, data: { status: 'EM_ANDAMENTO' } });
 }
 
 async function criarDeOrcamento(orcamentoId, dadosExtras, usuarioId) {
