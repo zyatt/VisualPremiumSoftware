@@ -4,6 +4,24 @@ import '../models/usuario_model.dart';
 import '../repositories/usuario_repository.dart';
 import '../utils/api_client.dart';
 
+/// Converte exceções técnicas (SocketException, ClientException, TimeoutException
+/// etc.) em uma mensagem amigável para o usuário. Mensagens de erro vindas do
+/// próprio servidor (ex: "Credenciais inválidas") são mantidas como estão.
+String _mensagemErro(Object e) {
+  final texto = e.toString();
+  if (texto.contains('SocketException') ||
+      texto.contains('ClientException') ||
+      texto.contains('Connection refused') ||
+      texto.contains('Connection reset') ||
+      texto.contains('Failed host lookup') ||
+      texto.contains('HandshakeException') ||
+      texto.contains('TimeoutException') ||
+      texto.contains('Network is unreachable')) {
+    return 'Não foi possível acessar. Verifique sua conexão com o servidor';
+  }
+  return texto.replaceFirst('Exception: ', '');
+}
+
 class UsuarioProvider extends ChangeNotifier {
   final UsuarioRepository _repo = UsuarioRepository();
   OrcamentoProvider? _orcamentoProvider;
@@ -70,7 +88,7 @@ class UsuarioProvider extends ChangeNotifier {
       await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
       return true;
     } catch (e) {
-      _erro = e.toString().replaceFirst('Exception: ', '');
+      _erro = _mensagemErro(e);
       return false;
     } finally {
       _carregando = false;

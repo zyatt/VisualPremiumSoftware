@@ -116,3 +116,54 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
 }
 
 module.exports = { gastosPorCategoria };
+
+/**
+ * Retorna o gasto total (entrada + saída) agrupado por mês para um dado ano.
+ * Resultado ordenado de janeiro a dezembro.
+ *
+ * @param {number} ano  Ano desejado (default: ano corrente)
+ */
+async function gastosMensais({ ano } = {}) {
+  const anoAlvo = Number(ano) || new Date().getFullYear();
+
+  const inicio = new Date(`${anoAlvo}-01-01T00:00:00.000Z`);
+  const fim    = new Date(`${anoAlvo}-12-31T23:59:59.999Z`);
+
+  const movimentacoes = await prisma.movimentacaoEstoque.findMany({
+    where: {
+      relacaoOS: { status: 'FECHADA' },
+      criadoEm:  { gte: inicio, lte: fim },
+    },
+    select: {
+      tipo:          true,
+      quantidade:    true,
+      precoUnitario: true,
+      precoM2:       true,
+      criadoEm:      true,
+    },
+    orderBy: { criadoEm: 'asc' },
+  });
+
+  // Inicializa todos os 12 meses com zero
+  const porMes = {};
+  for (let m = 1; m <= 12; m++) {
+    const key = `${anoAlvo}-${String(m).padStart(2, '0')}`;
+    porMes[key] = { mesAno: key, totalEntrada: 0, totalSaida: 0 };
+  }
+
+  for (const mov of movimentacoes) {
+    const mes    = mov.criadoEm.getMonth() + 1;
+    const key    = `${anoAlvo}-${String(mes).padStart(2, '0')}`;
+    const pu     = Number(mov.precoUnitario || 0);
+    const pm2    = Number(mov.precoM2 || 0);
+    const preco  = pu > 0 ? pu : pm2;
+    const sub    = preco * Number(mov.quantidade);
+
+    if (mov.tipo === 'ENTRADA') porMes[key].totalEntrada += sub;
+    else                        porMes[key].totalSaida   += sub;
+  }
+
+  return Object.values(porMes);
+}
+
+module.exports = { gastosPorCategoria, gastosMensais };

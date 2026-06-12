@@ -18,7 +18,8 @@ import 'providers/producao_provider.dart';
 import 'providers/audit_log_provider.dart';
 import 'providers/gastos_categoria_provider.dart';
 import 'providers/alertas_estoque_provider.dart';
-import 'providers/veiculo_provider.dart';           // ← NOVO
+import 'providers/veiculo_provider.dart';
+import 'providers/theme_provider.dart';           // ← NOVO
 
 import 'widgets/update_checker_widget.dart';
 
@@ -64,26 +65,31 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuditLogProvider()),
         ChangeNotifierProvider(create: (_) => GastosCategoriaProvider()),
         ChangeNotifierProvider(create: (_) => AlertasEstoqueProvider()),
-        ChangeNotifierProvider(create: (_) => VeiculoProvider()),  // ← NOVO
+        ChangeNotifierProvider(create: (_) => VeiculoProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),  // ← NOVO
       ],
-      child: MaterialApp.router(
-        title: 'Visual Premium',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light,
-        darkTheme: AppTheme.dark,
-        themeMode: ThemeMode.dark,
-        builder: (context, child) => UpdateChecker(child: child!),
-        routerConfig: AppRouter.buildRouter(usuarioProvider),
-        localizationsDelegates: const [
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        supportedLocales: const [
-          Locale('pt', 'BR'),
-          Locale('en', 'US'),
-        ],
-        locale: const Locale('pt', 'BR'),
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, _) {
+          return MaterialApp.router(
+            title: 'Visual Premium',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.light,
+            darkTheme: AppTheme.dark,
+            themeMode: themeProvider.themeMode,   // ← controlado pelo provider
+            builder: (context, child) => UpdateChecker(child: child!),
+            routerConfig: AppRouter.buildRouter(usuarioProvider),
+            localizationsDelegates: const [
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            supportedLocales: const [
+              Locale('pt', 'BR'),
+              Locale('en', 'US'),
+            ],
+            locale: const Locale('pt', 'BR'),
+          );
+        },
       ),
     );
   }

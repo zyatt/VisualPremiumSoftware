@@ -116,7 +116,7 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
 
   Future<void> _abrirCriacaoOC() async {
     final resultado = await Navigator.of(context).push<dynamic>(
-      MaterialPageRoute(builder: (_) => const NovaOrdemCompraPage()),
+      MaterialPageRoute(builder: (_) => NovaOrdemCompraPage()),
     );
     // resultado pode ser OrdemCompraModel (novo fluxo) ou bool true (fallback)
     if (resultado != null && mounted) {
@@ -127,9 +127,9 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -144,9 +144,9 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Consumer<OrdemCompraProvider>(
                       builder: (_, p, __) {
                         final total = p.emAndamento.length + p.finalizadas.length + p.canceladas.length;
@@ -155,7 +155,7 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
                           style: Theme.of(context)
                               .textTheme
                               .bodyMedium
-                              ?.copyWith(color: AppTheme.textSecondary),
+                              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                         );
                       },
                     ),
@@ -169,34 +169,34 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.primary,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 IconButton(
                   onPressed: () => context.read<OrdemCompraProvider>().carregar(),
-                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: 20),
 
             // ── Busca por número da OC ──────────────────────────────────────
             TextField(
               controller: _buscaNumeroCtrl,
               decoration: InputDecoration(
                 hintText: 'Buscar pelo número da OC...',
-                prefixIcon: const Icon(Icons.tag, color: AppTheme.textHint, size: 18),
+                prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
                 isDense: true,
                 suffixIcon: _filtroBuscaNumero.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18, color: AppTheme.textHint),
+                        icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
                         onPressed: () {
                           _buscaNumeroCtrl.clear();
                           setState(() => _filtroBuscaNumero = '');
@@ -208,18 +208,18 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               onChanged: (v) => setState(() => _filtroBuscaNumero = v),
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
 
             // ── Abas ───────────────────────────────────────────────────────
             Container(
-              decoration: const BoxDecoration(
-                color: AppTheme.surface,
-                border: Border(bottom: BorderSide(color: AppTheme.divider)),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
               ),
               child: TabBar(
                 controller: _tabController,
                 labelColor: AppTheme.primary,
-                unselectedLabelColor: AppTheme.textSecondary,
+                unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
                 indicatorColor: AppTheme.primary,
                 indicatorWeight: 2,
                 labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
@@ -241,19 +241,45 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
                     );
                   }
                   if (provider.erro != null) {
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.error_outline, color: AppTheme.error, size: 48),
-                          const SizedBox(height: 12),
-                          Text(provider.erro!),
-                          TextButton(
-                            onPressed: () => provider.carregar(),
-                            child: const Text('Tentar novamente',
-                                style: TextStyle(color: AppTheme.primary)),
-                          ),
-                        ],
+                    final partes = provider.erro!.split(': ');
+                    final subtitulo = partes.length > 1
+                        ? partes.sublist(1).join(': ')
+                        : provider.erro!;
+                    return SizedBox(
+                      height: 300,
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.cloud_off_outlined,
+                                size: 48, color: AppTheme.error),
+                            SizedBox(height: 12),
+                            Text(
+                              'Erro ao carregar ordens de compra',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              subtitulo,
+                              style: TextStyle(
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 16),
+                            FilledButton.icon(
+                              onPressed: () => provider.carregar(),
+                              icon: const Icon(Icons.refresh, size: 18),
+                              label: const Text('Tentar novamente'),
+                              style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.primary),
+                            ),
+                          ],
+                        ),
                       ),
                     );
                   }
@@ -318,10 +344,10 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Row(children: [
+        title: Row(children: [
           Icon(Icons.lock_outline, color: AppTheme.error, size: 22),
           SizedBox(width: 8),
-          Text('OS Fechada', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w700)),
+          Text('OS Fechada', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
         ]),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -329,7 +355,7 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
           children: [
             Text(
               'Não é possível finalizar esta OC porque ${osBloqueadas.length == 1 ? 'a seguinte OS já foi fechada' : 'as seguintes OS já foram fechadas'} no controle de estoque:',
-              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14),
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -342,13 +368,13 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(color: AppTheme.error.withValues(alpha: 0.4)),
                 ),
-                child: Text(os, style: const TextStyle(color: AppTheme.error, fontWeight: FontWeight.w700, fontSize: 13)),
+                child: Text(os, style: TextStyle(color: AppTheme.error, fontWeight: FontWeight.w700, fontSize: 13)),
               )).toList(),
             ),
-            const SizedBox(height: 12),
-            const Text(
+            SizedBox(height: 12),
+            Text(
               'Para prosseguir, reabra essa OS no controle de estoque antes de finalizar a OC.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
             ),
           ],
         ),
@@ -398,14 +424,14 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Finalizar Ordem'),
-        content: const Text(
+        title: Text('Finalizar Ordem'),
+        content: Text(
             'Ao finalizar, os itens serão adicionados ao estoque. Confirmar?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar',
-                  style: TextStyle(color: AppTheme.textSecondary))),
+              child: Text('Cancelar',
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
           FilledButton(
             onPressed: () async {
               Navigator.pop(ctx);
@@ -431,14 +457,14 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Cancelar Ordem'),
-        content: const Text(
+        title: Text('Cancelar Ordem'),
+        content: Text(
             'Tem certeza que deseja cancelar esta ordem de compra?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Voltar',
-                  style: TextStyle(color: AppTheme.textSecondary))),
+              child: Text('Voltar',
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
           FilledButton(
             onPressed: () async {
               Navigator.pop(ctx);
@@ -518,14 +544,14 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Reverter Ordem Finalizada'),
-        content: const Text(
+        title: Text('Reverter Ordem Finalizada'),
+        content: Text(
             'Esta ação irá desfazer a finalização: os itens serão removidos do estoque e a ordem voltará para "Em Andamento". Confirmar?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Voltar',
-                  style: TextStyle(color: AppTheme.textSecondary))),
+              child: Text('Voltar',
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
           FilledButton(
             onPressed: () async {
               Navigator.pop(ctx);
@@ -593,11 +619,11 @@ class _OcList extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.inbox_outlined, size: 48, color: AppTheme.textHint),
-            const SizedBox(height: 12),
+            Icon(Icons.inbox_outlined, size: 48, color: Theme.of(context).colorScheme.outline),
+            SizedBox(height: 12),
             Text(emptyMessage,
-                style: const TextStyle(
-                    color: AppTheme.textSecondary, fontSize: 15)),
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 15)),
           ],
         ),
       );
@@ -627,9 +653,9 @@ class _OcList extends StatelessWidget {
           );
         } catch (e) {
           return Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.error)),
+            margin: EdgeInsets.only(bottom: 8),
+            padding: EdgeInsets.all(14),
+            decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.error)),
             child: Text('Erro ao carregar ordem: $e', style: const TextStyle(color: AppTheme.error, fontSize: 12)),
           );
         }
@@ -697,10 +723,10 @@ class _OcCardState extends State<_OcCard> {
         child: Container(
           decoration: BoxDecoration(
             color: _hovered
-                ? const Color(0xFFFF9800).withValues(alpha: 0.06)
-                : AppTheme.surface,
+                ? Color(0xFFFF9800).withValues(alpha: 0.06)
+                : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.divider),
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(11),
@@ -721,10 +747,10 @@ class _OcCardState extends State<_OcCard> {
                 Expanded(
                   child: Text(
                     'OC #${ordem.id} — ${ordem.fornecedorNome ?? 'Fornecedor'}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 15,
-                      color: AppTheme.textPrimary,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -738,18 +764,18 @@ class _OcCardState extends State<_OcCard> {
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             Wrap(
               spacing: 8,
               runSpacing: 4,
               children: [
                 _chip(Icons.person_outline, ordem.requisitante,
-                    AppTheme.textSecondary),
+                    Theme.of(context).colorScheme.onSurfaceVariant),
                 _chip(Icons.calendar_today_outlined, _formatData(ordem.data),
-                    AppTheme.textSecondary),
+                    Theme.of(context).colorScheme.onSurfaceVariant),
                 if (ordem.empresa != null)
                   _chip(Icons.business_outlined, ordem.empresa!,
-                      AppTheme.textSecondary),
+                      Theme.of(context).colorScheme.onSurfaceVariant),
               ],
             ),
             if (ordem.numerosOS.isNotEmpty) ...[
@@ -774,17 +800,17 @@ class _OcCardState extends State<_OcCard> {
               ),
             ],
             if (widget.mostrarAcoes) ...[
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   OutlinedButton.icon(
                     onPressed: widget.onAbrirPdf,
-                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
-                    label: const Text('PDF'),
+                    icon: Icon(Icons.picture_as_pdf_outlined, size: 16),
+                    label: Text('PDF'),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.textSecondary,
-                      side: const BorderSide(color: AppTheme.divider),
+                      foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 6),
                       textStyle: const TextStyle(fontSize: 13),
@@ -832,17 +858,17 @@ class _OcCardState extends State<_OcCard> {
               ),
             ],
             if (widget.mostrarReverter) ...[
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   OutlinedButton.icon(
                     onPressed: widget.onAbrirPdf,
-                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
-                    label: const Text('PDF'),
+                    icon: Icon(Icons.picture_as_pdf_outlined, size: 16),
+                    label: Text('PDF'),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.textSecondary,
-                      side: const BorderSide(color: AppTheme.divider),
+                      foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 6),
                       textStyle: const TextStyle(fontSize: 13),
@@ -927,10 +953,10 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
         // ignore: use_build_context_synchronously
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Row(children: [
+          title: Row(children: [
             Icon(Icons.lock_outline, color: AppTheme.error, size: 22),
             SizedBox(width: 8),
-            Text('OS Fechada', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w700)),
+            Text('OS Fechada', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
           ]),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -938,7 +964,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
             children: [
               Text(
                 'Não é possível finalizar esta OC porque ${osBloqueadas.length == 1 ? 'a seguinte OS já foi fechada' : 'as seguintes OS já foram fechadas'} no controle de estoque:',
-                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14),
               ),
               const SizedBox(height: 12),
               Wrap(
@@ -951,13 +977,13 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: AppTheme.error.withValues(alpha: 0.4)),
                   ),
-                  child: Text(os, style: const TextStyle(color: AppTheme.error, fontWeight: FontWeight.w700, fontSize: 13)),
+                  child: Text(os, style: TextStyle(color: AppTheme.error, fontWeight: FontWeight.w700, fontSize: 13)),
                 )).toList(),
               ),
-              const SizedBox(height: 12),
-              const Text(
+              SizedBox(height: 12),
+              Text(
                 'Para prosseguir, reabra essa OS no controle de estoque antes de finalizar a OC.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
               ),
             ],
           ),
@@ -977,10 +1003,10 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Finalizar Ordem'),
-        content: const Text('Ao finalizar, os itens serão adicionados ao estoque. Confirmar?'),
+        title: Text('Finalizar Ordem'),
+        content: Text('Ao finalizar, os itens serão adicionados ao estoque. Confirmar?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar', style: TextStyle(color: AppTheme.textSecondary))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancelar', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: AppTheme.success), child: const Text('Finalizar')),
         ],
       ),
@@ -1007,10 +1033,10 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Cancelar Ordem'),
-        content: const Text('Tem certeza que deseja cancelar esta ordem de compra?'),
+        title: Text('Cancelar Ordem'),
+        content: Text('Tem certeza que deseja cancelar esta ordem de compra?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Voltar', style: TextStyle(color: AppTheme.textSecondary))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Voltar', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: AppTheme.error), child: const Text('Cancelar OC')),
         ],
       ),
@@ -1037,10 +1063,10 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Reverter Ordem Finalizada'),
-        content: const Text('Esta ação irá desfazer a finalização: os itens serão removidos do estoque e a ordem voltará para "Em Andamento". Confirmar?'),
+        title: Text('Reverter Ordem Finalizada'),
+        content: Text('Esta ação irá desfazer a finalização: os itens serão removidos do estoque e a ordem voltará para "Em Andamento". Confirmar?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Voltar', style: TextStyle(color: AppTheme.textSecondary))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Voltar', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB45309)),
@@ -1078,7 +1104,51 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
         final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
         return m.id == _ordem.id;
       }, orElse: () => _ordem);
-      if (mounted) setState(() { _ordem = raw; });
+      final atualizado = raw is OrdemCompraModel
+          ? raw
+          : OrdemCompraModel.fromJson(raw as Map<String, dynamic>);
+      if (mounted) setState(() { _ordem = atualizado; });
+    }
+  }
+
+  Future<void> _abrirPdf() async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Gerando PDF…'),
+        duration: Duration(seconds: 2),
+        backgroundColor: AppTheme.primary,
+      ),
+    );
+    try {
+      final bytes = await OrdemCompraRepository().baixarPdf(_ordem.id);
+
+      // Monta nome: "OC_42_FORNECEDOR NOME.pdf" → sanitiza caracteres inválidos
+      final fornecedor = (_ordem.fornecedorNome ?? 'FORNECEDOR')
+          .toUpperCase()
+          .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final fileName = 'OC_${_ordem.id}_$fornecedor.pdf';
+
+      final dir  = await getTemporaryDirectory();
+      final file = File('${dir.path}${Platform.pathSeparator}$fileName');
+      await file.writeAsBytes(bytes, flush: true);
+
+      // Abre o arquivo no visualizador/navegador padrão do sistema
+      if (Platform.isWindows) {
+        await Process.run('explorer', [file.path]);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', [file.path]);
+      } else {
+        await Process.run('xdg-open', [file.path]);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao gerar PDF: $e'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
     }
   }
 
@@ -1086,7 +1156,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
   Widget build(BuildContext context) {
     final emAndamento = _ordem.status == 'EM_ANDAMENTO';
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
         child: Column(
@@ -1099,34 +1169,74 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                   onTap: () => Navigator.of(context).pop(),
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      border: Border.all(color: AppTheme.divider),
+                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
+                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         SizedBox(width: 6),
-                        Text('Ordens de Compra', style: TextStyle(fontSize: 13, color: AppTheme.textSecondary, fontWeight: FontWeight.w500)),
+                        Text('Ordens de Compra', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.w500)),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(width: 16),
-                Text('OC #${_ordem.id}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: AppTheme.textPrimary)),
-                const SizedBox(width: 10),
+                SizedBox(width: 16),
+                Text('OC #${_ordem.id}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: Theme.of(context).colorScheme.onSurface)),
+                SizedBox(width: 10),
                 _statusBadge(_ordem.status),
-                const Spacer(),
+                Spacer(),
+                _headerActionButton(
+                  icon: Icons.picture_as_pdf_outlined,
+                  label: 'PDF',
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  onPressed: _abrirPdf,
+                ),
+                if (emAndamento) ...[
+                  const SizedBox(width: 8),
+                  _headerActionButton(
+                    icon: Icons.cancel_outlined,
+                    label: 'Cancelar',
+                    color: AppTheme.error,
+                    onPressed: _processando ? null : _confirmarCancelar,
+                  ),
+                  const SizedBox(width: 8),
+                  _headerActionButton(
+                    icon: Icons.edit_outlined,
+                    label: 'Editar',
+                    color: AppTheme.primary,
+                    onPressed: _processando ? null : _abrirEdicao,
+                  ),
+                  const SizedBox(width: 8),
+                  _headerActionButton(
+                    icon: Icons.check_circle_outline,
+                    label: 'Finalizar',
+                    color: AppTheme.success,
+                    filled: true,
+                    onPressed: _processando ? null : _confirmarFinalizar,
+                  ),
+                ],
+                if (_ordem.status == 'FINALIZADO') ...[
+                  SizedBox(width: 8),
+                  _headerActionButton(
+                    icon: Icons.undo,
+                    label: 'Reverter',
+                    color: Color(0xFFB45309),
+                    onPressed: _processando ? null : _confirmarReverter,
+                  ),
+                ],
+                SizedBox(width: 8),
                 IconButton(
                   onPressed: _recarregar,
-                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
@@ -1152,41 +1262,41 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
               Wrap(spacing: 6, runSpacing: 6, children: _ordem.numerosOS.map((os) => Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(6)),
-                child: Text(os, style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                child: Text(os, style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600)),
               )).toList()),
             ]),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
           ],
           _secaoCard('Itens (${_ordem.itens.length})', Icons.inventory_2_outlined, [
             ..._ordem.itens.map((item) => Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: AppTheme.surfaceVariant, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppTheme.divider)),
+              margin: EdgeInsets.only(bottom: 8),
+              padding: EdgeInsets.all(14),
+              decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(10), border: Border.all(color: Theme.of(context).colorScheme.outlineVariant)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(item.materialNome, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.textPrimary)),
+                        Text(item.materialNome, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
                         Builder(builder: (_) {
                           final sub = [
                             if (item.materialMedida != null && item.materialMedida!.isNotEmpty) item.materialMedida!,
                             if (item.materialEspessura != null && item.materialEspessura!.isNotEmpty) item.materialEspessura!,
                             if (item.materialIdentificador != null && item.materialIdentificador!.isNotEmpty) item.materialIdentificador!,
                           ].join(' · ');
-                          if (sub.isEmpty) return const SizedBox.shrink();
+                          if (sub.isEmpty) return SizedBox.shrink();
                           return Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Text(sub, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                            padding: EdgeInsets.only(top: 2),
+                            child: Text(sub, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                           );
                         }),
                         if (item.descricaoItem != null && item.descricaoItem!.isNotEmpty)
                           Padding(
-                            padding: const EdgeInsets.only(top: 2),
+                            padding: EdgeInsets.only(top: 2),
                             child: Text(
                               item.descricaoItem!,
-                              style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, fontStyle: FontStyle.italic),
+                              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic),
                             ),
                           ),
                       ],
@@ -1238,53 +1348,15 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
               ]),
             )),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10)),
               child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                const Text('Total', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.textPrimary)),
+                Text('Total', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: Theme.of(context).colorScheme.onSurface)),
                 Text('R\$ ${_ordem.valorTotal.toStringAsFixed(2).replaceAll('.', ',')}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: AppTheme.primary)),
               ]),
             ),
           ]),
           const SizedBox(height: 24),
-          if (emAndamento) ...[
-            Row(children: [
-              Expanded(child: OutlinedButton.icon(
-                onPressed: _processando ? null : _confirmarCancelar,
-                icon: const Icon(Icons.cancel_outlined, size: 18),
-                label: const Text('Cancelar OC'),
-                style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: const BorderSide(color: AppTheme.error), padding: const EdgeInsets.symmetric(vertical: 14)),
-              )),
-              const SizedBox(width: 12),
-              Expanded(child: FilledButton.icon(
-                onPressed: _processando ? null : _confirmarFinalizar,
-                icon: const Icon(Icons.check_circle_outline, size: 18),
-                label: const Text('Finalizar OC'),
-                style: FilledButton.styleFrom(backgroundColor: AppTheme.success, padding: const EdgeInsets.symmetric(vertical: 14)),
-              )),
-            ]),
-            const SizedBox(height: 12),
-            SizedBox(width: double.infinity, child: OutlinedButton.icon(
-              onPressed: _processando ? null : _abrirEdicao,
-              icon: const Icon(Icons.edit_outlined, size: 18),
-              label: const Text('Editar Ordem de Compra'),
-              style: OutlinedButton.styleFrom(foregroundColor: AppTheme.primary, side: const BorderSide(color: AppTheme.primary), padding: const EdgeInsets.symmetric(vertical: 14)),
-            )),
-            const SizedBox(height: 24),
-          ],
-          if (_ordem.status == 'FINALIZADO') ...[
-            SizedBox(width: double.infinity, child: OutlinedButton.icon(
-              onPressed: _processando ? null : _confirmarReverter,
-              icon: const Icon(Icons.undo, size: 18),
-              label: const Text('Reverter Finalização'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFB45309),
-                side: const BorderSide(color: Color(0xFFB45309)),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-            )),
-            const SizedBox(height: 24),
-          ],
         ],
               ),
             ),
@@ -1304,24 +1376,24 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
   }
 
   Widget _secaoCard(String titulo, IconData icon, List<Widget> children) => Container(
-    decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.divider)),
-    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: Theme.of(context).colorScheme.outlineVariant)),
+    padding: EdgeInsets.all(16),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [Icon(icon, size: 16, color: AppTheme.primary), const SizedBox(width: 6), Text(titulo, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.textPrimary))]),
-      const SizedBox(height: 12),
-      const Divider(height: 1, color: AppTheme.divider),
-      const SizedBox(height: 12),
+      Row(children: [Icon(icon, size: 16, color: AppTheme.primary), SizedBox(width: 6), Text(titulo, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Theme.of(context).colorScheme.onSurface))]),
+      SizedBox(height: 12),
+      Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+      SizedBox(height: 12),
       ...children,
     ]),
   );
 
   Widget _infoRow(IconData icon, String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 10),
+    padding: EdgeInsets.only(bottom: 10),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Icon(icon, size: 15, color: AppTheme.textHint),
-      const SizedBox(width: 8),
-      SizedBox(width: 140, child: Text(label, style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary))),
-      Expanded(child: Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppTheme.textPrimary))),
+      Icon(icon, size: 15, color: Theme.of(context).colorScheme.outline),
+      SizedBox(width: 8),
+      SizedBox(width: 140, child: Text(label, style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant))),
+      Expanded(child: Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface))),
     ]),
   );
 
@@ -1331,13 +1403,13 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: AppTheme.textHint),
-          const SizedBox(width: 3),
+          Icon(icon, size: 12, color: Theme.of(context).colorScheme.outline),
+          SizedBox(width: 3),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: AppTheme.textSecondary,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -1356,13 +1428,13 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 12, color: AppTheme.textHint),
-            const SizedBox(width: 3),
+            Icon(icon, size: 12, color: Theme.of(context).colorScheme.outline),
+            SizedBox(width: 3),
             Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: AppTheme.textSecondary,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -1399,6 +1471,41 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _headerActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    bool filled = false,
+    VoidCallback? onPressed,
+  }) {
+    if (filled) {
+      return FilledButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 16),
+        label: Text(label),
+        style: FilledButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
+    }
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 16),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: color,
+        side: BorderSide(color: color),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
   }
@@ -1448,25 +1555,47 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     _data = widget.ordem.data;
     _empresa = widget.ordem.empresa;
     _numerosOS = List<String>.from(widget.ordem.numerosOS);
-    _itens = widget.ordem.itens.map((i) => _ItemRascunho(
-      materialId: i.materialId,
-      materialNome: i.materialNome,
-      materialMedida: i.materialMedida,
-      materialEspessura: i.materialEspessura,
-      materialIdentificador: i.materialIdentificador,
-      descricaoItem: i.descricaoItem,
-      materialEspecifico: i.materialEspecifico,
-      numeroOS: i.numeroOS,
-      quantidade: i.quantidade,
-      precoUnitario: i.precoUnitario,
-      precoMetroQuadrado: i.precoMetroQuadrado,
-      usarM2: i.usarM2,
-    )).toList();
+    _itens = _agruparItensEmRascunhos(widget.ordem.itens);
     _requisitanteCtrl = TextEditingController(text: widget.ordem.requisitante);
     _formaPagamentoCtrl = TextEditingController(text: widget.ordem.formaPagamento ?? '');
     _prazoPagamentoCtrl = TextEditingController(text: widget.ordem.prazoPagamento ?? '');
     _observacoesCtrl = TextEditingController(text: widget.ordem.observacoes ?? '');
     _carregarFornecedor();
+  }
+
+  /// Agrupa itens do banco (um por linha OS) de volta em _ItemRascunho com
+  /// múltiplas linhas de distribuição. Itens do mesmo material com o mesmo
+  /// preço e descrição são consolidados.
+  List<_ItemRascunho> _agruparItensEmRascunhos(List<OrdemCompraItemModel> itens) {
+    final grupos = <String, _ItemRascunho>{};
+    for (final i in itens) {
+      // Chave: material + preço + modo + descrição
+      final chave = '${i.materialId}|${i.usarM2}|${i.precoUnitario}|${i.precoMetroQuadrado}|${i.descricaoItem ?? ''}';
+      if (grupos.containsKey(chave)) {
+        // Adiciona linha de distribuição ao rascunho existente
+        final r = grupos[chave]!;
+        r.distribuicao.add(_DistribuicaoLinha(os: i.numeroOS, quantidade: i.quantidade));
+        r.quantidade += i.quantidade;
+        r.numeroOS = r.distribuicao.first.os;
+      } else {
+        grupos[chave] = _ItemRascunho(
+          materialId:            i.materialId,
+          materialNome:          i.materialNome,
+          materialMedida:        i.materialMedida,
+          materialEspessura:     i.materialEspessura,
+          materialIdentificador: i.materialIdentificador,
+          descricaoItem:         i.descricaoItem,
+          materialEspecifico:    i.materialEspecifico,
+          numeroOS:              i.numeroOS,
+          quantidade:            i.quantidade,
+          precoUnitario:         i.precoUnitario,
+          precoMetroQuadrado:    i.precoMetroQuadrado,
+          usarM2:                i.usarM2,
+          distribuicao: [_DistribuicaoLinha(os: i.numeroOS, quantidade: i.quantidade)],
+        );
+      }
+    }
+    return grupos.values.toList();
   }
 
   Future<void> _carregarFornecedor() async {
@@ -1554,13 +1683,56 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um fornecedor.'), backgroundColor: AppTheme.error));
       return;
     }
-    if (_numerosOS.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Adicione ao menos um número de OS.'), backgroundColor: AppTheme.error));
-        return;
-     }
+    if (_itens.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Adicione pelo menos um item à ordem de compra.'),
+        backgroundColor: AppTheme.error,
+      ));
+      return;
+    }
     for (final item in _itens) {
-      if (item.numeroOS.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Atribua uma OS para todos os itens.'), backgroundColor: AppTheme.error));
+      // Pelo menos uma linha deve ter OS selecionada E que ainda conste na lista atual
+      final temOSSelecionada = item.distribuicao.any(
+        (l) => l.os.isNotEmpty && _numerosOS.contains(l.os),
+      );
+      if (!temOSSelecionada) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Selecione a OS para o item "${item.materialNome}".'),
+          backgroundColor: AppTheme.error,
+        ));
+        return;
+      }
+      // Nenhuma linha com OS válida pode ter qtd = 0
+      final linhaComZero = item.distribuicao.any(
+        (l) => l.os.isNotEmpty && _numerosOS.contains(l.os) && l.quantidade <= 0,
+      );
+      if (linhaComZero) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('A quantidade deve ser maior que 0 para todos os itens da distribuição em "${item.materialNome}".'),
+          backgroundColor: AppTheme.error,
+        ));
+        return;
+      }
+      // Total distribuído deve ser exatamente igual à quantidade do item
+      final totalDistribuido = item.distribuicao.fold(0.0, (s, l) => s + l.quantidade);
+      final diff = totalDistribuido - item.quantidade;
+      if (diff > 0.0001) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('A quantidade distribuída (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) excede a quantidade do item "${item.materialNome}" (${item.quantidade % 1 == 0 ? item.quantidade.toInt() : item.quantidade}).'),
+          backgroundColor: AppTheme.error,
+        ));
+        return;
+      }
+      if (diff < -0.0001) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+            'A soma das quantidades distribuídas (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) '
+            'está abaixo da quantidade do item "${item.materialNome}" '
+            '(${item.quantidade % 1 == 0 ? item.quantidade.toInt() : item.quantidade}). '
+            'O total distribuído deve ser igual à quantidade.',
+          ),
+          backgroundColor: AppTheme.error,
+        ));
         return;
       }
     }
@@ -1601,15 +1773,16 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         'itens': _itens.map((i) => {
           'materialId': i.materialId,
           'descricaoItem': i.descricaoItem,
-          'numeroOS': i.numeroOS,
+          'numeroOS': i.distribuicao.firstWhere((l) => l.os.isNotEmpty, orElse: () => _DistribuicaoLinha()).os,
           'quantidade': i.quantidade,
           'precoUnitario': i.usarM2 ? null : i.precoUnitario,
           'precoMetroQuadrado': i.usarM2 ? i.precoMetroQuadrado : null,
           'usarM2': i.usarM2,
+          'distribuicao': i.distribuicao.where((l) => l.os.isNotEmpty && l.quantidade > 0).map((l) => {'os': l.os, 'quantidade': l.quantidade}).toList(),
         }).toList(),
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ordem atualizada com sucesso!'), backgroundColor: AppTheme.success));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ordem atualizada com sucesso!'), backgroundColor: AppTheme.success));
       Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: AppTheme.error));
@@ -1620,44 +1793,44 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 
   InputDecoration _deco(String hint) => InputDecoration(
     hintText: hint,
-    hintStyle: const TextStyle(color: AppTheme.textHint, fontSize: 14),
-    filled: true, fillColor: AppTheme.surfaceVariant,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppTheme.divider)),
-    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppTheme.divider)),
-    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
+    hintStyle: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 14),
+    filled: true, fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+    contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: AppTheme.primary, width: 1.5)),
   );
 
   Widget _label(String text) => Text(
     text,
-    style: const TextStyle(
+    style: TextStyle(
       fontSize: 13,
       fontWeight: FontWeight.w600,
-      color: AppTheme.textSecondary,
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
     ),
   );
 
   Widget _aviso(String msg) => Container(
-    padding: const EdgeInsets.all(12),
+    padding: EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: const Color(0xFFFFFBEB),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: const Color(0xFFFCD34D)),
+      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
     ),
-    child: Text(msg, style: const TextStyle(color: Color(0xFF92400E), fontSize: 13)),
+    child: Text(msg, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13)),
   );
 
   Widget _card({ required String titulo, String? subtitulo, required List<Widget> children, Widget? trailing }) {
     return Container(
-      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.divider)),
-      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: Theme.of(context).colorScheme.outlineVariant)),
+      padding: EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(titulo, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppTheme.textPrimary)),
+            Text(titulo, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
             if (subtitulo != null) ...[
-              const SizedBox(height: 2),
-              Text(subtitulo, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+              SizedBox(height: 2),
+              Text(subtitulo, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ],
           ])),
           if (trailing != null) trailing,
@@ -1673,17 +1846,17 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       child: GestureDetector(
         onTap: () => setState(() => _empresa = value),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          duration: Duration(milliseconds: 150),
+          padding: EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
-            color: selected ? AppTheme.primary.withValues(alpha: 0.06) : AppTheme.surface,
+            color: selected ? AppTheme.primary.withValues(alpha: 0.06) : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: selected ? AppTheme.primary : AppTheme.divider, width: selected ? 1.5 : 1),
+            border: Border.all(color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant, width: selected ? 1.5 : 1),
           ),
           child: Column(children: [
-            Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: selected ? AppTheme.primary : AppTheme.textSecondary)),
-            const SizedBox(height: 6),
-            Icon(selected ? Icons.check_circle : Icons.radio_button_unchecked, color: selected ? AppTheme.primary : AppTheme.textHint, size: 20),
+            Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: selected ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant)),
+            SizedBox(height: 6),
+            Icon(selected ? Icons.check_circle : Icons.radio_button_unchecked, color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outline, size: 20),
           ]),
         ),
       ),
@@ -1693,13 +1866,13 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         scrolledUnderElevation: 1,
-        leading: IconButton(icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary), onPressed: () => Navigator.of(context).pop()),
-        title: Text('Editar OC #${widget.ordem.id}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: AppTheme.textPrimary)),
+        leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: () => Navigator.of(context).pop()),
+        title: Text('Editar OC #${widget.ordem.id}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: Theme.of(context).colorScheme.onSurface)),
         actions: [
           Padding(padding: const EdgeInsets.only(right: 16), child: FilledButton(
             onPressed: _salvando ? null : _salvar,
@@ -1717,40 +1890,40 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
               _label('Número da OC'),
               InputDecorator(
                 decoration: _deco('').copyWith(
-                  prefixIcon: const Icon(Icons.tag, size: 18, color: AppTheme.textHint),
+                  prefixIcon: Icon(Icons.tag, size: 18, color: Theme.of(context).colorScheme.outline),
                   suffixText: 'Fixo',
-                  suffixStyle: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600, fontSize: 13),
+                  suffixStyle: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600, fontSize: 13),
                 ),
-                child: Text('#${widget.ordem.id}', style: const TextStyle(fontSize: 14, color: AppTheme.textPrimary)),
+                child: Text('#${widget.ordem.id}', style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
               ),
             ])),
-            const SizedBox(width: 12),
+            SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _label('Data'),
               InkWell(
                 onTap: _selecionarData,
                 borderRadius: BorderRadius.circular(8),
                 child: InputDecorator(
-                  decoration: _deco('').copyWith(suffixIcon: const Icon(Icons.calendar_today_outlined, size: 18, color: AppTheme.textHint)),
+                  decoration: _deco('').copyWith(suffixIcon: Icon(Icons.calendar_today_outlined, size: 18, color: Theme.of(context).colorScheme.outline)),
                   child: Text(
                     '${_data.day.toString().padLeft(2, '0')}/${_data.month.toString().padLeft(2, '0')}/${_data.year}',
-                    style: const TextStyle(fontSize: 14, color: AppTheme.textPrimary),
+                    style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
                   ),
                 ),
               ),
             ])),
           ]),
-          const SizedBox(height: 14),
+          SizedBox(height: 14),
 
           _label('Fornecedor'),
           InkWell(
             onTap: _selecionarFornecedor,
             borderRadius: BorderRadius.circular(8),
             child: InputDecorator(
-              decoration: _deco('Buscar fornecedor...').copyWith(prefixIcon: const Icon(Icons.search, size: 18, color: AppTheme.textHint)),
+              decoration: _deco('Buscar fornecedor...').copyWith(prefixIcon: Icon(Icons.search, size: 18, color: Theme.of(context).colorScheme.outline)),
               child: Text(
                 _fornecedor?.nomeFantasia ?? widget.ordem.fornecedorNome ?? '',
-                style: TextStyle(fontSize: 14, color: _fornecedor == null ? AppTheme.textHint : AppTheme.textPrimary),
+                style: TextStyle(fontSize: 14, color: _fornecedor == null ? Theme.of(context).colorScheme.outline : Theme.of(context).colorScheme.onSurface),
               ),
             ),
           ),
@@ -1829,11 +2002,15 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           numerosOS: _numerosOS,
           onChanged: () {
             setState(() {
-              // Se agora existe mais de uma OS,
-              // força o usuário a selecionar novamente
-              if (_numerosOS.length > 1) {
+              // Se agora não há exatamente 1 OS (0 ou 2+),
+              // limpa a OS atribuída aos itens para forçar
+              // o usuário a selecionar novamente
+              if (_numerosOS.length != 1) {
                 for (final item in _itens) {
                   item.numeroOS = '';
+                  for (final linha in item.distribuicao) {
+                    linha.os = '';
+                  }
                 }
               }
             });
@@ -1871,17 +2048,17 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppTheme.primary,
                     side: const BorderSide(color: AppTheme.primary),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
-                    textStyle: const TextStyle(
+                    textStyle: TextStyle(
                         fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
               if (_itens.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                const Divider(color: AppTheme.divider),
+                SizedBox(height: 16),
+                Divider(color: Theme.of(context).colorScheme.outlineVariant),
                 const SizedBox(height: 8),
               ],
             ],
@@ -1895,7 +2072,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
             if (_itens.isNotEmpty) ...[
               const SizedBox(height: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
@@ -1903,7 +2080,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Total', style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                    Text('Total', style: TextStyle(fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface)),
                     Text(
                       'R\$ ${_itens.fold(0.0, (s, i) => s + i.precoTotal).toStringAsFixed(2).replaceAll('.', ',')}',
                       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.primary),
@@ -2043,14 +2220,42 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       return;
     }
 
-    if (_numerosOS.isEmpty) {
-      _showErro('Adicione ao menos um número de OS.');
+    if (_itens.isEmpty) {
+      _showErro('Adicione pelo menos um item à ordem de compra.');
       return;
     }
 
     for (final item in _itens) {
-      if (item.numeroOS.isEmpty) {
-        _showErro('Atribua uma OS para todos os itens.');
+      // Pelo menos uma linha deve ter OS selecionada E que ainda conste na lista atual
+      final temOSSelecionada = item.distribuicao.any(
+        (l) => l.os.isNotEmpty && _numerosOS.contains(l.os),
+      );
+      if (!temOSSelecionada) {
+        _showErro('Selecione a OS para o item "${item.materialNome}".');
+        return;
+      }
+      // Nenhuma linha com OS válida pode ter qtd = 0
+      final linhaComZero = item.distribuicao.any(
+        (l) => l.os.isNotEmpty && _numerosOS.contains(l.os) && l.quantidade <= 0,
+      );
+      if (linhaComZero) {
+        _showErro('A quantidade deve ser maior que 0 para todos os itens da distribuição em "${item.materialNome}".');
+        return;
+      }
+      // Total distribuído deve ser exatamente igual à quantidade do item
+      final totalDistribuido = item.distribuicao.fold(0.0, (s, l) => s + l.quantidade);
+      final diff = totalDistribuido - item.quantidade;
+      if (diff > 0.0001) {
+        _showErro('A quantidade distribuída (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) excede a quantidade do item "${item.materialNome}" (${item.quantidade % 1 == 0 ? item.quantidade.toInt() : item.quantidade}).');
+        return;
+      }
+      if (diff < -0.0001) {
+        _showErro(
+          'A soma das quantidades distribuídas (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) '
+          'está abaixo da quantidade do item "${item.materialNome}" '
+          '(${item.quantidade % 1 == 0 ? item.quantidade.toInt() : item.quantidade}). '
+          'O total distribuído deve ser igual à quantidade.',
+        );
         return;
       }
     }
@@ -2089,11 +2294,12 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
             .map((i) => {
                   'materialId': i.materialId,
                   'descricaoItem': i.descricaoItem,
-                  'numeroOS': i.numeroOS,
+                  'numeroOS': i.distribuicao.firstWhere((l) => l.os.isNotEmpty, orElse: () => _DistribuicaoLinha()).os,
                   'quantidade': i.quantidade,
                   'precoUnitario': i.usarM2 ? null : i.precoUnitario,
                   'precoMetroQuadrado': i.usarM2 ? i.precoMetroQuadrado : null,
                   'usarM2': i.usarM2,
+                  'distribuicao': i.distribuicao.where((l) => l.os.isNotEmpty && l.quantidade > 0).map((l) => {'os': l.os, 'quantidade': l.quantidade}).toList(),
                 })
             .toList(),
       });
@@ -2205,23 +2411,23 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         scrolledUnderElevation: 1,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+          icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
           widget.itensPreCarregados.isNotEmpty
               ? 'Nova OC — do Orçamento'
               : 'Nova Ordem de Compra',
-          style: const TextStyle(
+          style: TextStyle(
               fontWeight: FontWeight.w700,
               fontSize: 18,
-              color: AppTheme.textPrimary),
+              color: Theme.of(context).colorScheme.onSurface),
         ),
         actions: [
           Padding(
@@ -2295,10 +2501,10 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                           _label('Número da OC'),
                           InputDecorator(
                             decoration: _deco('').copyWith(
-                              prefixIcon: const Icon(Icons.tag,
-                                  size: 18, color: AppTheme.textHint),
+                              prefixIcon: Icon(Icons.tag,
+                                  size: 18, color: Theme.of(context).colorScheme.outline),
                               suffixText: 'Automático',
-                              suffixStyle: const TextStyle(
+                              suffixStyle: TextStyle(
                                   color: AppTheme.primary,
                                   fontWeight: FontWeight.w600,
                                   fontSize: 13),
@@ -2306,7 +2512,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                             child: Text(
                               _proximoId != null ? '$_proximoId' : '—',
                               style: TextStyle(
-                                color: _proximoId != null ? AppTheme.textPrimary : AppTheme.textHint,
+                                color: _proximoId != null ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.outline,
                                 fontSize: 14,
                               )
                             ),
@@ -2325,16 +2531,16 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                             borderRadius: BorderRadius.circular(8),
                             child: InputDecorator(
                               decoration: _deco('').copyWith(
-                                suffixIcon: const Icon(
+                                suffixIcon: Icon(
                                     Icons.calendar_today_outlined,
                                     size: 18,
-                                    color: AppTheme.textHint),
+                                    color: Theme.of(context).colorScheme.outline),
                               ),
                               child: Text(
                                 '${_data.day.toString().padLeft(2, '0')}/${_data.month.toString().padLeft(2, '0')}/${_data.year}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                     fontSize: 14,
-                                    color: AppTheme.textPrimary),
+                                    color: Theme.of(context).colorScheme.onSurface),
                               ),
                             ),
                           ),
@@ -2343,7 +2549,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 14),
+                SizedBox(height: 14),
 
                 // Fornecedor
                 _label('Fornecedor principal'),
@@ -2352,16 +2558,16 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                   borderRadius: BorderRadius.circular(8),
                   child: InputDecorator(
                     decoration: _deco('Buscar fornecedor...').copyWith(
-                      prefixIcon: const Icon(Icons.search,
-                          size: 18, color: AppTheme.textHint),
+                      prefixIcon: Icon(Icons.search,
+                          size: 18, color: Theme.of(context).colorScheme.outline),
                     ),
                     child: Text(
                       _fornecedor?.nomeFantasia ?? '',
                       style: TextStyle(
                           fontSize: 14,
                           color: _fornecedor == null
-                              ? AppTheme.textHint
-                              : AppTheme.textPrimary),
+                              ? Theme.of(context).colorScheme.outline
+                              : Theme.of(context).colorScheme.onSurface),
                     ),
                   ),
                 ),
@@ -2455,11 +2661,15 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
               numerosOS: _numerosOS,
               onChanged: () {
                 setState(() {
-                  // Se agora existe mais de uma OS,
-                  // força o usuário a selecionar novamente
-                  if (_numerosOS.length > 1) {
+                  // Se agora não há exatamente 1 OS (0 ou 2+),
+                  // limpa a OS atribuída aos itens para forçar
+                  // o usuário a selecionar novamente
+                  if (_numerosOS.length != 1) {
                     for (final item in _itens) {
                       item.numeroOS = '';
+                      for (final linha in item.distribuicao) {
+                        linha.os = '';
+                      }
                     }
                   }
                 });
@@ -2501,14 +2711,14 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8)),
-                        textStyle: const TextStyle(
+                        textStyle: TextStyle(
                             fontSize: 14, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),
                   if (_itens.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    const Divider(color: AppTheme.divider),
+                    SizedBox(height: 16),
+                    Divider(color: Theme.of(context).colorScheme.outlineVariant),
                     const SizedBox(height: 8),
                   ],
                 ],
@@ -2534,10 +2744,10 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Total',
+                        Text('Total',
                             style: TextStyle(
                                 fontWeight: FontWeight.w700,
-                                color: AppTheme.textPrimary)),
+                                color: Theme.of(context).colorScheme.onSurface)),
                         Text(
                           'R\$ ${_itens.fold(0.0, (s, i) => s + i.precoTotal).toStringAsFixed(2).replaceAll('.', ',')}',
                           style: const TextStyle(
@@ -2576,7 +2786,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                             fontSize: 16, fontWeight: FontWeight.w700)),
               ),
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
           ],
         ),
       ),
@@ -2593,11 +2803,11 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2611,12 +2821,12 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                         style: Theme.of(context)
                             .textTheme
                             .titleMedium
-                            ?.copyWith(color: AppTheme.textPrimary)),
+                            ?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
                     if (subtitulo != null) ...[
-                      const SizedBox(height: 2),
+                      SizedBox(height: 2),
                       Text(subtitulo,
-                          style: const TextStyle(
-                              fontSize: 12, color: AppTheme.textSecondary)),
+                          style: TextStyle(
+                              fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                     ],
                   ],
                 ),
@@ -2639,15 +2849,15 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       child: GestureDetector(
         onTap: () => setState(() => _empresa = value),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          duration: Duration(milliseconds: 150),
+          padding: EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
             color: selected
                 ? AppTheme.primary.withValues(alpha: 0.06)
-                : AppTheme.surface,
+                : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: selected ? AppTheme.primary : AppTheme.divider,
+              color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
               width: selected ? 1.5 : 1,
             ),
           ),
@@ -2658,15 +2868,15 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
                   fontSize: 14,
-                  color: selected ? AppTheme.primary : AppTheme.textSecondary,
+                  color: selected ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 6),
+              SizedBox(height: 6),
               Icon(
                 selected
                     ? Icons.check_circle
                     : Icons.radio_button_unchecked,
-                color: selected ? AppTheme.primary : AppTheme.textHint,
+                color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outline,
                 size: 20,
               ),
             ],
@@ -2679,37 +2889,37 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   Widget _aviso(String msg) => Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFFFFFBEB),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFFCD34D)),
+          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         child: Text(msg,
-            style: const TextStyle(
-                color: Color(0xFF92400E), fontSize: 13)),
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13)),
       );
 
   Widget _label(String text) => Text(
     text,
-    style: const TextStyle(
+    style: TextStyle(
       fontSize: 13,
       fontWeight: FontWeight.w600,
-      color: AppTheme.textSecondary,
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
     ),
   );
 
   InputDecoration _deco(String hint) => InputDecoration(
         hintText: hint,
         hintStyle:
-            const TextStyle(color: AppTheme.textHint, fontSize: 14),
+            TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 14),
         filled: true,
-        fillColor: AppTheme.surfaceVariant,
+        fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.divider),
+          borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.divider),
+          borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -2794,23 +3004,23 @@ class _OsInputSectionState extends State<_OsInputSection> {
 
   InputDecoration _deco(String hint) => InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(color: AppTheme.textHint, fontSize: 14),
+        hintStyle: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 14),
         filled: true,
-        fillColor: AppTheme.surfaceVariant,
-        prefixIcon: const Icon(Icons.assignment_outlined, size: 18, color: AppTheme.textHint),
+        fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+        prefixIcon: Icon(Icons.assignment_outlined, size: 18, color: Theme.of(context).colorScheme.outline),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.divider),
+          borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.divider),
+          borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.primary, width: 1.5),
+          borderSide: BorderSide(color: AppTheme.primary, width: 1.5),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       );
 
   @override
@@ -2818,26 +3028,26 @@ class _OsInputSectionState extends State<_OsInputSection> {
     final hasValue = _controllers.any((c) => c.text.trim().isNotEmpty);
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: !hasValue ? AppTheme.primary.withValues(alpha: 0.5) : AppTheme.divider,
+          color: !hasValue ? AppTheme.primary.withValues(alpha: 0.5) : Theme.of(context).colorScheme.outlineVariant,
           width: !hasValue ? 1.5 : 1,
         ),
       ),
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
             Text('Números de OS',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppTheme.textPrimary)),
-            const Text(' *', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w700)),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+            Text(' *', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w700)),
           ]),
-          const SizedBox(height: 4),
-          const Text(
+          SizedBox(height: 4),
+          Text(
             'Preencha ao menos uma OS. Se houver apenas uma, ela será atribuída automaticamente aos itens.',
-            style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
 
@@ -2922,6 +3132,16 @@ class _OsInputSectionState extends State<_OsInputSection> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// LINHA DE DISTRIBUIÇÃO POR OS
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DistribuicaoLinha {
+  String os;
+  double quantidade;
+  _DistribuicaoLinha({this.os = '', this.quantidade = 0});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // RASCUNHO DE ITEM
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2942,6 +3162,8 @@ class _ItemRascunho {
   /// Se true, o total é calculado como quantidade × precoMetroQuadrado;
   /// caso contrário, quantidade × precoUnitario.
   bool usarM2;
+  /// Distribuição da quantidade por OS.
+  List<_DistribuicaoLinha> distribuicao;
 
   _ItemRascunho({
     required this.materialId,
@@ -2956,7 +3178,8 @@ class _ItemRascunho {
     this.precoUnitario = 0,
     this.precoMetroQuadrado,
     this.usarM2 = false,
-  });
+    List<_DistribuicaoLinha>? distribuicao,
+  }) : distribuicao = distribuicao ?? [_DistribuicaoLinha(os: numeroOS, quantidade: quantidade)];
 
   double get precoTotal {
     if (usarM2 && precoMetroQuadrado != null && precoMetroQuadrado! > 0) {
@@ -3016,9 +3239,41 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   @override
   void didUpdateWidget(covariant _ItemFormCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Se passou a ter exatamente 1 OS, sincroniza automaticamente
-    if (widget.numerosOS.length == 1 && widget.item.numeroOS != widget.numerosOS.first) {
-      widget.item.numeroOS = widget.numerosOS.first;
+    // Limpa linhas com OS que foram removidas da lista (ex: usuario apagou o campo)
+    bool changed = false;
+    for (final linha in widget.item.distribuicao) {
+      if (linha.os.isNotEmpty && !widget.numerosOS.contains(linha.os)) {
+        linha.os = '';
+        changed = true;
+      }
+    }
+    // Se agora há exatamente 1 OS, preenche a linha 0 automaticamente
+    if (widget.numerosOS.length == 1) {
+      final dist = widget.item.distribuicao;
+      while (dist.length > 1) {
+        dist.removeLast();
+        changed = true;
+      }
+      if (dist.isEmpty) {
+        dist.add(_DistribuicaoLinha(
+            os: widget.numerosOS.first,
+            quantidade: widget.item.quantidade));
+        changed = true;
+      } else {
+        if (dist[0].os != widget.numerosOS.first) {
+          dist[0].os = widget.numerosOS.first;
+          changed = true;
+        }
+        if ((dist[0].quantidade - widget.item.quantidade).abs() > 0.0001) {
+          dist[0].quantidade = widget.item.quantidade;
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      widget.item.numeroOS = widget.item.distribuicao
+          .firstWhere((l) => l.os.isNotEmpty, orElse: () => _DistribuicaoLinha())
+          .os;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) widget.onChanged();
       });
@@ -3037,23 +3292,23 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   InputDecoration _deco(String hint) => InputDecoration(
         hintText: hint,
         hintStyle:
-            const TextStyle(color: AppTheme.textHint, fontSize: 12),
+            TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
         filled: true,
-        fillColor: AppTheme.surface,
+        fillColor: Theme.of(context).colorScheme.surface,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: const BorderSide(color: AppTheme.divider),
+          borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: const BorderSide(color: AppTheme.divider),
+          borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: const BorderSide(color: AppTheme.primary),
+          borderSide: BorderSide(color: AppTheme.primary),
         ),
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         isDense: true,
       );
 
@@ -3061,12 +3316,12 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   Widget build(BuildContext context) {
     final total = widget.item.precoTotal;
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      margin: EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3078,20 +3333,20 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(widget.item.materialNome,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
-                            color: AppTheme.textPrimary)),
+                            color: Theme.of(context).colorScheme.onSurface)),
                     Builder(builder: (_) {
                       final sub = [
                         if (widget.item.materialMedida != null && widget.item.materialMedida!.isNotEmpty) widget.item.materialMedida!,
                         if (widget.item.materialEspessura != null && widget.item.materialEspessura!.isNotEmpty) widget.item.materialEspessura!,
                         if (widget.item.materialIdentificador != null && widget.item.materialIdentificador!.isNotEmpty) widget.item.materialIdentificador!,
                       ].join(' · ');
-                      if (sub.isEmpty) return const SizedBox.shrink();
+                      if (sub.isEmpty) return SizedBox.shrink();
                       return Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(sub, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                        padding: EdgeInsets.only(top: 2),
+                        child: Text(sub, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                       );
                     }),
                   ],
@@ -3102,19 +3357,19 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                 icon: const Icon(Icons.delete_outline,
                     color: AppTheme.error, size: 20),
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+                constraints: BoxConstraints(),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           // ── Descrição adicional (somente para materiais específicos) ──────────
           if (widget.item.materialEspecifico == true) ...[
-            const Text(
+            Text(
               'Descrição adicional',
               style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: AppTheme.textSecondary),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 4),
             TextFormField(
@@ -3127,86 +3382,37 @@ class _ItemFormCardState extends State<_ItemFormCard> {
             ),
             const SizedBox(height: 8),
           ],
-          if (widget.numerosOS.isNotEmpty) ...[
-            const Text('OS',
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textSecondary)),
-            const SizedBox(height: 4),
-            if (widget.numerosOS.length == 1)
-              // 1 OS: exibe como badge, sem precisar escolher
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.assignment_outlined, size: 14, color: AppTheme.primary),
-                    const SizedBox(width: 6),
-                    Text(
-                      widget.numerosOS.first,
-                      style: const TextStyle(
-                          fontSize: 13,
-                          color: AppTheme.primary,
-                          fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              )
-            else
-              DropdownButtonFormField<String>(
-                initialValue: widget.item.numeroOS.isNotEmpty &&
-                        widget.numerosOS.contains(widget.item.numeroOS)
-                    ? widget.item.numeroOS
-                    : null,
-                decoration: _deco('Selecione a OS'),
-                items: widget.numerosOS
-                    .map((os) =>
-                        DropdownMenuItem(value: os, child: Text(os)))
-                    .toList(),
-                onChanged: (v) {
-                  if (v != null) {
-                    setState(() => widget.item.numeroOS = v);
-                    widget.onChanged();
-                  }
-                },
-              ),
-            const SizedBox(height: 8),
-          ] else
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFFBEB),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Text('Adicione números de OS acima',
-                  style:
-                      TextStyle(fontSize: 12, color: Color(0xFF92400E))),
-            ),
-          const SizedBox(height: 8),
+          // ── Distribuição por OS (sempre expandida) ───────────────────────
+          _DistribuicaoSection(
+            item: widget.item,
+            numerosOS: widget.numerosOS,
+            onChanged: () {
+              // Sincroniza numeroOS com a primeira linha que tiver OS preenchida
+              final primeira = widget.item.distribuicao
+                  .firstWhere((l) => l.os.isNotEmpty, orElse: () => _DistribuicaoLinha());
+              widget.item.numeroOS = primeira.os;
+              widget.onChanged();
+              setState(() {});
+            },
+          ),
+          SizedBox(height: 8),
           // ── Seletor de modo de cálculo ───────────────────────────────────
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: AppTheme.surface,
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppTheme.divider),
+              border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Modo de cálculo',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: AppTheme.textSecondary,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -3247,10 +3453,10 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                   children: [
                     Text(
                         widget.item.usarM2 ? 'Quantidade (m²)' : 'Quantidade',
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: AppTheme.textSecondary)),
+                            color: Theme.of(context).colorScheme.onSurfaceVariant)),
                     const SizedBox(height: 4),
                     TextFormField(
                       controller: _qtdCtrl,
@@ -3263,6 +3469,14 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       onChanged: (v) {
                         widget.item.quantidade =
                             double.tryParse(v) ?? 0;
+                        // Com 1 OS: atualiza automaticamente a distribuição
+                        if (widget.numerosOS.length == 1 &&
+                            widget.item.distribuicao.length == 1) {
+                          widget.item.distribuicao[0].os =
+                              widget.numerosOS.first;
+                          widget.item.distribuicao[0].quantidade =
+                              widget.item.quantidade;
+                        }
                         widget.onChanged();
                         setState(() {});
                       },
@@ -3270,30 +3484,30 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        const Text('Preço Unitário.',
+                        Text('Preço Unitário.',
                             style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
-                                color: AppTheme.textSecondary)),
+                                color: Theme.of(context).colorScheme.onSurfaceVariant)),
                         if (!widget.item.usarM2) ...[
-                          const SizedBox(width: 4),
-                          const _BadgeAtivo(),
+                          SizedBox(width: 4),
+                          _BadgeAtivo(),
                         ],
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    SizedBox(height: 4),
                     TextFormField(
                       controller: _precoCtrl,
                       enabled: !widget.item.usarM2,  // ← adicionar
                       decoration: _deco('0.00').copyWith(
-                        fillColor: widget.item.usarM2 ? AppTheme.divider : AppTheme.surface,  // ← adicionar
+                        fillColor: widget.item.usarM2 ? Theme.of(context).colorScheme.outlineVariant : Theme.of(context).colorScheme.surface,  // ← adicionar
                       ),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
@@ -3309,30 +3523,30 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        const Text('Preço m²',
+                        Text('Preço m²',
                             style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
-                                color: AppTheme.textSecondary)),
+                                color: Theme.of(context).colorScheme.onSurfaceVariant)),
                         if (widget.item.usarM2) ...[
-                          const SizedBox(width: 4),
-                          const _BadgeAtivo(),
+                          SizedBox(width: 4),
+                          _BadgeAtivo(),
                         ],
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    SizedBox(height: 4),
                     TextFormField(
                       controller: _precoM2Ctrl,
                       enabled: widget.item.usarM2,  // ← adicionar
                       decoration: _deco('0.00').copyWith(
-                        fillColor: !widget.item.usarM2 ? AppTheme.divider : AppTheme.surface,  // ← adicionar
+                        fillColor: !widget.item.usarM2 ? Theme.of(context).colorScheme.outlineVariant : Theme.of(context).colorScheme.surface,  // ← adicionar
                       ),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
@@ -3385,13 +3599,13 @@ class _ModoCalculo extends StatelessWidget {
       borderRadius: BorderRadius.circular(6),
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        duration: Duration(milliseconds: 150),
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
         decoration: BoxDecoration(
           color: ativo ? AppTheme.primary.withValues(alpha: 0.10) : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: ativo ? AppTheme.primary : AppTheme.divider,
+            color: ativo ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
             width: ativo ? 1.5 : 1,
           ),
         ),
@@ -3406,21 +3620,21 @@ class _ModoCalculo extends StatelessWidget {
                 activeColor: AppTheme.primary,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 visualDensity: VisualDensity.compact,
-                shape: const CircleBorder(),
+                shape: CircleBorder(),
                 side: BorderSide(
-                  color: ativo ? AppTheme.primary : AppTheme.textHint,
+                  color: ativo ? AppTheme.primary : Theme.of(context).colorScheme.outline,
                   width: 1.5,
                 ),
               ),
             ),
-            const SizedBox(width: 6),
+            SizedBox(width: 6),
             Expanded(
               child: Text(
                 label,
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: ativo ? AppTheme.primary : AppTheme.textSecondary,
+                  color: ativo ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
@@ -3450,6 +3664,362 @@ class _BadgeAtivo extends StatelessWidget {
           fontWeight: FontWeight.w700,
           letterSpacing: 0.3,
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DISTRIBUIÇÃO POR OS (sempre expandida)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DistribuicaoSection extends StatefulWidget {
+  final _ItemRascunho item;
+  final List<String> numerosOS;
+  final VoidCallback onChanged;
+
+  const _DistribuicaoSection({
+    required this.item,
+    required this.numerosOS,
+    required this.onChanged,
+  });
+
+  @override
+  State<_DistribuicaoSection> createState() => _DistribuicaoSectionState();
+}
+
+class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
+  late List<TextEditingController> _qtdCtrls;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoFillSeUmaOS();
+    _syncControllers();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DistribuicaoSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Quando muda de múltiplas OS para uma só (ou já é uma só),
+    // preenche automaticamente OS e quantidade na linha 0.
+    final preencheuAuto = _autoFillSeUmaOS();
+    if (preencheuAuto) {
+      // Atualiza o controller da linha 0 para refletir a nova quantidade
+      if (_qtdCtrls.isNotEmpty) {
+        final qtd = widget.item.distribuicao[0].quantidade;
+        final novoTexto = qtd == 0
+            ? ''
+            : qtd % 1 == 0
+                ? qtd.toInt().toString()
+                : qtd.toString();
+        if (_qtdCtrls[0].text != novoTexto) {
+          _qtdCtrls[0].text = novoTexto;
+        }
+      }
+    }
+    // Quando a quantidade total do item muda e há exatamente 1 OS,
+    // mantém o controller sincronizado com a quantidade atualizada.
+    if (widget.numerosOS.length == 1 &&
+        widget.item.distribuicao.length == 1 &&
+        _qtdCtrls.isNotEmpty) {
+      final qtd = widget.item.distribuicao[0].quantidade;
+      final novoTexto = qtd == 0
+          ? ''
+          : qtd % 1 == 0
+              ? qtd.toInt().toString()
+              : qtd.toString();
+      if (_qtdCtrls[0].text != novoTexto) {
+        _qtdCtrls[0].text = novoTexto;
+      }
+    }
+  }
+
+  /// Quando há exatamente 1 OS cadastrada, preenche automaticamente a
+  /// linha 0 da distribuição com essa OS e a quantidade total do item.
+  /// Retorna true se fez alguma alteração.
+  bool _autoFillSeUmaOS() {
+    if (widget.numerosOS.length != 1) return false;
+    final umaOS = widget.numerosOS.first;
+    final dist = widget.item.distribuicao;
+    // Garante que existe pelo menos 1 linha
+    if (dist.isEmpty) {
+      dist.add(_DistribuicaoLinha(os: umaOS, quantidade: widget.item.quantidade));
+      return true;
+    }
+    bool changed = false;
+    // Remove linhas extras (caso tenha sobrado de quando havia 2 OS)
+    while (dist.length > 1) {
+      dist.removeLast();
+      changed = true;
+    }
+    // Preenche a linha 0
+    if (dist[0].os != umaOS) {
+      dist[0].os = umaOS;
+      changed = true;
+    }
+    if ((dist[0].quantidade - widget.item.quantidade).abs() > 0.0001) {
+      dist[0].quantidade = widget.item.quantidade;
+      changed = true;
+    }
+    return changed;
+  }
+
+  void _syncControllers() {
+    _qtdCtrls = widget.item.distribuicao.map((l) {
+      final v = l.quantidade == 0 ? '' : (l.quantidade % 1 == 0 ? l.quantidade.toInt().toString() : l.quantidade.toString());
+      return TextEditingController(text: v);
+    }).toList();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _qtdCtrls) { c.dispose(); }
+    super.dispose();
+  }
+
+  void _adicionarLinha() {
+    final ctrl = TextEditingController();
+    setState(() {
+      widget.item.distribuicao.add(_DistribuicaoLinha());
+      _qtdCtrls.add(ctrl);
+    });
+    widget.onChanged();
+  }
+
+  void _removerLinha(int idx) {
+    _qtdCtrls[idx].dispose();
+    setState(() {
+      widget.item.distribuicao.removeAt(idx);
+      _qtdCtrls.removeAt(idx);
+    });
+    widget.onChanged();
+  }
+
+  void _limpar() {
+    for (final c in _qtdCtrls) { c.dispose(); }
+    setState(() {
+      widget.item.distribuicao
+        ..clear()
+        ..add(_DistribuicaoLinha());
+      _qtdCtrls = [TextEditingController()];
+    });
+    widget.onChanged();
+  }
+
+  double get _totalDistribuido =>
+      widget.item.distribuicao.fold(0.0, (s, l) => s + l.quantidade);
+
+  @override
+  Widget build(BuildContext context) {
+    final total = widget.item.quantidade;
+    final distribuido = _totalDistribuido;
+    final excesso = distribuido - total;
+    final ok = (distribuido - total).abs() < 0.0001;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Cabeçalho ────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+            child: Row(
+              children: [
+                const Icon(Icons.account_tree_outlined, size: 14, color: AppTheme.primary),
+                const SizedBox(width: 6),
+                Text(
+                  'Distribuição por OS',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.primary),
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: ok
+                        ? AppTheme.success.withValues(alpha: 0.12)
+                        : AppTheme.warning.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${distribuido % 1 == 0 ? distribuido.toInt() : distribuido}/${total % 1 == 0 ? total.toInt() : total} distribuído',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: ok ? AppTheme.success : AppTheme.warning,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Barra de excesso ─────────────────────────────────────────────
+          if (excesso > 0.0001)
+            Container(
+              height: 4,
+              margin: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: AppTheme.error,
+                borderRadius: BorderRadius.circular(2),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppTheme.error,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'Excede em ${excesso % 1 == 0 ? excesso.toInt() : excesso.toStringAsFixed(2)}',
+                      style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (excesso > 0.0001) SizedBox(height: 6),
+
+          // ── Cabeçalho da tabela ──────────────────────────────────────────
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              children: [
+                Expanded(child: Text('OS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurfaceVariant))),
+                SizedBox(width: 8),
+                SizedBox(width: 80, child: Text('Quantidade', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center)),
+                SizedBox(width: 28),
+              ],
+            ),
+          ),
+          SizedBox(height: 4),
+
+          // ── Linhas ────────────────────────────────────────────────────────
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 10),
+            child: Column(
+              children: widget.item.distribuicao.asMap().entries.map((e) {
+                final idx = e.key;
+                final linha = e.value;
+                final InputDecoration decoSmall = InputDecoration(
+                  hintStyle: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
+                  filled: true,
+                  fillColor: Theme.of(context).colorScheme.surface,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: AppTheme.primary)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  isDense: true,
+                );
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: widget.numerosOS.isEmpty
+                            // Sem OS cadastradas: campo bloqueado
+                            ? Container(
+                                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                                ),
+                                child: Text(
+                                  'Preencha os números de OS acima',
+                                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline, fontStyle: FontStyle.italic),
+                                ),
+                              )
+                            // Com OS cadastradas: dropdown
+                            : DropdownButtonFormField<String>(
+                                key: ValueKey('os_dd_${idx}_${widget.numerosOS.join(",")}_${widget.item.distribuicao.length}_${linha.os}'),
+                                initialValue: linha.os.isNotEmpty && widget.numerosOS.contains(linha.os) ? linha.os : null,
+                                decoration: InputDecoration(
+                                  hintText: 'Selecione a OS',
+                                  hintStyle: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
+                                  filled: true,
+                                  fillColor: Theme.of(context).colorScheme.surface,
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
+                                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
+                                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: AppTheme.primary)),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                  isDense: true,
+                                ),
+                                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface),
+                                items: widget.numerosOS
+                                    .map((os) => DropdownMenuItem(value: os, child: Text(os)))
+                                    .toList(),
+                                onChanged: (v) {
+                                  if (v != null) {
+                                    setState(() => linha.os = v);
+                                    widget.onChanged();
+                                  }
+                                },
+                              ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 80,
+                        child: TextField(
+                          controller: _qtdCtrls[idx],
+                          decoration: decoSmall.copyWith(hintText: '0'),
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))],
+                          style: const TextStyle(fontSize: 12),
+                          textAlign: TextAlign.center,
+                          onChanged: (v) {
+                            linha.quantidade = double.tryParse(v) ?? 0;
+                            setState(() {});
+                            widget.onChanged();
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: 24,
+                        child: widget.item.distribuicao.length > 1
+                            ? GestureDetector(
+                                onTap: () => _removerLinha(idx),
+                                child: const Icon(Icons.remove_circle_outline, size: 18, color: AppTheme.error),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+
+          // ── Ações ─────────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
+            child: Row(
+              children: [
+                TextButton.icon(
+                  onPressed: _adicionarLinha,
+                  icon: const Icon(Icons.add, size: 14, color: AppTheme.primary),
+                  label: Text('Adicionar OS', style: TextStyle(fontSize: 12, color: AppTheme.primary)),
+                  style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                ),
+                SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: _limpar,
+                  icon: Icon(Icons.close, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  label: Text('Limpar distribuição', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3494,8 +4064,8 @@ class _FornecedorPickerState extends State<_FornecedorPicker> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Selecionar Fornecedor',
-          style: TextStyle(color: AppTheme.textPrimary)),
+      title: Text('Selecionar Fornecedor',
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
       content: SizedBox(
         width: double.maxFinite,
         height: 400,
@@ -3503,9 +4073,9 @@ class _FornecedorPickerState extends State<_FornecedorPicker> {
           children: [
             TextField(
               controller: _searchCtrl,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'Buscar fornecedor...',
-                prefixIcon: Icon(Icons.search, color: AppTheme.textHint),
+                prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline),
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
@@ -3523,12 +4093,12 @@ class _FornecedorPickerState extends State<_FornecedorPicker> {
                         final f = _resultados[i];
                         return ListTile(
                           title: Text(f.nomeFantasia,
-                              style: const TextStyle(
-                                  color: AppTheme.textPrimary)),
+                              style: TextStyle(
+                                  color: Theme.of(context).colorScheme.onSurface)),
                           subtitle: f.tipoFornecedor != null
                               ? Text(f.tipoFornecedor!,
-                                  style: const TextStyle(
-                                      color: AppTheme.textSecondary))
+                                  style: TextStyle(
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant))
                               : null,
                           onTap: () => Navigator.pop(context, f),
                         );
@@ -3541,8 +4111,8 @@ class _FornecedorPickerState extends State<_FornecedorPicker> {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar',
-                style: TextStyle(color: AppTheme.textSecondary))),
+            child: Text('Cancelar',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
       ],
     );
   }
@@ -3659,21 +4229,21 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
 
   InputDecoration _deco(String hint, {IconData? icon}) => InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(color: AppTheme.textHint, fontSize: 12),
-        prefixIcon: icon != null ? Icon(icon, size: 15, color: AppTheme.textHint) : null,
+        hintStyle: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
+        prefixIcon: icon != null ? Icon(icon, size: 15, color: Theme.of(context).colorScheme.outline) : null,
         filled: true,
-        fillColor: AppTheme.surfaceVariant,
+        fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 9),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(7),
-            borderSide: const BorderSide(color: AppTheme.divider)),
+            borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
         enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(7),
-            borderSide: const BorderSide(color: AppTheme.divider)),
+            borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(7),
-            borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
+            borderSide: BorderSide(color: AppTheme.primary, width: 1.5)),
       );
 
   @override
@@ -3683,9 +4253,9 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
     return AlertDialog(
       title: Row(
         children: [
-          const Text('Adicionar Itens',
+          Text('Adicionar Itens',
               style: TextStyle(
-                  color: AppTheme.textPrimary, fontWeight: FontWeight.w700)),
+                  color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
           const Spacer(),
           if (_totalItens > 0)
             Container(
@@ -3773,44 +4343,44 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                     onChanged: (_) => setState(() {}),
                   ),
                 ),
-                const SizedBox(width: 4),
+                SizedBox(width: 4),
                 IconButton(
                   onPressed: _temFiltro ? _limparFiltros : null,
                   icon: Icon(
                     Icons.filter_alt_off,
                     size: 18,
-                    color: _temFiltro ? AppTheme.textSecondary : AppTheme.textHint,
+                    color: _temFiltro ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
                   ),
                   tooltip: 'Limpar filtros',
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                  constraints: BoxConstraints(),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
 
             // ── Contador de resultados ─────────────────────────────────────
             Text(
               '${filtrados.length} ${filtrados.length == 1 ? 'material encontrado' : 'materiais encontrados'}',
-              style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
-            const SizedBox(height: 6),
-            const Divider(height: 1, color: AppTheme.divider),
+            SizedBox(height: 6),
+            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
 
             // ── Lista filtrada ─────────────────────────────────────────────
             Expanded(
               child: filtrados.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Text(
                         'Nenhum material encontrado com esses filtros.',
-                        style: TextStyle(color: AppTheme.textSecondary),
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                         textAlign: TextAlign.center,
                       ),
                     )
                   : ListView.separated(
                       itemCount: filtrados.length,
                       separatorBuilder: (_, __) =>
-                          const Divider(height: 1, color: AppTheme.divider),
+                          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
                       itemBuilder: (_, i) {
                         final m = filtrados[i];
                         final qty = _quantidades[m.materialId] ?? 0;
@@ -3830,7 +4400,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                         fontSize: 13,
                                         color: qty > 0
                                             ? AppTheme.primary
-                                            : AppTheme.textPrimary,
+                                            : Theme.of(context).colorScheme.onSurface,
                                       ),
                                     ),
                                     const SizedBox(height: 2),
@@ -3840,9 +4410,9 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                           : m.precoMetroQuadrado > 0
                                               ? 'm²: R\$ ${m.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}'
                                               : 'Sem preço cadastrado',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                           fontSize: 11,
-                                          color: AppTheme.textSecondary),
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant),
                                     ),
                                   ],
                                 ),
@@ -3862,10 +4432,10 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                                 _quantidades[m.materialId] = novo;
                                               }
                                             }),
-                                    icon: const Icon(
+                                    icon: Icon(
                                         Icons.remove_circle_outline, size: 22),
                                     color: qty == 0
-                                        ? AppTheme.textHint
+                                        ? Theme.of(context).colorScheme.outline
                                         : AppTheme.error,
                                     padding: EdgeInsets.zero,
                                     constraints: const BoxConstraints(),
@@ -3880,7 +4450,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                         fontWeight: FontWeight.w700,
                                         color: qty > 0
                                             ? AppTheme.primary
-                                            : AppTheme.textHint,
+                                            : Theme.of(context).colorScheme.outline,
                                       ),
                                     ),
                                   ),
@@ -3892,7 +4462,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                         Icons.add_circle_outline, size: 22),
                                     color: AppTheme.primary,
                                     padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
+                                    constraints: BoxConstraints(),
                                   ),
                                 ],
                               ),
@@ -3908,8 +4478,8 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar',
-              style: TextStyle(color: AppTheme.textSecondary)),
+          child: Text('Cancelar',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ),
         FilledButton(
           onPressed: _totalItens == 0 ? null : _confirmar,

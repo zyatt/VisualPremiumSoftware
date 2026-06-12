@@ -2,8 +2,20 @@ import 'package:flutter/foundation.dart';
 import '../models/veiculo_model.dart';
 import '../utils/api_client.dart';
 
-String _mensagemErro(Object e) =>
-    e.toString().replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+String _mensagemErro(Object e) {
+  final raw = e.toString();
+  if (raw.contains('SocketException') ||
+      raw.contains('ClientException') ||
+      raw.contains('Connection refused') ||
+      raw.contains('Connection reset') ||
+      raw.contains('Failed host lookup') ||
+      raw.contains('HandshakeException') ||
+      raw.contains('TimeoutException') ||
+      raw.contains('Network is unreachable')) {
+    return 'Verifique a conexão com o servidor';
+  }
+  return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+}
 
 class VeiculoProvider extends ChangeNotifier {
   // ── Lista de veículos ──────────────────────────────────────────────────────

@@ -5,6 +5,16 @@ import '../repositories/fornecedor_repository.dart';
 
 String _mensagemErro(Object e) {
   final raw = e.toString();
+  if (raw.contains('SocketException') ||
+      raw.contains('ClientException') ||
+      raw.contains('Connection refused') ||
+      raw.contains('Connection reset') ||
+      raw.contains('Failed host lookup') ||
+      raw.contains('HandshakeException') ||
+      raw.contains('TimeoutException') ||
+      raw.contains('Network is unreachable')) {
+    return 'Verifique a conexão com o servidor';
+  }
   return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
 }
 
@@ -78,73 +88,73 @@ class FornecedorProvider extends ChangeNotifier {
   Future<bool> criar(Map<String, dynamic> dados) async {
     try {
       await _repo.criar(dados);
-      await recarregar();
-      return true;
     } catch (e) {
       _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
+    await recarregar();
+    return true;
   }
 
   Future<bool> atualizar(int id, Map<String, dynamic> dados) async {
     try {
       await _repo.atualizar(id, dados);
-      await recarregar();
-      return true;
     } catch (e) {
       _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
+    await recarregar();
+    return true;
   }
 
   Future<bool> remover(int id) async {
     try {
       await _repo.remover(id);
-      await recarregar();
-      return true;
     } catch (e) {
       _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
+    await recarregar();
+    return true;
   }
 
   Future<bool> vincularMaterial(int fornecedorId, Map<String, dynamic> dados) async {
     try {
       await _repo.vincularMaterial(fornecedorId, dados);
-      await recarregar();
-      return true;
     } catch (e) {
       _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
+    await recarregar();
+    return true;
   }
 
   Future<bool> desvincularMaterial(int fornecedorId, int materialId) async {
     try {
       await _repo.desvincularMaterial(fornecedorId, materialId);
-      await recarregar();
-      return true;
     } catch (e) {
       _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
+    await recarregar();
+    return true;
   }
 
   Future<bool> atualizarPreco(int fornecedorId, int materialId, Map<String, dynamic> dados) async {
     try {
       await _repo.atualizarPreco(fornecedorId, materialId, dados);
-      await recarregar();
-      return true;
     } catch (e) {
       _erro = _mensagemErro(e);
       notifyListeners();
       return false;
     }
+    await recarregar();
+    return true;
   }
 
   /// Busca rápida para o overlay de vínculo — usa endpoint dedicado (/fornecedores/buscar)

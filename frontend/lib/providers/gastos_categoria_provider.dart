@@ -4,6 +4,16 @@ import '../utils/api_client.dart';
 
 String _mensagemErro(Object e) {
   final raw = e.toString();
+  if (raw.contains('SocketException') ||
+      raw.contains('ClientException') ||
+      raw.contains('Connection refused') ||
+      raw.contains('Connection reset') ||
+      raw.contains('Failed host lookup') ||
+      raw.contains('HandshakeException') ||
+      raw.contains('TimeoutException') ||
+      raw.contains('Network is unreachable')) {
+    return 'Verifique a conexão com o servidor';
+  }
   return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
 }
 
@@ -16,6 +26,20 @@ class GastosCategoriaProvider extends ChangeNotifier {
 
   String? _erro;
   String? get erro => _erro;
+
+  // ── Gráfico mensal ────────────────────────────────────────────────────────
+  List<GastoMensalModel> _mensal = [];
+  List<GastoMensalModel> get mensal => _mensal;
+
+  bool _carregandoMensal = false;
+  bool get carregandoMensal => _carregandoMensal;
+
+  String? _erroMensal;
+  String? get erroMensal => _erroMensal;
+
+  int _anoMensal = DateTime.now().year;
+  int get anoMensal => _anoMensal;
+  // ─────────────────────────────────────────────────────────────────────────
 
   DateTime? _dataInicioAtiva;
   DateTime? _dataFimAtiva;
@@ -64,6 +88,28 @@ class GastosCategoriaProvider extends ChangeNotifier {
       _erro = _mensagemErro(e);
     } finally {
       _carregando = false;
+      notifyListeners();
+    }
+  }
+
+  /// Carrega o gráfico de barras mensais para o [ano] informado.
+  Future<void> carregarMensal({int? ano}) async {
+    _anoMensal = ano ?? DateTime.now().year;
+    _carregandoMensal = true;
+    _erroMensal = null;
+    notifyListeners();
+
+    try {
+      final list = await ApiClient.getList(
+        '/gastos-categoria/mensal?ano=$_anoMensal',
+      );
+      _mensal = list
+          .map((e) => GastoMensalModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      _erroMensal = _mensagemErro(e);
+    } finally {
+      _carregandoMensal = false;
       notifyListeners();
     }
   }

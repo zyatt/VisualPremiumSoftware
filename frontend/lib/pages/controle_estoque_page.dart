@@ -264,9 +264,9 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     );
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -281,15 +281,15 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(
                       'Movimentações por Ordem de Serviço',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
@@ -313,19 +313,19 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.error,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
+                    padding: EdgeInsets.symmetric(
                         horizontal: 20, vertical: 12),
                   ),
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 IconButton(
                   onPressed: () => context.read<EstoqueProvider>().carregarRelacoesOS(),
-                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
@@ -341,10 +341,12 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   child: TextField(
                     controller: _buscaCtrl,
                     onChanged: _buscar,
-                    decoration: const InputDecoration(
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    decoration: InputDecoration(
                       hintText: 'Buscar por número da OS...',
                       prefixIcon: Icon(Icons.search,
-                          color: AppTheme.textHint, size: 20),
+                          color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
                     ),
                   ),
@@ -354,27 +356,29 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                 Expanded(
                   child: TextField(
                     controller: _buscaNomeCtrl,
-                    decoration: const InputDecoration(
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    decoration: InputDecoration(
                       hintText: 'Filtrar por nome do material...',
                       prefixIcon: Icon(Icons.filter_alt_outlined,
-                          color: AppTheme.textHint, size: 20),
+                          color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
                     ),
                     onChanged: (_) {
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
-                        const Duration(milliseconds: 300),
+                        Duration(milliseconds: 300),
                         () => setState(() {}),
                       );
                     },
                   ),
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 // Limpar todos os filtros
                 IconButton(
                   tooltip: 'Limpar filtros',
-                  icon: const Icon(Icons.filter_alt_off,
-                      color: AppTheme.textSecondary),
+                  icon: Icon(Icons.filter_alt_off,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
                   onPressed: () {
                     _buscaCtrl.clear();
                     _buscaNomeCtrl.clear();
@@ -386,15 +390,15 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                     context.read<EstoqueProvider>().carregarRelacoesOS();
                   },
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
 
             // ── Barras de busca — linha 2 (id, identificador, medida, espessura)
             Row(
@@ -403,10 +407,10 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   width: 110,
                   child: TextField(
                     controller: _buscaIdCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'ID...',
                       prefixIcon: Icon(Icons.tag,
-                          color: AppTheme.textHint, size: 18),
+                          color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
                     keyboardType: TextInputType.number,
@@ -422,14 +426,14 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                     },
                   ),
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 Expanded(
                   child: TextField(
                     controller: _identificadorCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'Identificador...',
                       prefixIcon: Icon(Icons.qr_code,
-                          color: AppTheme.textHint, size: 18),
+                          color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
                     textCapitalization: TextCapitalization.characters,
@@ -443,14 +447,14 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                     },
                   ),
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 Expanded(
                   child: TextField(
                     controller: _medidaCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'Medida...',
                       prefixIcon: Icon(Icons.straighten,
-                          color: AppTheme.textHint, size: 18),
+                          color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
                     textCapitalization: TextCapitalization.characters,
@@ -464,14 +468,14 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                     },
                   ),
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 Expanded(
                   child: TextField(
                     controller: _espessuraCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'Espessura...',
                       prefixIcon: Icon(Icons.layers,
-                          color: AppTheme.textHint, size: 18),
+                          color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
                     textCapitalization: TextCapitalization.characters,
@@ -479,7 +483,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                     onChanged: (_) {
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
-                        const Duration(milliseconds: 300),
+                        Duration(milliseconds: 300),
                         () => setState(() {}),
                       );
                     },
@@ -487,18 +491,18 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
 
             // ── Abas ───────────────────────────────────────────────
             Container(
-              decoration: const BoxDecoration(
-                color: AppTheme.surface,
-                border: Border(bottom: BorderSide(color: AppTheme.divider)),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
               ),
               child: TabBar(
                 controller: _tabController,
                 labelColor: AppTheme.primary,
-                unselectedLabelColor: AppTheme.textSecondary,
+                unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
                 indicatorColor: AppTheme.primary,
                 indicatorWeight: 2,
                 labelStyle: const TextStyle(
@@ -525,13 +529,48 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       child: CircularProgressIndicator(
                           color: AppTheme.primary))
                   : provider.erro != null
-                      ? Center(
-                          child: Text(
-                            'Erro: ${provider.erro}',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(color: AppTheme.error),
+                      ? SizedBox(
+                          height: 300,
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.cloud_off_outlined,
+                                    size: 48, color: AppTheme.error),
+                                SizedBox(height: 12),
+                                Text(
+                                  'Erro ao carregar controle de estoque',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onSurface,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 15,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  () {
+                                    final partes = provider.erro!.split(': ');
+                                    return partes.length > 1
+                                        ? partes.sublist(1).join(': ')
+                                        : provider.erro!;
+                                  }(),
+                                  style: TextStyle(
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 16),
+                                FilledButton.icon(
+                                  onPressed: () => context
+                                      .read<EstoqueProvider>()
+                                      .carregarRelacoesOS(),
+                                  icon: const Icon(Icons.refresh, size: 18),
+                                  label: const Text('Tentar novamente'),
+                                  style: FilledButton.styleFrom(
+                                      backgroundColor: AppTheme.primary),
+                                ),
+                              ],
+                            ),
                           ),
                         )
                       : TabBarView(
@@ -581,18 +620,18 @@ class _OsGrid extends StatelessWidget {
     required this.onTap,
   });
 
-  SliverToBoxAdapter _cabecalho(String titulo, int count) =>
+  SliverToBoxAdapter _cabecalho(String titulo, int count, BuildContext context) =>
       SliverToBoxAdapter(
         child: Padding(
-          padding: const EdgeInsets.only(top: 20, bottom: 10),
+          padding: EdgeInsets.only(top: 20, bottom: 10),
           child: Row(
             children: [
               Text(
                 titulo,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.textSecondary,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   letterSpacing: 0.5,
                 ),
               ),
@@ -605,15 +644,15 @@ class _OsGrid extends StatelessWidget {
                 ),
                 child: Text(
                   '$count',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                     color: AppTheme.primary,
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
-              const Expanded(child: Divider(color: AppTheme.divider)),
+              SizedBox(width: 10),
+              Expanded(child: Divider(color: Theme.of(context).colorScheme.outlineVariant)),
             ],
           ),
         ),
@@ -626,13 +665,13 @@ class _OsGrid extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.inbox_outlined,
-                size: 48, color: AppTheme.textHint),
-            const SizedBox(height: 12),
+            Icon(Icons.inbox_outlined,
+                size: 48, color: Theme.of(context).colorScheme.outline),
+            SizedBox(height: 12),
             Text(
               emptyMessage,
-              style: const TextStyle(
-                  color: AppTheme.textSecondary, fontSize: 15),
+              style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 15),
             ),
           ],
         ),
@@ -652,7 +691,7 @@ class _OsGrid extends StatelessWidget {
     return CustomScrollView(
       slivers: [
         if (numericas.isNotEmpty) ...[
-          _cabecalho('Ordens de Serviço', numericas.length),
+          _cabecalho('Ordens de Serviço', numericas.length, context),
           SliverGrid(
             delegate: SliverChildBuilderDelegate(
               (ctx, i) {
@@ -665,7 +704,7 @@ class _OsGrid extends StatelessWidget {
           ),
         ],
         if (textuais.isNotEmpty) ...[
-          _cabecalho('Empresa', textuais.length),
+          _cabecalho('Empresa', textuais.length, context),
           SliverGrid(
             delegate: SliverChildBuilderDelegate(
               (ctx, i) {
@@ -777,24 +816,24 @@ class _RelacaoOSCard extends StatelessWidget {
                     int.tryParse(numeroOSDisplay) != null
                         ? 'OS $numeroOSDisplay'
                         : numeroOSDisplay,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color: AppTheme.textPrimary,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 2),
+                  SizedBox(height: 2),
                   Text(
                     '$materiaisUnicos '
                     '${materiaisUnicos == 1 ? 'material' : 'materiais'}',
-                    style: const TextStyle(
-                        fontSize: 11, color: AppTheme.textSecondary),
+                    style: TextStyle(
+                        fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   Text(
                     dataStr,
-                    style: const TextStyle(
-                        fontSize: 11, color: AppTheme.textHint),
+                    style: TextStyle(
+                        fontSize: 11, color: Theme.of(context).colorScheme.outline),
                   ),
                 ],
               ),
@@ -977,13 +1016,13 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
                 border: Border.all(
                     color: _corEmAndamento.withValues(alpha: 0.25)),
               ),
-              child: const Text(
+              child: Text(
                 'Após fechar:\n'
                 '• A OS não aceitará novas movimentações\n'
                 '• Ela será movida para a página de Relatórios\n'
                 '• Um relatório PDF poderá ser gerado',
                 style:
-                    TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                    TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ),
           ],
@@ -1104,17 +1143,17 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
                   child: const Icon(Icons.edit_outlined,
                       color: AppTheme.primary, size: 20),
                 ),
-                const SizedBox(width: 12),
-                const Text('Renomear OS'),
+                SizedBox(width: 12),
+                Text('Renomear OS'),
               ],
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Novo número / nome da OS:',
-                  style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                  style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 10),
                 TextField(
@@ -1189,7 +1228,7 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
     final rel      = provider.relacaoSelecionada;
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -1267,18 +1306,18 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
                   ? null
                   : () => _confirmarFecharOS(context),
               icon: provider.fechandoOS
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 14,
                       height: 14,
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: _corEmAndamento))
-                  : const Icon(Icons.lock_outline,
+                  : Icon(Icons.lock_outline,
                       size: 18, color: _corEmAndamento),
               label: Text(
                 'Finalizar OS',
                 style: TextStyle(
                   color: provider.fechandoOS
-                      ? AppTheme.textHint
+                      ? Theme.of(context).colorScheme.outline
                       : _corEmAndamento,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1287,21 +1326,21 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
           // Botão excluir (só para OS em andamento)
           if (rel != null && !rel.estaFechada)
             IconButton(
-              icon: const Icon(Icons.delete_outline, color: AppTheme.error),
+              icon: Icon(Icons.delete_outline, color: AppTheme.error),
               tooltip: 'Excluir OS',
               onPressed: () => _confirmarExcluirOS(context),
             ),
           // Botão renomear (só para OS em andamento)
           if (rel != null && !rel.estaFechada)
             IconButton(
-              icon: const Icon(Icons.edit_outlined, color: AppTheme.textSecondary),
+              icon: Icon(Icons.edit_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant),
               tooltip: 'Renomear OS',
               onPressed: () => _abrirRenomearOS(context, rel),
             ),
         ],
       ),
       body: provider.carregandoDetalhe
-          ? const Center(
+          ? Center(
               child: CircularProgressIndicator(color: AppTheme.primary))
           : rel == null
               ? Center(
@@ -1310,7 +1349,7 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
                     style: Theme.of(context)
                         .textTheme
                         .bodyMedium
-                        ?.copyWith(color: AppTheme.textHint),
+                        ?.copyWith(color: Theme.of(context).colorScheme.outline),
                   ),
                 )
               : _RelacaoDetalheBody(rel: rel),
@@ -1379,7 +1418,7 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
           style: Theme.of(context)
               .textTheme
               .bodyMedium
-              ?.copyWith(color: AppTheme.textHint),
+              ?.copyWith(color: Theme.of(context).colorScheme.outline),
         ),
       );
     }
@@ -1597,9 +1636,9 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
 
     if (!temPrecoUnit && !temPrecoM2) {
       messenger.showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text('Nenhum custo de última compra registrado para este material'),
-          backgroundColor: AppTheme.textSecondary,
+          backgroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       );
       return;
@@ -1647,10 +1686,10 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Novo custo (última compra):',
                     style: TextStyle(
-                        fontSize: 11, color: AppTheme.textSecondary),
+                        fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 4),
                   if (temPrecoUnit)
@@ -1672,11 +1711,11 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                 ],
               ),
             ),
-            const SizedBox(height: 8),
-            const Text(
+            SizedBox(height: 8),
+            Text(
               'Somente o custo registrado nas movimentações será alterado — '
               'as quantidades e o saldo de estoque não mudam.',
-              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -1740,7 +1779,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       child: InkWell(
         onTap: () => _mostrarPainel(context),
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: EdgeInsets.all(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1771,33 +1810,33 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                           ),
                         ],
                         if (_subtitulo.isNotEmpty) ...[
-                          const SizedBox(height: 2),
+                          SizedBox(height: 2),
                           Text(
                             _subtitulo,
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 11,
-                                color: AppTheme.textSecondary),
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ],
                       ],
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  const Icon(Icons.expand_more,
-                      size: 18, color: AppTheme.textHint),
+                  SizedBox(width: 6),
+                  Icon(Icons.expand_more,
+                      size: 18, color: Theme.of(context).colorScheme.outline),
                 ],
               ),
-              const Spacer(),
+              Spacer(),
               _UltimoPrecoRow(movimentacoes: widget.movimentacoes),
-              const SizedBox(height: 6),
+              SizedBox(height: 6),
               _TotaisResumoMini(totais: totais, unidade: unidade),
-              const SizedBox(height: 4),
+              SizedBox(height: 4),
               Text(
                 '${widget.movimentacoes.length} '
                 '${widget.movimentacoes.length == 1 ? 'movimentação' : 'movimentações'}',
-                style: const TextStyle(
-                    fontSize: 11, color: AppTheme.textHint),
+                style: TextStyle(
+                    fontSize: 11, color: Theme.of(context).colorScheme.outline),
               ),
             ],
           ),
@@ -1891,16 +1930,16 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                               if (subtitulo.isNotEmpty)
                                 Text(
                                   subtitulo,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 12,
-                                      color: AppTheme.textSecondary),
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant),
                                 ),
                               if (unidade != null)
                                 Text(
                                   unidade,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 12,
-                                      color: AppTheme.textSecondary),
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant),
                                 ),
                             ],
                           ),
@@ -1978,14 +2017,14 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                             Navigator.of(ctx).pop();
                             _abrirAtualizarCusto(context);
                           },
-                          icon: const Icon(Icons.price_change_outlined,
-                              size: 16, color: AppTheme.textSecondary),
-                          label: const Text(
+                          icon: Icon(Icons.price_change_outlined,
+                              size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          label: Text(
                             'Atualizar custo (última compra)',
-                            style: TextStyle(color: AppTheme.textSecondary),
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                           ),
                           style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: AppTheme.divider),
+                            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8)),
                           ),
@@ -2018,18 +2057,18 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      SizedBox(height: 16),
                     ],
 
-                    const Divider(height: 1),
-                    const SizedBox(height: 12),
+                    Divider(height: 1),
+                    SizedBox(height: 12),
 
                     Text(
                       'Histórico (${movsAtuais.length})',
                       style: Theme.of(ctx)
                           .textTheme
                           .titleSmall
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                     const SizedBox(height: 8),
                     ConstrainedBox(
@@ -2134,10 +2173,10 @@ class _PrecoBadge extends StatelessWidget {
           children: [
             TextSpan(
               text: '$label ',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 9,
                 fontWeight: FontWeight.w500,
-                color: AppTheme.textSecondary,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             TextSpan(
@@ -2254,12 +2293,12 @@ class _TotaisResumoCompleto extends StatelessWidget {
     final unStr      = unidade ?? '';
     final temEntrada = totais.qtdEntrada > 0;
     final temSaida   = totais.qtdSaida   > 0;
-    if (!temEntrada && !temSaida) return const SizedBox.shrink();
+    if (!temEntrada && !temSaida) return SizedBox.shrink();
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -2278,8 +2317,8 @@ class _TotaisResumoCompleto extends StatelessWidget {
             Container(
               width: 1,
               height: 36,
-              margin: const EdgeInsets.symmetric(horizontal: 10),
-              color: AppTheme.divider,
+              margin: EdgeInsets.symmetric(horizontal: 10),
+              color: Theme.of(context).colorScheme.outlineVariant,
             ),
           if (temSaida)
             Expanded(
@@ -2340,18 +2379,18 @@ class _TotalLinha extends StatelessWidget {
     return Row(
       children: [
         Container(
-          padding: const EdgeInsets.all(5),
+          padding: EdgeInsets.all(5),
           decoration: BoxDecoration(
             color: cor.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Icon(icon, size: 13, color: cor),
         ),
-        const SizedBox(width: 8),
+        SizedBox(width: 8),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary, fontWeight: FontWeight.w500)),
+            Text(label, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.w500)),
             Text(qtd,   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: cor)),
             Text(valor, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cor.withValues(alpha: 0.75))),
           ],
@@ -2386,10 +2425,10 @@ class _MovimentacaoRow extends StatelessWidget {
     final icon = isEntrada ? Icons.arrow_upward : Icons.arrow_downward;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      margin: EdgeInsets.only(bottom: 6),
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -2404,7 +2443,7 @@ class _MovimentacaoRow extends StatelessWidget {
             ),
             child: Icon(icon, size: 14, color: cor),
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2418,11 +2457,11 @@ class _MovimentacaoRow extends StatelessWidget {
                             fontWeight: FontWeight.w700,
                           ),
                     ),
-                    const SizedBox(width: 6),
+                    SizedBox(width: 6),
                     Text(
                       formatQtd(mov.quantidade, unidade),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppTheme.textPrimary,
+                            color: Theme.of(context).colorScheme.onSurface,
                             fontWeight: FontWeight.w600,
                           ),
                     ),
@@ -2455,23 +2494,23 @@ class _MovimentacaoRow extends StatelessWidget {
                     }),
                   ],
                 ),
-                const SizedBox(height: 2),
+                SizedBox(height: 2),
                 Text(
                   formatData(mov.criadoEm),
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
-                      ?.copyWith(color: AppTheme.textHint, fontSize: 11),
+                      ?.copyWith(color: Theme.of(context).colorScheme.outline, fontSize: 11),
                 ),
                 if (mov.observacao != null &&
                     mov.observacao!.isNotEmpty) ...[
-                  const SizedBox(height: 3),
+                  SizedBox(height: 3),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.notes,
-                          size: 12, color: AppTheme.textSecondary),
-                      const SizedBox(width: 4),
+                      Icon(Icons.notes,
+                          size: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      SizedBox(width: 4),
                       Expanded(
                         child: Text(
                           mov.observacao!,
@@ -2479,7 +2518,7 @@ class _MovimentacaoRow extends StatelessWidget {
                               .textTheme
                               .bodySmall
                               ?.copyWith(
-                                  color: AppTheme.textSecondary,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   fontStyle: FontStyle.italic),
                         ),
                       ),
@@ -2620,7 +2659,7 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
                 : Icons.remove_circle_outline,
             color: cor,
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: 8),
           Text(isEntrada ? 'Registrar Entrada' : 'Registrar Saída'),
         ],
       ),
@@ -2634,13 +2673,13 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
                 style: Theme.of(context)
                     .textTheme
                     .titleMedium
-                    ?.copyWith(color: AppTheme.textPrimary)),
-            const SizedBox(height: 4),
+                    ?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+            SizedBox(height: 4),
             Text('OS ${widget.numeroOS}',
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
-                    ?.copyWith(color: AppTheme.textSecondary)),
+                    ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             const SizedBox(height: 14),
             TextFormField(
               controller: _quantCtrl,
@@ -2691,17 +2730,17 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
               if (pm2 != null && pm2 > 0) {
                 partes.add('M²: R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}');
               }
-              if (partes.isEmpty) return const SizedBox.shrink();
+              if (partes.isEmpty) return SizedBox.shrink();
               return Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: EdgeInsets.only(top: 8),
                 child: Row(
                   children: [
-                    const Icon(Icons.price_check, size: 12, color: AppTheme.textSecondary),
-                    const SizedBox(width: 4),
+                    Icon(Icons.price_check, size: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    SizedBox(width: 4),
                     Expanded(
                       child: Text(
                         partes.join('  ·  '),
-                        style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                        style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
                     ),
                   ],
@@ -3022,7 +3061,7 @@ class _MovimentacaoGlobalDialogState
                           : Icons.remove_circle_outline,
                       color: cor,
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: 8),
                     Text(
                       isEntrada ? 'Nova Entrada' : 'Nova Saída',
                       style: Theme.of(context).textTheme.headlineSmall,
@@ -3081,10 +3120,10 @@ class _MovimentacaoGlobalDialogState
                                   width: 90,
                                   child: TextField(
                                     controller: _idCtrl,
-                                    decoration: const InputDecoration(
+                                    decoration: InputDecoration(
                                       hintText: 'ID...',
                                       prefixIcon: Icon(Icons.tag,
-                                          color: AppTheme.textHint, size: 16),
+                                          color: Theme.of(context).colorScheme.outline, size: 16),
                                       isDense: true,
                                     ),
                                     keyboardType: TextInputType.number,
@@ -3101,12 +3140,15 @@ class _MovimentacaoGlobalDialogState
                                   child: TextField(
                                     controller: _nomeCtrl,
                                     autofocus: true,
-                                    decoration: const InputDecoration(
+                                    decoration: InputDecoration(
                                       hintText: 'Buscar por nome...',
                                       prefixIcon: Icon(Icons.search,
-                                          color: AppTheme.textHint, size: 18),
+                                          color: Theme.of(context).colorScheme.outline, size: 18),
                                       isDense: true,
                                     ),
+                                    textCapitalization:
+                                        TextCapitalization.characters,
+                                    inputFormatters: [_UpperCaseFormatter()],
                                     onChanged: (_) => _agendarBusca(),
                                     onSubmitted: (_) => _buscar(),
                                   ),
@@ -3150,11 +3192,11 @@ class _MovimentacaoGlobalDialogState
                                     },
                                   ),
                                 ),
-                                const SizedBox(width: 4),
+                                SizedBox(width: 4),
                                 IconButton(
                                   tooltip: 'Limpar filtros',
-                                  icon: const Icon(Icons.filter_alt_off,
-                                      color: AppTheme.textSecondary, size: 18),
+                                  icon: Icon(Icons.filter_alt_off,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant, size: 18),
                                   onPressed: _limparFiltros,
                                   style: IconButton.styleFrom(
                                     padding: EdgeInsets.zero,
@@ -3173,10 +3215,10 @@ class _MovimentacaoGlobalDialogState
                                 Expanded(
                                   child: TextField(
                                     controller: _identificadorCtrl,
-                                    decoration: const InputDecoration(
+                                    decoration: InputDecoration(
                                       hintText: 'Identificador...',
                                       prefixIcon: Icon(Icons.qr_code,
-                                          color: AppTheme.textHint, size: 16),
+                                          color: Theme.of(context).colorScheme.outline, size: 16),
                                       isDense: true,
                                     ),
                                     textCapitalization:
@@ -3186,14 +3228,14 @@ class _MovimentacaoGlobalDialogState
                                     onSubmitted: (_) => _buscar(),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                                SizedBox(width: 8),
                                 Expanded(
                                   child: TextField(
                                     controller: _medidaCtrl,
-                                    decoration: const InputDecoration(
+                                    decoration: InputDecoration(
                                       hintText: 'Medida...',
                                       prefixIcon: Icon(Icons.straighten,
-                                          color: AppTheme.textHint, size: 16),
+                                          color: Theme.of(context).colorScheme.outline, size: 16),
                                       isDense: true,
                                     ),
                                     textCapitalization:
@@ -3203,14 +3245,14 @@ class _MovimentacaoGlobalDialogState
                                     onSubmitted: (_) => _buscar(),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                                SizedBox(width: 8),
                                 Expanded(
                                   child: TextField(
                                     controller: _espessuraCtrl,
-                                    decoration: const InputDecoration(
+                                    decoration: InputDecoration(
                                       hintText: 'Espessura...',
                                       prefixIcon: Icon(Icons.layers,
-                                          color: AppTheme.textHint, size: 16),
+                                          color: Theme.of(context).colorScheme.outline, size: 16),
                                       isDense: true,
                                     ),
                                     textCapitalization:
@@ -3222,17 +3264,19 @@ class _MovimentacaoGlobalDialogState
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 8),
+                            SizedBox(height: 8),
 
                             // Filtro por descrição
                             TextField(
                               controller: _descricaoCtrl,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 hintText: 'Buscar por descrição do item...',
                                 prefixIcon: Icon(Icons.label_outline,
-                                    color: AppTheme.textHint, size: 16),
+                                    color: Theme.of(context).colorScheme.outline, size: 16),
                                 isDense: true,
                               ),
+                              textCapitalization: TextCapitalization.characters,
+                              inputFormatters: [_UpperCaseFormatter()],
                               onChanged: (_) => _agendarBusca(),
                               onSubmitted: (_) => _buscar(),
                             ),
@@ -3247,27 +3291,27 @@ class _MovimentacaoGlobalDialogState
                                           strokeWidth: 2),
                                     )
                                   : !_buscouUmaVez
-                                      ? const Center(
+                                      ? Center(
                                           child: Text(
                                             'Digite para buscar materiais',
                                             style: TextStyle(
-                                                color: AppTheme.textHint,
+                                                color: Theme.of(context).colorScheme.outline,
                                                 fontSize: 13),
                                           ),
                                         )
                                       : _resultados.isEmpty
-                                          ? const Center(
+                                          ? Center(
                                               child: Text(
                                                 'Nenhum material encontrado',
                                                 style: TextStyle(
-                                                    color: AppTheme.textHint,
+                                                    color: Theme.of(context).colorScheme.outline,
                                                     fontSize: 13),
                                               ),
                                             )
                                           : Container(
                                               decoration: BoxDecoration(
                                                 border: Border.all(
-                                                    color: AppTheme.divider),
+                                                    color: Theme.of(context).colorScheme.outlineVariant),
                                                 borderRadius:
                                                     BorderRadius.circular(8),
                                               ),
@@ -3389,9 +3433,9 @@ class _MovimentacaoGlobalDialogState
                             // Cabeçalho da coluna
                             Row(
                               children: [
-                                const Icon(Icons.check_circle_outline,
+                                Icon(Icons.check_circle_outline,
                                     size: 16, color: AppTheme.primary),
-                                const SizedBox(width: 6),
+                                SizedBox(width: 6),
                                 Text(
                                   'Selecionados (${_itensSelecionados.length})',
                                   style: Theme.of(context)
@@ -3412,14 +3456,14 @@ class _MovimentacaoGlobalDialogState
                                         children: [
                                           Icon(Icons.inventory_2_outlined,
                                               size: 36,
-                                              color: AppTheme.textHint
+                                              color: Theme.of(context).colorScheme.outline
                                                   .withValues(alpha: 0.4)),
-                                          const SizedBox(height: 10),
-                                          const Text(
+                                          SizedBox(height: 10),
+                                          Text(
                                             'Nenhum material\nadicionado ainda',
                                             textAlign: TextAlign.center,
                                             style: TextStyle(
-                                                color: AppTheme.textHint,
+                                                color: Theme.of(context).colorScheme.outline,
                                                 fontSize: 13),
                                           ),
                                         ],
@@ -3637,34 +3681,34 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
           ),
           child: Row(
             children: [
-              const Icon(Icons.calculate_outlined,
+              Icon(Icons.calculate_outlined,
                   size: 14, color: AppTheme.primary),
-              const SizedBox(width: 8),
+              SizedBox(width: 8),
               Expanded(
                 child: RichText(
                   text: TextSpan(
-                    style: const TextStyle(
-                        fontSize: 12, color: AppTheme.textSecondary),
+                    style: TextStyle(
+                        fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     children: [
                       TextSpan(
                           text: '${_fmt(larg)} × ${_fmt(alt)} m  =  '),
                       TextSpan(
                         text: '${_fmt(areaUsada)} m²',
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontWeight: FontWeight.w700,
-                            color: AppTheme.textPrimary),
+                            color: Theme.of(context).colorScheme.onSurface),
                       ),
                       const TextSpan(text: '  →  '),
                       TextSpan(
                         text: item.quantCtrl.text,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontWeight: FontWeight.w700,
                             color: AppTheme.primary),
                       ),
                       TextSpan(
                         text: ' ${m.unidade ?? 'UN'}  ($pct% da chapa)',
-                        style: const TextStyle(
-                            color: AppTheme.textSecondary),
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
                     ],
                   ),
@@ -3718,9 +3762,9 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                     if (partes.isNotEmpty)
                       Text(
                         partes,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 11,
-                            color: AppTheme.textSecondary),
+                            color: Theme.of(context).colorScheme.onSurfaceVariant),
                         overflow: TextOverflow.ellipsis,
                       ),
                   ],
@@ -3728,8 +3772,8 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
               ),
               IconButton(
                 onPressed: widget.onRemover,
-                icon: const Icon(Icons.close,
-                    size: 16, color: AppTheme.textSecondary),
+                icon: Icon(Icons.close,
+                    size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 style: IconButton.styleFrom(
                   padding: EdgeInsets.zero,
                   minimumSize: const Size(28, 28),
@@ -3760,9 +3804,9 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                       size: 20,
                       color: item.usarModoDimensional
                           ? AppTheme.primary
-                          : AppTheme.textHint,
+                          : Theme.of(context).colorScheme.outline,
                     ),
-                    const SizedBox(width: 6),
+                    SizedBox(width: 6),
                     Text(
                       'Informar por dimensão usada',
                       style: TextStyle(
@@ -3770,7 +3814,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                         fontWeight: FontWeight.w600,
                         color: item.usarModoDimensional
                             ? AppTheme.primary
-                            : AppTheme.textSecondary,
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -3804,36 +3848,36 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                   child: TextField(
                     controller: item.larguraUsadaCtrl,
                     keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                        TextInputType.numberWithOptions(decimal: true),
                     decoration: InputDecoration(
                       labelText: 'Largura usada (m)',
                       isDense: true,
                       suffixText: '/ ${_fmt(chapa.$1)} m',
-                      suffixStyle: const TextStyle(
-                          fontSize: 11, color: AppTheme.textHint),
+                      suffixStyle: TextStyle(
+                          fontSize: 11, color: Theme.of(context).colorScheme.outline),
                     ),
                     onChanged: (_) => _recalcularQtd(),
                   ),
                 ),
-                const Padding(
+                Padding(
                   padding: EdgeInsets.symmetric(horizontal: 8),
                   child: Text('×',
                       style: TextStyle(
                           fontSize: 16,
-                          color: AppTheme.textSecondary,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                           fontWeight: FontWeight.w700)),
                 ),
                 Expanded(
                   child: TextField(
                     controller: item.alturaUsadaCtrl,
                     keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                        TextInputType.numberWithOptions(decimal: true),
                     decoration: InputDecoration(
                       labelText: 'Comprimento usado (m)',
                       isDense: true,
                       suffixText: '/ ${_fmt(chapa.$2)} m',
-                      suffixStyle: const TextStyle(
-                          fontSize: 11, color: AppTheme.textHint),
+                      suffixStyle: TextStyle(
+                          fontSize: 11, color: Theme.of(context).colorScheme.outline),
                     ),
                     onChanged: (_) => _recalcularQtd(),
                   ),
@@ -3852,7 +3896,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                 child: TextFormField(
                   controller: item.quantCtrl,
                   keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                      TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                     labelText: 'Quantidade *',
                     isDense: true,
@@ -3860,8 +3904,8 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                     helperText: item.usarModoDimensional
                         ? 'Calculado automaticamente'
                         : null,
-                    helperStyle: const TextStyle(
-                        fontSize: 10, color: AppTheme.textSecondary),
+                    helperStyle: TextStyle(
+                        fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   readOnly: item.usarModoDimensional,
                   validator: (v) {
@@ -3930,19 +3974,19 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
             if (pm2 != null && pm2 > 0) {
               partesBrl.add('M²: R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}');
             }
-            if (partesBrl.isEmpty) return const SizedBox.shrink();
+            if (partesBrl.isEmpty) return SizedBox.shrink();
             return Padding(
-              padding: const EdgeInsets.only(top: 6),
+              padding: EdgeInsets.only(top: 6),
               child: Row(
                 children: [
-                  const Icon(Icons.price_check,
-                      size: 12, color: AppTheme.textSecondary),
-                  const SizedBox(width: 4),
+                  Icon(Icons.price_check,
+                      size: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  SizedBox(width: 4),
                   Expanded(
                     child: Text(
                       partesBrl.join('  ·  '),
-                      style: const TextStyle(
-                          fontSize: 11, color: AppTheme.textSecondary),
+                      style: TextStyle(
+                          fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                 ],
@@ -3976,19 +4020,19 @@ class _MaterialPaiHeader extends StatelessWidget {
 
     return Container(
       color: AppTheme.primary.withValues(alpha: 0.05),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       child: Row(
         children: [
-          const Icon(Icons.folder_special_outlined,
+          Icon(Icons.folder_special_outlined,
               size: 14, color: AppTheme.primary),
-          const SizedBox(width: 6),
+          SizedBox(width: 6),
           SizedBox(
             width: 36,
             child: Text(
               '#${material.id}',
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 11,
-                  color: AppTheme.textHint,
+                  color: Theme.of(context).colorScheme.outline,
                   fontWeight: FontWeight.w500),
             ),
           ),
@@ -3999,7 +4043,7 @@ class _MaterialPaiHeader extends StatelessWidget {
               children: [
                 Text(
                   material.nome,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: AppTheme.primary,
@@ -4009,8 +4053,8 @@ class _MaterialPaiHeader extends StatelessWidget {
                 if (partes.isNotEmpty)
                   Text(
                     partes,
-                    style: const TextStyle(
-                        fontSize: 11, color: AppTheme.textSecondary),
+                    style: TextStyle(
+                        fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     overflow: TextOverflow.ellipsis,
                   ),
               ],
@@ -4146,7 +4190,7 @@ class _NovaDescricaoTileState extends State<_NovaDescricaoTile> {
             icon: const Icon(Icons.check, size: 16, color: AppTheme.success),
             style: IconButton.styleFrom(
               padding: EdgeInsets.zero,
-              minimumSize: const Size(28, 28),
+              minimumSize: Size(28, 28),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             tooltip: 'Confirmar descrição',
@@ -4156,7 +4200,7 @@ class _NovaDescricaoTileState extends State<_NovaDescricaoTile> {
               _expandido = false;
               _ctrl.clear();
             }),
-            icon: const Icon(Icons.close, size: 16, color: AppTheme.textSecondary),
+            icon: Icon(Icons.close, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
             style: IconButton.styleFrom(
               padding: EdgeInsets.zero,
               minimumSize: const Size(28, 28),
@@ -4222,16 +4266,16 @@ class _FilhoEspecificoTileState extends State<_FilhoEspecificoTile> {
           child: Row(
             children: [
               if (sel)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(right: 6),
                   child: Icon(Icons.check_circle,
                       size: 15, color: AppTheme.primary),
                 )
               else
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(right: 6),
                   child: Icon(Icons.subdirectory_arrow_right,
-                      size: 14, color: AppTheme.textHint),
+                      size: 14, color: Theme.of(context).colorScheme.outline),
                 ),
               Expanded(
                 child: Text(
@@ -4239,7 +4283,7 @@ class _FilhoEspecificoTileState extends State<_FilhoEspecificoTile> {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                    color: sel ? AppTheme.primary : AppTheme.textPrimary,
+                    color: sel ? AppTheme.primary : Theme.of(context).colorScheme.onSurface,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -4249,16 +4293,16 @@ class _FilhoEspecificoTileState extends State<_FilhoEspecificoTile> {
                 children: [
                   Text(
                     qtdStr,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary),
+                        color: Theme.of(context).colorScheme.onSurface),
                   ),
                   if (widget.pai.unidade != null)
                     Text(
                       widget.pai.unidade!,
-                      style: const TextStyle(
-                          fontSize: 10, color: AppTheme.textHint),
+                      style: TextStyle(
+                          fontSize: 10, color: Theme.of(context).colorScheme.outline),
                     ),
                 ],
               ),
@@ -4331,24 +4375,24 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
           child: Row(
             children: [
               if (sel)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(right: 6),
                   child: Icon(Icons.check_circle,
                       size: 15, color: AppTheme.primary),
                 )
               else
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(right: 6),
                   child: Icon(Icons.circle_outlined,
-                      size: 15, color: AppTheme.textHint),
+                      size: 15, color: Theme.of(context).colorScheme.outline),
                 ),
               SizedBox(
                 width: 36,
                 child: Text(
                   '#${m.id}',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 11,
-                      color: AppTheme.textHint,
+                      color: Theme.of(context).colorScheme.outline,
                       fontWeight: FontWeight.w500),
                 ),
               ),
@@ -4364,16 +4408,16 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
                         fontWeight:
                             sel ? FontWeight.w700 : FontWeight.w500,
                         color:
-                            sel ? AppTheme.primary : AppTheme.textPrimary,
+                            sel ? AppTheme.primary : Theme.of(context).colorScheme.onSurface,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
                     if (partes.isNotEmpty)
                       Text(
                         partes,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 11,
-                            color: AppTheme.textSecondary),
+                            color: Theme.of(context).colorScheme.onSurfaceVariant),
                         overflow: TextOverflow.ellipsis,
                       ),
                   ],
@@ -4385,16 +4429,16 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
                   Text(
                     m.quantidade.toStringAsFixed(
                         m.quantidade % 1 == 0 ? 0 : 2),
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary),
+                        color: Theme.of(context).colorScheme.onSurface),
                   ),
                   if (m.unidade != null)
                     Text(
                       m.unidade!,
-                      style: const TextStyle(
-                          fontSize: 10, color: AppTheme.textHint),
+                      style: TextStyle(
+                          fontSize: 10, color: Theme.of(context).colorScheme.outline),
                     ),
                 ],
               ),
@@ -4412,7 +4456,7 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
 
 class _StatusBadgeMini extends StatelessWidget {
   final String status;
-  const _StatusBadgeMini({required this.status});
+  _StatusBadgeMini({required this.status});
 
   @override
   Widget build(BuildContext context) {
@@ -4420,8 +4464,8 @@ class _StatusBadgeMini extends StatelessWidget {
       'OK'      => ('OK',      AppTheme.statusOk),
       'LIMITE'  => ('LIMITE',  AppTheme.statusBaixo),
       'CRITICO' => ('CRITICO', AppTheme.statusCritico),
-      'INATIVO' => ('INATIVO', AppTheme.textHint),
-      _         => ('—',       AppTheme.textHint),
+      'INATIVO' => ('INATIVO', Theme.of(context).colorScheme.outline),
+      _         => ('—',       Theme.of(context).colorScheme.outline),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

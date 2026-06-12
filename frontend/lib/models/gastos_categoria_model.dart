@@ -76,3 +76,44 @@ class GastoCategoriaModel {
             .toList(),
       );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Modelo de gasto mensal (para o gráfico)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class GastoMensalModel {
+  /// Ex: "2024-03"
+  final String mesAno;
+  final int    ano;
+  final int    mes;
+  final double totalEntrada;
+  final double totalSaida;
+
+  const GastoMensalModel({
+    required this.mesAno,
+    required this.ano,
+    required this.mes,
+    required this.totalEntrada,
+    required this.totalSaida,
+  });
+
+  double get total => totalEntrada + totalSaida;
+
+  /// Rótulo curto: "Jan", "Fev", …
+  static const _meses = [
+    '', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+    'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
+  ];
+  String get label => _meses[mes];
+
+  factory GastoMensalModel.fromJson(Map<String, dynamic> json) {
+    final parts = (json['mesAno'] as String).split('-');
+    return GastoMensalModel(
+      mesAno:       json['mesAno'] as String,
+      ano:          int.parse(parts[0]),
+      mes:          int.parse(parts[1]),
+      totalEntrada: (json['totalEntrada'] as num?)?.toDouble() ?? 0,
+      totalSaida:   (json['totalSaida']   as num?)?.toDouble() ?? 0,
+    );
+  }
+}

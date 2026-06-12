@@ -98,7 +98,7 @@ class _HistoricoPageState extends State<HistoricoPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -116,27 +116,27 @@ class _HistoricoPageState extends State<HistoricoPage>
                         style: Theme.of(context)
                             .textTheme
                             .headlineMedium
-                            ?.copyWith(color: AppTheme.textPrimary),
+                            ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                       ),
-                      const SizedBox(height: 2),
+                      SizedBox(height: 2),
                       Text(
                         '$total ${total == 1 ? 'ordem' : 'ordens'} no histórico',
                         style: Theme.of(context)
                             .textTheme
                             .bodyMedium
-                            ?.copyWith(color: AppTheme.textSecondary),
+                            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
                     ],
                   ),
-                  const Spacer(),
+                  Spacer(),
                   IconButton(
                     onPressed: () => context.read<OrdemCompraProvider>().carregar(),
-                    icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                    icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     tooltip: 'Atualizar',
                     style: IconButton.styleFrom(
-                      backgroundColor: AppTheme.surface,
+                      backgroundColor: Theme.of(context).colorScheme.surface,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      side: const BorderSide(color: AppTheme.divider),
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                     ),
                   ),
                 ],
@@ -152,13 +152,13 @@ class _HistoricoPageState extends State<HistoricoPage>
                     controller: _buscaCtrl,
                     decoration: InputDecoration(
                       hintText: 'Buscar por nº OC, fornecedor, empresa ou OS…',
-                      prefixIcon: const Icon(Icons.search,
-                          color: AppTheme.textHint, size: 20),
+                      prefixIcon: Icon(Icons.search,
+                          color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
                       suffixIcon: _filtroBusca.isNotEmpty
                           ? IconButton(
-                              icon: const Icon(Icons.clear,
-                                  size: 18, color: AppTheme.textHint),
+                              icon: Icon(Icons.clear,
+                                  size: 18, color: Theme.of(context).colorScheme.outline),
                               onPressed: () {
                                 _buscaCtrl.clear();
                                 setState(() => _filtroBusca = '');
@@ -189,30 +189,30 @@ class _HistoricoPageState extends State<HistoricoPage>
                   active: _dataFim != null,
                   onTap: () => _selecionarData(isInicio: false),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 if (_filtroBusca.isNotEmpty ||
                     _dataInicio != null ||
                     _dataFim != null)
                   IconButton.outlined(
                     tooltip: 'Limpar filtros',
-                    icon: const Icon(Icons.filter_alt_off),
+                    icon: Icon(Icons.filter_alt_off),
                     onPressed: _limparFiltros,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
               ],
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
 
             Container(
-              decoration: const BoxDecoration(
-                color: AppTheme.surface,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
                 border:
-                    Border(bottom: BorderSide(color: AppTheme.divider)),
+                    Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
               ),
               child: TabBar(
                 controller: _tabController,
                 labelColor: AppTheme.primary,
-                unselectedLabelColor: AppTheme.textSecondary,
+                unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
                 indicatorColor: AppTheme.primary,
                 indicatorWeight: 2,
                 labelStyle: const TextStyle(
@@ -234,22 +234,41 @@ class _HistoricoPageState extends State<HistoricoPage>
                     );
                   }
                   if (prov.erro != null) {
+                    final partes = prov.erro!.split(': ');
+                    final subtitulo = partes.length > 1
+                        ? partes.sublist(1).join(': ')
+                        : prov.erro!;
                     return Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.error_outline,
-                              color: AppTheme.error, size: 48),
-                          const SizedBox(height: 12),
-                          Text(prov.erro!,
-                              style: const TextStyle(
-                                  color: AppTheme.textSecondary)),
-                          const SizedBox(height: 12),
-                          TextButton(
-                            onPressed: prov.carregar,
-                            child: const Text('Tentar novamente',
-                                style:
-                                    TextStyle(color: AppTheme.primary)),
+                          Icon(Icons.cloud_off_outlined,
+                              size: 48, color: AppTheme.error),
+                          SizedBox(height: 12),
+                          Text(
+                            'Erro ao carregar histórico',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            subtitulo,
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed: () =>
+                                context.read<OrdemCompraProvider>().carregar(),
+                            icon: const Icon(Icons.refresh, size: 18),
+                            label: const Text('Tentar novamente'),
+                            style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.primary),
                           ),
                         ],
                       ),
@@ -304,11 +323,11 @@ class _DateFilterBtn extends StatelessWidget {
     return OutlinedButton.icon(
       onPressed: onTap,
       icon: Icon(icon, size: 15),
-      label: Text(label, style: const TextStyle(fontSize: 13)),
+      label: Text(label, style: TextStyle(fontSize: 13)),
       style: OutlinedButton.styleFrom(
-        foregroundColor: active ? AppTheme.primary : AppTheme.textSecondary,
+        foregroundColor: active ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
         side: BorderSide(
-          color: active ? AppTheme.primary : AppTheme.divider,
+          color: active ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
         ),
         backgroundColor:
             active ? AppTheme.primary.withValues(alpha: 0.06) : null,
@@ -339,11 +358,11 @@ class _HistoricoList extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(emptyIcon, size: 52, color: AppTheme.textHint),
-            const SizedBox(height: 12),
+            Icon(emptyIcon, size: 52, color: Theme.of(context).colorScheme.outline),
+            SizedBox(height: 12),
             Text(emptyMessage,
-                style: const TextStyle(
-                    color: AppTheme.textSecondary, fontSize: 15)),
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 15)),
           ],
         ),
       );
@@ -414,10 +433,10 @@ class _HistoricoCardState extends State<_HistoricoCard> {
         child: Container(
           decoration: BoxDecoration(
             color: _hovered
-                ? const Color(0xFFFF9800).withValues(alpha: 0.06)
-                : AppTheme.surface,
+                ? Color(0xFFFF9800).withValues(alpha: 0.06)
+                : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.divider),
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(11),
@@ -439,10 +458,10 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                             Expanded(
                               child: Text(
                                 'OC #${o.id} — ${o.fornecedorNome ?? 'Fornecedor'}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.w700,
                                   fontSize: 15,
-                                  color: AppTheme.textPrimary,
+                                  color: Theme.of(context).colorScheme.onSurface,
                                 ),
                               ),
                             ),
@@ -519,21 +538,21 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                               GestureDetector(
                                 behavior: HitTestBehavior.opaque,
                                 onTap: widget.onVerDetalhes,
-                                child: const Row(
+                                child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
                                       'Ver detalhes',
                                       style: TextStyle(
                                         fontSize: 12,
-                                        color: AppTheme.textSecondary,
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
                                     SizedBox(width: 3),
                                     Icon(Icons.open_in_new,
                                         size: 13,
-                                        color: AppTheme.textSecondary),
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                                   ],
                                 ),
                               ),
@@ -550,11 +569,11 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                   crossFadeState: _expandido
                       ? CrossFadeState.showSecond
                       : CrossFadeState.showFirst,
-                  firstChild: const SizedBox.shrink(),
+                  firstChild: SizedBox.shrink(),
                   secondChild: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Divider(height: 1, color: AppTheme.divider),
+                      Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(20, 12, 16, 14),
                         child: Column(
@@ -563,26 +582,26 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                             Row(children: [
                               const Icon(Icons.inventory_2_outlined,
                                   size: 14, color: AppTheme.primary),
-                              const SizedBox(width: 5),
+                              SizedBox(width: 5),
                               Text(
                                 'Itens (${o.itens.length})',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13,
-                                  color: AppTheme.textPrimary,
+                                  color: Theme.of(context).colorScheme.onSurface,
                                 ),
                               ),
                             ]),
-                            const SizedBox(height: 10),
+                            SizedBox(height: 10),
 
                             ...o.itens.map((item) => Container(
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  padding: const EdgeInsets.all(12),
+                                  margin: EdgeInsets.only(bottom: 8),
+                                  padding: EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: AppTheme.surfaceVariant,
+                                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
                                     borderRadius: BorderRadius.circular(8),
                                     border: Border.all(
-                                        color: AppTheme.divider),
+                                        color: Theme.of(context).colorScheme.outlineVariant),
                                   ),
                                   child: Row(
                                     crossAxisAlignment:
@@ -595,20 +614,20 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                                           children: [
                                             Text(
                                               item.materialNome,
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 fontWeight: FontWeight.w600,
                                                 fontSize: 13,
-                                                color: AppTheme.textPrimary,
+                                                color: Theme.of(context).colorScheme.onSurface,
                                               ),
                                             ),
                                             if (item.descricaoItem != null &&
                                                 item.descricaoItem!.isNotEmpty) ...[
-                                              const SizedBox(height: 2),
+                                              SizedBox(height: 2),
                                               Text(
                                                 item.descricaoItem!,
-                                                style: const TextStyle(
+                                                style: TextStyle(
                                                   fontSize: 12,
-                                                  color: AppTheme.textSecondary,
+                                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                                                   fontStyle: FontStyle.italic,
                                                 ),
                                               ),
@@ -661,11 +680,11 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text('Total',
+                                  Text('Total',
                                       style: TextStyle(
                                           fontWeight: FontWeight.w700,
                                           fontSize: 14,
-                                          color: AppTheme.textPrimary)),
+                                          color: Theme.of(context).colorScheme.onSurface)),
                                   Text(
                                     _moeda(o.valorTotal),
                                     style: TextStyle(
@@ -693,11 +712,11 @@ class _HistoricoCardState extends State<_HistoricoCard> {
   Widget _chip(IconData icon, String label) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 13, color: AppTheme.textSecondary),
-          const SizedBox(width: 3),
+          Icon(icon, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          SizedBox(width: 3),
           Text(label,
-              style: const TextStyle(
-                  fontSize: 12, color: AppTheme.textSecondary)),
+              style: TextStyle(
+                  fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ],
       );
 
@@ -718,21 +737,21 @@ class _HistoricoCardState extends State<_HistoricoCard> {
   Widget _itemChip(IconData icon, String label) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: AppTheme.textHint),
-          const SizedBox(width: 3),
+          Icon(icon, size: 12, color: Theme.of(context).colorScheme.outline),
+          SizedBox(width: 3),
           Text(label,
-              style: const TextStyle(
-                  fontSize: 12, color: AppTheme.textSecondary)),
+              style: TextStyle(
+                  fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ],
       );
 
   Widget _itemChipDestaque(IconData icon, String label, {required bool ativo}) {
     if (!ativo) {
       return Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 12, color: AppTheme.textHint),
-        const SizedBox(width: 3),
+        Icon(icon, size: 12, color: Theme.of(context).colorScheme.outline),
+        SizedBox(width: 3),
         Text(label,
-            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
       ]);
     }
     return Container(
@@ -791,22 +810,22 @@ class _HistoricoDetalhePage extends StatelessWidget {
     }
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         scrolledUnderElevation: 1,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+          icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Row(children: [
           Text(
             'OC #${o.id}',
-            style: const TextStyle(
+            style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 18,
-                color: AppTheme.textPrimary),
+                color: Theme.of(context).colorScheme.onSurface),
           ),
           const SizedBox(width: 10),
           Container(
@@ -829,25 +848,25 @@ class _HistoricoDetalhePage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          _secaoCard('Informações Gerais', Icons.info_outline, [
-            _infoRow(Icons.business_outlined, 'Fornecedor',
+          _secaoCard(context, 'Informações Gerais', Icons.info_outline, [
+            _infoRow(context, Icons.business_outlined, 'Fornecedor',
                 o.fornecedorNome ?? '—'),
-            _infoRow(Icons.person_outline, 'Requisitante',
+            _infoRow(context, Icons.person_outline, 'Requisitante',
                 o.requisitante.isEmpty ? '—' : o.requisitante),
-            _infoRow(Icons.apartment_outlined, 'Empresa', o.empresa ?? '—'),
-            _infoRow(Icons.calendar_today_outlined, 'Data',
+            _infoRow(context, Icons.apartment_outlined, 'Empresa', o.empresa ?? '—'),
+            _infoRow(context, Icons.calendar_today_outlined, 'Data',
                 _formatData(o.data)),
-            _infoRow(Icons.payment_outlined, 'Forma de Pagamento',
+            _infoRow(context, Icons.payment_outlined, 'Forma de Pagamento',
                 o.formaPagamento ?? '—'),
-            _infoRow(Icons.schedule_outlined, 'Prazo de Pagamento',
+            _infoRow(context, Icons.schedule_outlined, 'Prazo de Pagamento',
                 o.prazoPagamento ?? '—'),
             if (o.observacoes != null && o.observacoes!.isNotEmpty)
-              _infoRow(Icons.notes_outlined, 'Observações', o.observacoes!),
+              _infoRow(context, Icons.notes_outlined, 'Observações', o.observacoes!),
           ]),
           const SizedBox(height: 16),
 
           if (o.numerosOS.isNotEmpty) ...[
-            _secaoCard('Números de OS', Icons.assignment_outlined, [
+            _secaoCard(context, 'Números de OS', Icons.assignment_outlined, [
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -868,18 +887,18 @@ class _HistoricoDetalhePage extends StatelessWidget {
                     .toList(),
               ),
             ]),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
           ],
 
-          _secaoCard('Itens (${o.itens.length})', Icons.inventory_2_outlined,
+          _secaoCard(context, 'Itens (${o.itens.length})', Icons.inventory_2_outlined,
               [
             ...o.itens.map((item) => Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(14),
+                  margin: EdgeInsets.only(bottom: 8),
+                  padding: EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppTheme.divider),
+                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -887,10 +906,10 @@ class _HistoricoDetalhePage extends StatelessWidget {
                       Row(children: [
                         Expanded(
                           child: Text(item.materialNome,
-                              style: const TextStyle(
+                              style: TextStyle(
                                   fontWeight: FontWeight.w700,
                                   fontSize: 14,
-                                  color: AppTheme.textPrimary)),
+                                  color: Theme.of(context).colorScheme.onSurface)),
                         ),
                         Text(
                           _moeda(item.precoTotal),
@@ -902,27 +921,27 @@ class _HistoricoDetalhePage extends StatelessWidget {
                       ]),
                       if (item.descricaoItem != null &&
                           item.descricaoItem!.isNotEmpty) ...[
-                        const SizedBox(height: 3),
+                        SizedBox(height: 3),
                         Text(
                           item.descricaoItem!,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: AppTheme.textSecondary,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                             fontStyle: FontStyle.italic,
                           ),
                         ),
                       ],
                       const SizedBox(height: 6),
                       Wrap(spacing: 12, runSpacing: 4, children: [
-                        _itemChip(Icons.assignment_outlined,
+                        _itemChip(context, Icons.assignment_outlined,
                             'OS: ${item.numeroOS}'),
-                        _itemChip(Icons.format_list_numbered,
+                        _itemChip(context, Icons.format_list_numbered,
                             'Quantidade: ${_fmtNum(item.quantidade)}'),
-                        _itemChipDestaque(Icons.attach_money,
+                        _itemChipDestaque(context, Icons.attach_money,
                             'Unitário: ${_moeda(item.precoUnitario)}',
                             ativo: !item.usarM2),
                         if (item.precoMetroQuadrado != null)
-                          _itemChipDestaque(Icons.square_foot,
+                          _itemChipDestaque(context, Icons.square_foot,
                               'm²: ${_moeda(item.precoMetroQuadrado!)}',
                               ativo: item.usarM2),
                       ]),
@@ -940,11 +959,11 @@ class _HistoricoDetalhePage extends StatelessWidget {
               child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Total',
+                    Text('Total',
                         style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 15,
-                            color: AppTheme.textPrimary)),
+                            color: Theme.of(context).colorScheme.onSurface)),
                     Text(
                       _moeda(o.valorTotal),
                       style: TextStyle(
@@ -962,12 +981,12 @@ class _HistoricoDetalhePage extends StatelessWidget {
   }
 
   Widget _secaoCard(
-          String titulo, IconData icon, List<Widget> children) =>
+          BuildContext context, String titulo, IconData icon, List<Widget> children) =>
       Container(
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.divider),
+          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -975,58 +994,58 @@ class _HistoricoDetalhePage extends StatelessWidget {
           children: [
             Row(children: [
               Icon(icon, size: 16, color: AppTheme.primary),
-              const SizedBox(width: 6),
+              SizedBox(width: 6),
               Text(titulo,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 14,
-                      color: AppTheme.textPrimary)),
+                      color: Theme.of(context).colorScheme.onSurface)),
             ]),
-            const SizedBox(height: 12),
-            const Divider(height: 1, color: AppTheme.divider),
+            SizedBox(height: 12),
+            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
             const SizedBox(height: 12),
             ...children,
           ],
         ),
       );
 
-  Widget _infoRow(IconData icon, String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+  Widget _infoRow(BuildContext context, IconData icon, String label, String value) => Padding(
+        padding: EdgeInsets.only(bottom: 10),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(icon, size: 15, color: AppTheme.textHint),
-          const SizedBox(width: 8),
+          Icon(icon, size: 15, color: Theme.of(context).colorScheme.outline),
+          SizedBox(width: 8),
           SizedBox(
             width: 140,
             child: Text(label,
-                style: const TextStyle(
-                    fontSize: 13, color: AppTheme.textSecondary)),
+                style: TextStyle(
+                    fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
           ),
           Expanded(
             child: Text(value,
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
-                    color: AppTheme.textPrimary)),
+                    color: Theme.of(context).colorScheme.onSurface)),
           ),
         ]),
       );
 
-  Widget _itemChip(IconData icon, String label) =>
+  Widget _itemChip(BuildContext context, IconData icon, String label) =>
       Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 12, color: AppTheme.textHint),
-        const SizedBox(width: 3),
+        Icon(icon, size: 12, color: Theme.of(context).colorScheme.outline),
+        SizedBox(width: 3),
         Text(label,
-            style: const TextStyle(
-                fontSize: 12, color: AppTheme.textSecondary)),
+            style: TextStyle(
+                fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
       ]);
 
-  Widget _itemChipDestaque(IconData icon, String label, {required bool ativo}) {
+  Widget _itemChipDestaque(BuildContext context, IconData icon, String label, {required bool ativo}) {
     if (!ativo) {
       return Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 12, color: AppTheme.textHint),
-        const SizedBox(width: 3),
+        Icon(icon, size: 12, color: Theme.of(context).colorScheme.outline),
+        SizedBox(width: 3),
         Text(label,
-            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
       ]);
     }
     return Container(

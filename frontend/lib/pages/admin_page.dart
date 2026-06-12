@@ -4,6 +4,21 @@ import 'package:flutter/gestures.dart';
 import '../repositories/usuario_repository.dart';
 import '../theme/app_theme.dart';
 
+String _mensagemErro(Object e) {
+  final raw = e.toString();
+  if (raw.contains('SocketException') ||
+      raw.contains('ClientException') ||
+      raw.contains('Connection refused') ||
+      raw.contains('Connection reset') ||
+      raw.contains('Failed host lookup') ||
+      raw.contains('HandshakeException') ||
+      raw.contains('TimeoutException') ||
+      raw.contains('Network is unreachable')) {
+    return 'Verifique a conexão com o servidor';
+  }
+  return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+}
+
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
 
@@ -30,7 +45,7 @@ class _AdminPageState extends State<AdminPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -47,21 +62,21 @@ class _AdminPageState extends State<AdminPage>
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(
                       'Gerencie usuários e configurações do sistema',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: 20),
 
             // ── TabBar ──────────────────────────────────────────────────────
             TabBar(
@@ -70,7 +85,7 @@ class _AdminPageState extends State<AdminPage>
               tabAlignment: TabAlignment.start,
               indicatorColor: AppTheme.primary,
               labelColor: AppTheme.primary,
-              unselectedLabelColor: AppTheme.textSecondary,
+              unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
               indicatorWeight: 2,
               tabs: const [
                 Tab(
@@ -85,7 +100,7 @@ class _AdminPageState extends State<AdminPage>
                 ),
               ],
             ),
-            const Divider(height: 1, color: AppTheme.divider),
+            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
             const SizedBox(height: 16),
 
             // ── Conteúdo ────────────────────────────────────────────────────
@@ -135,7 +150,7 @@ class _UsuariosTabState extends State<_UsuariosTab> {
       final lista = await _repo.listar();
       setState(() => _usuarios = lista.cast<Map<String, dynamic>>());
     } catch (e) {
-      setState(() => _erro = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _erro = _mensagemErro(e));
     } finally {
       setState(() => _carregando = false);
     }
@@ -161,7 +176,7 @@ class _UsuariosTabState extends State<_UsuariosTab> {
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         title: const Text('Excluir usuário'),
         content: Text(
           'Deseja excluir "$nome"? Esta ação não pode ser desfeita.',
@@ -188,9 +203,9 @@ class _UsuariosTabState extends State<_UsuariosTab> {
       await _repo.excluir(usuario['id'] as int);
       await _carregar();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Usuário excluído.'),
-          backgroundColor: AppTheme.textSecondary,
+          backgroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
         ));
       }
     } catch (e) {
@@ -217,7 +232,7 @@ class _UsuariosTabState extends State<_UsuariosTab> {
                 style: Theme.of(context)
                     .textTheme
                     .bodyMedium
-                    ?.copyWith(color: AppTheme.textSecondary),
+                    ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             const Spacer(),
             FilledButton.icon(
@@ -228,18 +243,18 @@ class _UsuariosTabState extends State<_UsuariosTab> {
                 backgroundColor: AppTheme.primary,
                 foregroundColor: Colors.white,
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               ),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             IconButton(
               onPressed: _carregar,
-              icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+              icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
               tooltip: 'Atualizar',
               style: IconButton.styleFrom(
-                backgroundColor: AppTheme.surface,
+                backgroundColor: Theme.of(context).colorScheme.surface,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                side: const BorderSide(color: AppTheme.divider),
+                side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
               ),
             ),
           ],
@@ -257,13 +272,25 @@ class _UsuariosTabState extends State<_UsuariosTab> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.cloud_off_outlined,
+                          Icon(Icons.cloud_off_outlined,
                               size: 48, color: AppTheme.error),
-                          const SizedBox(height: 12),
+                          SizedBox(height: 12),
                           Text(
-                            _erro!,
-                            style: const TextStyle(
-                                color: AppTheme.textSecondary),
+                            'Erro ao carregar usuários',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            _erro!.contains(': ')
+                                ? _erro!.substring(_erro!.indexOf(': ') + 2)
+                                : _erro!,
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 16),
@@ -282,23 +309,23 @@ class _UsuariosTabState extends State<_UsuariosTab> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.people_outline_rounded,
-                                  size: 64, color: AppTheme.textHint),
-                              const SizedBox(height: 16),
+                              Icon(Icons.people_outline_rounded,
+                                  size: 64, color: Theme.of(context).colorScheme.outline),
+                              SizedBox(height: 16),
                               Text(
                                 'Nenhum usuário cadastrado',
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodyLarge
-                                    ?.copyWith(color: AppTheme.textSecondary),
+                                    ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                               ),
-                              const SizedBox(height: 8),
+                              SizedBox(height: 8),
                               Text(
                                 'Clique em "Novo usuário" para começar.',
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodyMedium
-                                    ?.copyWith(color: AppTheme.textHint),
+                                    ?.copyWith(color: Theme.of(context).colorScheme.outline),
                               ),
                             ],
                           ),
@@ -331,9 +358,9 @@ class _TabelaUsuarios extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
@@ -342,8 +369,8 @@ class _TabelaUsuarios extends StatelessWidget {
             // Cabeçalho
             Container(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              color: AppTheme.background,
+                  EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              color: Theme.of(context).scaffoldBackgroundColor,
               child: const Row(
                 children: [
                   Expanded(flex: 3, child: _HeaderCell('Nome')),
@@ -354,14 +381,14 @@ class _TabelaUsuarios extends StatelessWidget {
                 ],
               ),
             ),
-            const Divider(height: 1, color: AppTheme.divider),
+            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
 
             // Linhas
             Expanded(
               child: ListView.separated(
                 itemCount: usuarios.length,
                 separatorBuilder: (_, __) =>
-                    const Divider(height: 1, color: AppTheme.divider),
+                    Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
                 itemBuilder: (context, i) => _LinhaUsuario(
                   usuario: usuarios[i],
                   onEditar: onEditar,
@@ -412,7 +439,7 @@ class _LinhaUsuarioState extends State<_LinhaUsuario> {
 
     final bgColor = _hovered
         ? AppTheme.primary.withValues(alpha: 0.06)
-        : AppTheme.surface;
+        : Theme.of(context).colorScheme.surface;
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
@@ -446,12 +473,12 @@ class _LinhaUsuarioState extends State<_LinhaUsuario> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           u['nome'] as String? ?? '-',
-                          style: const TextStyle(
-                            color: AppTheme.textPrimary,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                           ),
@@ -467,8 +494,8 @@ class _LinhaUsuarioState extends State<_LinhaUsuario> {
                   flex: 2,
                   child: Text(
                     u['username'] as String? ?? '-',
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                       fontSize: 13,
                     ),
                   ),
@@ -539,7 +566,7 @@ class _LinhaUsuarioState extends State<_LinhaUsuario> {
       position: RelativeRect.fromLTRB(
         position.dx, position.dy, position.dx, position.dy,
       ),
-      color: AppTheme.surface,
+      color: Theme.of(context).colorScheme.surface,
       items: [
         PopupMenuItem(
           onTap: () => widget.onEditar(widget.usuario),
@@ -575,8 +602,8 @@ class _HeaderCell extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: const TextStyle(
-        color: AppTheme.textSecondary,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
         fontSize: 11,
         fontWeight: FontWeight.w700,
         letterSpacing: 0.4,
@@ -656,14 +683,14 @@ class _RoleLabel extends StatelessWidget {
     };
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
         label,
         style: TextStyle(
-          color: AppTheme.textSecondary,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
           fontSize: 11,
           fontWeight: FontWeight.w700,
         ),
@@ -777,7 +804,7 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       title: Text(_isEdicao ? 'Editar usuário' : 'Novo usuário'),
       content: SizedBox(
         width: 440,
@@ -862,7 +889,7 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                             ? Icons.visibility_off_rounded
                             : Icons.visibility_rounded,
                         size: 18,
-                        color: AppTheme.textHint,
+                        color: Theme.of(context).colorScheme.outline,
                       ),
                       onPressed: () =>
                           setState(() => _mostrarSenha = !_mostrarSenha),
@@ -905,14 +932,14 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                       activeThumbColor: Colors.white,
                       activeTrackColor: AppTheme.primary,
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: 8),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'Usuário ativo',
                           style: TextStyle(
-                            color: AppTheme.textPrimary,
+                            color: Theme.of(context).colorScheme.onSurface,
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                           ),
@@ -921,8 +948,8 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                           _ativo
                               ? 'Pode realizar login'
                               : 'Não pode realizar login',
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                             fontSize: 11,
                           ),
                         ),

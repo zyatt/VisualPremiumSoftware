@@ -85,9 +85,9 @@ class _ProducaoPageState extends State<ProducaoPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -101,15 +101,15 @@ class _ProducaoPageState extends State<ProducaoPage>
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(
                       'Solicitação e controle de materiais',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
@@ -119,27 +119,27 @@ class _ProducaoPageState extends State<ProducaoPage>
                     context.read<ProducaoProvider>().carregarCategorias();
                     context.read<ProducaoProvider>().carregarHistorico();
                   },
-                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: 20),
 
             Container(
-              decoration: const BoxDecoration(
-                color: AppTheme.surface,
-                border: Border(bottom: BorderSide(color: AppTheme.divider)),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
               ),
               child: TabBar(
                 controller: _tabController,
                 labelColor: AppTheme.primary,
-                unselectedLabelColor: AppTheme.textSecondary,
+                unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
                 indicatorColor: AppTheme.primary,
                 indicatorWeight: 2,
                 labelStyle: const TextStyle(
@@ -240,7 +240,12 @@ class _EstoqueTabState extends State<_EstoqueTab> {
               ),
       ),
     ).then((_) {
-      if (mounted) context.read<ProducaoProvider>().carregarCategorias();
+      if (mounted) {
+        final p = context.read<ProducaoProvider>();
+        // Só recarrega se já tinha carregado com sucesso — evita que o retorno
+        // da navegação sobrescreva um estado de erro e cause rebuild espúrio.
+        if (p.categoriasCarregadas) p.carregarCategorias();
+      }
     });
   }
 
@@ -249,7 +254,7 @@ class _EstoqueTabState extends State<_EstoqueTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
 
         SizedBox(
           width: 360,
@@ -257,7 +262,7 @@ class _EstoqueTabState extends State<_EstoqueTab> {
             controller: _filtroCategoriaCtrl,
             decoration: InputDecoration(
               hintText:   'Buscar categoria...',
-              prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
+              prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
               isDense:    true,
               suffixIcon: _filtroCategoria.isNotEmpty
                   ? IconButton(
@@ -278,19 +283,61 @@ class _EstoqueTabState extends State<_EstoqueTab> {
           child: SingleChildScrollView(
             child: Consumer<ProducaoProvider>(
               builder: (_, provider, __) {
-                if (provider.carregandoCategorias && provider.categorias.isEmpty) {
+                if (provider.carregandoCategorias && !provider.categoriasCarregadas) {
                   return const SizedBox(
                     height: 200,
                     child: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
                   );
                 }
 
+                if (provider.erroCategorias != null && !provider.categoriasCarregadas) {
+                  return SizedBox(
+                    height: 300,
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.cloud_off_outlined,
+                              size: 48, color: AppTheme.error),
+                          SizedBox(height: 12),
+                          Text(
+                            'Erro ao carregar categorias',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            provider.erroCategorias!,
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed: () => provider.carregarCategorias(),
+                            icon: const Icon(Icons.refresh, size: 18),
+                            label: const Text('Tentar novamente'),
+                            style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.primary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
+                // Só exibe categorias fixas se o servidor já respondeu com sucesso
+                final servidorOk = provider.categoriasCarregadas;
+
                 bool corresponde(String label) =>
                     _filtroCategoria.isEmpty ||
                     label.toLowerCase().contains(_filtroCategoria);
 
                 final cards = <Widget>[
-                  if (corresponde('Geral'))
+                  if (servidorOk && corresponde('Geral'))
                     _CategoriaCardProducao(
                       categoria: 'Geral',
                       cor:       const Color(0xFF5E35B1),
@@ -302,7 +349,7 @@ class _EstoqueTabState extends State<_EstoqueTab> {
                         icone:          Icons.grid_view_rounded,
                       ),
                     ),
-                  if (corresponde('Sem categoria'))
+                  if (servidorOk && corresponde('Sem categoria'))
                     _CategoriaCardProducao(
                       categoria: 'Sem categoria',
                       cor:       const Color(0xFF546E7A),
@@ -332,12 +379,12 @@ class _EstoqueTabState extends State<_EstoqueTab> {
                 if (cards.isEmpty) {
                   return Center(
                     child: Padding(
-                      padding: const EdgeInsets.only(top: 80),
+                      padding: EdgeInsets.only(top: 80),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.search_off, size: 64, color: AppTheme.textHint),
-                          const SizedBox(height: 16),
+                          Icon(Icons.search_off, size: 64, color: Theme.of(context).colorScheme.outline),
+                          SizedBox(height: 16),
                           Text(
                             _filtroCategoria.isNotEmpty
                                 ? 'Nenhuma categoria encontrada'
@@ -345,7 +392,7 @@ class _EstoqueTabState extends State<_EstoqueTab> {
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyLarge
-                                ?.copyWith(color: AppTheme.textSecondary),
+                                ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                           ),
                         ],
                       ),
@@ -405,9 +452,9 @@ class _CategoriaCardProducaoState extends State<_CategoriaCardProducao> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
+          duration: Duration(milliseconds: 150),
           decoration: BoxDecoration(
-            color: ativo ? widget.cor.withValues(alpha: 0.12) : AppTheme.surface,
+            color: ativo ? widget.cor.withValues(alpha: 0.12) : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: ativo ? widget.cor : widget.cor.withValues(alpha: 0.25),
@@ -429,15 +476,15 @@ class _CategoriaCardProducaoState extends State<_CategoriaCardProducao> {
                 ),
                 child: Icon(widget.icone, color: widget.cor, size: 28),
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: EdgeInsets.symmetric(horizontal: 12),
                 child: Text(
                   widget.categoria,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: ativo ? widget.cor : AppTheme.textPrimary,
+                    color: ativo ? widget.cor : Theme.of(context).colorScheme.onSurface,
                   ),
                   textAlign: TextAlign.center,
                   maxLines: 2,
@@ -572,7 +619,7 @@ class _ProducaoIdentificadorPageState extends State<_ProducaoIdentificadorPage> 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -585,21 +632,21 @@ class _ProducaoIdentificadorPageState extends State<_ProducaoIdentificadorPage> 
                   onTap: () => Navigator.of(context).pop(),
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      border: Border.all(color: AppTheme.divider),
+                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
+                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         SizedBox(width: 6),
                         Text(
                           'Categorias',
                           style: TextStyle(
                             fontSize: 13,
-                            color: AppTheme.textSecondary,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -617,7 +664,7 @@ class _ProducaoIdentificadorPageState extends State<_ProducaoIdentificadorPage> 
                   ),
                   child: Icon(widget.icone, color: widget.cor, size: 20),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -626,27 +673,27 @@ class _ProducaoIdentificadorPageState extends State<_ProducaoIdentificadorPage> 
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(
                       'Selecione um identificador para ver os materiais',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
-                const Spacer(),
+                Spacer(),
                 IconButton(
                   onPressed: _carregar,
-                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
@@ -660,7 +707,7 @@ class _ProducaoIdentificadorPageState extends State<_ProducaoIdentificadorPage> 
                 controller: _filtroCtrl,
                 decoration: InputDecoration(
                   hintText:   'Buscar identificador...',
-                  prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
+                  prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                   isDense:    true,
                   suffixIcon: _filtro.isNotEmpty
                       ? IconButton(
@@ -734,14 +781,14 @@ class _ProducaoIdentificadorPageState extends State<_ProducaoIdentificadorPage> 
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.search_off, size: 64, color: AppTheme.textHint),
-            const SizedBox(height: 16),
+            Icon(Icons.search_off, size: 64, color: Theme.of(context).colorScheme.outline),
+            SizedBox(height: 16),
             Text(
               'Nenhum identificador encontrado',
               style: Theme.of(context)
                   .textTheme
                   .bodyLarge
-                  ?.copyWith(color: AppTheme.textSecondary),
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -798,9 +845,9 @@ class _IdentificadorCardProducaoState extends State<_IdentificadorCardProducao> 
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
+          duration: Duration(milliseconds: 150),
           decoration: BoxDecoration(
-            color: ativo ? widget.cor.withValues(alpha: 0.12) : AppTheme.surface,
+            color: ativo ? widget.cor.withValues(alpha: 0.12) : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: ativo ? widget.cor : widget.cor.withValues(alpha: 0.25),
@@ -822,27 +869,27 @@ class _IdentificadorCardProducaoState extends State<_IdentificadorCardProducao> 
                 ),
                 child: Icon(widget.icone, color: widget.cor, size: 28),
               ),
-              const SizedBox(height: 10),
+              SizedBox(height: 10),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: EdgeInsets.symmetric(horizontal: 12),
                 child: Text(
                   widget.label,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: ativo ? widget.cor : AppTheme.textPrimary,
+                    color: ativo ? widget.cor : Theme.of(context).colorScheme.onSurface,
                   ),
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(height: 4),
+              SizedBox(height: 4),
               Text(
                 '${widget.quantidade} ${widget.quantidade == 1 ? "material" : "materiais"}',
                 style: TextStyle(
                   fontSize: 11,
-                  color: ativo ? widget.cor.withValues(alpha: 0.8) : AppTheme.textHint,
+                  color: ativo ? widget.cor.withValues(alpha: 0.8) : Theme.of(context).colorScheme.outline,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -955,7 +1002,7 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -968,23 +1015,23 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                   onTap: () => Navigator.of(context).pop(),
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      border: Border.all(color: AppTheme.divider),
+                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
-                        const SizedBox(width: 6),
+                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        SizedBox(width: 6),
                         Text(
                           widget.mostrarBotaoIdentificadores
                               ? widget.categoriaLabel
                               : 'Categorias',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
-                            color: AppTheme.textSecondary,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -993,15 +1040,15 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                   ),
                 ),
                 if (widget.mostrarBotaoIdentificadores && widget.identificadorLabel != null) ...[
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.symmetric(horizontal: 6),
-                    child: Icon(Icons.chevron_right, size: 16, color: AppTheme.textHint),
+                    child: Icon(Icons.chevron_right, size: 16, color: Theme.of(context).colorScheme.outline),
                   ),
                   Text(
                     widget.identificadorLabel!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: AppTheme.textSecondary,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -1016,7 +1063,7 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                   ),
                   child: Icon(widget.icone, color: widget.cor, size: 22),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1025,27 +1072,27 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(
                       'Solicitação e controle de materiais',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
-                const Spacer(),
+                Spacer(),
                 IconButton(
                   onPressed: _aplicarFiltros,
-                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
@@ -1059,9 +1106,9 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                   width: 110,
                   child: TextField(
                     controller: _buscaIdCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'ID...',
-                      prefixIcon: Icon(Icons.tag, color: AppTheme.textHint, size: 18),
+                      prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
                     keyboardType: TextInputType.number,
@@ -1070,14 +1117,14 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Expanded(
                   flex: 3,
                   child: TextField(
                     controller: _buscaCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'Buscar material...',
-                      prefixIcon: Icon(Icons.search, color: AppTheme.textHint, size: 20),
+                      prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense:    true,
                     ),
                     onChanged: (_) => _aplicarFiltros(),
@@ -1121,9 +1168,9 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                 Expanded(
                   child: TextField(
                     controller: _identificadorCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'Identificador...',
-                      prefixIcon: Icon(Icons.qr_code, color: AppTheme.textHint, size: 18),
+                      prefixIcon: Icon(Icons.qr_code, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
                     textCapitalization: TextCapitalization.characters,
@@ -1132,26 +1179,26 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Expanded(
                   child: TextField(
                     controller: _medidaCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'Medida...',
-                      prefixIcon: Icon(Icons.straighten, color: AppTheme.textHint, size: 18),
+                      prefixIcon: Icon(Icons.straighten, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
                     onChanged: (_) => _aplicarFiltros(),
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Expanded(
                   child: TextField(
                     controller: _espessuraCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'Espessura...',
-                      prefixIcon: Icon(Icons.layers, color: AppTheme.textHint, size: 18),
+                      prefixIcon: Icon(Icons.layers, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
                     onChanged: (_) => _aplicarFiltros(),
@@ -1170,11 +1217,50 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                     return const Center(
                         child: CircularProgressIndicator(color: AppTheme.primary));
                   }
+                  if (provider.erro != null) {
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.cloud_off_outlined,
+                              size: 48, color: AppTheme.error),
+                          SizedBox(height: 12),
+                          Text(
+                            'Erro ao carregar materiais',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            provider.erro!.contains(': ')
+                                ? provider.erro!.substring(
+                                    provider.erro!.indexOf(': ') + 2)
+                                : provider.erro!,
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed: () => provider.carregarMateriais(),
+                            icon: const Icon(Icons.refresh, size: 18),
+                            label: const Text('Tentar novamente'),
+                            style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.primary),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
                   if (provider.materiais.isEmpty) {
-                    return const Center(
+                    return Center(
                       child: Text(
                         'Nenhum material encontrado',
-                        style: TextStyle(color: AppTheme.textHint),
+                        style: TextStyle(color: Theme.of(context).colorScheme.outline),
                       ),
                     );
                   }
@@ -1267,22 +1353,22 @@ class _TabelaMateriais extends StatelessWidget {
       ? SizedBox(width: col.fixed, child: child)
       : Expanded(flex: (col.flex! * 10).round(), child: child);
 
-  Widget _cabecalho() => Container(
-        color: AppTheme.surfaceVariant,
+  Widget _cabecalho(BuildContext context) => Container(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         child: Row(
           children: [
             for (final col in _cols)
               _colWrap(
                 col,
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
                     col.label,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
-                      color: AppTheme.textSecondary,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -1298,10 +1384,10 @@ class _TabelaMateriais extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _cabecalho(),
+        _cabecalho(context),
         for (int i = 0; i < materiais.length; i++) ...[
           if (i > 0)
-            const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+            Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
           _LinhaMateria(
             material: materiais[i],
             cols: cols,
@@ -1309,7 +1395,7 @@ class _TabelaMateriais extends StatelessWidget {
           ),
         ],
         if (materiais.isNotEmpty)
-          const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+          Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
       ],
     );
   }
@@ -1337,17 +1423,17 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
       ? SizedBox(width: col.fixed, child: child)
       : Expanded(flex: (col.flex! * 10).round(), child: child);
 
-  static Widget _cell(String text) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+  Widget _cell(String text) => Padding(
+        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         child: Text(
           text,
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+          style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
         ),
       );
 
-  static Widget _vDivider() => const VerticalDivider(
-        width: 1, thickness: 0.5, color: AppTheme.divider,
+  Widget _vDivider() => VerticalDivider(
+        width: 1, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant,
       );
 
   void _abrirSolicitacao(BuildContext context) {
@@ -1369,8 +1455,8 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
     final podeOperar = role != 'COMPRAS';
 
     final bgColor = _hovered && podeOperar
-        ? const Color(0xFFFF9800).withValues(alpha: 0.10)
-        : AppTheme.surface;
+        ? Color(0xFFFF9800).withValues(alpha: 0.10)
+        : Theme.of(context).colorScheme.surface;
 
     return MouseRegion(
       cursor: podeOperar ? SystemMouseCursors.click : SystemMouseCursors.basic,
@@ -1388,14 +1474,14 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
               children: [
                 // ID
                 _colWrap(cols[0], Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
                     '${m.id}',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
-                      color: AppTheme.textSecondary,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 )),
@@ -1407,14 +1493,14 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
 
                 // Nome
                 _colWrap(cols[2], Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
                     m.nome,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 )),
@@ -1454,7 +1540,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 13,
-                      color: m.emUso > 0 ? AppTheme.warning : AppTheme.textHint,
+                      color: m.emUso > 0 ? AppTheme.warning : Theme.of(context).colorScheme.outline,
                       fontWeight: m.emUso > 0 ? FontWeight.w600 : FontWeight.normal,
                     ),
                   ),
@@ -1470,7 +1556,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: _corStatus(m.statusReal),
+                      color: _corStatus(context, m.statusReal),
                     ),
                   ),
                 )),
@@ -1491,12 +1577,12 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
     );
   }
 
-  static Color _corStatus(String status) {
+  Color _corStatus(BuildContext context, String status) {
     switch (status) {
       case 'OK':      return AppTheme.statusOk;
       case 'LIMITE':  return AppTheme.statusBaixo;
       case 'CRITICO': return AppTheme.statusCritico;
-      default:        return AppTheme.textHint;
+      default:        return Theme.of(context).colorScheme.outline;
     }
   }
 }
@@ -1512,7 +1598,7 @@ class _StatusBadge extends StatelessWidget {
       case 'OK':      cor = AppTheme.statusOk;      break;
       case 'LIMITE':  cor = AppTheme.statusBaixo;   break;
       case 'CRITICO': cor = AppTheme.statusCritico; break;
-      default:        cor = AppTheme.textHint;
+      default:        cor = Theme.of(context).colorScheme.outline;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1547,11 +1633,14 @@ class _SolicitarMaterialDialog extends StatefulWidget {
 }
 
 class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _osCtrl  = TextEditingController();
-  final _qtdCtrl = TextEditingController();
-  final _obsCtrl = TextEditingController();
-  bool  _enviando = false;
+  final _formKey     = GlobalKey<FormState>();
+  final _osCtrl      = TextEditingController();
+  final _qtdCtrl     = TextEditingController();
+  final _obsCtrl     = TextEditingController();
+  final _larguraCtrl = TextEditingController();
+  final _alturaCtrl  = TextEditingController();
+  bool  _enviando         = false;
+  bool  _modoDimensional  = false;
   String? _erro;
 
   FilhoEspecificoProducaoModel? _filhoSelecionado;
@@ -1568,7 +1657,49 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
     _osCtrl.dispose();
     _qtdCtrl.dispose();
     _obsCtrl.dispose();
+    _larguraCtrl.dispose();
+    _alturaCtrl.dispose();
     super.dispose();
+  }
+
+  // ── Detecta medida no formato "LxA" ou "LxAM" (ex: "2X1", "1.20X0.80M") ──
+  bool get _temMedidaDimensional {
+    final medida = widget.material.medida;
+    if (medida == null || medida.isEmpty) return false;
+    return RegExp(r'^\d+([.,]\d+)?\s*[xX]\s*\d+([.,]\d+)?\s*M?$', caseSensitive: false)
+        .hasMatch(medida.trim());
+  }
+
+  /// Parseia "2X1" ou "1.20X0.80M" → (largura, comprimento). Retorna null se inválido.
+  (double l, double a)? get _medidaChapa {
+    final medida = widget.material.medida;
+    if (medida == null) return null;
+    final semSufixo = medida.trim().replaceFirst(RegExp(r'M\s*$', caseSensitive: false), '').trim();
+    final partes = semSufixo.split(RegExp(r'\s*[xX]\s*'));
+    if (partes.length < 2) return null;
+    final l = double.tryParse(partes[0].replaceAll(',', '.'));
+    final a = double.tryParse(partes[1].replaceAll(',', '.'));
+    if (l == null || l <= 0 || a == null || a <= 0) return null;
+    return (l, a);
+  }
+
+  String _fmt(double v) =>
+      v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+
+  void _recalcularQtd() {
+    final chapa = _medidaChapa;
+    if (chapa == null) return;
+    final larg = double.tryParse(_larguraCtrl.text.replaceAll(',', '.'));
+    final alt  = double.tryParse(_alturaCtrl.text.replaceAll(',', '.'));
+    if (larg == null || alt == null || larg <= 0 || alt <= 0) {
+      setState(() {});
+      return;
+    }
+    final fracaoBruta = (larg * alt) / (chapa.$1 * chapa.$2);
+    final fracao  = double.parse(fracaoBruta.toStringAsFixed(4));
+    final qtdStr  = fracao.toStringAsFixed(4).replaceAll(RegExp(r'0+$'), '');
+    _qtdCtrl.text = qtdStr.endsWith('.') ? '${qtdStr}0' : qtdStr;
+    setState(() {});
   }
 
   Future<void> _confirmar() async {
@@ -1642,13 +1773,13 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
             children: [
               Text(
                 m.nome,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
               ),
               if (detalhes.isNotEmpty) ...[
-                const SizedBox(height: 2),
+                SizedBox(height: 2),
                 Text(
                   detalhes.join(' · '),
-                  style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ],
               const SizedBox(height: 16),
@@ -1716,19 +1847,19 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                                 style: const TextStyle(fontSize: 13),
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(
+                              padding: EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: AppTheme.surfaceVariant,
+                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
                                 '$qtdStr $unidade',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 11,
-                                  color: AppTheme.textSecondary,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -1746,14 +1877,198 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                         : null,
                   ),
                   if (_filhoSelecionado != null) ...[
-                    const SizedBox(height: 6),
+                    SizedBox(height: 6),
                     Text(
                       'Disponível: ${_filhoSelecionado!.quantidade.toStringAsFixed(_filhoSelecionado!.quantidade % 1 == 0 ? 0 : 2)} $unidade',
-                      style: const TextStyle(fontSize: 12, color: AppTheme.textHint),
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
                     ),
                   ],
                 ],
                 const SizedBox(height: 12),
+              ],
+
+              // ── Modo dimensional (chapas com medida LxA) ─────────────
+              if (!m.especifico || filhos.isNotEmpty) ...[
+                Builder(builder: (_) {
+                  final chapa = _medidaChapa;
+                  if (!_temMedidaDimensional || chapa == null) {
+                    return const SizedBox.shrink();
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Toggle
+                      InkWell(
+                        onTap: () => setState(() {
+                          _modoDimensional = !_modoDimensional;
+                          if (!_modoDimensional) {
+                            _larguraCtrl.clear();
+                            _alturaCtrl.clear();
+                            _qtdCtrl.clear();
+                          }
+                        }),
+                        borderRadius: BorderRadius.circular(6),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _modoDimensional
+                                    ? Icons.toggle_on
+                                    : Icons.toggle_off_outlined,
+                                size: 20,
+                                color: _modoDimensional
+                                    ? AppTheme.primary
+                                    : Theme.of(context).colorScheme.outline,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Informar por dimensão usada',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: _modoDimensional
+                                      ? AppTheme.primary
+                                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primary.withValues(alpha: 0.10),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'Para chapas',
+                                  style: const TextStyle(
+                                      fontSize: 10,
+                                      color: AppTheme.primary,
+                                      fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Campos largura × comprimento
+                      if (_modoDimensional) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _larguraCtrl,
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                decoration: InputDecoration(
+                                  labelText: 'Largura usada (m)',
+                                  isDense:    true,
+                                  suffixText: '/ ${_fmt(chapa.$1)} m',
+                                  suffixStyle: TextStyle(
+                                      fontSize: 11, color: Theme.of(context).colorScheme.outline),
+                                ),
+                                onChanged: (_) => _recalcularQtd(),
+                              ),
+                            ),
+                            Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 8),
+                              child: Text('×',
+                                  style: TextStyle(
+                                      fontSize: 16,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w700)),
+                            ),
+                            Expanded(
+                              child: TextField(
+                                controller: _alturaCtrl,
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                decoration: InputDecoration(
+                                  labelText: 'Comprimento usado (m)',
+                                  isDense:    true,
+                                  suffixText: '/ ${_fmt(chapa.$2)} m',
+                                  suffixStyle: TextStyle(
+                                      fontSize: 11, color: Theme.of(context).colorScheme.outline),
+                                ),
+                                onChanged: (_) => _recalcularQtd(),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        // Preview do cálculo
+                        Builder(builder: (_) {
+                          final larg = double.tryParse(
+                              _larguraCtrl.text.replaceAll(',', '.'));
+                          final alt  = double.tryParse(
+                              _alturaCtrl.text.replaceAll(',', '.'));
+                          if (larg == null || larg <= 0 ||
+                              alt == null  || alt  <= 0) {
+                            return const SizedBox.shrink();
+                          }
+                          final areaUsada = larg * alt;
+                          final areaTotal = chapa.$1 * chapa.$2;
+                          final fracao    = areaUsada / areaTotal;
+                          final pct       = (fracao * 100).toStringAsFixed(1);
+                          return Container(
+                            margin: const EdgeInsets.only(top: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primary.withValues(alpha: 0.07),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: AppTheme.primary.withValues(alpha: 0.20)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.calculate_outlined,
+                                    size: 14, color: AppTheme.primary),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: RichText(
+                                    text: TextSpan(
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                      children: [
+                                        TextSpan(
+                                            text: '${_fmt(larg)} × ${_fmt(alt)} m  =  '),
+                                        TextSpan(
+                                          text: '${_fmt(areaUsada)} m²',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: Theme.of(context).colorScheme.onSurface),
+                                        ),
+                                        const TextSpan(text: '  →  '),
+                                        TextSpan(
+                                          text: _qtdCtrl.text,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: AppTheme.primary),
+                                        ),
+                                        TextSpan(
+                                          text: ' ${m.unidade ?? 'UN'}  ($pct% da chapa)',
+                                          style: TextStyle(
+                                              color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                        const SizedBox(height: 8),
+                      ],
+
+                      const SizedBox(height: 4),
+                    ],
+                  );
+                }),
               ],
 
               // ── Quantidade ───────────────────────────────────────────────
@@ -1764,9 +2079,15 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                     labelText: 'Quantidade *',
                     isDense:   true,
                     suffixText: unidade,
+                    helperText: _modoDimensional
+                        ? 'Calculado automaticamente'
+                        : null,
+                    helperStyle: TextStyle(
+                        fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
+                  readOnly: _modoDimensional,
                   validator: (v) {
                     if (_erro != null) return _erro;
                     final qtd =
@@ -1784,10 +2105,10 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                   },
                 ),
                 if (!m.especifico) ...[
-                  const SizedBox(height: 8),
+                  SizedBox(height: 8),
                   Text(
                     'Disponível: ${disponivel.toStringAsFixed(disponivel % 1 == 0 ? 0 : 2)} $unidade',
-                    style: const TextStyle(fontSize: 12, color: AppTheme.textHint),
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
                   ),
                 ],
                 const SizedBox(height: 12),
@@ -1865,12 +2186,12 @@ class _HistoricoTabState extends State<_HistoricoTab> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
         TextField(
           controller: _buscaCtrl,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText:   'Buscar por OS ou usuário...',
-            prefixIcon: Icon(Icons.search, color: AppTheme.textHint, size: 20),
+            prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
             isDense:    true,
           ),
           onChanged: (v) {
@@ -1889,10 +2210,10 @@ class _HistoricoTabState extends State<_HistoricoTab> {
                     child: CircularProgressIndicator(color: AppTheme.primary));
               }
               if (provider.historico.isEmpty) {
-                return const Center(
+                return Center(
                   child: Text(
                     'Nenhuma saída registrada',
-                    style: TextStyle(color: AppTheme.textHint),
+                    style: TextStyle(color: Theme.of(context).colorScheme.outline),
                   ),
                 );
               }
@@ -2039,24 +2360,24 @@ class _HistoricoCard extends StatelessWidget {
                 children: [
                   Text(
                     'OS ${s.numeroOS}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                   Text(
                     s.materialNome,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: AppTheme.textSecondary,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                   if (detalhes.isNotEmpty)
                     Text(
                       detalhes.join(' · '),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.textSecondary,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   if (s.descricaoItem != null)
@@ -2071,17 +2392,17 @@ class _HistoricoCard extends StatelessWidget {
                   if (s.baixas.isNotEmpty && s.baixas.last.observacao != null)
                     Text(
                       s.baixas.last.observacao!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.textSecondary,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontStyle: FontStyle.italic,
                       ),
                     ),
                   Text(
                     'Usuário: ${s.usuarioNome}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
-                      color: AppTheme.textHint,
+                      color: Theme.of(context).colorScheme.outline,
                     ),
                   ),
                 ],
@@ -2092,17 +2413,17 @@ class _HistoricoCard extends StatelessWidget {
               children: [
                 Text(
                   '${s.quantidadeUsada.toStringAsFixed(s.quantidadeUsada % 1 == 0 ? 0 : 2)} ${s.materialUnidade ?? ''}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
                 Text(
                   dataStr,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: AppTheme.textHint,
+                    color: Theme.of(context).colorScheme.outline,
                   ),
                 ),
                 if (podeExcluir) ...[
@@ -2179,13 +2500,13 @@ class _BarraPaginacao extends StatelessWidget {
     final paginas = _paginas();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
             'Exibindo $inicio–$fim de $totalItens',
-            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           Row(
             mainAxisSize: MainAxisSize.min,
@@ -2196,12 +2517,12 @@ class _BarraPaginacao extends StatelessWidget {
                 enabled: paginaAtual > 0,
                 onTap: () => onPaginaChanged(paginaAtual - 1),
               ),
-              const SizedBox(width: 4),
+              SizedBox(width: 4),
               for (final p in paginas) ...[
                 if (p == -1)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.symmetric(horizontal: 4),
-                    child: Text('…', style: TextStyle(color: AppTheme.textHint)),
+                    child: Text('…', style: TextStyle(color: Theme.of(context).colorScheme.outline)),
                   )
                 else
                   _BotaoNumeroPagina(
@@ -2250,14 +2571,14 @@ class _BotaoPagina extends StatelessWidget {
           height: 32,
           decoration: BoxDecoration(
             border: Border.all(
-              color: enabled ? AppTheme.divider : AppTheme.divider.withValues(alpha: 0.4),
+              color: enabled ? Theme.of(context).colorScheme.outlineVariant : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
             ),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Icon(
             icon,
             size: 18,
-            color: enabled ? AppTheme.textSecondary : AppTheme.textHint,
+            color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
           ),
         ),
       ),
@@ -2287,7 +2608,7 @@ class _BotaoNumeroPagina extends StatelessWidget {
         decoration: BoxDecoration(
           color: ativa ? AppTheme.primary : Colors.transparent,
           border: Border.all(
-            color: ativa ? AppTheme.primary : AppTheme.divider,
+            color: ativa ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
           ),
           borderRadius: BorderRadius.circular(6),
         ),
@@ -2297,7 +2618,7 @@ class _BotaoNumeroPagina extends StatelessWidget {
           style: TextStyle(
             fontSize: 13,
             fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
-            color: ativa ? Colors.white : AppTheme.textSecondary,
+            color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
       ),

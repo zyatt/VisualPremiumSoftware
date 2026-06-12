@@ -56,6 +56,13 @@ const confirmarEstoque = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+const atualizarCustoManual = async (req, res, next) => {
+  try {
+    const { usuarioId, usuarioNome } = _usuario(req);
+    res.json(await svc.atualizarCustoManual(+req.params.id, req.body, usuarioId, usuarioNome));
+  } catch (e) { next(e); }
+};
+
 const listarCategorias = async (req, res, next) => {
   try { res.json(await svc.listarCategorias()); } catch (e) { next(e); }
 };
@@ -95,6 +102,7 @@ module.exports = {
   reativar,
   excluir,
   confirmarEstoque,
+  atualizarCustoManual,
   listarCategorias,
   listarHistoricoPrecos,
   atualizarFilhoEspecifico,

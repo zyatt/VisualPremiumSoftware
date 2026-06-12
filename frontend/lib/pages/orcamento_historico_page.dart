@@ -5,6 +5,26 @@ import '../providers/orcamento_provider.dart';
 import '../repositories/orcamento_repository.dart';
 import '../theme/app_theme.dart';
 
+/// Remove prefixos como "Exception:", "HttpException:" que o Dart adiciona
+/// automaticamente ao fazer e.toString() em exceções. Quando o erro é de
+/// conexão (sem internet / servidor fora do ar), retorna uma mensagem
+/// amigável contextualizada com a ação que estava sendo feita.
+String _mensagemErro(Object e, {required String acao}) {
+  final raw = e.toString();
+  if (raw.contains('SocketException') ||
+      raw.contains('ClientException') ||
+      raw.contains('Connection refused') ||
+      raw.contains('Connection reset') ||
+      raw.contains('Failed host lookup') ||
+      raw.contains('HandshakeException') ||
+      raw.contains('TimeoutException') ||
+      raw.contains('Network is unreachable')) {
+    return 'Erro ao $acao: Verifique a conexão com o servidor.';
+  }
+  final msg = raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+  return 'Erro ao $acao: $msg';
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 String _brl(double? v) {
@@ -134,7 +154,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
             todos.where((o) => o['status'] == 'CANCELADO').toList();
       });
     } catch (e) {
-      if (mounted) setState(() => _erro = e.toString());
+      if (mounted) setState(() => _erro = _mensagemErro(e, acao: 'carregar histórico'));
     } finally {
       if (mounted) setState(() => _carregando = false);
     }
@@ -221,7 +241,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao reabrir orçamento: $e'),
+            content: Text(_mensagemErro(e, acao: 'reabrir orçamento')),
             backgroundColor: AppTheme.error,
           ),
         );
@@ -366,13 +386,28 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.error_outline,
+                              const Icon(Icons.cloud_off_outlined,
                                   size: 48, color: AppTheme.error),
-                              const SizedBox(height: 16),
-                              Text('Erro: $_erro',
-                                  style: const TextStyle(
-                                      color: AppTheme.error)),
                               const SizedBox(height: 12),
+                              const Text(
+                                'Erro ao carregar histórico',
+                                style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _erro!.contains(': ')
+                                    ? _erro!.substring(_erro!.indexOf(': ') + 2)
+                                    : _erro!,
+                                style: const TextStyle(
+                                    color: AppTheme.textSecondary),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 16),
                               FilledButton.icon(
                                 onPressed: _carregar,
                                 icon: const Icon(Icons.refresh, size: 16),

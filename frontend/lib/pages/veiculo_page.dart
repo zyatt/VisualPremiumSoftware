@@ -74,18 +74,18 @@ class _VeiculoPageState extends State<VeiculoPage> {
 
     if (role != 'ADMIN' && role != 'GERENTE') {
       return Scaffold(
-        backgroundColor: AppTheme.background,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.lock_outline, size: 64, color: AppTheme.textHint),
-              const SizedBox(height: 16),
+              Icon(Icons.lock_outline, size: 64, color: Theme.of(context).colorScheme.outline),
+              SizedBox(height: 16),
               Text('Acesso restrito',
                   style: Theme.of(context)
                       .textTheme
                       .headlineSmall
-                      ?.copyWith(color: AppTheme.textPrimary)),
+                      ?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
             ],
           ),
         ),
@@ -95,7 +95,7 @@ class _VeiculoPageState extends State<VeiculoPage> {
     final provider = context.watch<VeiculoProvider>();
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -112,15 +112,15 @@ class _VeiculoPageState extends State<VeiculoPage> {
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(
                       'Gerencie veículos e seus serviços',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
@@ -135,17 +135,17 @@ class _VeiculoPageState extends State<VeiculoPage> {
                         borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 IconButton(
                   onPressed: () => provider.carregarVeiculos(),
-                  icon: const Icon(Icons.refresh,
-                      size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh,
+                      size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
@@ -159,8 +159,43 @@ class _VeiculoPageState extends State<VeiculoPage> {
                       child: CircularProgressIndicator(color: AppTheme.primary))
                   : provider.erro != null
                       ? Center(
-                          child: Text('Erro: ${provider.erro}',
-                              style: const TextStyle(color: AppTheme.error)))
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.cloud_off_outlined,
+                                  size: 48, color: AppTheme.error),
+                              SizedBox(height: 12),
+                              Text(
+                                'Erro ao carregar veículos',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.onSurface,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                provider.erro!.contains(': ')
+                                    ? provider.erro!.substring(
+                                        provider.erro!.indexOf(': ') + 2)
+                                    : provider.erro!,
+                                style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 16),
+                              FilledButton.icon(
+                                onPressed: () =>
+                                    provider.carregarVeiculos(),
+                                icon: const Icon(Icons.refresh, size: 18),
+                                label: const Text('Tentar novamente'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.primary),
+                              ),
+                            ],
+                          ),
+                        )
                       : provider.veiculos.isEmpty
                           ? _EmptyState(onAdd: () => _abrirFormVeiculo())
                           : ListView.separated(
@@ -195,13 +230,13 @@ class _EmptyState extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.directions_car_outlined,
-              size: 64, color: AppTheme.textHint.withValues(alpha: 0.4)),
-          const SizedBox(height: 16),
+              size: 64, color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.4)),
+          SizedBox(height: 16),
           Text('Nenhum veículo cadastrado',
               style: Theme.of(context)
                   .textTheme
                   .bodyLarge
-                  ?.copyWith(color: AppTheme.textHint)),
+                  ?.copyWith(color: Theme.of(context).colorScheme.outline)),
           const SizedBox(height: 12),
           TextButton.icon(
             onPressed: onAdd,
@@ -252,7 +287,7 @@ class _VeiculoCardState extends State<_VeiculoCard> {
       context: context,
       builder: (_) => _FormManutencaoDialog(veiculoId: widget.veiculo.id),
     ).then((_) {
-      if (_expandido) {
+      if (_expandido && mounted) {
         context
             .read<VeiculoProvider>()
             .carregarManutencoes(widget.veiculo.id);
@@ -264,13 +299,13 @@ class _VeiculoCardState extends State<_VeiculoCard> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        title: const Text('Desativar veículo',
-            style: TextStyle(color: AppTheme.textPrimary)),
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        title: Text('Desativar veículo',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
         content: Text(
           'Deseja desativar "${widget.veiculo.nome}"?\n'
           'O histórico de serviços será mantido.',
-          style: const TextStyle(color: AppTheme.textSecondary),
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         actions: [
           TextButton(
@@ -298,11 +333,11 @@ class _VeiculoCardState extends State<_VeiculoCard> {
     final ult = v.ultimaManutencao;
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+      duration: Duration(milliseconds: 200),
       decoration: BoxDecoration(
-        color:        AppTheme.surface,
+        color:        Theme.of(context).colorScheme.surface,
         border:       Border.all(
-          color: _expandido ? cor.withValues(alpha: 0.4) : AppTheme.divider,
+          color: _expandido ? cor.withValues(alpha: 0.4) : Theme.of(context).colorScheme.outlineVariant,
           width: _expandido ? 1.5 : 1,
         ),
         borderRadius: BorderRadius.circular(14),
@@ -340,10 +375,10 @@ class _VeiculoCardState extends State<_VeiculoCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(v.nome,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize:   15,
                               fontWeight: FontWeight.w700,
-                              color:      AppTheme.textPrimary,
+                              color:      Theme.of(context).colorScheme.onSurface,
                             )),
                         const SizedBox(height: 2),
                         Row(
@@ -374,8 +409,8 @@ class _VeiculoCardState extends State<_VeiculoCard> {
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: ult.emAndamento
-                                      ? const Color(0xFFFFB300)
-                                      : AppTheme.textSecondary,
+                                      ? Color(0xFFFFB300)
+                                      : Theme.of(context).colorScheme.onSurfaceVariant,
                                 ),
                               ),
                             ],
@@ -388,14 +423,14 @@ class _VeiculoCardState extends State<_VeiculoCard> {
                   // Ações
                   IconButton(
                     onPressed: _novaManutencao,
-                    icon: const Icon(Icons.add_circle_outline,
+                    icon: Icon(Icons.add_circle_outline,
                         size: 20, color: AppTheme.primary),
                     tooltip: 'Novo serviço',
                   ),
                   IconButton(
                     onPressed: _editarVeiculo,
-                    icon: const Icon(Icons.edit_outlined,
-                        size: 18, color: AppTheme.textSecondary),
+                    icon: Icon(Icons.edit_outlined,
+                        size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     tooltip: 'Editar',
                   ),
                   IconButton(
@@ -405,12 +440,12 @@ class _VeiculoCardState extends State<_VeiculoCard> {
                     tooltip: 'Desativar',
                   ),
 
-                  const SizedBox(width: 4),
+                  SizedBox(width: 4),
                   AnimatedRotation(
                     turns:    _expandido ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: const Icon(Icons.keyboard_arrow_down_rounded,
-                        color: AppTheme.textSecondary),
+                    duration: Duration(milliseconds: 200),
+                    child: Icon(Icons.keyboard_arrow_down_rounded,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ],
               ),
@@ -419,7 +454,7 @@ class _VeiculoCardState extends State<_VeiculoCard> {
 
           // ── Histórico de serviços ────────────────────────────────────────
           if (_expandido) ...[
-            const Divider(height: 1, color: AppTheme.divider),
+            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
             _HistoricoManutencoes(
               veiculoId: v.id,
               cor:       cor,
@@ -458,28 +493,28 @@ class _HistoricoManutencoes extends StatelessWidget {
 
     if (provider.manutencoes.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(24),
         child: Center(
           child: Text(
             'Nenhum serviço registrado ainda.',
-            style: const TextStyle(
-                color: AppTheme.textHint, fontSize: 13),
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.outline, fontSize: 13),
           ),
         ),
       );
     }
 
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'Histórico de serviços',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize:   13,
               fontWeight: FontWeight.w600,
-              color:      AppTheme.textSecondary,
+              color:      Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 12),
@@ -524,12 +559,12 @@ class _LinhaManutencao extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        title: const Text('Remover serviço',
-            style: TextStyle(color: AppTheme.textPrimary)),
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        title: Text('Remover serviço',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
         content: Text(
           'Remover "${labelTipo(manutencao.tipo)}" de ${_fmtData(manutencao.dataEnvio)}?',
-          style: const TextStyle(color: AppTheme.textSecondary),
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         actions: [
           TextButton(
@@ -578,10 +613,10 @@ class _LinhaManutencao extends StatelessWidget {
                     Row(
                       children: [
                         Text(labelTipo(m.tipo),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize:   13,
                               fontWeight: FontWeight.w600,
-                              color:      AppTheme.textPrimary,
+                              color:      Theme.of(context).colorScheme.onSurface,
                             )),
                         if (m.emAndamento) ...[
                           const SizedBox(width: 6),
@@ -604,15 +639,15 @@ class _LinhaManutencao extends StatelessWidget {
                     ),
                     if (m.descricao != null && m.descricao!.isNotEmpty)
                       Text(m.descricao!,
-                          style: const TextStyle(
-                              fontSize: 12, color: AppTheme.textSecondary)),
-                    const SizedBox(height: 2),
+                          style: TextStyle(
+                              fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                    SizedBox(height: 2),
                     Text(
                       m.dataRetirada != null
                           ? 'Envio: ${_fmtData(m.dataEnvio)}  ·  Retirada: ${_fmtData(m.dataRetirada)}'
                           : 'Envio: ${_fmtData(m.dataEnvio)}',
-                      style: const TextStyle(
-                          fontSize: 11, color: AppTheme.textSecondary),
+                      style: TextStyle(
+                          fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
@@ -621,36 +656,36 @@ class _LinhaManutencao extends StatelessWidget {
               // Valor
               Text(
                 _brl(m.valor),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize:   14,
                   fontWeight: FontWeight.w700,
-                  color:      AppTheme.textPrimary,
+                  color:      Theme.of(context).colorScheme.onSurface,
                 ),
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: 8),
 
               // Ações
               IconButton(
                 onPressed: () => _editarManutencao(context),
-                icon: const Icon(Icons.edit_outlined,
-                    size: 16, color: AppTheme.textSecondary),
+                icon: Icon(Icons.edit_outlined,
+                    size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 tooltip: 'Editar',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
               ),
               IconButton(
                 onPressed: () => _confirmarDeletar(context),
-                icon: const Icon(Icons.delete_outline,
+                icon: Icon(Icons.delete_outline,
                     size: 16, color: AppTheme.error),
                 tooltip: 'Remover',
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                constraints: BoxConstraints(minWidth: 28, minHeight: 28),
               ),
             ],
           ),
         ),
         if (!ultimo)
-          const Divider(height: 1, color: AppTheme.divider),
+          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
       ],
     );
   }
@@ -707,9 +742,9 @@ class _FormVeiculoDialogState extends State<_FormVeiculoDialog> {
     final titulo =
         widget.veiculo == null ? 'Novo Veículo' : 'Editar Veículo';
     return AlertDialog(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       title: Text(titulo,
-          style: const TextStyle(color: AppTheme.textPrimary)),
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
       content: Form(
         key: _formKey,
         child: SizedBox(
@@ -718,6 +753,7 @@ class _FormVeiculoDialogState extends State<_FormVeiculoDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _campo(
+                context: context,
                 controller: _nomeCtrl,
                 label:      'Nome do veículo',
                 validator:  (v) =>
@@ -725,6 +761,7 @@ class _FormVeiculoDialogState extends State<_FormVeiculoDialog> {
               ),
               const SizedBox(height: 12),
               _campo(
+                context: context,
                 controller: _placaCtrl,
                 label:      'Placa',
                 validator:  (v) =>
@@ -860,10 +897,10 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       title: Text(
         widget.manutencao == null ? 'Novo Serviço' : 'Editar Serviço',
-        style: const TextStyle(color: AppTheme.textPrimary),
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
       ),
       content: Form(
         key: _formKey,
@@ -875,10 +912,10 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Tipo
-                const Text('Tipo de serviço',
+                Text('Tipo de serviço',
                     style: TextStyle(
                         fontSize: 12,
-                        color:    AppTheme.textSecondary,
+                        color:    Theme.of(context).colorScheme.onSurfaceVariant,
                         fontWeight: FontWeight.w600)),
                 const SizedBox(height: 6),
                 Wrap(
@@ -892,13 +929,13 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
                       onSelected: (_) => setState(() => _tipo = t),
                       selectedColor: AppTheme.primary.withValues(alpha: 0.2),
                       labelStyle: TextStyle(
-                        color: sel ? AppTheme.primary : AppTheme.textSecondary,
+                        color: sel ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
                         fontWeight:
                             sel ? FontWeight.w700 : FontWeight.normal,
                       ),
                       side: BorderSide(
-                          color: sel ? AppTheme.primary : AppTheme.divider),
-                      backgroundColor: AppTheme.surface,
+                          color: sel ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant),
+                      backgroundColor: Theme.of(context).colorScheme.surface,
                     );
                   }).toList(),
                 ),
@@ -906,6 +943,7 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
 
                 // Descrição
                 _campo(
+                  context: context,
                   controller: _descCtrl,
                   label:      'Descrição (opcional)',
                 ),
@@ -913,6 +951,7 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
 
                 // Valor
                 _campo(
+                  context: context,
                   controller: _valorCtrl,
                   label:      'Valor (R\$)',
                   hint:       '0,00',
@@ -978,6 +1017,7 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
 // ── Widgets auxiliares dos dialogs ────────────────────────────────────────────
 
 Widget _campo({
+  required BuildContext context,
   required TextEditingController controller,
   required String                label,
   String?                        hint,
@@ -988,20 +1028,20 @@ Widget _campo({
     controller:  controller,
     keyboardType: inputType,
     validator:   validator,
-    style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+    style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
     decoration: InputDecoration(
       labelText:     label,
       hintText:      hint,
-      labelStyle:    const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-      hintStyle:     const TextStyle(color: AppTheme.textHint, fontSize: 13),
+      labelStyle:    TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
+      hintStyle:     TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 13),
       filled:        true,
-      fillColor:     AppTheme.background,
+      fillColor:     Theme.of(context).scaffoldBackgroundColor,
       border:        OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide:   const BorderSide(color: AppTheme.divider)),
+          borderSide:   BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
       enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide:   const BorderSide(color: AppTheme.divider)),
+          borderSide:   BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
       focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide:   const BorderSide(color: AppTheme.primary)),
@@ -1038,25 +1078,25 @@ class _DataBtn extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
-          color:        AppTheme.background,
+          color:        Theme.of(context).scaffoldBackgroundColor,
           border:       Border.all(
-              color: hasVal ? AppTheme.primary : AppTheme.divider),
+              color: hasVal ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
           children: [
             Icon(Icons.calendar_today,
                 size:  15,
-                color: hasVal ? AppTheme.primary : AppTheme.textHint),
-            const SizedBox(width: 6),
+                color: hasVal ? AppTheme.primary : Theme.of(context).colorScheme.outline),
+            SizedBox(width: 6),
             Expanded(
               child: Text(
                 hasVal ? _fmt(valor!) : label,
                 style: TextStyle(
                   fontSize:   13,
-                  color:      hasVal ? AppTheme.primary : AppTheme.textHint,
+                  color:      hasVal ? AppTheme.primary : Theme.of(context).colorScheme.outline,
                   fontWeight: hasVal ? FontWeight.w600 : FontWeight.normal,
                 ),
                 overflow: TextOverflow.ellipsis,
@@ -1065,7 +1105,7 @@ class _DataBtn extends StatelessWidget {
             if (hasVal && onClear != null)
               GestureDetector(
                 onTap: onClear,
-                child: const Icon(Icons.close, size: 14, color: AppTheme.textHint),
+                child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
               ),
           ],
         ),

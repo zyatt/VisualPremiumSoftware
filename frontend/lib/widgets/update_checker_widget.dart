@@ -16,6 +16,9 @@ class UpdateChecker extends StatefulWidget {
 }
 
 class _UpdateCheckerState extends State<UpdateChecker> with WidgetsBindingObserver {
+  // Impede verificações simultâneas e reabertura do dialog enquanto já está visível
+  bool _isChecking = false;
+  bool _dialogVisible = false;
 
   @override
   void initState() {
@@ -37,12 +40,18 @@ class _UpdateCheckerState extends State<UpdateChecker> with WidgetsBindingObserv
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) {
+    // Só verifica ao retomar se não há verificação em andamento nem dialog aberto
+    if (state == AppLifecycleState.resumed && mounted && !_isChecking && !_dialogVisible) {
       _checkForUpdates();
     }
   }
 
   Future<void> _checkForUpdates() async {
+    // Guarda dupla: evita chamadas concorrentes
+    if (_isChecking || _dialogVisible) return;
+
+    _isChecking = true;
+
     try {
       debugPrint('[UpdateChecker] Iniciando verificação...');
 
@@ -55,18 +64,23 @@ class _UpdateCheckerState extends State<UpdateChecker> with WidgetsBindingObserv
 
       debugPrint('[UpdateChecker] Atualização encontrada: ${updateInfo.latestVersion}');
 
-      // Usa a GlobalKey do Navigator raiz — independente de contexto
       final navigatorState = AppRouter.rootNavigatorKey.currentState;
       if (navigatorState == null) {
         debugPrint('[UpdateChecker] Navigator ainda não está pronto');
         return;
       }
 
+      // Marca dialog como visível antes de exibir
+      _dialogVisible = true;
+
       // ignore: use_build_context_synchronously
       await AutoUpdateDialog.show(navigatorState.context, updateInfo);
     } catch (e, stack) {
       debugPrint('[UpdateChecker] ERRO ao verificar updates: $e');
       debugPrint('[UpdateChecker] Stack: $stack');
+    } finally {
+      _isChecking = false;
+      _dialogVisible = false;
     }
   }
 

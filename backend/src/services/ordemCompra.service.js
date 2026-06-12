@@ -64,6 +64,41 @@ function _calcularQuantidadeReal({ quantidade, usarM2, qtdPadrao }) {
   return Number(quantidade) * qtd;
 }
 
+/**
+ * Expande itens que possuem distribuição por OS em múltiplos registros.
+ *
+ * Quando um item tem campo `distribuicao` (array de {os, quantidade}), cada
+ * linha gera um OrdemCompraItem separado com o mesmo material/preço mas
+ * com numeroOS e quantidade individuais.
+ *
+ * Itens sem `distribuicao` ou com apenas uma linha são mantidos como estão
+ * (usando o campo `numeroOS` diretamente).
+ */
+function _expandirItensComDistribuicao(itens) {
+  const resultado = [];
+  for (const item of itens) {
+    const dist = Array.isArray(item.distribuicao)
+      ? item.distribuicao.filter((l) => l.os && String(l.os).trim() && Number(l.quantidade) > 0)
+      : [];
+
+    if (dist.length > 0) {
+      for (const linha of dist) {
+        resultado.push({
+          ...item,
+          numeroOS:   String(linha.os).trim(),
+          quantidade: Number(linha.quantidade),
+          precoTotal: item.usarM2 && Number(item.precoMetroQuadrado) > 0
+            ? Number(linha.quantidade) * Number(item.precoMetroQuadrado)
+            : Number(linha.quantidade) * Number(item.precoUnitario ?? 0),
+        });
+      }
+    } else {
+      resultado.push(item);
+    }
+  }
+  return resultado;
+}
+
 // ── select de material reutilizável (inclui qtdPadrao e unidPadrao) ───────────
 const _selectMaterial = {
   id: true,
@@ -138,7 +173,10 @@ async function criar(data, usuarioId) {
 
   const osArray = _normalizarNumerosOS(numerosOS);
 
-  const valorTotal = (itens || []).reduce((acc, item) => {
+  // Expande itens com distribuição por OS em múltiplos registros
+  const itensExpandidos = _expandirItensComDistribuicao(itens || []);
+
+  const valorTotal = itensExpandidos.reduce((acc, item) => {
     const precoBase = item.usarM2 && Number(item.precoMetroQuadrado) > 0
       ? Number(item.precoMetroQuadrado)
       : Number(item.precoUnitario);
@@ -153,9 +191,9 @@ async function criar(data, usuarioId) {
       numerosOS: osArray.length
         ? { create: osArray.map((n) => ({ numeroOS: String(n) })) }
         : undefined,
-      itens: itens?.length
+      itens: itensExpandidos.length
         ? {
-            create: itens.map((item) => {
+            create: itensExpandidos.map((item) => {
               const usarM2 = item.usarM2 ?? false;
               return {
                 material:           { connect: { id: item.materialId } },
@@ -203,9 +241,10 @@ async function atualizar(id, data) {
 
   if (Array.isArray(itens)) {
     await prisma.ordemCompraItem.deleteMany({ where: { ordemCompraId: id } });
-    if (itens.length) {
+    const itensExpandidos = _expandirItensComDistribuicao(itens);
+    if (itensExpandidos.length) {
       await prisma.ordemCompraItem.createMany({
-        data: itens.map((item) => {
+        data: itensExpandidos.map((item) => {
           const usarM2 = item.usarM2 ?? false;
           return {
             ordemCompraId:      id,
@@ -347,29 +386,69 @@ async function finalizar(id) {
     const eEspecifico   = material?.especifico === true;
     const osEhNumerica  = /^\d+$/.test(numeroOSLimpo);
 
-    let relacaoOS = await prisma.relacaoOS.findUnique({ where: { numeroOS: numeroOSLimpo } });
+    let relacaoOS;
 
-    if (relacaoOS && !osEhNumerica && relacaoOS.status === 'FECHADA') {
-      const _d   = new Date();
-      const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`;
-      let candidato = `${numeroOSLimpo}-${hoje}`;
-      let sufixoSeq  = 1;
+    if (osEhNumerica) {
+      // Numéricas continuam sendo únicas
+      relacaoOS = await prisma.relacaoOS.upsert({
+        where: { numeroOS: numeroOSLimpo },
+        create: {
+          numeroOS: numeroOSLimpo,
+          status: 'EM_ANDAMENTO',
+        },
+        update: {},
+      });
+    } else {
+      const _d = new Date();
+      const hoje =
+        `${String(_d.getDate()).padStart(2, '0')}-` +
+        `${String(_d.getMonth() + 1).padStart(2, '0')}-` +
+        `${_d.getFullYear()}`;
 
-      while (true) {
-        const existente = await prisma.relacaoOS.findUnique({ where: { numeroOS: candidato } });
-        if (!existente) {
-          relacaoOS = await prisma.relacaoOS.create({ data: { numeroOS: candidato } });
-          break;
+      // procura relação aberta criada pela produção ou pelo estoque
+      const relacaoAberta = await prisma.relacaoOS.findFirst({
+        where: {
+          status: 'EM_ANDAMENTO',
+          OR: [
+            { numeroOS: numeroOSLimpo },
+            { numeroOS: { startsWith: `${numeroOSLimpo}-${hoje}` } },
+          ],
+        },
+        orderBy: {
+          criadoEm: 'asc',
+        },
+      });
+
+      if (relacaoAberta) {
+        relacaoOS = relacaoAberta;
+      } else {
+        let candidato = `${numeroOSLimpo}-${hoje}`;
+        let sufixoSeq = 1;
+
+        while (true) {
+          const existente = await prisma.relacaoOS.findUnique({
+            where: { numeroOS: candidato },
+          });
+
+          if (!existente) {
+            relacaoOS = await prisma.relacaoOS.create({
+              data: {
+                numeroOS: candidato,
+                status: 'EM_ANDAMENTO',
+              },
+            });
+            break;
+          }
+
+          if (existente.status !== 'FECHADA') {
+            relacaoOS = existente;
+            break;
+          }
+
+          sufixoSeq++;
+          candidato = `${numeroOSLimpo}-${hoje}-${sufixoSeq}`;
         }
-        if (existente.status !== 'FECHADA') {
-          relacaoOS = existente;
-          break;
-        }
-        sufixoSeq += 1;
-        candidato = `${numeroOSLimpo}-${hoje}-${sufixoSeq}`;
       }
-    } else if (!relacaoOS) {
-      relacaoOS = await prisma.relacaoOS.create({ data: { numeroOS: numeroOSLimpo } });
     }
 
     const precoUnitarioBruto = Number(item.precoUnitario ?? 0);

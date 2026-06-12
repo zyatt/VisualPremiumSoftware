@@ -50,7 +50,7 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
     final info = widget.updateInfo;
 
     return Dialog(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
         width: 460,
@@ -85,15 +85,15 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
                         style: GoogleFonts.raleway(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
+                          color: Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
-                      const SizedBox(height: 2),
+                      SizedBox(height: 2),
                       Text(
                         'v${info.currentVersion}  →  v${info.latestVersion}',
                         style: GoogleFonts.nunito(
                           fontSize: 13,
-                          color: AppTheme.textSecondary,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -101,16 +101,16 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
                 ),
                 if (!info.mandatory && !_downloading)
                   IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                    color: AppTheme.textHint,
+                    icon: Icon(Icons.close_rounded, size: 20),
+                    color: Theme.of(context).colorScheme.outline,
                     onPressed: () => Navigator.pop(context),
                   ),
               ],
             ),
 
-            const SizedBox(height: 20),
-            const Divider(color: AppTheme.divider),
-            const SizedBox(height: 16),
+            SizedBox(height: 20),
+            Divider(color: Theme.of(context).colorScheme.outlineVariant),
+            SizedBox(height: 16),
 
             // Release notes
             if (info.releaseNotes.isNotEmpty) ...[
@@ -119,25 +119,25 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
                 style: GoogleFonts.raleway(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               Container(
                 width: double.infinity,
-                constraints: const BoxConstraints(maxHeight: 140),
-                padding: const EdgeInsets.all(12),
+                constraints: BoxConstraints(maxHeight: 140),
+                padding: EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppTheme.surfaceVariant,
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppTheme.divider),
+                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                 ),
                 child: SingleChildScrollView(
                   child: Text(
                     info.releaseNotes,
                     style: GoogleFonts.nunito(
                       fontSize: 13,
-                      color: AppTheme.textSecondary,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                       height: 1.5,
                     ),
                   ),
@@ -156,7 +156,7 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
                     style: GoogleFonts.nunito(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   Text(
@@ -169,22 +169,22 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              SizedBox(height: 10),
               ClipRRect(
                 borderRadius: BorderRadius.circular(6),
                 child: LinearProgressIndicator(
                   value: _progress,
                   minHeight: 8,
-                  backgroundColor: AppTheme.surfaceVariant,
-                  valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primary),
+                  backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
                 ),
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               Text(
                 'O aplicativo será reiniciado automaticamente após a instalação.',
                 style: GoogleFonts.nunito(
                   fontSize: 12,
-                  color: AppTheme.textHint,
+                  color: Theme.of(context).colorScheme.outline,
                 ),
               ),
             ],

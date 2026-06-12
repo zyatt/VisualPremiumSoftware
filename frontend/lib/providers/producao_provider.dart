@@ -4,6 +4,16 @@ import '../repositories/producao_repository.dart';
 
 String _mensagemErro(Object e) {
   final raw = e.toString();
+  if (raw.contains('SocketException') ||
+      raw.contains('ClientException') ||
+      raw.contains('Connection refused') ||
+      raw.contains('Connection reset') ||
+      raw.contains('Failed host lookup') ||
+      raw.contains('HandshakeException') ||
+      raw.contains('TimeoutException') ||
+      raw.contains('Network is unreachable')) {
+    return 'Verifique a conexão com o servidor';
+  }
   return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
 }
 
@@ -14,6 +24,11 @@ class ProducaoProvider with ChangeNotifier {
   List<String> get categorias => _categorias;
   bool _carregandoCategorias = false;
   bool get carregandoCategorias => _carregandoCategorias;
+  /// true somente após ao menos um carregamento bem-sucedido
+  bool _categoriasCarregadas = false;
+  bool get categoriasCarregadas => _categoriasCarregadas;
+  String? _erroCategorias;
+  String? get erroCategorias => _erroCategorias;
 
   List<MaterialProducaoModel> _materiais = [];
   List<MaterialProducaoModel> get materiais => _materiais;
@@ -30,10 +45,13 @@ class ProducaoProvider with ChangeNotifier {
 
   Future<void> carregarCategorias() async {
     _carregandoCategorias = true;
+    _erroCategorias = null;
     notifyListeners();
     try {
       _categorias = await _repo.listarCategorias();
+      _categoriasCarregadas = true;
     } catch (e) {
+      _erroCategorias = _mensagemErro(e);
       debugPrint('Erro ao carregar categorias: $e');
     } finally {
       _carregandoCategorias = false;

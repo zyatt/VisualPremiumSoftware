@@ -265,8 +265,11 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
 
   if (comPreco) {
     // Qtd
+    const qtdLabel = item.unidade
+      ? `${formatNumber(item.quantidade)} ${item.unidade}`
+      : formatNumber(item.quantidade);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(formatNumber(item.quantidade), cx + 4, tySingle, { width: cols[1].w - 8, align: 'center', lineBreak: false });
+       .text(qtdLabel, cx + 4, tySingle, { width: cols[1].w - 8, align: 'center', lineBreak: false });
     cx += cols[1].w;
 
     // Unit (precoUnitario já normalizado no service: usa pm2 quando pu=0)
@@ -290,8 +293,11 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
        .text(formatDate(item.data), cx + 4, tySingle, { width: cols[4].w - 8, align: 'right', lineBreak: false });
   } else {
     // Qtd
+    const qtdLabel = item.unidade
+      ? `${formatNumber(item.quantidade)} ${item.unidade}`
+      : formatNumber(item.quantidade);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(formatNumber(item.quantidade), cx + 4, tySingle, { width: cols[1].w - 8, align: 'center', lineBreak: false });
+       .text(qtdLabel, cx + 4, tySingle, { width: cols[1].w - 8, align: 'center', lineBreak: false });
     cx += cols[1].w;
 
     // Data

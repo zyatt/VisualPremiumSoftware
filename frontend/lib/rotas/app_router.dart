@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:visual_premium/pages/gastos_categoria_page.dart';
 import 'package:visual_premium/pages/veiculo_page.dart';         // ← NOVO
 import '../pages/admin_page.dart';
+import '../pages/loading_page.dart';
 import '../pages/login_page.dart';
 import '../pages/inicio_page.dart';
 import '../pages/estoque_page.dart';
@@ -35,7 +36,7 @@ class AppRouter {
   static GoRouter buildRouter(UsuarioProvider usuarioProvider) {
     return GoRouter(
       navigatorKey: rootNavigatorKey,
-      initialLocation: '/login',
+      initialLocation: '/',
       refreshListenable: usuarioProvider,
 
       redirect: (context, state) {
@@ -43,9 +44,14 @@ class AppRouter {
         final path    = state.matchedLocation;
         final logado  = usuario != null;
         final naLogin = path == '/login';
+        final naLoading = path == '/';
+
+        // Loading nunca é redirecionada — ela mesma navega após a animação
+        if (naLoading) return null;
 
         if (!logado) {
-          return naLogin ? null : '/login';
+          if (naLogin) return null;
+          return '/login';
         }
 
         final roleUp     = usuario.role.trim().toUpperCase();
@@ -54,6 +60,7 @@ class AppRouter {
         final isGerente  = roleUp == 'GERENTE';
         final isCompras  = roleUp == 'COMPRAS';
 
+        // Sai do login quando logado
         if (naLogin) {
           return isProducao ? '/producao' : '/inicio';
         }
@@ -74,6 +81,10 @@ class AppRouter {
       },
 
       routes: [
+        GoRoute(
+          path: '/',
+          builder: (_, __) => const LoadingPage(),
+        ),
         GoRoute(
           path: '/login',
           builder: (_, __) => const LoginPage(),

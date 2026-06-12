@@ -15,4 +15,16 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /gastos-categoria/mensal?ano=2024
+router.get('/mensal', async (req, res) => {
+  try {
+    const { ano } = req.query;
+    const dados = await svc.gastosMensais({ ano });
+    res.json(dados);
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || 'Erro interno' });
+  }
+});
+
 module.exports = router;

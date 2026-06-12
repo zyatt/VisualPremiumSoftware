@@ -10,6 +10,26 @@ import '../repositories/orcamento_repository.dart';
 import '../theme/app_theme.dart';
 import 'orcamento_historico_page.dart';
 import 'orcamento_editor_page.dart';
+
+/// Remove prefixos como "Exception:", "HttpException:" que o Dart adiciona
+/// automaticamente ao fazer e.toString() em exceções. Quando o erro é de
+/// conexão (sem internet / servidor fora do ar), retorna uma mensagem
+/// amigável contextualizada com a ação que estava sendo feita.
+String _mensagemErro(Object e, {required String acao}) {
+  final raw = e.toString();
+  if (raw.contains('SocketException') ||
+      raw.contains('ClientException') ||
+      raw.contains('Connection refused') ||
+      raw.contains('Connection reset') ||
+      raw.contains('Failed host lookup') ||
+      raw.contains('HandshakeException') ||
+      raw.contains('TimeoutException') ||
+      raw.contains('Network is unreachable')) {
+    return 'Erro ao $acao: Verifique a conexão com o servidor.';
+  }
+  final msg = raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+  return 'Erro ao $acao: $msg';
+}
 // ─── Formatters ───────────────────────────────
 
 /// Bloqueia a digitação de vírgula em campos de texto livre (busca, título, descrição, etc.)
@@ -105,7 +125,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         _naoAprovados = naoAprovados;
       });
     } catch (e) {
-      if (mounted) setState(() => _erroAprovacao = e.toString());
+      if (mounted) setState(() => _erroAprovacao = _mensagemErro(e, acao: 'carregar orçamentos'));
     } finally {
       if (mounted) setState(() => _carregandoAprovacao = false);
     }
@@ -156,7 +176,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao aprovar: $e'),
+            content: Text(_mensagemErro(e, acao: 'aprovar orçamento')),
             backgroundColor: AppTheme.error,
           ),
         );
@@ -241,7 +261,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao rejeitar: $e'),
+            content: Text(_mensagemErro(e, acao: 'rejeitar orçamento')),
             backgroundColor: AppTheme.error,
           ),
         );
@@ -353,7 +373,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao abrir orçamento: $e'),
+            content: Text(_mensagemErro(e, acao: 'abrir orçamento')),
             backgroundColor: AppTheme.error,
           ),
         );
@@ -477,7 +497,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao carregar orçamento: $e'),
+            content: Text(_mensagemErro(e, acao: 'carregar orçamento')),
             backgroundColor: AppTheme.error,
           ),
         );
@@ -492,14 +512,14 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     return Consumer<OrcamentoProvider>(
       builder: (context, provider, _) {
         if (!provider.carregado) {
-          return const Scaffold(
+          return Scaffold(
             body: Center(
                 child: CircularProgressIndicator(color: AppTheme.primary)),
           );
         }
 
         return Scaffold(
-          backgroundColor: AppTheme.background,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           body: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -528,14 +548,14 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     return Column(
       children: [
         Container(
-          decoration: const BoxDecoration(
-            color: AppTheme.surface,
-            border: Border(bottom: BorderSide(color: AppTheme.divider)),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            border: Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
           ),
           child: TabBar(
             controller: _mainTabController,
             labelColor: AppTheme.primary,
-            unselectedLabelColor: AppTheme.textSecondary,
+            unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
             indicatorColor: AppTheme.primary,
             indicatorWeight: 2,
             labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
@@ -616,15 +636,15 @@ class _OrcamentoPageState extends State<OrcamentoPage>
               style: Theme.of(context)
                   .textTheme
                   .headlineMedium
-                  ?.copyWith(color: AppTheme.textPrimary),
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
             ),
-            const SizedBox(height: 2),
+            SizedBox(height: 2),
             Text(
               'Orçar e comparar valores entre fornecedores',
               style: Theme.of(context)
                   .textTheme
                   .bodyMedium
-                  ?.copyWith(color: AppTheme.textSecondary),
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -673,14 +693,14 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                     ),
                 ],
               ),
-              label: const Text(
+              label: Text(
                 'Aberto',
                 style: TextStyle(fontSize: 13),
               ),
               style: OutlinedButton.styleFrom(
-                foregroundColor: temAbas ? AppTheme.warning : AppTheme.textHint,
+                foregroundColor: temAbas ? AppTheme.warning : Theme.of(context).colorScheme.outline,
                 side: BorderSide(
-                    color: temAbas ? AppTheme.warning : AppTheme.divider),
+                    color: temAbas ? AppTheme.warning : Theme.of(context).colorScheme.outlineVariant),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14,
                   vertical: 10,
@@ -733,37 +753,37 @@ class _OrcamentoPageState extends State<OrcamentoPage>
               // A reabertura já configura a aba no provider via _reabrirOrcamento
             }
           },
-          icon: const Icon(Icons.history, size: 16),
-          label: const Text(
+          icon: Icon(Icons.history, size: 16),
+          label: Text(
             'Histórico',
             style: TextStyle(fontSize: 13),
           ),
           style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.textSecondary,
-            side: const BorderSide(color: AppTheme.divider),
-            padding: const EdgeInsets.symmetric(
+            foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+            padding: EdgeInsets.symmetric(
               horizontal: 14,
               vertical: 10,
             ),
           ),
         ),
 
-        const SizedBox(width: 12),
+        SizedBox(width: 12),
 
         IconButton(
           onPressed: () => _carregarOrcamentosServidor(),
-          icon: const Icon(
+          icon: Icon(
             Icons.refresh,
             size: 18,
-            color: AppTheme.textSecondary,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
           tooltip: 'Atualizar',
           style: IconButton.styleFrom(
-            backgroundColor: AppTheme.surface,
+            backgroundColor: Theme.of(context).colorScheme.surface,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
             ),
-            side: const BorderSide(color: AppTheme.divider),
+            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
           ),
         ),
 
@@ -793,14 +813,14 @@ class _OrcamentoPageState extends State<OrcamentoPage>
               aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
             context.read<OrcamentoProvider>().fecharAbaAposOperacao();
           },
-          icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: AppTheme.textSecondary),
+          icon: Icon(Icons.arrow_back_ios_new, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
           style: IconButton.styleFrom(
-            backgroundColor: AppTheme.surface,
+            backgroundColor: Theme.of(context).colorScheme.surface,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            side: const BorderSide(color: AppTheme.divider),
+            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
           ),
         ),
-        const SizedBox(width: 16),
+        SizedBox(width: 16),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -809,15 +829,15 @@ class _OrcamentoPageState extends State<OrcamentoPage>
               style: Theme.of(context)
                   .textTheme
                   .headlineMedium
-                  ?.copyWith(color: AppTheme.textPrimary),
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
             ),
-            const SizedBox(height: 2),
+            SizedBox(height: 2),
             Text(
               'Orçar e comparar valores entre fornecedores',
               style: Theme.of(context)
                   .textTheme
                   .bodyMedium
-                  ?.copyWith(color: AppTheme.textSecondary),
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -851,11 +871,27 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, size: 48, color: AppTheme.error),
+            Icon(Icons.cloud_off_outlined,
+                size: 48, color: AppTheme.error),
+            SizedBox(height: 12),
+            Text(
+              'Erro ao carregar orçamentos',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 4),
+            Text(
+              _erroAprovacao!.contains(': ')
+                  ? _erroAprovacao!.substring(_erroAprovacao!.indexOf(': ') + 2)
+                  : _erroAprovacao!,
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 16),
-            Text('Erro ao carregar: $_erroAprovacao',
-                style: const TextStyle(color: AppTheme.error)),
-            const SizedBox(height: 12),
             FilledButton.icon(
               onPressed: _carregarOrcamentosServidor,
               icon: const Icon(Icons.refresh, size: 16),
@@ -881,13 +917,13 @@ class _OrcamentoPageState extends State<OrcamentoPage>
               ),
               child: Icon(emptyIcon, size: 36, color: statusColor),
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: 20),
             Text(
               emptyMessage,
               style: Theme.of(context)
                   .textTheme
                   .headlineSmall
-                  ?.copyWith(color: AppTheme.textPrimary),
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
             ),
             const SizedBox(height: 8),
             TextButton.icon(
@@ -908,9 +944,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           children: [
             TextButton.icon(
               onPressed: () => _carregarOrcamentosServidor(),
-              icon: const Icon(Icons.refresh, size: 15),
-              label: const Text('Atualizar', style: TextStyle(fontSize: 12)),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.textSecondary),
+              icon: Icon(Icons.refresh, size: 15),
+              label: Text('Atualizar', style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -988,7 +1024,7 @@ class _DescricaoFieldState extends State<_DescricaoField> {
         hintText: 'Especificação do material',
         isDense: true,
         filled: true,
-        fillColor: AppTheme.surface,
+        fillColor: Theme.of(context).colorScheme.surface,
         errorText: _ctrl.text.trim().isEmpty ? 'Descrição obrigatória' : null,
       ),
       style: const TextStyle(fontSize: 13),
@@ -1045,9 +1081,9 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1073,17 +1109,17 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
                   child: Icon(Icons.description_outlined,
                       size: 18, color: statusColor),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         titulo,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
+                          color: Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
                       if (criadoEm != null)
@@ -1092,7 +1128,7 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
                             'Criado em ${criadoEm.day.toString().padLeft(2, '0')}/${criadoEm.month.toString().padLeft(2, '0')}/${criadoEm.year}',
                             if (criadorNome != null) 'por $criadorNome',
                           ].join(' '),
-                          style: const TextStyle(fontSize: 11, color: AppTheme.textHint),
+                          style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
                         ),
                       if (aprovadoEm != null)                                      // ← adicionar bloco
                         Text(
@@ -1100,17 +1136,17 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
                             'Aprovado em ${aprovadoEm.day.toString().padLeft(2, '0')}/${aprovadoEm.month.toString().padLeft(2, '0')}/${aprovadoEm.year}',
                             if (aprovadorNome != null) 'por $aprovadorNome',
                           ].join(' '),
-                          style: const TextStyle(fontSize: 11, color: AppTheme.textHint),
+                          style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
                         ),
                     ],
                   ),
                 ),
                 Text(
                   '#${orcamento['id']}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.textSecondary,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -1118,32 +1154,32 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
           ),
 
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.inventory_2_outlined,
-                        size: 14, color: AppTheme.textSecondary),
-                    const SizedBox(width: 6),
+                    Icon(Icons.inventory_2_outlined,
+                        size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    SizedBox(width: 6),
                     Text(
                       '${materiaisUnicos.length} ${materiaisUnicos.length == 1 ? 'material' : 'materiais'}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.textSecondary,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                     if (aprovadorNome != null) ...[
-                      const SizedBox(width: 16),
-                      const Icon(Icons.person_outline,
-                          size: 14, color: AppTheme.textSecondary),
-                      const SizedBox(width: 4),
+                      SizedBox(width: 16),
+                      Icon(Icons.person_outline,
+                          size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      SizedBox(width: 4),
                       Text(
                         aprovadorNome,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: AppTheme.textSecondary,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -1179,12 +1215,12 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
                                   color: AppTheme.error,
                                 ),
                               ),
-                              const SizedBox(height: 2),
+                              SizedBox(height: 2),
                               Text(
                                 motivoRejeicao,
-                                style: const TextStyle(
+                                style: TextStyle(
                                     fontSize: 12,
-                                    color: AppTheme.textSecondary),
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant),
                               ),
                             ],
                           ),
@@ -1414,16 +1450,16 @@ class _QuantidadeFieldState extends State<_QuantidadeField> {
   Widget build(BuildContext context) {
     return TextField(
       controller: _ctrl,
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      keyboardType: TextInputType.numberWithOptions(decimal: true),
       inputFormatters: [
         FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))
       ],
       decoration: InputDecoration(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
         isDense: true,
         filled: true,
-        fillColor: AppTheme.surface,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
       style: const TextStyle(fontSize: 12),
       onChanged: (v) {
@@ -1478,7 +1514,7 @@ class _DialogVincularFornecedoresState
 
     return AlertDialog(
       title: Text('Adicionar Fornecedores — ${widget.materialNome}',
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
       content: SizedBox(
         width: 360,
         child: Column(
@@ -1489,10 +1525,10 @@ class _DialogVincularFornecedoresState
               autofocus: true,
               decoration: InputDecoration(
                 hintText: 'Buscar fornecedor...',
-                prefixIcon: const Icon(Icons.search, size: 18, color: AppTheme.textHint),
+                prefixIcon: Icon(Icons.search, size: 18, color: Theme.of(context).colorScheme.outline),
                 suffixIcon: _filtro.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.close, size: 16, color: AppTheme.textHint),
+                        icon: Icon(Icons.close, size: 16, color: Theme.of(context).colorScheme.outline),
                         onPressed: () {
                           _buscaCtrl.clear();
                           setState(() => _filtro = '');
@@ -1523,24 +1559,24 @@ class _DialogVincularFornecedoresState
                 ),
               ),
             ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 280),
+              constraints: BoxConstraints(maxHeight: 280),
               child: disponiveis.isEmpty
-                  ? const Padding(
+                  ? Padding(
                       padding: EdgeInsets.symmetric(vertical: 16),
                       child: Text(
                           'Todos os fornecedores já estão vinculados a este material.',
-                          style: TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+                          style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                     )
                   : filtrados.isEmpty
                       ? Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          padding: EdgeInsets.symmetric(vertical: 16),
                           child: Row(
                             children: [
-                              const Icon(Icons.search_off, size: 16, color: AppTheme.textHint),
-                              const SizedBox(width: 8),
+                              Icon(Icons.search_off, size: 16, color: Theme.of(context).colorScheme.outline),
+                              SizedBox(width: 8),
                               Text(
                                 'Nenhum fornecedor encontrado para "$_filtro".',
-                                style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
                               ),
                             ],
                           ),
@@ -1549,7 +1585,7 @@ class _DialogVincularFornecedoresState
                           shrinkWrap: true,
                           itemCount: filtrados.length,
                           separatorBuilder: (_, __) =>
-                              const Divider(height: 1, color: AppTheme.divider),
+                              Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
                           itemBuilder: (ctx, i) {
                             final f = filtrados[i];
                             return CheckboxListTile(
@@ -1635,7 +1671,7 @@ class _DialogEditarPrecoState extends State<_DialogEditarPreco> {
     return AlertDialog(
       title: Text(
         'Editar Preço — ${widget.fornecedorNome}',
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
       ),
       content: SizedBox(
         width: 320,
@@ -1644,8 +1680,8 @@ class _DialogEditarPrecoState extends State<_DialogEditarPreco> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.materialNome,
-                style: const TextStyle(
-                    fontSize: 12, color: AppTheme.textSecondary)),
+                style: TextStyle(
+                    fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
             const SizedBox(height: 16),
             TextField(
               controller: _precoCtrl,
@@ -1722,15 +1758,15 @@ class _DialogDescartarOrcamentoState
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Cancelar Orçamento',
+      title: Text('Cancelar Orçamento',
           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Este orçamento será movido para o histórico como cancelado.',
-            style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
           TextField(
@@ -1793,7 +1829,7 @@ class _DialogOpcaoOC extends StatelessWidget {
           Text(
             '${itens.length} ${itens.length == 1 ? 'material' : 'materiais'} selecionados · '
             '${fornecedores.length} ${fornecedores.length == 1 ? 'fornecedor' : 'fornecedores'}',
-            style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
           const Text('Como deseja gerar a OC?',

@@ -37,6 +37,28 @@ import '../providers/audit_log_provider.dart';
 import '../theme/app_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Converte mensagens de erro técnicas em textos legíveis pelo usuário.
+/// Trata especialmente erros de rede (SocketException / ClientException).
+String _mensagemErroAmigavel(String raw) {
+  final lower = raw.toLowerCase();
+  if (lower.contains('socketexception') ||
+      lower.contains('clientexception') ||
+      lower.contains('connection refused') ||
+      lower.contains('recusou a conexão') ||
+      lower.contains('errno')) {
+    return 'Erro ao carregar o histórico.\nVerifique a conexão com o servidor.';
+  }
+  if (lower.contains('timeout') || lower.contains('timed out')) {
+    return 'A conexão com o servidor expirou.\nVerifique a rede e tente novamente.';
+  }
+  // Remove prefixos técnicos como "Exception:", "HttpException:" etc.
+  return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PÁGINA PRINCIPAL
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -130,7 +152,7 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -143,21 +165,21 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                   onTap: () => Navigator.of(context).pop(),
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      border: Border.all(color: AppTheme.divider),
+                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
+                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         SizedBox(width: 6),
                         Text(
                           'Voltar',
                           style: TextStyle(
                             fontSize: 13,
-                            color: AppTheme.textSecondary,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -173,9 +195,9 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                     color: const Color(0xFF7C3AED).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.history, color: Color(0xFF7C3AED), size: 20),
+                  child: Icon(Icons.history, color: Color(0xFF7C3AED), size: 20),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -186,27 +208,27 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(
                       'Cadastros, edições, desativações e exclusões de materiais',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
-                const Spacer(),
+                Spacer(),
                 IconButton(
                   onPressed: _carregar,
-                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
@@ -224,7 +246,7 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                       controller: _buscaCtrl,
                       decoration: InputDecoration(
                         hintText:   'Buscar material...',
-                        prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
+                        prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                         isDense:    true,
                         suffixIcon: _buscaCtrl.text.isNotEmpty
                             ? IconButton(
@@ -299,11 +321,11 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
 
             // ── Tabela ────────────────────────────────────────────────────────
             _CabecalhoTabela(mostrarMaterial: widget.materialIdInicial == null),
-            const Divider(height: 1, color: AppTheme.divider),
+            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
 
             Expanded(
               child: Consumer<AuditLogProvider>(
@@ -315,9 +337,24 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                   }
                   if (provider.erro != null) {
                     return Center(
-                      child: Text(
-                        provider.erro!,
-                        style: const TextStyle(color: AppTheme.error),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.error_outline, size: 48, color: AppTheme.error),
+                          SizedBox(height: 12),
+                          Text(
+                            _mensagemErroAmigavel(provider.erro!),
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed: _carregar,
+                            icon: const Icon(Icons.refresh, size: 18),
+                            label: const Text('Tentar novamente'),
+                            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                          ),
+                        ],
                       ),
                     );
                   }
@@ -327,11 +364,11 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(Icons.history_toggle_off,
-                              size: 56, color: AppTheme.textHint.withValues(alpha: 0.5)),
-                          const SizedBox(height: 12),
-                          const Text(
+                              size: 56, color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5)),
+                          SizedBox(height: 12),
+                          Text(
                             'Nenhum registro encontrado',
-                            style: TextStyle(color: AppTheme.textHint, fontSize: 14),
+                            style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 14),
                           ),
                         ],
                       ),
@@ -341,7 +378,7 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                   return ListView.separated(
                     itemCount:  provider.logs.length,
                     separatorBuilder: (_, __) =>
-                        const Divider(height: 1, color: AppTheme.divider),
+                        Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
                     itemBuilder: (_, i) => _LinhaLog(
                       log:            provider.logs[i],
                       mostrarMaterial: widget.materialIdInicial == null,
@@ -355,15 +392,15 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
             Consumer<AuditLogProvider>(
               builder: (_, provider, __) {
                 if (provider.carregando || provider.logs.isEmpty) {
-                  return const SizedBox.shrink();
+                  return SizedBox.shrink();
                 }
                 return Padding(
-                  padding: const EdgeInsets.only(top: 8),
+                  padding: EdgeInsets.only(top: 8),
                   child: Text(
                     '${provider.logs.length} registro(s) encontrado(s)',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: AppTheme.textHint,
+                      color: Theme.of(context).colorScheme.outline,
                     ),
                   ),
                 );
@@ -385,7 +422,7 @@ class _BotaoData extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onClear;
 
-  const _BotaoData({
+  _BotaoData({
     required this.label,
     required this.onTap,
     this.onClear,
@@ -397,26 +434,26 @@ class _BotaoData extends StatelessWidget {
       onTap:         onTap,
       borderRadius:  BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          border:       Border.all(color: AppTheme.divider),
+          border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           borderRadius: BorderRadius.circular(8),
-          color:        AppTheme.surface,
+          color:        Theme.of(context).colorScheme.surface,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.calendar_today, size: 14, color: AppTheme.textHint),
-            const SizedBox(width: 6),
+            Icon(Icons.calendar_today, size: 14, color: Theme.of(context).colorScheme.outline),
+            SizedBox(width: 6),
             Text(
               label,
-              style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             if (onClear != null) ...[
-              const SizedBox(width: 6),
+              SizedBox(width: 6),
               GestureDetector(
                 onTap: onClear,
-                child: const Icon(Icons.close, size: 14, color: AppTheme.textHint),
+                child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
               ),
             ],
           ],
@@ -431,61 +468,61 @@ class _BotaoData extends StatelessWidget {
 class _CabecalhoTabela extends StatelessWidget {
   final bool mostrarMaterial;
 
-  const _CabecalhoTabela({required this.mostrarMaterial});
+  _CabecalhoTabela({required this.mostrarMaterial});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      color: AppTheme.surface,
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: Theme.of(context).colorScheme.surface,
       child: Row(
         children: [
           // Ação
           SizedBox(
             width: 170,
             child: Text('Ação',
-                style: _estiloHeader),
+                style: _estiloHeader(context)),
           ),
           // Material (só quando não está filtrado por material)
           if (mostrarMaterial)
             Expanded(
               flex: 3,
-              child: Text('Material', style: _estiloHeader),
+              child: Text('Material', style: _estiloHeader(context)),
             ),
           // Campo alterado
           SizedBox(
             width: 140,
-            child: Text('Campo', style: _estiloHeader),
+            child: Text('Campo', style: _estiloHeader(context)),
           ),
           // Antes
           Expanded(
             flex: 2,
-            child: Text('Antes', style: _estiloHeader),
+            child: Text('Antes', style: _estiloHeader(context)),
           ),
           // Depois
           Expanded(
             flex: 2,
-            child: Text('Depois', style: _estiloHeader),
+            child: Text('Depois', style: _estiloHeader(context)),
           ),
           // Usuário
           SizedBox(
             width: 130,
-            child: Text('Usuário', style: _estiloHeader),
+            child: Text('Usuário', style: _estiloHeader(context)),
           ),
           // Data
           SizedBox(
             width: 130,
-            child: Text('Data/Hora', style: _estiloHeader, textAlign: TextAlign.right),
+            child: Text('Data/Hora', style: _estiloHeader(context), textAlign: TextAlign.right),
           ),
         ],
       ),
     );
   }
 
-  static final _estiloHeader = const TextStyle(
+  static TextStyle _estiloHeader(BuildContext context) => TextStyle(
     fontSize: 11,
     fontWeight: FontWeight.w700,
-    color: AppTheme.textHint,
+    color: Theme.of(context).colorScheme.outline,
     letterSpacing: 0.5,
   );
 }
@@ -533,10 +570,10 @@ class _LinhaLog extends StatelessWidget {
                 children: [
                   Text(
                     log.materialNome ?? '—',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -547,7 +584,7 @@ class _LinhaLog extends StatelessWidget {
                         log.materialMedida,
                         log.materialEspessura,
                       ].whereType<String>().join(' · '),
-                      style: const TextStyle(fontSize: 11, color: AppTheme.textHint),
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
                       overflow: TextOverflow.ellipsis,
                     ),
                 ],
@@ -559,9 +596,9 @@ class _LinhaLog extends StatelessWidget {
             width: 140,
             child: Text(
               log.campo ?? '—',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: AppTheme.textSecondary,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontStyle: FontStyle.italic,
               ),
               overflow: TextOverflow.ellipsis,
@@ -574,11 +611,11 @@ class _LinhaLog extends StatelessWidget {
             child: log.valorAntes != null
                 ? _ValorChip(
                     valor: log.valorAntes!,
-                    cor:   const Color(0xFFDC2626),
-                    bg:    const Color(0xFFDC2626),
+                    cor:   Color(0xFFDC2626),
+                    bg:    Color(0xFFDC2626),
                   )
-                : const Text('—',
-                    style: TextStyle(fontSize: 12, color: AppTheme.textHint)),
+                : Text('—',
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline)),
           ),
 
           // ── Valor depois ─────────────────────────────────────────────────
@@ -587,11 +624,11 @@ class _LinhaLog extends StatelessWidget {
             child: log.valorDepois != null
                 ? _ValorChip(
                     valor: log.valorDepois!,
-                    cor:   const Color(0xFF15803D),
-                    bg:    const Color(0xFF15803D),
+                    cor:   Color(0xFF15803D),
+                    bg:    Color(0xFF15803D),
                   )
-                : const Text('—',
-                    style: TextStyle(fontSize: 12, color: AppTheme.textHint)),
+                : Text('—',
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline)),
           ),
 
           // ── Usuário ──────────────────────────────────────────────────────
@@ -599,7 +636,7 @@ class _LinhaLog extends StatelessWidget {
             width: 130,
             child: Text(
               log.usuarioNome ?? '—',
-              style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -610,7 +647,7 @@ class _LinhaLog extends StatelessWidget {
             child: Text(
               dataStr,
               textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 12, color: AppTheme.textHint),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
             ),
           ),
         ],

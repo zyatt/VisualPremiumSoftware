@@ -455,6 +455,43 @@ async function atualizarFilhoEspecifico(materialId, filhoId, data, usuarioId, us
   return result;
 }
 
+async function atualizarCustoManual(id, data, usuarioId, usuarioNome) {
+  const material = await prisma.material.findUnique({ where: { id } });
+  if (!material) throw { status: 404, message: 'Material não encontrado' };
+
+  const novoUnitario = data.ultimoValorPago   != null ? _normalizarPreco(data.ultimoValorPago)   : undefined;
+  const novoM2       = data.ultimoValorPagoM2 != null ? _normalizarPreco(data.ultimoValorPagoM2) : undefined;
+
+  if (novoUnitario === undefined && novoM2 === undefined) {
+    throw { status: 400, message: 'Informe ao menos um valor (unitário ou m²)' };
+  }
+
+  const updateData = {};
+  if (novoUnitario !== undefined) updateData.ultimoValorPago   = novoUnitario;
+  if (novoM2       !== undefined) updateData.ultimoValorPagoM2 = novoM2;
+
+  const result = await prisma.material.update({ where: { id }, data: updateData });
+
+  await auditSvc.registrar(id, 'CUSTO_MANUAL', {
+    valorAntes:  JSON.stringify({
+      ultimoValorPago:   material.ultimoValorPago   != null ? Number(material.ultimoValorPago)   : null,
+      ultimoValorPagoM2: material.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null,
+    }),
+    valorDepois: JSON.stringify({
+      ultimoValorPago:   novoUnitario ?? (material.ultimoValorPago   != null ? Number(material.ultimoValorPago)   : null),
+      ultimoValorPagoM2: novoM2       ?? (material.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null),
+    }),
+    usuarioId,
+    usuarioNome,
+  });
+
+  return {
+    ...result,
+    custoUltimaCompra:   _normalizarPreco(result.ultimoValorPago),
+    custoM2UltimaCompra: _normalizarPreco(result.ultimoValorPagoM2),
+  };
+}
+
 module.exports = {
   calcularStatus,
   listar,
@@ -465,6 +502,7 @@ module.exports = {
   reativar,
   excluir,
   confirmarEstoque,
+  atualizarCustoManual,
   listarCategorias,
   listarHistoricoPrecos,
   atualizarFilhoEspecifico,

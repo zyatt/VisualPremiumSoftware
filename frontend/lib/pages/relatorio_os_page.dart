@@ -52,10 +52,7 @@ double _totalLiquido(List<MovimentacaoModel> movimentacoes) {
   // Ordena por criadoEm ascendente (mais antiga primeiro)
   final ordenadas = [...movimentacoes]
     ..sort((a, b) {
-      final da = a.criadoEm;
-      final db = b.criadoEm;
-      if (da == null && db == null) return 0;
-      return da.compareTo(db);
+      return a.criadoEm.compareTo(b.criadoEm);
     });
 
   for (final m in ordenadas) {
@@ -225,7 +222,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
     final provider = context.watch<RelatorioOSProvider>();
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -242,27 +239,27 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(
                       'Ordens de Serviço encerradas',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
-                const Spacer(),
+                Spacer(),
                 IconButton(
                   onPressed: () => context.read<RelatorioOSProvider>().carregar(),
-                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
@@ -275,10 +272,10 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     controller: _buscaOSCtrl,
                     onChanged: _onChanged,
                     onSubmitted: (_) => _aplicarFiltros(),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Buscar por número da OS...',
                       prefixIcon: Icon(Icons.search,
-                          color: AppTheme.textHint, size: 20),
+                          color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
                     ),
                   ),
@@ -294,10 +291,10 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly
                     ],
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'ID mat...',
                       prefixIcon: Icon(Icons.tag,
-                          color: AppTheme.textHint, size: 18),
+                          color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
                   ),
@@ -342,10 +339,10 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     controller: _materialNomeCtrl,
                     onChanged: _onChanged,
                     onSubmitted: (_) => _aplicarFiltros(),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Nome do material...',
                       prefixIcon: Icon(Icons.search,
-                          color: AppTheme.textHint, size: 18),
+                          color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
                   ),
@@ -358,10 +355,10 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     onSubmitted: (_) => _aplicarFiltros(),
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Identificador...',
                       prefixIcon: Icon(Icons.qr_code,
-                          color: AppTheme.textHint, size: 18),
+                          color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
                   ),
@@ -374,10 +371,10 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     onSubmitted: (_) => _aplicarFiltros(),
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Medida...',
                       prefixIcon: Icon(Icons.straighten,
-                          color: AppTheme.textHint, size: 18),
+                          color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
                   ),
@@ -390,10 +387,10 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     onSubmitted: (_) => _aplicarFiltros(),
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Espessura...',
                       prefixIcon: Icon(Icons.layers,
-                          color: AppTheme.textHint, size: 18),
+                          color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
                   ),
@@ -459,21 +456,21 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     child: Row(
                       children: [
                         Icon(Icons.summarize_outlined, size: 16, color: _corFechada.withValues(alpha: 0.8)),
-                        const SizedBox(width: 8),
+                        SizedBox(width: 8),
                         Text(
                           '$qtd ${qtd == 1 ? 'OS' : 'OS'} encontrada${qtd == 1 ? '' : 's'}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
-                            color: AppTheme.textSecondary,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
-                        const Spacer(),
+                        Spacer(),
                         if (total > 0) ...[
-                          const Text(
+                          Text(
                             'Total filtrado:',
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppTheme.textSecondary,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -500,12 +497,40 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                           color: AppTheme.primary))
                   : provider.erro != null
                       ? Center(
-                          child: Text(
-                            'Erro: ${provider.erro}',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(color: AppTheme.error),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.cloud_off_outlined,
+                                  size: 48, color: AppTheme.error),
+                              SizedBox(height: 12),
+                              Text(
+                                'Erro ao carregar relatórios',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.onSurface,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                provider.erro!.contains(': ')
+                                    ? provider.erro!.substring(
+                                        provider.erro!.indexOf(': ') + 2)
+                                    : provider.erro!,
+                                style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 16),
+                              FilledButton.icon(
+                                onPressed: () => provider.carregar(),
+                                icon: const Icon(Icons.refresh, size: 18),
+                                label: const Text('Tentar novamente'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.primary),
+                              ),
+                            ],
                           ),
                         )
                       : provider.relatorios.isEmpty
@@ -516,10 +541,10 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                                   Icon(
                                     Icons.description_outlined,
                                     size: 48,
-                                    color: AppTheme.textHint
+                                    color: Theme.of(context).colorScheme.outline
                                         .withValues(alpha: 0.4),
                                   ),
-                                  const SizedBox(height: 12),
+                                  SizedBox(height: 12),
                                   Text(
                                     provider.temFiltroMaterial
                                         ? 'Nenhuma OS com este material'
@@ -528,9 +553,9 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                                         .textTheme
                                         .bodyMedium
                                         ?.copyWith(
-                                            color: AppTheme.textHint),
+                                            color: Theme.of(context).colorScheme.outline),
                                   ),
-                                  const SizedBox(height: 4),
+                                  SizedBox(height: 4),
                                   Text(
                                     provider.temFiltroMaterial
                                         ? 'Tente ajustar os filtros de material'
@@ -539,33 +564,129 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                                         .textTheme
                                         .bodySmall
                                         ?.copyWith(
-                                            color: AppTheme.textHint
+                                            color: Theme.of(context).colorScheme.outline
                                                 .withValues(alpha: 0.7)),
                                   ),
                                 ],
                               ),
                             )
-                          : GridView.builder(
-                              gridDelegate:
-                                  const SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: 220,
-                                crossAxisSpacing: 12,
-                                mainAxisSpacing: 12,
-                                childAspectRatio: 1,
-                              ),
-                              itemCount: provider.relatorios.length,
-                              itemBuilder: (ctx, i) {
-                                final rel = provider.relatorios[i];
-                                return _RelatorioOSCard(
-                                  relatorio: rel,
-                                  onTap: () => _abrirDetalhe(rel),
-                                );
-                              },
+                          : _RelatorioOSGrid(
+                              relatorios: provider.relatorios,
+                              onTap: _abrirDetalhe,
                             ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+// ─── Helper: verifica se a OS é numérica (mesmo critério do controle) ─────────
+
+bool _osEhNumerica(String numeroOS) => int.tryParse(numeroOS.trim()) != null;
+
+// ─── Grid de OS (separado em numéricas × descritivas) ────────────────────────
+
+class _RelatorioOSGrid extends StatelessWidget {
+  final List<RelacaoOSModel> relatorios;
+  final void Function(RelacaoOSModel) onTap;
+
+  const _RelatorioOSGrid({
+    required this.relatorios,
+    required this.onTap,
+  });
+
+  SliverToBoxAdapter _cabecalho(BuildContext context, String titulo, int count) =>
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.only(top: 20, bottom: 10),
+          child: Row(
+            children: [
+              Text(
+                titulo,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$count',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ),
+              SizedBox(width: 10),
+              Expanded(child: Divider(color: Theme.of(context).colorScheme.outlineVariant)),
+            ],
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final numericas = relatorios
+        .where((r) => _osEhNumerica(_limparNumeroOS(r.numeroOS)))
+        .toList();
+    final textuais = relatorios
+        .where((r) => !_osEhNumerica(_limparNumeroOS(r.numeroOS)))
+        .toList();
+
+    const gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
+      maxCrossAxisExtent: 220,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      childAspectRatio: 1,
+    );
+
+    return CustomScrollView(
+      slivers: [
+        if (numericas.isNotEmpty) ...[
+          _cabecalho(context, 'Ordens de Serviço', numericas.length),
+          SliverGrid(
+            delegate: SliverChildBuilderDelegate(
+              (ctx, i) {
+                final rel = numericas[i];
+                return _RelatorioOSCard(
+                  relatorio: rel,
+                  onTap: () => onTap(rel),
+                );
+              },
+              childCount: numericas.length,
+            ),
+            gridDelegate: gridDelegate,
+          ),
+        ],
+        if (textuais.isNotEmpty) ...[
+          _cabecalho(context, 'Empresa', textuais.length),
+          SliverGrid(
+            delegate: SliverChildBuilderDelegate(
+              (ctx, i) {
+                final rel = textuais[i];
+                return _RelatorioOSCard(
+                  relatorio: rel,
+                  onTap: () => onTap(rel),
+                );
+              },
+              childCount: textuais.length,
+            ),
+            gridDelegate: gridDelegate,
+          ),
+        ],
+        const SliverToBoxAdapter(child: SizedBox(height: 16)),
+      ],
     );
   }
 }
@@ -655,30 +776,30 @@ class _RelatorioOSCard extends StatelessWidget {
                 children: [
                   Text(
                     _tituloOS(relatorio.numeroOS),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color: AppTheme.textPrimary,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 2),
+                  SizedBox(height: 2),
                   Text(
                     '$materiaisUnicos '
                     '${materiaisUnicos == 1 ? 'material' : 'materiais'}',
-                    style: const TextStyle(
-                        fontSize: 11, color: AppTheme.textSecondary),
+                    style: TextStyle(
+                        fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   if (entradas.isNotEmpty)
                     Text(
                       '${entradas.length} entrada(s). · ${saidas.length} saída(s).',
-                      style: const TextStyle(
-                          fontSize: 11, color: AppTheme.textSecondary),
+                      style: TextStyle(
+                          fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   if (totalGeral > 0)
                     Text(
                       _brl(totalGeral),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: _corFechada,
@@ -686,8 +807,8 @@ class _RelatorioOSCard extends StatelessWidget {
                     ),
                   Text(
                     dataStr,
-                    style: const TextStyle(
-                        fontSize: 11, color: AppTheme.textHint),
+                    style: TextStyle(
+                        fontSize: 11, color: Theme.of(context).colorScheme.outline),
                   ),
                 ],
               ),
@@ -878,7 +999,7 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
     final rel = provider.selecionado;
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -966,7 +1087,7 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
         ],
       ),
       body: provider.carregandoDetalhe
-          ? const Center(
+          ? Center(
               child: CircularProgressIndicator(color: AppTheme.primary))
           : rel == null
               ? Center(
@@ -975,7 +1096,7 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
                     style: Theme.of(context)
                         .textTheme
                         .bodyMedium
-                        ?.copyWith(color: AppTheme.textHint),
+                        ?.copyWith(color: Theme.of(context).colorScheme.outline),
                   ),
                 )
               : _RelatorioDetalheBody(rel: rel),
@@ -1039,7 +1160,7 @@ class _RelatorioDetalheBody extends StatelessWidget {
                       .fold<DateTime?>(null, (min, d) => min == null || d.isBefore(min) ? d : min);
                   return _fmtData(primeira ?? rel.criadoEm);
                 }(),
-                cor: AppTheme.textSecondary,
+                cor: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
               const SizedBox(width: 12),
               _SummaryCard(
@@ -1112,15 +1233,15 @@ class _SummaryCard extends StatelessWidget {
                 ),
                 child: Icon(icon, color: cor, size: 18),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       label,
-                      style: const TextStyle(
-                          fontSize: 11, color: AppTheme.textSecondary),
+                      style: TextStyle(
+                          fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
@@ -1181,21 +1302,21 @@ class _MovimentacaoSection extends StatelessWidget {
                   ),
                   child: Icon(icone, color: cor, size: 16),
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 Text(
                   titulo,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
-                const Spacer(),
+                Spacer(),
                 Text(
                   '${movimentacoes.length} '
                   '${movimentacoes.length == 1 ? 'item' : 'itens'}',
-                  style: const TextStyle(
-                      fontSize: 12, color: AppTheme.textSecondary),
+                  style: TextStyle(
+                      fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -1203,21 +1324,21 @@ class _MovimentacaoSection extends StatelessWidget {
 
             // Cabeçalho da tabela
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: EdgeInsets.symmetric(horizontal: 8),
               child: Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     flex: 3,
                     child: Text(
                       'Material',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
-                        color: AppTheme.textSecondary,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
-                  const SizedBox(
+                  SizedBox(
                     width: 80,
                     child: Text(
                       'Qtd.',
@@ -1225,12 +1346,12 @@ class _MovimentacaoSection extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
-                        color: AppTheme.textSecondary,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
                   if (mostrarPreco) ...[
-                    const SizedBox(
+                    SizedBox(
                       width: 90,
                       child: Text(
                         'Unit.',
@@ -1238,11 +1359,11 @@ class _MovimentacaoSection extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
-                    const SizedBox(
+                    SizedBox(
                       width: 90,
                       child: Text(
                         'M²',
@@ -1250,11 +1371,11 @@ class _MovimentacaoSection extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
-                    const SizedBox(
+                    SizedBox(
                       width: 100,
                       child: Text(
                         'Total',
@@ -1262,12 +1383,12 @@ class _MovimentacaoSection extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
                   ],
-                  const SizedBox(
+                  SizedBox(
                     width: 90,
                     child: Text(
                       'Data',
@@ -1275,14 +1396,14 @@ class _MovimentacaoSection extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
-                        color: AppTheme.textSecondary,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-            const Divider(height: 12, color: AppTheme.divider),
+            Divider(height: 12, color: Theme.of(context).colorScheme.outlineVariant),
 
             // Linhas
             ...List.generate(movimentacoes.length, (i) {
@@ -1312,19 +1433,19 @@ class _MovimentacaoSection extends StatelessWidget {
                             children: [
                               Text(
                                 m.materialNome,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w500,
-                                  color: AppTheme.textPrimary,
+                                  color: Theme.of(context).colorScheme.onSurface,
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),
                               if ((m.materialUnidade ?? '').isNotEmpty)
                                 Text(
                                   m.materialUnidade!,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 11,
-                                      color: AppTheme.textSecondary),
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               // Identificador / medida / espessura
@@ -1342,9 +1463,9 @@ class _MovimentacaoSection extends StatelessWidget {
                                     if ((m.materialEspessura ?? '').isNotEmpty)
                                       m.materialEspessura!,
                                   ].join(' · '),
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 11,
-                                    color: AppTheme.textSecondary,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                                     fontWeight: FontWeight.w500,
                                   ),
                                   overflow: TextOverflow.ellipsis,
@@ -1353,10 +1474,10 @@ class _MovimentacaoSection extends StatelessWidget {
                                   m.descricaoItem!.isNotEmpty)
                                 Text(
                                   m.descricaoItem!,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w500,
-                                    color: AppTheme.textSecondary,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -1364,9 +1485,9 @@ class _MovimentacaoSection extends StatelessWidget {
                                   m.observacao!.isNotEmpty)
                                 Text(
                                   m.observacao!,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 11,
-                                    color: AppTheme.textHint,
+                                    color: Theme.of(context).colorScheme.outline,
                                     fontStyle: FontStyle.italic,
                                   ),
                                   overflow: TextOverflow.ellipsis,
@@ -1380,9 +1501,9 @@ class _MovimentacaoSection extends StatelessWidget {
                           child: Text(
                             '$qtdStr ${m.materialUnidade ?? ''}',
                             textAlign: TextAlign.right,
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 13,
-                                color: AppTheme.textPrimary),
+                                color: Theme.of(context).colorScheme.onSurface),
                           ),
                         ),
                         // Preço — colunas separadas Unit. | M² | Total
@@ -1392,9 +1513,9 @@ class _MovimentacaoSection extends StatelessWidget {
                             child: Text(
                               pu != null ? _brl(pu) : '—',
                               textAlign: TextAlign.right,
-                              style: const TextStyle(
+                              style: TextStyle(
                                   fontSize: 13,
-                                  color: AppTheme.textSecondary),
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
                             ),
                           ),
                           SizedBox(
@@ -1402,9 +1523,9 @@ class _MovimentacaoSection extends StatelessWidget {
                             child: Text(
                               pm2 != null ? _brl(pm2) : '—',
                               textAlign: TextAlign.right,
-                              style: const TextStyle(
+                              style: TextStyle(
                                   fontSize: 13,
-                                  color: AppTheme.textSecondary),
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
                             ),
                           ),
                           SizedBox(
@@ -1412,10 +1533,10 @@ class _MovimentacaoSection extends StatelessWidget {
                             child: Text(
                               total > 0 ? _brl(total) : '—',
                               textAlign: TextAlign.right,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
-                                color: AppTheme.textPrimary,
+                                color: Theme.of(context).colorScheme.onSurface,
                               ),
                             ),
                           ),
@@ -1426,34 +1547,34 @@ class _MovimentacaoSection extends StatelessWidget {
                           child: Text(
                             _fmtData(m.criadoEm),
                             textAlign: TextAlign.right,
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 12,
-                                color: AppTheme.textSecondary),
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
                           ),
                         ),
                       ],
                     ),
                   ),
                   if (i < movimentacoes.length - 1)
-                    const Divider(height: 1, color: AppTheme.divider),
+                    Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
                 ],
               );
             }),
 
             // Rodapé com total
             if (mostrarPreco) ...[
-              const Divider(height: 16, color: AppTheme.divider),
+              Divider(height: 16, color: Theme.of(context).colorScheme.outlineVariant),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding: EdgeInsets.symmetric(horizontal: 8),
                 child: Row(
                   children: [
-                    const Spacer(),
-                    const Text(
+                    Spacer(),
+                    Text(
                       'Total geral',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: AppTheme.textSecondary,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1525,11 +1646,11 @@ class _DatePickerField extends StatelessWidget {
       onTap: () => _pick(context),
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color:  AppTheme.surface,
+          color:  Theme.of(context).colorScheme.surface,
           border: Border.all(
-            color: hasValue ? AppTheme.primary : AppTheme.divider,
+            color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
           ),
           borderRadius: BorderRadius.circular(8),
         ),
@@ -1539,22 +1660,22 @@ class _DatePickerField extends StatelessWidget {
             Icon(
               Icons.calendar_today,
               size:  16,
-              color: hasValue ? AppTheme.primary : AppTheme.textHint,
+              color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
             ),
-            const SizedBox(width: 6),
+            SizedBox(width: 6),
             Text(
               hasValue ? '$label: ${_fmtData(value)}' : label,
               style: TextStyle(
                 fontSize:   13,
-                color:      hasValue ? AppTheme.primary : AppTheme.textHint,
+                color:      hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
                 fontWeight: hasValue ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
             if (hasValue) ...[
-              const SizedBox(width: 6),
+              SizedBox(width: 6),
               GestureDetector(
                 onTap: onCleared,
-                child: const Icon(Icons.close, size: 14, color: AppTheme.textHint),
+                child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
               ),
             ],
           ],

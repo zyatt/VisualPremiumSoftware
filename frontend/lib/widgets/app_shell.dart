@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/usuario_provider.dart';
 import '../providers/alertas_estoque_provider.dart';
+import '../providers/theme_provider.dart';   // ← NOVO
 import '../theme/app_theme.dart';
 
 class AppShell extends StatefulWidget {
@@ -25,7 +26,7 @@ class AppShell extends StatefulWidget {
     _NavItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção',         route: '/producao'),
     _NavItem(icon: Icons.admin_panel_settings_rounded,    label: 'Admin',            route: '/admin'),
     _NavItem(icon: Icons.pie_chart_rounded,               label: 'Gastos',           route: '/gastos-categoria'),
-    _NavItem(icon: Icons.directions_car_rounded,          label: 'Veículos',         route: '/veiculos'), // ← adicionar
+    _NavItem(icon: Icons.directions_car_rounded,          label: 'Veículos',         route: '/veiculos'),
   ];
 
   // Itens para COMPRAS (sem Admin; pode ver Produção como somente leitura)
@@ -68,8 +69,6 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
-    // O provider é global (MultiProvider no main), não fazemos pararPolling aqui
-    // para que o polling continue mesmo ao navegar entre páginas.
     super.dispose();
   }
 
@@ -90,7 +89,6 @@ class _AppShellState extends State<AppShell> {
     } else if (isAdmin || isGerente) {
       items = AppShell._navItemsCompleto;
     } else {
-      // COMPRAS e qualquer outro role não-produção
       items = AppShell._navItemsCompras;
     }
 
@@ -161,15 +159,26 @@ class _SidebarContentState extends State<_SidebarContent> {
     if (mounted) setState(() => _version = info.version);
   }
 
+  // ── Dialog de configurações ──────────────────────────────────
+  void _abrirConfiguracoes(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => const _ConfiguracoesDialog(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final usuario  = context.watch<UsuarioProvider>().usuarioLogado;
-    final alertas  = context.watch<AlertasEstoqueProvider>();
-    final nAlertas = alertas.totalAlertas;
+    final usuario   = context.watch<UsuarioProvider>().usuarioLogado;
+    final alertas   = context.watch<AlertasEstoqueProvider>();
+    final nAlertas  = alertas.totalAlertas;
     final nCriticos = alertas.totalCriticos;
 
+    // Cor da sidebar: fixa escura independente do tema do app
+    const sidebarBg = AppTheme.sidebar; // 0xFF201E1E
+
     return Container(
-      color: AppTheme.sidebar,
+      color: sidebarBg,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -180,7 +189,7 @@ class _SidebarContentState extends State<_SidebarContent> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                   ClipRRect(
+                  ClipRRect(
                     borderRadius: BorderRadius.circular(10),
                     child: Image.asset(
                       'assets/images/logo.png',
@@ -245,7 +254,7 @@ class _SidebarContentState extends State<_SidebarContent> {
 
             const Divider(color: Colors.white10, height: 1),
 
-            // ── Usuário + logout ──────────────────────────────────────────
+            // ── Usuário + botão de configurações ─────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               child: Row(
@@ -287,13 +296,11 @@ class _SidebarContentState extends State<_SidebarContent> {
                       ],
                     ),
                   ),
+                  // ── Botão de configurações ────────────────────────────
                   IconButton(
-                    tooltip: 'Sair',
-                    icon: const Icon(Icons.logout_rounded, size: 18, color: Colors.white38),
-                    onPressed: () {
-                      context.read<UsuarioProvider>().logout();
-                      context.go('/login');
-                    },
+                    tooltip: 'Configurações',
+                    icon: const Icon(Icons.settings_rounded, size: 18, color: Colors.white38),
+                    onPressed: () => _abrirConfiguracoes(context),
                   ),
                 ],
               ),
@@ -318,6 +325,248 @@ class _SidebarContentState extends State<_SidebarContent> {
     showDialog(
       context: context,
       builder: (_) => _PainelAlertasDialog(alertas: alertas),
+    );
+  }
+}
+
+// ─── Dialog de Configurações ────────────────────────────────────────────────
+
+class _ConfiguracoesDialog extends StatelessWidget {
+  const _ConfiguracoesDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    final themeProvider = context.watch<ThemeProvider>();
+    final isDark = themeProvider.isDark;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Container(
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: colorScheme.outline.withValues(alpha: 0.5),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.12),
+                blurRadius: 32,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Header ──────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 12, 16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.settings_rounded,
+                        color: AppTheme.primary,
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Configurações',
+                      style: GoogleFonts.raleway(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: Icon(Icons.close_rounded,
+                          size: 18, color: colorScheme.onSurfaceVariant),
+                      onPressed: () => Navigator.of(context).pop(),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ),
+              ),
+
+              Divider(color: colorScheme.outline.withValues(alpha: 0.4), height: 1),
+
+              // ── Opção: Tema ──────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text(
+                  'APARÊNCIA',
+                  style: GoogleFonts.nunito(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => context.read<ThemeProvider>().toggle(),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      child: Row(
+                        children: [
+                          // Ícone animado que troca conforme o tema
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 250),
+                            transitionBuilder: (child, anim) => ScaleTransition(
+                              scale: anim,
+                              child: child,
+                            ),
+                            child: Icon(
+                              isDark
+                                  ? Icons.dark_mode_rounded
+                                  : Icons.light_mode_rounded,
+                              key: ValueKey(isDark),
+                              color: isDark
+                                  ? const Color(0xFF93C5FD)
+                                  : const Color(0xFFFBBF24),
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Modo de exibição',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: colorScheme.onSurface,
+                                  ),
+                                ),
+                                Text(
+                                  isDark ? 'Escuro' : 'Claro',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Toggle switch
+                          Switch(
+                            value: isDark,
+                            onChanged: (_) =>
+                                context.read<ThemeProvider>().toggle(),
+                            activeThumbColor: AppTheme.primary,
+                            activeTrackColor:
+                                AppTheme.primary.withValues(alpha: 0.3),
+                            inactiveThumbColor: colorScheme.onSurfaceVariant,
+                            inactiveTrackColor: colorScheme.outline
+                                .withValues(alpha: 0.3),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 8),
+              Divider(
+                  color: colorScheme.outline.withValues(alpha: 0.4), height: 1),
+
+              // ── Opção: Sair ──────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text(
+                  'CONTA',
+                  style: GoogleFonts.nunito(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      context.read<UsuarioProvider>().logout();
+                      context.go('/login');
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: AppTheme.error.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.logout_rounded,
+                              color: AppTheme.error,
+                              size: 16,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Sair da conta',
+                            style: GoogleFonts.nunito(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.error,
+                            ),
+                          ),
+                          const Spacer(),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: 18,
+                            color: AppTheme.error.withValues(alpha: 0.5),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -448,29 +697,28 @@ class _PainelAlertasDialog extends StatelessWidget {
     final limites  = alertas.limites;
 
     return AlertDialog(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 12, 0),
       contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-      actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      actionsPadding: EdgeInsets.fromLTRB(12, 0, 12, 12),
       title: Row(
         children: [
-          const Icon(Icons.notifications_active_rounded,
+          Icon(Icons.notifications_active_rounded,
               color: Color(0xFFDC2626), size: 20),
-          const SizedBox(width: 8),
+          SizedBox(width: 8),
           Text(
             'Alertas de Estoque',
             style: GoogleFonts.nunito(
-              color: AppTheme.textPrimary,
+              color: Theme.of(context).colorScheme.onSurface,
               fontWeight: FontWeight.w800,
               fontSize: 15,
             ),
           ),
-          const Spacer(),
-          // Botão de atualizar
+          Spacer(),
           IconButton(
             tooltip: 'Atualizar',
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            color: AppTheme.textSecondary,
+            icon: Icon(Icons.refresh_rounded, size: 18),
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
             onPressed: () => alertas.carregar(),
           ),
         ],
@@ -493,13 +741,13 @@ class _PainelAlertasDialog extends StatelessWidget {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.check_circle_outline_rounded,
+                            Icon(Icons.check_circle_outline_rounded,
                                 size: 48, color: Color(0xFF15803D)),
-                            const SizedBox(height: 12),
+                            SizedBox(height: 12),
                             Text(
                               'Nenhum material em alerta',
                               style: GoogleFonts.nunito(
-                                  color: AppTheme.textSecondary, fontSize: 14),
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14),
                             ),
                           ],
                         ),
@@ -540,7 +788,7 @@ class _PainelAlertasDialog extends StatelessWidget {
           onPressed: () => Navigator.of(context).pop(),
           child: Text(
             'Fechar',
-            style: GoogleFonts.nunito(color: AppTheme.textSecondary),
+            style: GoogleFonts.nunito(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ),
         FilledButton.icon(
@@ -617,7 +865,6 @@ class _AlertaItemTile extends StatelessWidget {
     final isCritico = alerta.isCritico as bool;
     final cor = isCritico ? const Color(0xFFDC2626) : const Color(0xFFD97706);
 
-    // Monta subtítulo com unidade, identificador, medida, espessura
     final partes = <String>[];
     if ((alerta.categoria as String?) != null &&
         (alerta.categoria as String).isNotEmpty) {
@@ -661,7 +908,7 @@ class _AlertaItemTile extends StatelessWidget {
                 Text(
                   alerta.nome as String,
                   style: GoogleFonts.nunito(
-                    color: AppTheme.textPrimary,
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
                   ),
@@ -671,7 +918,7 @@ class _AlertaItemTile extends StatelessWidget {
                   Text(
                     subtitulo,
                     style: GoogleFonts.nunito(
-                      color: AppTheme.textHint,
+                      color: Theme.of(context).colorScheme.outline,
                       fontSize: 10,
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -694,7 +941,7 @@ class _AlertaItemTile extends StatelessWidget {
               Text(
                 'mín $minStr',
                 style: GoogleFonts.nunito(
-                  color: AppTheme.textHint,
+                  color: Theme.of(context).colorScheme.outline,
                   fontSize: 10,
                 ),
               ),

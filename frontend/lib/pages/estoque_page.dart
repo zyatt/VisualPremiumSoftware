@@ -85,6 +85,28 @@ class _DecimalInputFormatter extends TextInputFormatter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Converte exceções técnicas de rede em mensagens legíveis pelo usuário.
+String _mensagemErroAmigavelPdf(Object e) {
+  final raw   = e.toString();
+  final lower = raw.toLowerCase();
+  if (lower.contains('socketexception') ||
+      lower.contains('clientexception') ||
+      lower.contains('connection refused') ||
+      lower.contains('recusou a conexão') ||
+      lower.contains('errno')) {
+    return 'Verifique a conexão com o servidor.';
+  }
+  if (lower.contains('timeout') || lower.contains('timed out')) {
+    return 'Conexão com o servidor expirou. Verifique a rede e tente novamente.';
+  }
+  // Remove prefixos técnicos
+  return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TELA PRINCIPAL: busca + grade de categorias + tabela inline
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -183,9 +205,9 @@ class _EstoquePageState extends State<EstoquePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -200,27 +222,27 @@ class _EstoquePageState extends State<EstoquePage> {
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(
                       'Selecione uma categoria para ver os materiais',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
-                const Spacer(),
+                Spacer(),
                 IconButton(
                   onPressed: () => context.read<MaterialProvider>().carregarCategorias(),
-                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
@@ -246,7 +268,7 @@ class _EstoquePageState extends State<EstoquePage> {
                 inputFormatters: [_NoCommaFormatter()],
                 decoration: InputDecoration(
                   hintText:   'Buscar categoria...',
-                  prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
+                  prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                   isDense:    true,
                   suffixIcon: _filtroCategoria.isNotEmpty
                       ? IconButton(
@@ -268,10 +290,70 @@ class _EstoquePageState extends State<EstoquePage> {
               child: SingleChildScrollView(
                 child: Consumer<MaterialProvider>(
                   builder: (_, provider, __) {
-                    if (provider.carregando && provider.categorias.isEmpty) {
+                    if (provider.carregando) {
                       return const SizedBox(
                         height: 200,
                         child: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+                      );
+                    }
+
+                    if (provider.erro != null) {
+                      // A mensagem vem como "Erro ao carregar categorias: Verifique..."
+                      // Extrai só a parte após o primeiro ": " para evitar duplicação.
+                      final partes = provider.erro!.split(': ');
+                      final subtitulo = partes.length > 1
+                          ? partes.sublist(1).join(': ')
+                          : provider.erro!;
+                      return SizedBox(
+                        height: 300,
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.cloud_off_outlined,
+                                  size: 48, color: AppTheme.error),
+                              SizedBox(height: 12),
+                              Text(
+                                'Erro ao carregar categorias',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.onSurface,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                subtitulo,
+                                style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 16),
+                              FilledButton.icon(
+                                onPressed: () => context
+                                    .read<MaterialProvider>()
+                                    .carregarCategorias(),
+                                icon: const Icon(Icons.refresh, size: 18),
+                                label: const Text('Tentar novamente'),
+                                style: FilledButton.styleFrom(
+                                    backgroundColor: AppTheme.primary),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+
+                    // Só exibe os cards se o servidor respondeu com sucesso
+                    // pelo menos uma vez. Evita mostrar "Geral" e "Sem categoria"
+                    // com o servidor offline (quando categorias ainda não foram carregadas).
+                    if (!provider.categoriasCarregadas) {
+                      return const SizedBox(
+                        height: 200,
+                        child: Center(
+                          child: CircularProgressIndicator(color: AppTheme.primary),
+                        ),
                       );
                     }
 
@@ -326,13 +408,13 @@ class _EstoquePageState extends State<EstoquePage> {
                     if (todosCards.isEmpty) {
                       return Center(
                         child: Padding(
-                          padding: const EdgeInsets.only(top: 80),
+                          padding: EdgeInsets.only(top: 80),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.search_off,
-                                  size: 64, color: AppTheme.textHint),
-                              const SizedBox(height: 16),
+                              Icon(Icons.search_off,
+                                  size: 64, color: Theme.of(context).colorScheme.outline),
+                              SizedBox(height: 16),
                               Text(
                                 _filtroCategoria.isNotEmpty
                                     ? 'Nenhuma categoria encontrada'
@@ -340,7 +422,7 @@ class _EstoquePageState extends State<EstoquePage> {
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodyLarge
-                                    ?.copyWith(color: AppTheme.textSecondary),
+                                    ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                               ),
                             ],
                           ),
@@ -405,9 +487,9 @@ class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Selecione quais materiais deseja incluir no relatório:',
-              style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
             ..._opcoes.map((opcao) {
@@ -420,7 +502,7 @@ class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
                   onTap: () => setState(() => _statusSelecionado = valor),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 120),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                    padding: EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                     decoration: BoxDecoration(
                       color: selecionado
                           ? cor.withValues(alpha: 0.10)
@@ -429,20 +511,20 @@ class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
                       border: Border.all(
                         color: selecionado
                             ? cor
-                            : AppTheme.textHint.withValues(alpha: 0.25),
+                            : Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
                         width: selecionado ? 1.5 : 1,
                       ),
                     ),
                     child: Row(
                       children: [
-                        Icon(icone, size: 18, color: selecionado ? cor : AppTheme.textSecondary),
-                        const SizedBox(width: 10),
+                        Icon(icone, size: 18, color: selecionado ? cor : Theme.of(context).colorScheme.onSurfaceVariant),
+                        SizedBox(width: 10),
                         Text(
                           label,
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: selecionado ? FontWeight.w700 : FontWeight.w400,
-                            color: selecionado ? cor : AppTheme.textPrimary,
+                            color: selecionado ? cor : Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
                         const Spacer(),
@@ -612,7 +694,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -625,21 +707,21 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
                   onTap: () => Navigator.of(context).pop(),
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      border: Border.all(color: AppTheme.divider),
+                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
+                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         SizedBox(width: 6),
                         Text(
                           'Categorias',
                           style: TextStyle(
                             fontSize: 13,
-                            color: AppTheme.textSecondary,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -657,7 +739,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
                   ),
                   child: Icon(widget.icone, color: widget.cor, size: 20),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -666,32 +748,32 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(
                       'Selecione um identificador para ver os materiais',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
-                const Spacer(),
+                Spacer(),
                 IconButton(
                   onPressed: _carregar,
-                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: 20),
 
             // ── Campo de busca ────────────────────────────────────────────────
             SizedBox(
@@ -701,7 +783,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
                 inputFormatters: [_NoCommaFormatter()],
                 decoration: InputDecoration(
                   hintText:   'Buscar identificador...',
-                  prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
+                  prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                   isDense:    true,
                   suffixIcon: _filtro.isNotEmpty
                       ? IconButton(
@@ -777,14 +859,14 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.search_off, size: 64, color: AppTheme.textHint),
-            const SizedBox(height: 16),
+            Icon(Icons.search_off, size: 64, color: Theme.of(context).colorScheme.outline),
+            SizedBox(height: 16),
             Text(
               'Nenhum identificador encontrado',
               style: Theme.of(context)
                   .textTheme
                   .bodyLarge
-                  ?.copyWith(color: AppTheme.textSecondary),
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -841,11 +923,11 @@ class _IdentificadorCardState extends State<_IdentificadorCard> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
+          duration: Duration(milliseconds: 150),
           decoration: BoxDecoration(
             color: ativo
                 ? widget.cor.withValues(alpha: 0.12)
-                : AppTheme.surface,
+                : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: ativo
@@ -881,29 +963,29 @@ class _IdentificadorCardState extends State<_IdentificadorCard> {
                 ),
                 child: Icon(widget.icone, color: widget.cor, size: 28),
               ),
-              const SizedBox(height: 10),
+              SizedBox(height: 10),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: EdgeInsets.symmetric(horizontal: 12),
                 child: Text(
                   widget.label,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: ativo ? widget.cor : AppTheme.textPrimary,
+                    color: ativo ? widget.cor : Theme.of(context).colorScheme.onSurface,
                   ),
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(height: 4),
+              SizedBox(height: 4),
               Text(
                 '${widget.quantidade} ${widget.quantidade == 1 ? "material" : "materiais"}',
                 style: TextStyle(
                   fontSize: 11,
                   color: ativo
                       ? widget.cor.withValues(alpha: 0.8)
-                      : AppTheme.textHint,
+                      : Theme.of(context).colorScheme.outline,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -1275,7 +1357,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Erro ao gerar PDF: $e'),
+          content: Text('Erro ao gerar PDF: ${_mensagemErroAmigavelPdf(e)}'),
           backgroundColor: AppTheme.error,
         ),
       );
@@ -1284,7 +1366,10 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
 
   // ── Orçar materiais filtrados ──────────────────────────────────────────────
   Future<void> _orcarFiltrados() async {
-    final materiais = context.read<MaterialProvider>().materiais;
+    final todos = context.read<MaterialProvider>().materiais;
+    final materiais = _somenteFornecedor
+        ? todos.where((m) => m.fornecedorMateriais.isNotEmpty).toList()
+        : todos;
     if (materiais.isEmpty) return;
 
     // Monta os itens para o orçamento com os dados de preço de cada material
@@ -1343,7 +1428,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     final cor    = widget.cor;
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -1351,29 +1436,30 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
           children: [
             // ── Cabeçalho com botão voltar ──────────────────────────────────
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Botão voltar
                 InkWell(
                   onTap: () => Navigator.of(context).pop(),
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      border: Border.all(color: AppTheme.divider),
+                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.arrow_back, size: 18, color: AppTheme.textSecondary),
-                        const SizedBox(width: 6),
+                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        SizedBox(width: 6),
                         Text(
                           widget.mostrarBotaoIdentificadores
                               ? widget.categoriaLabel
                               : 'Categorias',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
-                            color: AppTheme.textSecondary,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -1405,11 +1491,11 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                             style: Theme.of(context)
                                 .textTheme
                                 .bodySmall
-                                ?.copyWith(color: AppTheme.textHint),
+                                ?.copyWith(color: Theme.of(context).colorScheme.outline),
                           ),
-                          const Padding(
+                          Padding(
                             padding: EdgeInsets.symmetric(horizontal: 4),
-                            child: Icon(Icons.chevron_right, size: 14, color: AppTheme.textHint),
+                            child: Icon(Icons.chevron_right, size: 14, color: Theme.of(context).colorScheme.outline),
                           ),
                           Text(
                             widget.identificadorLabel!,
@@ -1430,102 +1516,107 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(
                       'Materiais desta categoria',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
                 const Spacer(),
-                // ▼ NOVO — botão Histórico à esquerda do Orçar filtrados
-                OutlinedButton.icon(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const HistoricoMaterialPage(),
-                    ),
-                  ),
-                  icon: const Icon(Icons.history, size: 18),
-                  label: const Text('Histórico'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF7C3AED),
-                    side: const BorderSide(color: Color(0xFF7C3AED)),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // ── fim da adição ──────────────────────────────────────────
-                Consumer<MaterialProvider>(
-                  builder: (_, mp, __) {
-                    final temMateriais = !mp.carregando && mp.materiais.isNotEmpty;
-                    return Tooltip(
-                      message: temMateriais
-                          ? 'Criar orçamento com os ${mp.materiais.length} material(is) filtrado(s)'
-                          : 'Nenhum material filtrado',
-                      child: OutlinedButton.icon(
-                        onPressed: temMateriais ? _orcarFiltrados : null,
-                        icon: const Icon(Icons.request_quote, size: 18),
-                        label: Text(
-                          temMateriais
-                              ? 'Orçar filtrados (${mp.materiais.length})'
-                              : 'Orçar filtrados',
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF1E88E5),
-                          side: BorderSide(
-                            color: temMateriais
-                                ? const Color(0xFF1E88E5)
-                                : AppTheme.textHint,
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
+                // Botões de ação — Wrap evita overflow quando a janela estreita
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const HistoricoMaterialPage(),
                         ),
                       ),
-                    );
-                  },
-                ),
-                const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  onPressed: _exportarPdf,
-                  icon: const Icon(Icons.picture_as_pdf, size: 18),
-                  label: const Text('Exportar Estoque (PDF)'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFE85D04),
-                    side: const BorderSide(color: Color(0xFFE85D04)),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                FilledButton.icon(
-                  onPressed: () => _abrirFormMaterial(),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Novo Material'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: _aplicarFiltros,
-                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
-                  tooltip: 'Atualizar',
-                  style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
-                  ),
+                      icon: const Icon(Icons.history, size: 18),
+                      label: const Text('Histórico'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF7C3AED),
+                        side: const BorderSide(color: Color(0xFF7C3AED)),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                      ),
+                    ),
+                    Consumer<MaterialProvider>(
+                      builder: (_, mp, __) {
+                        final visiveis = _somenteFornecedor
+                            ? mp.materiais.where((m) => m.fornecedorMateriais.isNotEmpty).toList()
+                            : mp.materiais;
+                        final temMateriais = !mp.carregando && visiveis.isNotEmpty;
+                        return Tooltip(
+                          message: temMateriais
+                              ? 'Criar orçamento com os ${visiveis.length} material(is) filtrado(s)'
+                              : 'Nenhum material filtrado',
+                          child: OutlinedButton.icon(
+                            onPressed: temMateriais ? _orcarFiltrados : null,
+                            icon: const Icon(Icons.request_quote, size: 18),
+                            label: Text(
+                              temMateriais
+                                  ? 'Orçar filtrados (${visiveis.length})'
+                                  : 'Orçar filtrados',
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Color(0xFF1E88E5),
+                              side: BorderSide(
+                                color: temMateriais
+                                    ? Color(0xFF1E88E5)
+                                    : Theme.of(context).colorScheme.outline,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 12),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _exportarPdf,
+                      icon: const Icon(Icons.picture_as_pdf, size: 18),
+                      label: const Text('Exportar Estoque (PDF)'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFE85D04),
+                        side: const BorderSide(color: Color(0xFFE85D04)),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: () => _abrirFormMaterial(),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: Text('Novo Material'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: _aplicarFiltros,
+                      icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      tooltip: 'Atualizar',
+                      style: IconButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.surface,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: 20),
 
             // ── Filtros linha 1 ────────────────────────────────────────────
             Row(
@@ -1534,9 +1625,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   width: 120,
                   child: TextField(
                     controller: _buscaIdCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'ID...',
-                      prefixIcon: Icon(Icons.tag, color: AppTheme.textHint, size: 18),
+                      prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
                     keyboardType: TextInputType.number,
@@ -1549,15 +1640,15 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Expanded(
                   flex: 3,
                   child: TextField(
                     controller: _buscaCtrl,
                     inputFormatters: [_NoCommaFormatter()],
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'Buscar material...',
-                      prefixIcon: Icon(Icons.search, color: AppTheme.textHint, size: 20),
+                      prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense:    true,
                     ),
                     onChanged: (_) {
@@ -1590,13 +1681,13 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     },
                   ),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 FilterChip(
-                  label: const Text('Com fornecedor'),
+                  label: Text('Com fornecedor'),
                   avatar: Icon(
                     Icons.store_outlined,
                     size: 16,
-                    color: _somenteFornecedor ? AppTheme.primary : AppTheme.textHint,
+                    color: _somenteFornecedor ? AppTheme.primary : Theme.of(context).colorScheme.outline,
                   ),
                   selected: _somenteFornecedor,
                   onSelected: (v) {
@@ -1607,13 +1698,13 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   checkmarkColor: AppTheme.primary,
                   labelStyle: TextStyle(
                     fontSize: 13,
-                    color: _somenteFornecedor ? AppTheme.primary : AppTheme.textSecondary,
+                    color: _somenteFornecedor ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
                     fontWeight: _somenteFornecedor ? FontWeight.w600 : FontWeight.normal,
                   ),
                   side: BorderSide(
                     color: _somenteFornecedor
                         ? AppTheme.primary
-                        : AppTheme.textHint.withValues(alpha: 0.4),
+                        : Theme.of(context).colorScheme.outline.withValues(alpha: 0.4),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1637,7 +1728,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
 
             // ── Filtros linha 2 ────────────────────────────────────────────
             Row(
@@ -1645,9 +1736,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                 Expanded(
                   child: TextField(
                     controller: _identificadorCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'Identificador...',
-                      prefixIcon: Icon(Icons.qr_code, color: AppTheme.textHint, size: 18),
+                      prefixIcon: Icon(Icons.qr_code, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
                     textCapitalization: TextCapitalization.characters,
@@ -1660,13 +1751,13 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Expanded(
                   child: TextField(
                     controller: _medidaCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'Medida...',
-                      prefixIcon: Icon(Icons.straighten, color: AppTheme.textHint, size: 18),
+                      prefixIcon: Icon(Icons.straighten, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
                     textCapitalization: TextCapitalization.characters,
@@ -1679,13 +1770,13 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Expanded(
                   child: TextField(
                     controller: _espessuraCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:   'Espessura...',
-                      prefixIcon: Icon(Icons.layers, color: AppTheme.textHint, size: 18),
+                      prefixIcon: Icon(Icons.layers, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
                     textCapitalization: TextCapitalization.characters,
@@ -1716,11 +1807,25 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.error_outline, size: 48, color: AppTheme.error),
-                          const SizedBox(height: 12),
+                          Icon(Icons.cloud_off_outlined,
+                              size: 48, color: AppTheme.error),
+                          SizedBox(height: 12),
                           Text(
-                            provider.erro!,
-                            style: const TextStyle(color: AppTheme.textSecondary),
+                            'Erro ao carregar materiais',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            provider.erro!.contains(': ')
+                                ? provider.erro!.substring(provider.erro!.indexOf(': ') + 2)
+                                : provider.erro!,
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 16),
@@ -1734,35 +1839,43 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                       ),
                     );
                   }
-                  if (provider.materiais.isEmpty) {
+                  final todos = _somenteFornecedor
+                      ? provider.materiais
+                          .where((m) => m.fornecedorMateriais.isNotEmpty)
+                          .toList()
+                      : provider.materiais;
+
+                  if (todos.isEmpty) {
                     return Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.inventory_2_outlined,
-                              size: 64, color: AppTheme.textHint),
-                          const SizedBox(height: 16),
+                          Icon(Icons.inventory_2_outlined,
+                              size: 64, color: Theme.of(context).colorScheme.outline),
+                          SizedBox(height: 16),
                           Text(
-                            'Nenhum material encontrado',
+                            _somenteFornecedor
+                                ? 'Nenhum material com fornecedor vinculado'
+                                : 'Nenhum material encontrado',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyLarge
-                                ?.copyWith(color: AppTheme.textSecondary),
+                                ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                           ),
-                          const SizedBox(height: 8),
+                          SizedBox(height: 8),
                           Text(
-                            'Clique em "Novo Material" para adicionar.',
+                            _somenteFornecedor
+                                ? 'Desative o filtro "Com fornecedor" para ver todos.'
+                                : 'Clique em "Novo Material" para adicionar.',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyMedium
-                                ?.copyWith(color: AppTheme.textHint),
+                                ?.copyWith(color: Theme.of(context).colorScheme.outline),
                           ),
                         ],
                       ),
                     );
                   }
-
-                  final todos        = provider.materiais;
                   final ordenados    = _ordenarLista(todos);
                   final totalPaginas = (ordenados.length / _itensPorPagina).ceil();
                   final paginaSegura = _paginaAtual.clamp(0, (totalPaginas - 1).clamp(0, 999));
@@ -1859,11 +1972,11 @@ class _CategoriaCardCompactState extends State<_CategoriaCardCompact> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
+          duration: Duration(milliseconds: 150),
           decoration: BoxDecoration(
             color: ativo
                 ? widget.cor.withValues(alpha: 0.12)
-                : AppTheme.surface,
+                : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: ativo
@@ -1899,15 +2012,15 @@ class _CategoriaCardCompactState extends State<_CategoriaCardCompact> {
                 ),
                 child: Icon(widget.icone, color: widget.cor, size: 28),
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: EdgeInsets.symmetric(horizontal: 12),
                 child: Text(
                   widget.categoria,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: ativo ? widget.cor : AppTheme.textPrimary,
+                    color: ativo ? widget.cor : Theme.of(context).colorScheme.onSurface,
                   ),
                   textAlign: TextAlign.center,
                   maxLines: 2,
@@ -1960,13 +2073,13 @@ class _BarraPaginacao extends StatelessWidget {
     final paginas = _paginas();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
             'Exibindo $inicio–$fim de $totalItens materiais',
-            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           Row(
             mainAxisSize: MainAxisSize.min,
@@ -1977,12 +2090,12 @@ class _BarraPaginacao extends StatelessWidget {
                 enabled: paginaAtual > 0,
                 onTap: () => onPaginaChanged(paginaAtual - 1),
               ),
-              const SizedBox(width: 4),
+              SizedBox(width: 4),
               for (final p in paginas) ...[
                 if (p == -1)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.symmetric(horizontal: 4),
-                    child: Text('…', style: TextStyle(color: AppTheme.textHint)),
+                    child: Text('…', style: TextStyle(color: Theme.of(context).colorScheme.outline)),
                   )
                 else
                   _BotaoNumeroPagina(
@@ -2031,14 +2144,14 @@ class _BotaoPagina extends StatelessWidget {
           height: 32,
           decoration: BoxDecoration(
             border: Border.all(
-              color: enabled ? AppTheme.divider : AppTheme.divider.withValues(alpha: 0.4),
+              color: enabled ? Theme.of(context).colorScheme.outlineVariant : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
             ),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Icon(
             icon,
             size: 18,
-            color: enabled ? AppTheme.textSecondary : AppTheme.textHint,
+            color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
           ),
         ),
       ),
@@ -2068,7 +2181,7 @@ class _BotaoNumeroPagina extends StatelessWidget {
         decoration: BoxDecoration(
           color: ativa ? AppTheme.primary : Colors.transparent,
           border: Border.all(
-            color: ativa ? AppTheme.primary : AppTheme.divider,
+            color: ativa ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
           ),
           borderRadius: BorderRadius.circular(6),
         ),
@@ -2078,7 +2191,7 @@ class _BotaoNumeroPagina extends StatelessWidget {
           style: TextStyle(
             fontSize: 13,
             fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
-            color: ativa ? Colors.white : AppTheme.textSecondary,
+            color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
       ),
@@ -2146,21 +2259,21 @@ class _SectionHeader extends StatelessWidget {
 
 class _EmptySection extends StatelessWidget {
   final String message;
-  const _EmptySection({required this.message});
+  _EmptySection({required this.message});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      decoration: const BoxDecoration(
+      padding: EdgeInsets.symmetric(vertical: 20),
+      decoration: BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: AppTheme.divider, width: 0.8),
+          bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant, width: 0.8),
         ),
       ),
       child: Center(
         child: Text(
           message,
-          style: const TextStyle(fontSize: 13, color: AppTheme.textHint),
+          style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.outline),
         ),
       ),
     );
@@ -2228,7 +2341,7 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
       : _TabelaMateriais._colsBase.where((c) => c.label != 'Categoria').toList();
 
   Widget _cabecalho() => Container(
-        color: AppTheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         child: Row(
           children: [
             for (final col in _cols)
@@ -2242,14 +2355,14 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
                         onTap:    () => widget.onToggleOrdem(col.sortKey!),
                       )
                     : Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                         child: Text(
                           col.label,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 12,
-                            color: AppTheme.textSecondary,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ),
@@ -2279,11 +2392,11 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
             color: AppTheme.warning,
           ),
           if (naoConfirm.isEmpty)
-            const _EmptySection(message: 'Nenhum material pendente de confirmação.')
+            _EmptySection(message: 'Nenhum material pendente de confirmação.')
           else ...[
             for (int i = 0; i < naoConfirm.length; i++) ...[
               if (i > 0)
-                const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+                Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
               _LinhaMateria(
                 material:             naoConfirm[i],
                 cols:                 _cols,
@@ -2293,7 +2406,7 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
                 mostrarCategoria:     widget.mostrarCategoria,
               ),
             ],
-            const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+            Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
           ],
 
           const SizedBox(height: 24),
@@ -2305,11 +2418,11 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
             color: AppTheme.success,
           ),
           if (confirmados.isEmpty)
-            const _EmptySection(message: 'Nenhum material com estoque confirmado.')
+            _EmptySection(message: 'Nenhum material com estoque confirmado.')
           else ...[
             for (int i = 0; i < confirmados.length; i++) ...[
               if (i > 0)
-                const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+                Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
               _LinhaMateria(
                 material:             confirmados[i],
                 cols:                 _cols,
@@ -2319,7 +2432,7 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
                 mostrarCategoria:     widget.mostrarCategoria,
               ),
             ],
-            const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+            Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
           ],
         ],
       ),
@@ -2330,7 +2443,7 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
       children: [
         // Cabeçalho fixo — não entra no scroll
         _cabecalho(),
-        const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+        Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
         // Corpo rolável ocupa o espaço restante
         Expanded(child: corpoRolavel),
       ],
@@ -2372,7 +2485,7 @@ class _CabecalhoOrdenavel extends StatelessWidget {
       child: GestureDetector(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
           child: Stack(
             alignment: Alignment.center,
             children: [
@@ -2382,7 +2495,7 @@ class _CabecalhoOrdenavel extends StatelessWidget {
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 12,
-                  color: ativo ? AppTheme.primary : AppTheme.textSecondary,
+                  color: ativo ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
               // Ícone pequeno no canto superior direito, sem afetar o layout do texto
@@ -2396,7 +2509,7 @@ class _CabecalhoOrdenavel extends StatelessWidget {
                           : Icons.arrow_drop_down_rounded)
                       : Icons.unfold_more_rounded,
                   size: 12,
-                  color: ativo ? AppTheme.primary : AppTheme.textHint,
+                  color: ativo ? AppTheme.primary : Theme.of(context).colorScheme.outline,
                 ),
               ),
             ],
@@ -2444,14 +2557,14 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
       ? SizedBox(width: col.fixed, child: child)
       : Expanded(flex: (col.flex! * 10).round(), child: child);
  
-  static Widget _cell(String text, {bool inativo = false}) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+  static Widget _cell(String text, BuildContext context, {bool inativo = false}) => Padding(
+        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         child: Text(
           text,
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 13,
-            color: inativo ? AppTheme.textHint : AppTheme.textPrimary,
+            color: inativo ? Theme.of(context).colorScheme.outline : Theme.of(context).colorScheme.onSurface,
           ),
         ),
       );
@@ -2463,10 +2576,10 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
     final cols    = widget.cols;
  
     final bgColor = _hovered
-        ? const Color(0xFFFF9800).withValues(alpha: 0.10)
+        ? Color(0xFFFF9800).withValues(alpha: 0.10)
         : inativo
-            ? AppTheme.surfaceVariant.withValues(alpha: 0.4)
-            : AppTheme.surface;
+            ? Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4)
+            : Theme.of(context).colorScheme.surface;
  
     Widget maybeOpacity(Widget child) =>
         inativo ? Opacity(opacity: 0.45, child: child) : child;
@@ -2476,14 +2589,14 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
         final total = m.quantidadeTotal;
         final label = total.toStringAsFixed(total % 1 == 0 ? 0 : 2);
         return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          padding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
                 label,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
               ),
               const SizedBox(width: 4),
               // Seta clicável separada para expandir/recolher
@@ -2509,6 +2622,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
       }
       return maybeOpacity(_cell(
         m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2),
+        context,
         inativo: inativo,
       ));
     }
@@ -2529,23 +2643,23 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
               children: [
                 // ID
                 _colWrap(cols[0], maybeOpacity(Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
                     '${m.id}',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
-                      color: inativo ? AppTheme.textHint : AppTheme.textSecondary,
+                      color: inativo ? Theme.of(context).colorScheme.outline : Theme.of(context).colorScheme.onSurfaceVariant,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
                 ))),
-                _vDivider(),
+                _vDivider(context),
  
                 // Identificador
-                _colWrap(cols[1], maybeOpacity(_cell(m.identificador ?? '—', inativo: inativo))),
-                _vDivider(),
+                _colWrap(cols[1], maybeOpacity(_cell(m.identificador ?? '—', context, inativo: inativo))),
+                _vDivider(context),
  
                 // Nome
                 _colWrap(cols[2], maybeOpacity(Padding(
@@ -2560,7 +2674,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                           style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 13,
-                            color: inativo ? AppTheme.textHint : AppTheme.textPrimary,
+                            color: inativo ? Theme.of(context).colorScheme.outline : Theme.of(context).colorScheme.onSurface,
                             decoration: inativo ? TextDecoration.lineThrough : null,
                           ),
                         ),
@@ -2568,44 +2682,45 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                     ],
                   ),
                 ))),
-                _vDivider(),
+                _vDivider(context),
  
                 // Categoria (apenas em Geral / Sem categoria)
                 if (widget.mostrarCategoria) ...[
-                  _colWrap(cols[3], maybeOpacity(_cell(m.categoria ?? '—', inativo: inativo))),
-                  _vDivider(),
+                  _colWrap(cols[3], maybeOpacity(_cell(m.categoria ?? '—', context, inativo: inativo))),
+                  _vDivider(context),
                 ],
  
                 // Medida
-                _colWrap(cols[widget.mostrarCategoria ? 4 : 3], maybeOpacity(_cell(m.medida ?? '—', inativo: inativo))),
-                _vDivider(),
+                _colWrap(cols[widget.mostrarCategoria ? 4 : 3], maybeOpacity(_cell(m.medida ?? '—', context, inativo: inativo))),
+                _vDivider(context),
  
                 // Espessura
-                _colWrap(cols[widget.mostrarCategoria ? 5 : 4], maybeOpacity(_cell(m.espessura ?? '—', inativo: inativo))),
-                _vDivider(),
+                _colWrap(cols[widget.mostrarCategoria ? 5 : 4], maybeOpacity(_cell(m.espessura ?? '—', context, inativo: inativo))),
+                _vDivider(context),
  
                 // Largura
-                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], maybeOpacity(_cell(m.largura != null ? m.largura!.toStringAsFixed((m.largura! % 1 == 0 ? 0 : 2).toInt()) : '—', inativo: inativo))),
-                _vDivider(),
+                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], maybeOpacity(_cell(m.largura != null ? m.largura!.toStringAsFixed((m.largura! % 1 == 0 ? 0 : 2).toInt()) : '—', context, inativo: inativo))),
+                _vDivider(context),
  
                 // Comprimento
-                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], maybeOpacity(_cell(m.comprimento != null ? m.comprimento!.toStringAsFixed((m.comprimento! % 1 == 0 ? 0 : 2).toInt()) : '—', inativo: inativo))),
-                _vDivider(),
+                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], maybeOpacity(_cell(m.comprimento != null ? m.comprimento!.toStringAsFixed((m.comprimento! % 1 == 0 ? 0 : 2).toInt()) : '—', context, inativo: inativo))),
+                _vDivider(context),
  
                 // Estoque atual (com lógica especial para específico)
                 _colWrap(cols[widget.mostrarCategoria ? 8 : 7], estoqueAtualCell()),
-                _vDivider(),
+                _vDivider(context),
  
                 // Estoque mínimo
                 _colWrap(cols[widget.mostrarCategoria ? 9 : 8], maybeOpacity(_cell(
                   m.estoqueMinimo.toStringAsFixed(m.estoqueMinimo % 1 == 0 ? 0 : 2),
+                  context,
                   inativo: inativo,
                 ))),
-                _vDivider(),
+                _vDivider(context),
  
                 // Unidade
-                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], maybeOpacity(_cell(m.unidade ?? '—', inativo: inativo))),
-                _vDivider(),
+                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], maybeOpacity(_cell(m.unidade ?? '—', context, inativo: inativo))),
+                _vDivider(context),
  
                 // Custo última compra
                 _colWrap(cols[widget.mostrarCategoria ? 11 : 10], maybeOpacity(_CustoCell(
@@ -2613,7 +2728,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                   temHistorico: true,
                   onTap:       () => widget.onVerHistoricoPrecos(m),
                 ))),
-                _vDivider(),
+                _vDivider(context),
  
                 // Custo m² última compra
                 _colWrap(cols[widget.mostrarCategoria ? 12 : 11], maybeOpacity(_CustoCell(
@@ -2621,7 +2736,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                   temHistorico: true,
                   onTap:       () => widget.onVerHistoricoPrecos(m),
                 ))),
-                _vDivider(),
+                _vDivider(context),
  
                 // Status
                 _colWrap(cols[widget.mostrarCategoria ? 13 : 12], maybeOpacity(Center(
@@ -2682,27 +2797,27 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
           child: _expandido
               ? Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE85D04).withValues(alpha: 0.03),
+                    color: Color(0xFFE85D04).withValues(alpha: 0.03),
                     border: Border(
                       left: BorderSide(
-                        color: const Color(0xFFE85D04).withValues(alpha: 0.4),
+                        color: Color(0xFFE85D04).withValues(alpha: 0.4),
                         width: 3,
                       ),
-                      bottom: const BorderSide(
-                        color: AppTheme.divider,
+                      bottom: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
                         width: 0.8,
                       ),
                     ),
                   ),
                   child: m.filhosEspecificos.isEmpty
-                      ? const Padding(
+                      ? Padding(
                           padding: EdgeInsets.symmetric(vertical: 14, horizontal: 24),
                           child: Text(
                             'Nenhum estoque registrado ainda. '
                             'Finalize uma Ordem de Compra com este material para criar entradas.',
                             style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.textHint,
+                              color: Theme.of(context).colorScheme.outline,
                               fontStyle: FontStyle.italic,
                             ),
                           ),
@@ -2710,13 +2825,13 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                       : Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Divider(height: 0, thickness: 0.5, color: AppTheme.divider),
+                            Divider(height: 0, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant),
                             for (int i = 0; i < m.filhosEspecificos.length; i++) ...[
                               if (i > 0)
-                                const Divider(
+                                Divider(
                                   height: 0,
                                   thickness: 0.5,
-                                  color: AppTheme.divider,
+                                  color: Theme.of(context).colorScheme.outlineVariant,
                                 ),
                               _LinhaFilhoEspecifico(
                                 filho:                m.filhosEspecificos[i],
@@ -2729,14 +2844,14 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                           ],
                         ),
                 )
-              : const SizedBox.shrink(),
+              : SizedBox.shrink(),
         ),
       ],
     );
   }
  
-  static Widget _vDivider() => const VerticalDivider(
-        width: 1, thickness: 0.5, color: AppTheme.divider,
+  static Widget _vDivider(BuildContext context) => VerticalDivider(
+        width: 1, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant,
       );
 }
 
@@ -2766,8 +2881,8 @@ class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
       ? SizedBox(width: col.fixed, child: child)
       : Expanded(flex: (col.flex! * 10).round(), child: child);
 
-  static Widget _vDivider() => const VerticalDivider(
-        width: 1, thickness: 0.5, color: AppTheme.divider,
+  static Widget _vDivider(BuildContext context) => VerticalDivider(
+        width: 1, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant,
       );
 
   static Widget _emptyCell() => const Padding(
@@ -2842,11 +2957,11 @@ class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
                     ),
                   ),
                 )),
-                _vDivider(),
+                _vDivider(context),
 
                 // col[1]: Identificador — vazio
                 _colWrap(cols[1], _emptyCell()),
-                _vDivider(),
+                _vDivider(context),
 
                 // col[2]: Nome → descrição do filho + ícones de ação no hover
                 _colWrap(cols[2], Padding(
@@ -2858,30 +2973,38 @@ class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
                         child: Text(
                           filho.descricao,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
                             fontStyle: FontStyle.italic,
-                            color: AppTheme.textPrimary,
+                            color: Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
                       ),
                     ],
                   ),
                 )),
-                _vDivider(),
+                _vDivider(context),
 
-                // col Categoria (apenas em Geral / Sem categoria) + Medida + Espessura: vazios
+                // col Categoria (apenas em Geral / Sem categoria) + Medida + Espessura + Largura + Comprimento: vazios
                 if (widget.mostrarCategoria) ...[
                   _colWrap(cols[3], _emptyCell()),
-                  _vDivider(),
+                  _vDivider(context),
                 ],
                 _colWrap(cols[widget.mostrarCategoria ? 4 : 3], _emptyCell()),
-                _vDivider(),
+                _vDivider(context),
                 _colWrap(cols[widget.mostrarCategoria ? 5 : 4], _emptyCell()),
-                _vDivider(),
+                _vDivider(context),
+
+                // col Largura — vazio
+                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], _emptyCell()),
+                _vDivider(context),
+
+                // col Comprimento — vazio
+                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], _emptyCell()),
+                _vDivider(context),
 
                 // col Estoque atual do filho
-                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], Padding(
+                _colWrap(cols[widget.mostrarCategoria ? 8 : 7], Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                   child: Center(
                     child: Text(
@@ -2895,36 +3018,36 @@ class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
                     ),
                   ),
                 )),
-                _vDivider(),
+                _vDivider(context),
 
                 // col Estoque mínimo — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], _emptyCell()),
-                _vDivider(),
+                _colWrap(cols[widget.mostrarCategoria ? 9 : 8], _emptyCell()),
+                _vDivider(context),
 
                 // col Unidade — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 8 : 7], _emptyCell()),
-                _vDivider(),
+                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], _emptyCell()),
+                _vDivider(context),
 
                 // col Custo última compra do filho
-                _colWrap(cols[widget.mostrarCategoria ? 9 : 8], _CustoCell(
+                _colWrap(cols[widget.mostrarCategoria ? 11 : 10], _CustoCell(
                   valor:        filho.ultimoValorPago,
                   temHistorico: filho.ultimoValorPago != null,
                   onTap:        () => widget.onVerHistoricoPrecos(pai),
                 )),
-                _vDivider(),
+                _vDivider(context),
 
                 // col Custo m² última compra do filho
-                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], _CustoCell(
+                _colWrap(cols[widget.mostrarCategoria ? 12 : 11], _CustoCell(
                   valor:        filho.ultimoValorPagoM2,
                   temHistorico: filho.ultimoValorPagoM2 != null,
                   onTap:        () => widget.onVerHistoricoPrecos(pai),
                 )),
-                _vDivider(),
+                _vDivider(context),
 
                 // col Status — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 11 : 10], _emptyCell()),
+                _colWrap(cols[widget.mostrarCategoria ? 13 : 12], _emptyCell()),
                 // col Histórico — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 12 : 11], _emptyCell()),
+                _colWrap(cols[widget.mostrarCategoria ? 14 : 13], _emptyCell()),
               ],
             ),
           ),
@@ -2992,7 +3115,7 @@ class _ValorCellState extends State<_ValorCell> {
                 fontSize: 13,
                 color: showHover
                     ? AppTheme.primary
-                    : hasValue ? AppTheme.textPrimary : AppTheme.textHint,
+                    : hasValue ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.outline,
                 fontWeight: hasValue ? FontWeight.w500 : FontWeight.normal,
               ),
             ),
@@ -3053,7 +3176,7 @@ class _IconBtnState extends State<_IconBtn> {
 
 class _StatusBadge extends StatelessWidget {
   final String status;
-  const _StatusBadge({required this.status});
+  _StatusBadge({required this.status});
 
   @override
   Widget build(BuildContext context) {
@@ -3061,8 +3184,8 @@ class _StatusBadge extends StatelessWidget {
       'OK'      => ('OK',      AppTheme.statusOk),
       'LIMITE'  => ('LIMITE',  AppTheme.statusBaixo),
       'CRITICO' => ('CRITICO', AppTheme.statusCritico),
-      'INATIVO' => ('INATIVO', AppTheme.textHint),
-      _         => ('—',       AppTheme.textHint),
+      'INATIVO' => ('INATIVO', Theme.of(context).colorScheme.outline),
+      _         => ('—',       Theme.of(context).colorScheme.outline),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -3085,7 +3208,7 @@ class _StatusBadge extends StatelessWidget {
 
 class _PrecosFornecedoresDialog extends StatelessWidget {
   final MaterialModel material;
-  const _PrecosFornecedoresDialog({required this.material});
+  _PrecosFornecedoresDialog({required this.material});
 
   @override
   Widget build(BuildContext context) {
@@ -3096,7 +3219,7 @@ class _PrecosFornecedoresDialog extends StatelessWidget {
     final temM2       = material.precoM2Mediano != null && material.precoM2Mediano! > 0;
 
     return AlertDialog(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       title: Text('Preços — ${material.nome}'),
       content: SizedBox(
         width: 500,
@@ -3125,21 +3248,21 @@ class _PrecosFornecedoresDialog extends StatelessWidget {
                               spacing: 16,
                               runSpacing: 4,
                               children: [
-                                const Text(
+                                Text(
                                   'Valor médio entre fornecedores:',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: AppTheme.textSecondary,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   ),
                                 ),
                                 if (temMediano)
                                   RichText(
                                     text: TextSpan(
-                                      style: const TextStyle(fontSize: 12),
+                                      style: TextStyle(fontSize: 12),
                                       children: [
-                                        const TextSpan(
+                                        TextSpan(
                                           text: 'Valor: ',
-                                          style: TextStyle(color: AppTheme.textSecondary),
+                                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                                         ),
                                         TextSpan(
                                           text: 'R\$ ${material.precoMediano!.toStringAsFixed(2)}',
@@ -3154,11 +3277,11 @@ class _PrecosFornecedoresDialog extends StatelessWidget {
                                 if (temM2)
                                   RichText(
                                     text: TextSpan(
-                                      style: const TextStyle(fontSize: 12),
+                                      style: TextStyle(fontSize: 12),
                                       children: [
-                                        const TextSpan(
+                                        TextSpan(
                                           text: 'Valor m²: ',
-                                          style: TextStyle(color: AppTheme.textSecondary),
+                                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                                         ),
                                         TextSpan(
                                           text: 'R\$ ${material.precoM2Mediano!.toStringAsFixed(2)}',
@@ -3184,7 +3307,7 @@ class _PrecosFornecedoresDialog extends StatelessWidget {
                           'Fornecedor',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                 fontWeight: FontWeight.w700,
-                                color: AppTheme.textSecondary,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
                         ),
                       ),
@@ -3195,7 +3318,7 @@ class _PrecosFornecedoresDialog extends StatelessWidget {
                           textAlign: TextAlign.right,
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                 fontWeight: FontWeight.w700,
-                                color: AppTheme.textSecondary,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
                         ),
                       ),
@@ -3206,7 +3329,7 @@ class _PrecosFornecedoresDialog extends StatelessWidget {
                           textAlign: TextAlign.right,
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                 fontWeight: FontWeight.w700,
-                                color: AppTheme.textSecondary,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
                         ),
                       ),
@@ -3231,7 +3354,7 @@ class _PrecosFornecedoresDialog extends StatelessWidget {
                                   material.precoM2Mediano,
                         ),
                         if (i < ordenados.length - 1)
-                          const Divider(height: 1, color: AppTheme.divider),
+                          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
                       ],
                     );
                   }),
@@ -3254,7 +3377,7 @@ class _FornecedorPrecoRow extends StatelessWidget {
   final bool destacarValor;
   final bool destacarValorM2;
 
-  const _FornecedorPrecoRow({
+  _FornecedorPrecoRow({
     required this.item,
     this.destacarValor = false,
     this.destacarValorM2 = false,
@@ -3263,14 +3386,14 @@ class _FornecedorPrecoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
           Expanded(
             child: Text(
               item.fornecedorNome.isEmpty ? '—' : item.fornecedorNome,
-              style: const TextStyle(
-                color: AppTheme.textPrimary,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
                 fontSize: 13,
               ),
             ),
@@ -3302,7 +3425,7 @@ class _FornecedorPrecoRow extends StatelessWidget {
                     fontSize: 13,
                     color: destacarValor
                         ? AppTheme.primary
-                        : AppTheme.textPrimary,
+                        : Theme.of(context).colorScheme.onSurface,
                     fontWeight: destacarValor
                         ? FontWeight.w700
                         : FontWeight.normal,
@@ -3338,7 +3461,7 @@ class _FornecedorPrecoRow extends StatelessWidget {
                     fontSize: 13,
                     color: destacarValorM2
                         ? AppTheme.primary
-                        : AppTheme.textPrimary,
+                        : Theme.of(context).colorScheme.onSurface,
                     fontWeight: destacarValorM2
                         ? FontWeight.w700
                         : FontWeight.normal,
@@ -3431,7 +3554,7 @@ class _FornecedorPainelRowState extends State<_FornecedorPainelRow> {
                               fontSize: 12,
                               color: _hovered
                                   ? AppTheme.primary
-                                  : AppTheme.textPrimary,
+                                  : Theme.of(context).colorScheme.onSurface,
                               fontWeight: widget.isMediano
                                   ? FontWeight.w600
                                   : FontWeight.normal,
@@ -3452,8 +3575,8 @@ class _FornecedorPainelRowState extends State<_FornecedorPainelRow> {
                       style: TextStyle(
                         fontSize: 12,
                         color: temPrecoUnit
-                            ? (_hovered ? AppTheme.primary : AppTheme.textPrimary)
-                            : AppTheme.textHint,
+                            ? (_hovered ? AppTheme.primary : Theme.of(context).colorScheme.onSurface)
+                            : Theme.of(context).colorScheme.outline,
                         fontWeight: temPrecoUnit ? FontWeight.w500 : FontWeight.normal,
                       ),
                     ),
@@ -3469,8 +3592,8 @@ class _FornecedorPainelRowState extends State<_FornecedorPainelRow> {
                       style: TextStyle(
                         fontSize: 12,
                         color: temPrecoM2
-                            ? (_hovered ? AppTheme.primary : AppTheme.textPrimary)
-                            : AppTheme.textHint,
+                            ? (_hovered ? AppTheme.primary : Theme.of(context).colorScheme.onSurface)
+                            : Theme.of(context).colorScheme.outline,
                         fontWeight: temPrecoM2 ? FontWeight.w500 : FontWeight.normal,
                       ),
                     ),
@@ -3481,7 +3604,7 @@ class _FornecedorPainelRowState extends State<_FornecedorPainelRow> {
           ),
         ),
         if (widget.showDivider)
-          const Divider(height: 0, thickness: 0.4, color: AppTheme.divider),
+          Divider(height: 0, thickness: 0.4, color: Theme.of(context).colorScheme.outlineVariant),
       ],
     );
   }
@@ -3618,13 +3741,13 @@ class _EditarFilhoEspecificoDialogState extends State<_EditarFilhoEspecificoDial
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Editar variação', style: TextStyle(fontSize: 16)),
+                Text('Editar variação', style: TextStyle(fontSize: 16)),
                 Text(
                   pai.nome,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.normal,
-                    color: AppTheme.textSecondary,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -3646,25 +3769,25 @@ class _EditarFilhoEspecificoDialogState extends State<_EditarFilhoEspecificoDial
                 color: const Color(0xFFE85D04).withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: const Color(0xFFE85D04).withValues(alpha: 0.25),
+                  color: Color(0xFFE85D04).withValues(alpha: 0.25),
                 ),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.inventory_2_outlined,
+                  Icon(Icons.inventory_2_outlined,
                       size: 16, color: Color(0xFFE85D04)),
-                  const SizedBox(width: 8),
-                  const Text(
+                  SizedBox(width: 8),
+                  Text(
                     'Estoque atual: ',
                     style: TextStyle(
-                        fontSize: 13, color: AppTheme.textSecondary),
+                        fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   Text(
                     () {
                       final q = widget.filho.quantidade;
                       return '${q.toStringAsFixed(q % 1 == 0 ? 0 : 2)} ${pai.unidade ?? ''}';
                     }(),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: Color(0xFFE85D04),
@@ -3673,10 +3796,10 @@ class _EditarFilhoEspecificoDialogState extends State<_EditarFilhoEspecificoDial
                 ],
               ),
             ),
-            const SizedBox(height: 16),
-            const Text(
+            SizedBox(height: 16),
+            Text(
               'Quantidade em estoque',
-              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 6),
             TextField(
@@ -3689,50 +3812,50 @@ class _EditarFilhoEspecificoDialogState extends State<_EditarFilhoEspecificoDial
                 suffixText: widget.pai.unidade ?? '',
               ),
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
 
             // ── Descrição ──────────────────────────────────────────────────
-            const Text(
+            Text(
               'Descrição / nome da variação',
-              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             if (widget.descricaoBloqueada) ...[
               // Campo somente leitura — há OS em andamento usando esta variação
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: AppTheme.textHint.withValues(alpha: 0.07),
+                  color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.07),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppTheme.divider),
+                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.lock_outline, size: 15, color: AppTheme.textHint),
-                    const SizedBox(width: 8),
+                    Icon(Icons.lock_outline, size: 15, color: Theme.of(context).colorScheme.outline),
+                    SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         widget.filho.descricao,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
+                          color: Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 6),
-              const Row(
+              SizedBox(height: 6),
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.info_outline, size: 13, color: AppTheme.textHint),
+                  Icon(Icons.info_outline, size: 13, color: Theme.of(context).colorScheme.outline),
                   SizedBox(width: 5),
                   Expanded(
                     child: Text(
                       'Este material possui OS em andamento. O nome não pode ser alterado.',
-                      style: TextStyle(fontSize: 11, color: AppTheme.textHint),
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
                     ),
                   ),
                 ],
@@ -3958,7 +4081,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
             ],
             TextFormField(
               controller: _nome,
@@ -3969,7 +4092,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               validator: (v) =>
                   v == null || v.trim().isEmpty ? 'Nome é obrigatório' : null,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             TextFormField(
               controller: _identificador,
               decoration: const InputDecoration(
@@ -3978,7 +4101,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               textCapitalization: TextCapitalization.characters,
               inputFormatters: [_UpperCaseFormatter()],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Row(children: [
               Expanded(
                 child: TextFormField(
@@ -3998,7 +4121,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 ),
               ),
             ]),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Row(children: [
               Expanded(
                 child: TextFormField(
@@ -4020,7 +4143,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 ),
               ),
             ]),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Row(children: [
               Expanded(
                 child: TextFormField(
@@ -4042,7 +4165,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 ),
               ),
             ]),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Row(children: [
               Expanded(
                 child: TextFormField(
@@ -4071,33 +4194,32 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 ),
               ),
             ]),
-            const SizedBox(height: 12),
+            SizedBox(height: 10),
             // ── Qtd Padrão / Unid Padrão ────────────────────────────────
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.info_outline, size: 14, color: AppTheme.textHint),
-                const SizedBox(width: 6),
+                Icon(Icons.info_outline, size: 14, color: Theme.of(context).colorScheme.outline),
+                SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     'Preenchimento por unidade de compra (opcional). '
                     'Ex: thinner 18 L → Qtd: 18000, Unid: ml. '
                     'Ao finalizar uma OC, o custo será dividido por essa qtd '
                     'e registrado por unidade menor.',
-                    style: const TextStyle(fontSize: 11, color: AppTheme.textHint),
+                    style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Row(children: [
               Expanded(
                 flex: 2,
                 child: TextFormField(
                   controller: _qtdPadrao,
                   decoration: const InputDecoration(
-                    labelText: 'Qtd por embalagem',
-                    hintText:  'Ex: 18000',
+                    labelText: 'Qtd padrão',
                   ),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [_DecimalInputFormatter()],
@@ -4114,20 +4236,19 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 child: TextFormField(
                   controller: _unidPadrao,
                   decoration: const InputDecoration(
-                    labelText: 'Unid. da embalagem',
-                    hintText:  'Ex: ml, m, L',
+                    labelText: 'Unid. padrão',
                   ),
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [_UpperCaseFormatter()],
                 ),
               ),
             ]),
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
             InkWell(
               borderRadius: BorderRadius.circular(8),
               onTap: () => setState(() => _estoqueConfirmado = !_estoqueConfirmado),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                padding: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                 child: Row(
                   children: [
                     Icon(
@@ -4135,9 +4256,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                           ? Icons.check_circle
                           : Icons.radio_button_unchecked,
                       size: 20,
-                      color: _estoqueConfirmado ? AppTheme.success : AppTheme.textHint,
+                      color: _estoqueConfirmado ? AppTheme.success : Theme.of(context).colorScheme.outline,
                     ),
-                    const SizedBox(width: 10),
+                    SizedBox(width: 10),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -4147,16 +4268,16 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                             fontSize: 14,
                             fontWeight: FontWeight.w500,
                             color: _estoqueConfirmado
-                                ? AppTheme.textPrimary
-                                : AppTheme.textSecondary,
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                         Text(
                           _estoqueConfirmado
                               ? 'A quantidade atual foi verificada fisicamente'
                               : 'Quantidade ainda não verificada fisicamente',
-                          style: const TextStyle(
-                              fontSize: 11, color: AppTheme.textHint),
+                          style: TextStyle(
+                              fontSize: 11, color: Theme.of(context).colorScheme.outline),
                         ),
                       ],
                     ),
@@ -4169,7 +4290,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               borderRadius: BorderRadius.circular(8),
               onTap: () => setState(() => _especifico = !_especifico),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                padding: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                 child: Row(
                   children: [
                     Icon(
@@ -4177,9 +4298,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                           ? Icons.check_circle
                           : Icons.radio_button_unchecked,
                       size: 20,
-                      color: _especifico ? AppTheme.primary : AppTheme.textHint,
+                      color: _especifico ? AppTheme.primary : Theme.of(context).colorScheme.outline,
                     ),
-                    const SizedBox(width: 10),
+                    SizedBox(width: 10),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -4189,16 +4310,16 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                             fontSize: 14,
                             fontWeight: FontWeight.w500,
                             color: _especifico
-                                ? AppTheme.textPrimary
-                                : AppTheme.textSecondary,
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                         Text(
                           _especifico
                               ? 'Exigirá descrição personalizada na ordem de compra'
                               : 'Material genérico (sem descrição adicional na OC)',
-                          style: const TextStyle(
-                              fontSize: 11, color: AppTheme.textHint),
+                          style: TextStyle(
+                              fontSize: 11, color: Theme.of(context).colorScheme.outline),
                         ),
                       ],
                     ),
@@ -4220,13 +4341,13 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       fornecedorPanel = Container(
         width: 260,
         decoration: BoxDecoration(
-          color: AppTheme.surfaceVariant.withValues(alpha: 0.5),
-          borderRadius: const BorderRadius.only(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.only(
             topRight:    Radius.circular(12),
             bottomRight: Radius.circular(12),
           ),
           border: Border(
-            left: BorderSide(color: AppTheme.divider.withValues(alpha: 0.6)),
+            left: BorderSide(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6)),
           ),
         ),
         child: Column(
@@ -4234,34 +4355,34 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
           children: [
             // Cabeçalho do painel
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 10),
               child: Row(
                 children: [
-                  const Icon(Icons.store_outlined, size: 16, color: AppTheme.textSecondary),
-                  const SizedBox(width: 6),
+                  Icon(Icons.store_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  SizedBox(width: 6),
                   Text(
                     'Fornecedores (${fornecedores.length})',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: AppTheme.textSecondary,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
               ),
             ),
-            const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
+            Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
 
             // Cabeçalho das colunas
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               child: Row(
-                children: const [
+                children: [
                   Expanded(
                     child: Text(
                       'Fornecedor',
                       style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
-                          color: AppTheme.textHint),
+                          color: Theme.of(context).colorScheme.outline),
                     ),
                   ),
                   SizedBox(
@@ -4270,7 +4391,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                       'Unit.',
                       textAlign: TextAlign.right,
                       style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
-                          color: AppTheme.textHint),
+                          color: Theme.of(context).colorScheme.outline),
                     ),
                   ),
                   SizedBox(
@@ -4279,13 +4400,13 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                       'm²',
                       textAlign: TextAlign.right,
                       style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
-                          color: AppTheme.textHint),
+                          color: Theme.of(context).colorScheme.outline),
                     ),
                   ),
                 ],
               ),
             ),
-            const Divider(height: 0, thickness: 0.5, color: AppTheme.divider),
+            Divider(height: 0, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant),
 
             // Lista de fornecedores clicáveis
             Flexible(
@@ -4309,16 +4430,16 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             ),
 
             // Dica de clique
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(12, 8, 12, 12),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline, size: 12, color: AppTheme.textHint),
+                  Icon(Icons.info_outline, size: 12, color: Theme.of(context).colorScheme.outline),
                   SizedBox(width: 5),
                   Expanded(
                     child: Text(
                       'Clique em um fornecedor para criar um orçamento com este material.',
-                      style: TextStyle(fontSize: 10, color: AppTheme.textHint),
+                      style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.outline),
                     ),
                   ),
                 ],
@@ -4331,19 +4452,20 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
     // ── Dialog com layout condicional ─────────────────────────────────────
     return Dialog(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth:  temFornecedor ? 840 : 560,
-          maxHeight: 680,
+          maxHeight: (MediaQuery.of(context).size.height * 0.95)
+              .clamp(0.0, 760.0),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             // ── Título ────────────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
+              padding: EdgeInsets.fromLTRB(24, 20, 16, 0),
               child: Row(
                 children: [
                   Text(
@@ -4370,7 +4492,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   // Formulário
                   Expanded(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                      padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
                       child: formPanel,
                     ),
                   ),
@@ -4525,8 +4647,8 @@ class _CustoCellState extends State<_CustoCell> {
                         color: showHover
                         ? AppTheme.primary
                         : hasValue
-                            ? AppTheme.textPrimary
-                            : AppTheme.textHint,
+                            ? Theme.of(context).colorScheme.onSurface
+                            : Theme.of(context).colorScheme.outline,
                         fontWeight: hasValue ? FontWeight.w500 : FontWeight.normal,
                       ),
                     ),
@@ -4554,10 +4676,141 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
   bool _carregando = true;
   String? _erro;
 
+  // ── Inserção manual de custo ──────────────────────────────────────────────
+  bool _mostrarFormCusto = false;
+  bool _salvandoCusto    = false;
+  final _ctrlUnit = TextEditingController();
+  final _ctrlM2   = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrlUnit.dispose();
+    _ctrlM2.dispose();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
     _carregar();
+  }
+
+  Future<void> _salvarCustoManual() async {
+    final unitStr = _ctrlUnit.text.trim().replaceAll(',', '.');
+    final m2Str   = _ctrlM2.text.trim().replaceAll(',', '.');
+    final unit = double.tryParse(unitStr);
+    final m2   = double.tryParse(m2Str);
+
+    if ((unitStr.isEmpty || unit == null) && (m2Str.isEmpty || m2 == null)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Informe ao menos um valor (unitário ou m²).'),
+          backgroundColor: AppTheme.warning,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _salvandoCusto = true);
+    final ok = await context.read<MaterialProvider>().atualizarCustoManual(
+      widget.material.id,
+      ultimoValorPago:   (unitStr.isNotEmpty && unit != null) ? unit : null,
+      ultimoValorPagoM2: (m2Str.isNotEmpty   && m2   != null) ? m2   : null,
+    );
+    if (!mounted) return;
+    setState(() { _salvandoCusto = false; _mostrarFormCusto = false; });
+    if (ok) {
+      _ctrlUnit.clear();
+      _ctrlM2.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Custo atualizado com sucesso.'),
+          backgroundColor: AppTheme.success,
+        ),
+      );
+    }
+  }
+
+  Widget _buildFormCusto() {
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Inserir custo manualmente',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface),
+          ),
+          SizedBox(height: 4),
+          Text(
+            'Preencha apenas os campos que deseja atualizar. Deixe em branco para não alterar.',
+            style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _ctrlUnit,
+                  decoration: const InputDecoration(
+                    labelText: 'Custo unitário (R\$)',
+                    prefixText: 'R\$ ',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _ctrlM2,
+                  decoration: const InputDecoration(
+                    labelText: 'Custo por m² (R\$)',
+                    prefixText: 'R\$ ',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: _salvandoCusto ? null : () => setState(() {
+                  _mostrarFormCusto = false;
+                  _ctrlUnit.clear();
+                  _ctrlM2.clear();
+                }),
+                child: const Text('Cancelar'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: _salvandoCusto ? null : _salvarCustoManual,
+                icon: _salvandoCusto
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.save_outlined, size: 16),
+                label: const Text('Salvar'),
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _carregar() async {
@@ -4584,7 +4837,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
     final temCustoM2 =  ultimoUsarM2 && ultimoCustoM2 != null && ultimoCustoM2 > 0;
 
     return AlertDialog(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       title: Row(
         children: [
           const Icon(Icons.history, size: 20, color: Color(0xFFE85D04)),
@@ -4610,25 +4863,25 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.payments_outlined, size: 16, color: Color(0xFFE85D04)),
-                    const SizedBox(width: 8),
+                    Icon(Icons.payments_outlined, size: 16, color: Color(0xFFE85D04)),
+                    SizedBox(width: 8),
                     Expanded(
                       child: Wrap(
                         spacing: 20,
                         runSpacing: 4,
                         children: [
-                          const Text(
+                          Text(
                             'Último custo registrado:',
-                            style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                           ),
                           if (temCusto)
                             RichText(
                               text: TextSpan(
-                                style: const TextStyle(fontSize: 12),
+                                style: TextStyle(fontSize: 12),
                                 children: [
-                                  const TextSpan(
+                                  TextSpan(
                                     text: 'Custo: ',
-                                    style: TextStyle(color: AppTheme.textSecondary),
+                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                                   ),
                                   TextSpan(
                                     text: 'R\$ ${ultimoCusto.toStringAsFixed(2)}',
@@ -4643,11 +4896,11 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                           if (temCustoM2)
                             RichText(
                               text: TextSpan(
-                                style: const TextStyle(fontSize: 12),
+                                style: TextStyle(fontSize: 12),
                                 children: [
-                                  const TextSpan(
+                                  TextSpan(
                                     text: 'Custo m²: ',
-                                    style: TextStyle(color: AppTheme.textSecondary),
+                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                                   ),
                                   TextSpan(
                                     text: 'R\$ ${ultimoCustoM2.toStringAsFixed(2)}',
@@ -4666,18 +4919,18 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                 ),
               ),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: AppTheme.divider, width: 0.8)),
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant, width: 0.8)),
               ),
-              child: const Row(
+              child: Row(
                 children: [
                   Expanded(
                     flex: 3,
                     child: Text(
                       'Fornecedor',
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                   SizedBox(
@@ -4686,7 +4939,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                       'OC #',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                   SizedBox(
@@ -4695,7 +4948,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                       'Qtd',
                       textAlign: TextAlign.right,
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                   SizedBox(
@@ -4704,7 +4957,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                       'Custo unit.',
                       textAlign: TextAlign.right,
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                   SizedBox(
@@ -4713,7 +4966,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                       'Custo m²',
                       textAlign: TextAlign.right,
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                   SizedBox(
@@ -4722,7 +4975,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                       'Total',
                       textAlign: TextAlign.right,
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                   SizedBox(
@@ -4731,7 +4984,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                       'Data',
                       textAlign: TextAlign.right,
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                 ],
@@ -4744,19 +4997,37 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
               )
             else if (_erro != null)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
+                padding: EdgeInsets.symmetric(vertical: 24),
                 child: Center(
-                  child: Text(_erro!, style: const TextStyle(color: AppTheme.error, fontSize: 13)),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.error_outline, size: 48, color: AppTheme.error),
+                      SizedBox(height: 12),
+                      Text(
+                        _erro!,
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: _carregar,
+                        icon: const Icon(Icons.refresh, size: 18),
+                        label: const Text('Tentar novamente'),
+                        style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                      ),
+                    ],
+                  ),
                 ),
               )
             else if (_historico.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 32),
                 child: Center(
                   child: Text(
                     'Nenhum custo registrado.\nO histórico é criado automaticamente ao finalizar uma Ordem de Compra.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, color: AppTheme.textHint),
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.outline),
                   ),
                 ),
               )
@@ -4809,8 +5080,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                                 ? FontWeight.w700
                                                 : FontWeight.normal,
                                             color: isUltimo
-                                                ? AppTheme.textPrimary
-                                                : AppTheme.textSecondary,
+                                                ? Theme.of(context).colorScheme.onSurface
+                                                : Theme.of(context).colorScheme.onSurfaceVariant,
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -4823,8 +5094,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                   child: Text(
                                     h.ordemCompraId != null ? '#${h.ordemCompraId}' : '—',
                                     textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                        fontSize: 12, color: AppTheme.textSecondary),
+                                    style: TextStyle(
+                                        fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                                   ),
                                 ),
                                 SizedBox(
@@ -4837,8 +5108,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                       fontSize: 13,
                                       fontWeight: isUltimo ? FontWeight.w700 : FontWeight.normal,
                                       color: isUltimo
-                                          ? AppTheme.textPrimary
-                                          : AppTheme.textSecondary,
+                                          ? Theme.of(context).colorScheme.onSurface
+                                          : Theme.of(context).colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                 ),
@@ -4855,8 +5126,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                           ? FontWeight.w700
                                           : FontWeight.normal,
                                       color: isUltimo
-                                          ? const Color(0xFFE85D04)
-                                          : AppTheme.textPrimary,
+                                          ? Color(0xFFE85D04)
+                                          : Theme.of(context).colorScheme.onSurface,
                                     ),
                                   ),
                                 ),
@@ -4870,8 +5141,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                     style: TextStyle(
                                       fontSize: 13,
                                       color: isUltimo
-                                          ? const Color(0xFFE85D04)
-                                          : AppTheme.textPrimary,
+                                          ? Color(0xFFE85D04)
+                                          : Theme.of(context).colorScheme.onSurface,
                                       fontWeight: isUltimo
                                           ? FontWeight.w700
                                           : FontWeight.normal,
@@ -4887,8 +5158,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                       fontSize: 13,
                                       fontWeight: isUltimo ? FontWeight.w700 : FontWeight.normal,
                                       color: isUltimo
-                                          ? const Color(0xFFE85D04)
-                                          : AppTheme.textPrimary,
+                                          ? Color(0xFFE85D04)
+                                          : Theme.of(context).colorScheme.onSurface,
                                     ),
                                   ),
                                 ),
@@ -4897,25 +5168,36 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                   child: Text(
                                     dataStr,
                                     textAlign: TextAlign.right,
-                                    style: const TextStyle(
-                                        fontSize: 12, color: AppTheme.textSecondary),
+                                    style: TextStyle(
+                                        fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                                   ),
                                 ),
                               ],
                             ),
                           ),
                           if (i < _historico.length - 1)
-                            const Divider(height: 1, color: AppTheme.divider),
+                            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
                         ],
                       );
                     }),
                   ),
                 ),
               ),
+            if (_mostrarFormCusto) _buildFormCusto(),
           ],
         ),
       ),
       actions: [
+        TextButton.icon(
+          onPressed: () => setState(() => _mostrarFormCusto = !_mostrarFormCusto),
+          icon: Icon(
+            _mostrarFormCusto ? Icons.close : Icons.edit_outlined,
+            size: 16,
+          ),
+          label: Text(_mostrarFormCusto ? 'Cancelar inserção' : 'Inserir custo manualmente'),
+          style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
+        ),
+        const Spacer(),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Fechar'),
@@ -4938,8 +5220,8 @@ class _AlertasBannerEstoque extends StatelessWidget {
     final limites    = provider.limites;
     final hasCritico = criticos.isNotEmpty;
     final corPrincipal = hasCritico
-        ? const Color(0xFFDC2626)
-        : const Color(0xFFD97706);
+        ? Color(0xFFDC2626)
+        : Color(0xFFD97706);
 
     return Container(
       decoration: BoxDecoration(
@@ -4957,19 +5239,19 @@ class _AlertasBannerEstoque extends StatelessWidget {
           ),
           title: RichText(
             text: TextSpan(
-              style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
               children: [
                 TextSpan(
                   text: hasCritico
                       ? '${criticos.length} material${criticos.length > 1 ? 'is' : ''} com estoque crítico'
                       : '${limites.length} material${limites.length > 1 ? 'is' : ''} no limite',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  style: TextStyle(fontWeight: FontWeight.w700),
                 ),
                 if (hasCritico && limites.isNotEmpty)
                   TextSpan(
                     text: ' e ${limites.length} no limite',
-                    style: const TextStyle(
-                        color: AppTheme.textSecondary, fontSize: 12),
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
                   ),
               ],
             ),
@@ -5051,10 +5333,10 @@ class _BannerSecao extends StatelessWidget {
                   children: [
                     Text(
                       a.nome as String,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary,
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(width: 6),

@@ -82,6 +82,7 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
         '';
     if (role != 'ADMIN') return;
     context.read<GastosCategoriaProvider>().carregar();
+    context.read<GastosCategoriaProvider>().carregarMensal();
     context.read<VeiculoProvider>().carregarGastos();
     context.read<VeiculoProvider>().carregarResumoAnual(ano: _anoSelecionado);
   }
@@ -119,24 +120,24 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
 
     if (role != 'ADMIN') {
       return Scaffold(
-        backgroundColor: AppTheme.background,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.lock_outline, size: 64, color: AppTheme.textHint),
-              const SizedBox(height: 16),
+              Icon(Icons.lock_outline, size: 64, color: Theme.of(context).colorScheme.outline),
+              SizedBox(height: 16),
               Text('Acesso restrito',
                   style: Theme.of(context)
                       .textTheme
                       .headlineSmall
-                      ?.copyWith(color: AppTheme.textPrimary)),
-              const SizedBox(height: 8),
+                      ?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+              SizedBox(height: 8),
               Text('Apenas administradores podem visualizar esta página.',
                   style: Theme.of(context)
                       .textTheme
                       .bodyMedium
-                      ?.copyWith(color: AppTheme.textSecondary)),
+                      ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ],
           ),
         ),
@@ -147,7 +148,7 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
     final veiProvider = context.watch<VeiculoProvider>();
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -163,13 +164,13 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
                         style: Theme.of(context)
                             .textTheme
                             .headlineMedium
-                            ?.copyWith(color: AppTheme.textPrimary)),
-                    const SizedBox(height: 2),
+                            ?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+                    SizedBox(height: 2),
                     Text('Materiais e veículos — visão geral de gastos',
                         style: Theme.of(context)
                             .textTheme
                             .bodyMedium
-                            ?.copyWith(color: AppTheme.textSecondary)),
+                            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   ],
                 ),
                 const Spacer(),
@@ -180,14 +181,14 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
                         dataInicio: _dataInicio, dataFim: _dataFim);
                     veiProvider.carregarResumoAnual(ano: _anoSelecionado);
                   },
-                  icon: const Icon(Icons.refresh,
-                      size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh,
+                      size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
@@ -227,13 +228,13 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
                   },
                 ),
                 if (_temFiltro) ...[
-                  const SizedBox(width: 8),
+                  SizedBox(width: 8),
                   TextButton.icon(
                     onPressed: _limparFiltros,
-                    icon:  const Icon(Icons.filter_alt_off, size: 16),
-                    label: const Text('Limpar filtro'),
+                    icon:  Icon(Icons.filter_alt_off, size: 16),
+                    label: Text('Limpar filtro'),
                     style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.textSecondary),
+                        foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ],
                 const Spacer(),
@@ -252,21 +253,21 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
                 totalVeiculos: veiProvider.totalGastosGeral,
               ),
 
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
 
             // ── Abas ──────────────────────────────────────────────────────
             Container(
               decoration: BoxDecoration(
-                color:        AppTheme.surface,
+                color:        Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(10),
-                border:       Border.all(color: AppTheme.divider),
+                border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
               ),
               child: TabBar(
                 controller:        _tabCtrl,
                 indicatorSize:     TabBarIndicatorSize.tab,
                 indicatorColor:    AppTheme.primary,
                 labelColor:        AppTheme.primary,
-                unselectedLabelColor: AppTheme.textSecondary,
+                unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
                 dividerColor:      Colors.transparent,
                 tabs: [
                   Tab(
@@ -340,22 +341,22 @@ class _ResumoGeralGlobal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
-        color:        AppTheme.surface,
-        border:       Border.all(color: AppTheme.divider),
+        color:        Theme.of(context).colorScheme.surface,
+        border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          const Icon(Icons.bar_chart_rounded,
-              size: 20, color: AppTheme.textSecondary),
-          const SizedBox(width: 10),
+          Icon(Icons.bar_chart_rounded,
+              size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          SizedBox(width: 10),
           Text('Totais gerais',
               style: Theme.of(context)
                   .textTheme
                   .bodyMedium
-                  ?.copyWith(color: AppTheme.textSecondary)),
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
           const Spacer(),
           _TotalBadge(
             label: 'Materiais',
@@ -402,14 +403,14 @@ class _TotalBadge extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icone, size: 14, color: cor),
-        const SizedBox(width: 4),
+        SizedBox(width: 4),
         Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(label,
-                style: const TextStyle(
-                    fontSize: 11, color: AppTheme.textSecondary)),
+                style: TextStyle(
+                    fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
             Text(_brl(valor),
                 style: TextStyle(
                     fontSize:   15,
@@ -426,22 +427,70 @@ class _TotalBadge extends StatelessWidget {
 // Aba Materiais
 // ═════════════════════════════════════════════════════════════════════════════
 
-class _AbaMateirais extends StatelessWidget {
+class _AbaMateirais extends StatefulWidget {
   final GastosCategoriaProvider provider;
   final bool                    temFiltro;
 
   const _AbaMateirais({required this.provider, required this.temFiltro});
 
   @override
+  State<_AbaMateirais> createState() => _AbaMateiraisState();
+}
+
+class _AbaMateiraisState extends State<_AbaMateirais> {
+  final _buscaCtrl = TextEditingController();
+  String _busca = '';
+
+  @override
+  void dispose() {
+    _buscaCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final provider = widget.provider;
+    final temFiltro = widget.temFiltro;
     if (provider.carregando) {
       return const Center(
           child: CircularProgressIndicator(color: AppTheme.primary));
     }
     if (provider.erro != null) {
       return Center(
-          child: Text('Erro: ${provider.erro}',
-              style: const TextStyle(color: AppTheme.error)));
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off_outlined,
+                size: 48, color: AppTheme.error),
+            SizedBox(height: 12),
+            Text(
+              'Erro ao carregar gastos',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 4),
+            Text(
+              provider.erro!.contains(': ')
+                  ? provider.erro!.substring(provider.erro!.indexOf(': ') + 2)
+                  : provider.erro!,
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () => provider.recarregar(),
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Tentar novamente'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primary),
+            ),
+          ],
+        ),
+      );
     }
     if (provider.categorias.isEmpty) {
       return Center(
@@ -449,14 +498,14 @@ class _AbaMateirais extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.category_outlined,
-                size: 56, color: AppTheme.textHint.withValues(alpha: 0.4)),
-            const SizedBox(height: 12),
+                size: 56, color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.4)),
+            SizedBox(height: 12),
             Text('Nenhum dado encontrado',
                 style: Theme.of(context)
                     .textTheme
                     .bodyLarge
-                    ?.copyWith(color: AppTheme.textHint)),
-            const SizedBox(height: 4),
+                    ?.copyWith(color: Theme.of(context).colorScheme.outline)),
+            SizedBox(height: 4),
             Text(
               temFiltro
                   ? 'Tente ajustar o período'
@@ -464,36 +513,616 @@ class _AbaMateirais extends StatelessWidget {
               style: Theme.of(context)
                   .textTheme
                   .bodySmall
-                  ?.copyWith(color: AppTheme.textHint.withValues(alpha: 0.7)),
+                  ?.copyWith(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.7)),
             ),
           ],
         ),
       );
     }
 
+    // Filtra as categorias pelo texto buscado
+    final busca = _busca.trim().toLowerCase();
+    final categoriasComIndice = provider.categorias
+        .asMap()
+        .entries
+        .toList();
+    final filtradas = busca.isEmpty
+        ? categoriasComIndice
+        : categoriasComIndice
+            .where((e) =>
+                e.value.categoriaLabel.toLowerCase().contains(busca))
+            .toList();
+
     // Totalizadores da aba
-    return Column(
-      children: [
-        _ResumoMateirais(
-          totalEntrada: provider.totalEntradaGeral,
-          totalSaida:   provider.totalSaidaGeral,
+    return CustomScrollView(
+      slivers: [
+        // Resumo
+        SliverToBoxAdapter(
+          child: _ResumoMateirais(
+            totalEntrada: provider.totalEntradaGeral,
+            totalSaida:   provider.totalSaidaGeral,
+          ),
         ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: ListView.separated(
-            itemCount:       provider.categorias.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (ctx, i) => _CategoriaCard(
-              gasto: provider.categorias[i],
-              cor:   _corCategoria(i),
-              index: i,
+        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+
+        // Gráfico mensal
+        SliverToBoxAdapter(
+          child: _GraficoMensal(provider: provider),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 16)),
+
+        // Título da seção + filtro por categoria
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                Text(
+                  'Gastos por categoria',
+                  style: TextStyle(
+                    fontSize:   13,
+                    fontWeight: FontWeight.w600,
+                    color:      Theme.of(context).colorScheme.onSurfaceVariant,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                Spacer(),
+                SizedBox(
+                  width: 240,
+                  height: 36,
+                  child: TextField(
+                    controller: _buscaCtrl,
+                    onChanged: (v) => setState(() => _busca = v),
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'Filtrar por categoria...',
+                      hintStyle: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
+                      prefixIcon: Icon(Icons.search, size: 16, color: Theme.of(context).colorScheme.outline),
+                      prefixIconConstraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                      suffixIcon: _busca.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
+                              onPressed: () {
+                                _buscaCtrl.clear();
+                                setState(() => _busca = '');
+                              },
+                            )
+                          : null,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      filled: true,
+                      fillColor: Theme.of(context).colorScheme.surface,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: AppTheme.primary, width: 1.5),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
+
+        // Estado vazio do filtro
+        if (filtradas.isEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.search_off_rounded,
+                        size: 40, color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.4)),
+                    SizedBox(height: 8),
+                    Text('Nenhuma categoria encontrada para "$_busca"',
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else
+          // Lista de categorias
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (ctx, i) {
+                final entry = filtradas[i];
+                return Padding(
+                  padding: EdgeInsets.only(
+                    bottom: i < filtradas.length - 1 ? 12 : 0,
+                  ),
+                  child: _CategoriaCard(
+                    gasto: entry.value,
+                    cor:   _corCategoria(entry.key),
+                    index: entry.key,
+                  ),
+                );
+              },
+              childCount: filtradas.length,
+            ),
+          ),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 16)),
       ],
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gráfico de barras — gastos mensais
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _GraficoMensal extends StatefulWidget {
+  final GastosCategoriaProvider provider;
+  const _GraficoMensal({required this.provider});
+
+  @override
+  State<_GraficoMensal> createState() => _GraficoMensalState();
+}
+
+class _GraficoMensalState extends State<_GraficoMensal>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _animCtrl;
+  late Animation<double>   _animacao;
+  int? _hoveredIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _animCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+    _animacao = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic);
+    if (widget.provider.mensal.isNotEmpty) _animCtrl.forward();
+  }
+
+  @override
+  void didUpdateWidget(_GraficoMensal old) {
+    super.didUpdateWidget(old);
+    if (widget.provider.mensal.isNotEmpty && old.provider.mensal.isEmpty) {
+      _animCtrl.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _animCtrl.dispose();
+    super.dispose();
+  }
+
+  void _trocarAno(int delta) {
+    _animCtrl.forward(from: 0);
+    widget.provider.carregarMensal(ano: widget.provider.anoMensal + delta);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final prov   = widget.provider;
+    final mensal = prov.mensal;
+
+    return Container(
+      padding: EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color:        Theme.of(context).colorScheme.surface,
+        border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.bar_chart_rounded,
+                  size: 18, color: AppTheme.primary),
+              SizedBox(width: 8),
+              Text('Gastos por mês',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                      )),
+              const Spacer(),
+              _AnoSelector(
+                ano:        prov.anoMensal,
+                onAnterior: () => _trocarAno(-1),
+                onProximo:  prov.anoMensal < DateTime.now().year
+                    ? () => _trocarAno(1)
+                    : null,
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Row(children: [
+            _LegendaDot(cor: _corEntrada, label: 'Entrada'),
+            SizedBox(width: 16),
+            _LegendaDot(cor: _corSaida,   label: 'Saída'),
+          ]),
+          const SizedBox(height: 16),
+          if (prov.carregandoMensal)
+            const SizedBox(
+              height: 160,
+              child: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+            )
+          else if (prov.erroMensal != null)
+            SizedBox(
+              height: 160,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.cloud_off_outlined,
+                        size: 36, color: AppTheme.error),
+                    SizedBox(height: 8),
+                    Text(
+                      'Erro ao carregar gráfico',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      prov.erroMensal!.contains(': ')
+                          ? prov.erroMensal!.substring(
+                              prov.erroMensal!.indexOf(': ') + 2)
+                          : prov.erroMensal!,
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: () =>
+                          prov.carregarMensal(ano: prov.anoMensal),
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('Tentar novamente',
+                          style: TextStyle(fontSize: 13)),
+                      style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8)),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (mensal.isEmpty)
+            SizedBox(
+              height: 160,
+              child: Center(
+                  child: Text('Sem dados para este ano',
+                      style: TextStyle(color: Theme.of(context).colorScheme.outline))),
+            )
+          else
+            AnimatedBuilder(
+              animation: _animacao,
+              builder: (_, __) => _BarChart(
+                dados:        mensal,
+                progresso:    _animacao.value,
+                hoveredIndex: _hoveredIndex,
+                onHover: (i) => setState(() => _hoveredIndex = i),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AnoSelector extends StatelessWidget {
+  final int           ano;
+  final VoidCallback  onAnterior;
+  final VoidCallback? onProximo;
+  const _AnoSelector({
+    required this.ano,
+    required this.onAnterior,
+    required this.onProximo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _NavBtn(icon: Icons.chevron_left,  onTap: onAnterior),
+        SizedBox(width: 4),
+        Text('$ano',
+            style: TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w700,
+                color: Theme.of(context).colorScheme.onSurface)),
+        const SizedBox(width: 4),
+        _NavBtn(icon: Icons.chevron_right, onTap: onProximo),
+      ],
+    );
+  }
+}
+
+class _NavBtn extends StatelessWidget {
+  final IconData      icon;
+  final VoidCallback? onTap;
+  const _NavBtn({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap:        onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Opacity(
+          opacity: onTap != null ? 1.0 : 0.3,
+          child:   Icon(icon, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
+      );
+}
+
+class _LegendaDot extends StatelessWidget {
+  final Color  cor;
+  final String label;
+  const _LegendaDot({required this.cor, required this.label});
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+              width: 10, height: 10,
+              decoration: BoxDecoration(color: cor, shape: BoxShape.circle)),
+          SizedBox(width: 4),
+          Text(label,
+              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        ],
+      );
+}
+
+class _BarChart extends StatelessWidget {
+  final List<GastoMensalModel> dados;
+  final double                 progresso;
+  final int?                   hoveredIndex;
+  final ValueChanged<int?>     onHover;
+
+  const _BarChart({
+    required this.dados,
+    required this.progresso,
+    required this.hoveredIndex,
+    required this.onHover,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final maxVal = dados.fold(0.0, (mx, d) => d.total > mx ? d.total : mx);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalWidth = constraints.maxWidth;
+        final barWidth   = totalWidth / dados.length;
+
+        return SizedBox(
+          height: 200,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // Barras + rótulos
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: List.generate(dados.length, (i) {
+                  final d       = dados[i];
+                  final frac    = maxVal > 0 ? d.total / maxVal : 0.0;
+                  final hovered = hoveredIndex == i;
+
+                  return Expanded(
+                    child: MouseRegion(
+                      onEnter: (_) => onHover(i),
+                      onExit:  (_) => onHover(null),
+                      child: GestureDetector(
+                        onTapDown: (_) => onHover(i),
+                        child: SizedBox(
+                          height: 200,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              // Espaço reservado para tooltip (nunca ocupa)
+                              const SizedBox(height: 60),
+
+                              // Barras empilhadas
+                              Flexible(
+                                child: LayoutBuilder(
+                                  builder: (_, bc) {
+                                    final altMax     = bc.maxHeight;
+                                    final altTotal   = altMax * frac * progresso;
+                                    final fracSaida  = d.total > 0
+                                        ? d.totalSaida / d.total
+                                        : 0.0;
+                                    final altSaida   = altTotal * fracSaida;
+                                    final altEntrada = altTotal * (1 - fracSaida);
+
+                                    return Column(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        if (altEntrada > 0)
+                                          Container(
+                                            height: altEntrada,
+                                            margin: const EdgeInsets.symmetric(
+                                                horizontal: 2),
+                                            decoration: BoxDecoration(
+                                              color: _corEntrada.withValues(
+                                                  alpha: hovered ? 1.0 : 0.8),
+                                              borderRadius:
+                                                  const BorderRadius.vertical(
+                                                      top: Radius.circular(4)),
+                                            ),
+                                          ),
+                                        if (altSaida > 0)
+                                          Container(
+                                            height: altSaida,
+                                            margin: const EdgeInsets.symmetric(
+                                                horizontal: 2),
+                                            decoration: BoxDecoration(
+                                              color: _corSaida.withValues(
+                                                  alpha: hovered ? 1.0 : 0.8),
+                                              borderRadius: altEntrada > 0
+                                                  ? BorderRadius.zero
+                                                  : const BorderRadius.vertical(
+                                                      top: Radius.circular(4)),
+                                            ),
+                                          ),
+                                        if (altTotal == 0)
+                                          Container(
+                                            height: 3,
+                                            margin: EdgeInsets.symmetric(
+                                                horizontal: 2),
+                                            decoration: BoxDecoration(
+                                              color: Theme.of(context).colorScheme.outlineVariant,
+                                              borderRadius:
+                                                  BorderRadius.circular(2),
+                                            ),
+                                          ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(d.label,
+                                  style: TextStyle(
+                                    fontSize:   10,
+                                    fontWeight: hovered
+                                        ? FontWeight.w700
+                                        : FontWeight.normal,
+                                    color: hovered
+                                        ? Theme.of(context).colorScheme.onSurface
+                                        : Theme.of(context).colorScheme.outline,
+                                  )),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+
+              // Tooltip flutuante via Stack — não causa overflow
+              if (hoveredIndex != null) ...[
+                Builder(builder: (context) {
+                  final i       = hoveredIndex!;
+                  final d       = dados[i];
+                  const tipW    = 165.0;
+                  // Centro da barra
+                  double left   = barWidth * i + barWidth / 2 - tipW / 2;
+                  // Clamp para não sair pelas bordas
+                  left = left.clamp(0.0, (totalWidth - tipW).clamp(0.0, double.infinity));
+
+                  return Positioned(
+                    top:  0,
+                    left: left,
+                    child: IgnorePointer(
+                      child: _TooltipBar(dado: d),
+                    ),
+                  );
+                }),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TooltipBar extends StatelessWidget {
+  final GastoMensalModel dado;
+  const _TooltipBar({required this.dado});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 165,
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color:        Theme.of(context).colorScheme.surface,
+        border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+              color:      Colors.black.withValues(alpha: 0.18),
+              blurRadius: 10,
+              offset:     Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${dado.label} ${dado.ano}',
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w700,
+                  color: Theme.of(context).colorScheme.onSurface)),
+          SizedBox(height: 4),
+          _TipLinha(cor: _corEntrada, label: 'Entrada', valor: dado.totalEntrada),
+          SizedBox(height: 2),
+          _TipLinha(cor: _corSaida,   label: 'Saída',   valor: dado.totalSaida),
+          Padding(
+            padding: EdgeInsets.symmetric(vertical: 4),
+            child: Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+          ),
+          _TipLinha(
+              cor:   const Color(0xFF43A047),
+              label: 'Total',
+              valor: dado.total,
+              bold:  true),
+        ],
+      ),
+    );
+  }
+}
+
+class _TipLinha extends StatelessWidget {
+  final Color  cor;
+  final String label;
+  final double valor;
+  final bool   bold;
+  const _TipLinha({
+    required this.cor,
+    required this.label,
+    required this.valor,
+    this.bold = false,
+  });
+
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [
+          Container(
+              width: 6, height: 6,
+              decoration: BoxDecoration(color: cor, shape: BoxShape.circle)),
+          SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              '$label: ${_brl(valor)}',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize:   10,
+                color:      Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: bold ? FontWeight.w700 : FontWeight.normal,
+              ),
+            ),
+          ),
+        ],
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Resumo de materiais
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _ResumoMateirais extends StatelessWidget {
   final double totalEntrada;
@@ -505,17 +1134,17 @@ class _ResumoMateirais extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color:        AppTheme.surface,
-        border:       Border.all(color: AppTheme.divider),
+        color:        Theme.of(context).colorScheme.surface,
+        border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
         children: [
-          const Text('Subtotais materiais',
+          Text('Subtotais materiais',
               style: TextStyle(
-                  fontSize: 13, color: AppTheme.textSecondary)),
+                  fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
           const Spacer(),
           _TotalBadge(
             label: 'Entradas',
@@ -573,20 +1202,20 @@ class _AbaVeiculos extends StatelessWidget {
           // ── Lista por veículo ──────────────────────────────────────────
           if (provider.gastos.isEmpty)
             Padding(
-              padding: const EdgeInsets.only(top: 40),
+              padding: EdgeInsets.only(top: 40),
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.directions_car_outlined,
                         size: 56,
-                        color: AppTheme.textHint.withValues(alpha: 0.4)),
-                    const SizedBox(height: 12),
+                        color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.4)),
+                    SizedBox(height: 12),
                     Text('Nenhum gasto com veículos encontrado',
                         style: Theme.of(context)
                             .textTheme
                             .bodyLarge
-                            ?.copyWith(color: AppTheme.textHint)),
+                            ?.copyWith(color: Theme.of(context).colorScheme.outline)),
                   ],
                 ),
               ),
@@ -596,7 +1225,7 @@ class _AbaVeiculos extends StatelessWidget {
                 style: Theme.of(context)
                     .textTheme
                     .titleSmall
-                    ?.copyWith(color: AppTheme.textSecondary)),
+                    ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             const SizedBox(height: 12),
             ...provider.gastos.asMap().entries.map((e) {
               final i = e.key;
@@ -634,10 +1263,10 @@ class _ResumoAnualCard extends StatelessWidget {
     final resumo = provider.resumoAnual;
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color:        AppTheme.surface,
-        border:       Border.all(color: AppTheme.divider),
+        color:        Theme.of(context).colorScheme.surface,
+        border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
@@ -648,39 +1277,39 @@ class _ResumoAnualCard extends StatelessWidget {
             children: [
               Icon(Icons.bar_chart_rounded,
                   size: 18, color: _corVeiculo),
-              const SizedBox(width: 8),
+              SizedBox(width: 8),
               Text('Gastos anuais com veículos',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize:   14,
                     fontWeight: FontWeight.w700,
-                    color:      AppTheme.textPrimary,
+                    color:      Theme.of(context).colorScheme.onSurface,
                   )),
-              const Spacer(),
+              Spacer(),
               // Seletor de ano
               Row(
                 children: [
                   IconButton(
                     onPressed: () => onAnoChanged(anoSelecionado - 1),
-                    icon: const Icon(Icons.chevron_left, size: 20),
-                    color:   AppTheme.textSecondary,
+                    icon: Icon(Icons.chevron_left, size: 20),
+                    color:   Theme.of(context).colorScheme.onSurfaceVariant,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
+                    constraints: BoxConstraints(
                         minWidth: 28, minHeight: 28),
                   ),
                   Text(
                     '$anoSelecionado',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize:   14,
                       fontWeight: FontWeight.w700,
-                      color:      AppTheme.textPrimary,
+                      color:      Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   IconButton(
                     onPressed: anoSelecionado < DateTime.now().year
                         ? () => onAnoChanged(anoSelecionado + 1)
                         : null,
-                    icon: const Icon(Icons.chevron_right, size: 20),
-                    color:   AppTheme.textSecondary,
+                    icon: Icon(Icons.chevron_right, size: 20),
+                    color:   Theme.of(context).colorScheme.onSurfaceVariant,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(
                         minWidth: 28, minHeight: 28),
@@ -704,8 +1333,8 @@ class _ResumoAnualCard extends StatelessWidget {
               child: Center(
                 child: Text(
                   'Sem gastos em $anoSelecionado',
-                  style: const TextStyle(
-                      color: AppTheme.textHint, fontSize: 13),
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.outline, fontSize: 13),
                 ),
               ),
             )
@@ -714,8 +1343,8 @@ class _ResumoAnualCard extends StatelessWidget {
             Row(
               children: [
                 Text('Total em $anoSelecionado:',
-                    style: const TextStyle(
-                        fontSize: 13, color: AppTheme.textSecondary)),
+                    style: TextStyle(
+                        fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 const SizedBox(width: 8),
                 Text(_brl(resumo.totalAnual),
                     style: TextStyle(
@@ -728,7 +1357,7 @@ class _ResumoAnualCard extends StatelessWidget {
             const SizedBox(height: 16),
 
             // Gráfico de barras mensal
-            _GraficoMensal(porMes: resumo.porMes),
+            _GraficoMensalVeiculo(porMes: resumo.porMes),
           ],
         ],
       ),
@@ -736,10 +1365,10 @@ class _ResumoAnualCard extends StatelessWidget {
   }
 }
 
-class _GraficoMensal extends StatelessWidget {
+class _GraficoMensalVeiculo extends StatelessWidget {
   final List<ResumoMensalVeiculoModel> porMes;
 
-  const _GraficoMensal({required this.porMes});
+  const _GraficoMensalVeiculo({required this.porMes});
 
   @override
   Widget build(BuildContext context) {
@@ -768,22 +1397,22 @@ class _GraficoMensal extends StatelessWidget {
                           color:    _corVeiculo.withValues(alpha: 0.8)),
                       textAlign: TextAlign.center,
                     ),
-                  const SizedBox(height: 2),
+                  SizedBox(height: 2),
                   AnimatedContainer(
-                    duration: const Duration(milliseconds: 400),
+                    duration: Duration(milliseconds: 400),
                     height:   (frac * 72).clamp(2.0, 72.0),
                     decoration: BoxDecoration(
                       color:        m.totalGasto > 0
                           ? _corVeiculo
-                          : AppTheme.divider,
-                      borderRadius: const BorderRadius.vertical(
+                          : Theme.of(context).colorScheme.outlineVariant,
+                      borderRadius: BorderRadius.vertical(
                           top: Radius.circular(4)),
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: 4),
                   Text(m.label,
-                      style: const TextStyle(
-                          fontSize: 10, color: AppTheme.textSecondary),
+                      style: TextStyle(
+                          fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       textAlign: TextAlign.center),
                 ],
               ),
@@ -816,11 +1445,11 @@ class _GastoVeiculoCardState extends State<_GastoVeiculoCard> {
     final cor = widget.cor;
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+      duration: Duration(milliseconds: 200),
       decoration: BoxDecoration(
-        color:        AppTheme.surface,
+        color:        Theme.of(context).colorScheme.surface,
         border:       Border.all(
-          color: _expandido ? cor.withValues(alpha: 0.4) : AppTheme.divider,
+          color: _expandido ? cor.withValues(alpha: 0.4) : Theme.of(context).colorScheme.outlineVariant,
           width: _expandido ? 1.5 : 1,
         ),
         borderRadius: BorderRadius.circular(14),
@@ -854,10 +1483,10 @@ class _GastoVeiculoCardState extends State<_GastoVeiculoCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(g.nome,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize:   15,
                               fontWeight: FontWeight.w700,
-                              color:      AppTheme.textPrimary,
+                              color:      Theme.of(context).colorScheme.onSurface,
                             )),
                         const SizedBox(height: 2),
                         Row(
@@ -879,11 +1508,11 @@ class _GastoVeiculoCardState extends State<_GastoVeiculoCard> {
                                     letterSpacing: 1,
                                   )),
                             ),
-                            const SizedBox(width: 8),
+                            SizedBox(width: 8),
                             Text(
                               '${g.qtdServicos} ${g.qtdServicos == 1 ? 'serviço' : 'serviços'}',
-                              style: const TextStyle(
-                                  fontSize: 12, color: AppTheme.textSecondary),
+                              style: TextStyle(
+                                  fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                             ),
                           ],
                         ),
@@ -906,19 +1535,19 @@ class _GastoVeiculoCardState extends State<_GastoVeiculoCard> {
                           color:      _corVeiculo,
                         )),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: 8),
                   AnimatedRotation(
                     turns:    _expandido ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: const Icon(Icons.keyboard_arrow_down_rounded,
-                        color: AppTheme.textSecondary),
+                    duration: Duration(milliseconds: 200),
+                    child: Icon(Icons.keyboard_arrow_down_rounded,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ],
               ),
             ),
           ),
           if (_expandido) ...[
-            const Divider(height: 1, color: AppTheme.divider),
+            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
             _TabelaServicos(servicos: g.servicos, cor: cor),
           ],
         ],
@@ -967,30 +1596,30 @@ class _TabelaServicos extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(labelTipo(s.tipo),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize:   13,
                                   fontWeight: FontWeight.w600,
-                                  color:      AppTheme.textPrimary,
+                                  color:      Theme.of(context).colorScheme.onSurface,
                                 )),
                             if (s.descricao != null &&
                                 s.descricao!.isNotEmpty)
                               Text(s.descricao!,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 12,
-                                      color: AppTheme.textSecondary)),
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
                             Text(
                               s.dataRetirada != null
                                   ? '${_fmtData(s.dataEnvio)} → ${_fmtData(s.dataRetirada)}'
                                   : 'Envio: ${_fmtData(s.dataEnvio)}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                   fontSize: 11,
-                                  color: AppTheme.textSecondary),
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
                             ),
                           ],
                         ),
                       ),
                       Text(_brl(s.valor),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize:   13,
                             fontWeight: FontWeight.w700,
                             color:      _corVeiculo,
@@ -999,18 +1628,18 @@ class _TabelaServicos extends StatelessWidget {
                   ),
                 ),
                 if (i < servicos.length - 1)
-                  const Divider(height: 1, color: AppTheme.divider),
+                  Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
               ],
             );
           }),
-          const Divider(height: 1, color: AppTheme.divider),
-          const SizedBox(height: 8),
+          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+          SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              const Text('Total do veículo:',
+              Text('Total do veículo:',
                   style: TextStyle(
-                      fontSize: 12, color: AppTheme.textSecondary)),
+                      fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
               const SizedBox(width: 8),
               Text(
                 _brl(servicos.fold(0.0, (s, m) => s + m.valor)),
@@ -1066,11 +1695,11 @@ class _CategoriaCardState extends State<_CategoriaCard> {
     final cor = widget.cor;
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+      duration: Duration(milliseconds: 200),
       decoration: BoxDecoration(
-        color:        AppTheme.surface,
+        color:        Theme.of(context).colorScheme.surface,
         border:       Border.all(
-          color: _expandido ? cor.withValues(alpha: 0.4) : AppTheme.divider,
+          color: _expandido ? cor.withValues(alpha: 0.4) : Theme.of(context).colorScheme.outlineVariant,
           width: _expandido ? 1.5 : 1,
         ),
         borderRadius: BorderRadius.circular(14),
@@ -1112,17 +1741,17 @@ class _CategoriaCardState extends State<_CategoriaCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(g.categoriaLabel,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize:   15,
                               fontWeight: FontWeight.w700,
-                              color:      AppTheme.textPrimary,
+                              color:      Theme.of(context).colorScheme.onSurface,
                             )),
-                        const SizedBox(height: 2),
+                        SizedBox(height: 2),
                         Text(
                           '${g.materiais.length} '
                           '${g.materiais.length == 1 ? 'material' : 'materiais'}',
-                          style: const TextStyle(
-                              fontSize: 12, color: AppTheme.textSecondary),
+                          style: TextStyle(
+                              fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
                       ],
                     ),
@@ -1140,19 +1769,19 @@ class _CategoriaCardState extends State<_CategoriaCard> {
                     cor:   _corSaida,
                     icone: Icons.arrow_upward_rounded,
                   ),
-                  const SizedBox(width: 12),
+                  SizedBox(width: 12),
                   AnimatedRotation(
                     turns:    _expandido ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: const Icon(Icons.keyboard_arrow_down_rounded,
-                        color: AppTheme.textSecondary),
+                    duration: Duration(milliseconds: 200),
+                    child: Icon(Icons.keyboard_arrow_down_rounded,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ],
               ),
             ),
           ),
           if (_expandido) ...[
-            const Divider(height: 1, color: AppTheme.divider),
+            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
             _TabelaMateriais(materiais: g.materiais, cor: cor),
           ],
         ],
@@ -1223,31 +1852,31 @@ class _TabelaMateriais extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: EdgeInsets.only(bottom: 8),
             child: Row(
               children: [
-                const Expanded(
+                Expanded(
                   flex: 3,
                   child: Text('Material',
                       style: TextStyle(
                         fontSize:   11,
                         fontWeight: FontWeight.w600,
-                        color:      AppTheme.textSecondary,
+                        color:      Theme.of(context).colorScheme.onSurfaceVariant,
                       )),
                 ),
                 _HeaderCol('Qtd. Entrada', align: TextAlign.right),
                 const SizedBox(width: 8),
                 _HeaderCol('Valor Entrada',
                     cor: _corEntrada, align: TextAlign.right),
-                const SizedBox(width: 16),
+                SizedBox(width: 16),
                 _HeaderCol('Qtd. Saída', align: TextAlign.right),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 _HeaderCol('Valor Saído',
                     cor: _corSaida, align: TextAlign.right),
               ],
             ),
           ),
-          const Divider(height: 1, color: AppTheme.divider),
+          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
           const SizedBox(height: 4),
           ...materiais.asMap().entries.map((e) {
             final i = e.key;
@@ -1258,18 +1887,18 @@ class _TabelaMateriais extends StatelessWidget {
               ultimo:   i == materiais.length - 1,
             );
           }),
-          const SizedBox(height: 4),
-          const Divider(height: 1, color: AppTheme.divider),
-          const SizedBox(height: 8),
+          SizedBox(height: 4),
+          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+          SizedBox(height: 8),
           Row(
             children: [
-              const Expanded(
+              Expanded(
                 flex: 3,
                 child: Text('Subtotal',
                     style: TextStyle(
                       fontSize:   12,
                       fontWeight: FontWeight.w600,
-                      color:      AppTheme.textSecondary,
+                      color:      Theme.of(context).colorScheme.onSurfaceVariant,
                     )),
               ),
               const SizedBox(width: 70),
@@ -1326,7 +1955,7 @@ class _HeaderCol extends StatelessWidget {
           style: TextStyle(
             fontSize:   11,
             fontWeight: FontWeight.w600,
-            color:      cor ?? AppTheme.textSecondary,
+            color:      cor ?? Theme.of(context).colorScheme.onSurfaceVariant,
           )),
     );
   }
@@ -1366,16 +1995,16 @@ class _LinhaMateria extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(m.nome,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize:   13,
                           fontWeight: FontWeight.w500,
-                          color:      AppTheme.textPrimary,
+                          color:      Theme.of(context).colorScheme.onSurface,
                         )),
                     if (detalhes.isNotEmpty)
                       Text(detalhes,
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 11,
-                              color: AppTheme.textSecondary)),
+                              color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   ],
                 ),
               ),
@@ -1389,8 +2018,8 @@ class _LinhaMateria extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     color: m.qtdEntrada > 0
-                        ? AppTheme.textPrimary
-                        : AppTheme.textHint,
+                        ? Theme.of(context).colorScheme.onSurface
+                        : Theme.of(context).colorScheme.outline,
                   ),
                 ),
               ),
@@ -1406,7 +2035,7 @@ class _LinhaMateria extends StatelessWidget {
                           : FontWeight.normal,
                       color: m.totalEntrada > 0
                           ? _corEntrada
-                          : AppTheme.textHint,
+                          : Theme.of(context).colorScheme.outline,
                     )),
               ),
               const SizedBox(width: 16),
@@ -1420,8 +2049,8 @@ class _LinhaMateria extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     color: m.qtdSaida > 0
-                        ? AppTheme.textPrimary
-                        : AppTheme.textHint,
+                        ? Theme.of(context).colorScheme.onSurface
+                        : Theme.of(context).colorScheme.outline,
                   ),
                 ),
               ),
@@ -1437,14 +2066,14 @@ class _LinhaMateria extends StatelessWidget {
                           : FontWeight.normal,
                       color: m.totalSaida > 0
                           ? _corSaida
-                          : AppTheme.textHint,
+                          : Theme.of(context).colorScheme.outline,
                     )),
               ),
             ],
           ),
         ),
         if (!ultimo)
-          const Divider(height: 1, color: AppTheme.divider),
+          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
       ],
     );
   }
@@ -1492,11 +2121,11 @@ class _DatePickerField extends StatelessWidget {
       onTap: () => _pick(context),
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color:        AppTheme.surface,
+          color:        Theme.of(context).colorScheme.surface,
           border:       Border.all(
-            color: hasValue ? AppTheme.primary : AppTheme.divider,
+            color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
           ),
           borderRadius: BorderRadius.circular(8),
         ),
@@ -1505,24 +2134,24 @@ class _DatePickerField extends StatelessWidget {
           children: [
             Icon(Icons.calendar_today,
                 size:  16,
-                color: hasValue ? AppTheme.primary : AppTheme.textHint),
-            const SizedBox(width: 6),
+                color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline),
+            SizedBox(width: 6),
             Text(
               hasValue
                   ? '$label: ${_fmtData(value)}'
                   : label,
               style: TextStyle(
                 fontSize:   13,
-                color:      hasValue ? AppTheme.primary : AppTheme.textHint,
+                color:      hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
                 fontWeight: hasValue ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
             if (hasValue) ...[
-              const SizedBox(width: 6),
+              SizedBox(width: 6),
               GestureDetector(
                 onTap: onCleared,
-                child: const Icon(Icons.close,
-                    size: 14, color: AppTheme.textHint),
+                child: Icon(Icons.close,
+                    size: 14, color: Theme.of(context).colorScheme.outline),
               ),
             ],
           ],

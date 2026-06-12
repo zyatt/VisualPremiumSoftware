@@ -5,9 +5,25 @@ import '../repositories/material_repository.dart';
 
 /// Remove prefixos como "Exception:", "HttpException:" que o Dart
 /// adiciona automaticamente ao fazer e.toString() em exceções.
-String _mensagemErro(Object e) {
+///
+/// Quando o erro é de conexão (sem internet / servidor fora do ar), retorna
+/// uma mensagem amigável contextualizada com a ação que estava sendo feita
+/// (ex: "Erro ao carregar materiais"). Quando é um erro específico vindo do
+/// backend (ex: validação), retorna a mensagem original já tratada.
+String _mensagemErro(Object e, {required String acao}) {
   final raw = e.toString();
-  return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+  if (raw.contains('SocketException') ||
+      raw.contains('ClientException') ||
+      raw.contains('Connection refused') ||
+      raw.contains('Connection reset') ||
+      raw.contains('Failed host lookup') ||
+      raw.contains('HandshakeException') ||
+      raw.contains('TimeoutException') ||
+      raw.contains('Network is unreachable')) {
+    return 'Erro ao $acao: Verifique a conexão com o servidor.';
+  }
+  final msg = raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
+  return 'Erro ao $acao: $msg';
 }
 
 class MaterialProvider extends ChangeNotifier {
@@ -18,6 +34,12 @@ class MaterialProvider extends ChangeNotifier {
 
   List<String> _categorias = [];
   List<String> get categorias => _categorias;
+
+  /// true somente após ao menos um carregamento bem-sucedido de categorias.
+  /// Usado para evitar exibir cards hardcoded ("Geral", "Sem categoria")
+  /// enquanto o servidor está offline.
+  bool _categoriasCarregadas = false;
+  bool get categoriasCarregadas => _categoriasCarregadas;
 
   bool _carregando = false;
   bool get carregando => _carregando;
@@ -66,7 +88,7 @@ class MaterialProvider extends ChangeNotifier {
         ativo:        ativo,
       );
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erro = _mensagemErro(e, acao: 'carregar estoque');
     } finally {
       _carregando = false;
       notifyListeners();
@@ -86,17 +108,26 @@ class MaterialProvider extends ChangeNotifier {
   }
 
   Future<void> carregarCategorias() async {
+    _carregando = true;
+    _erro = null;
+    notifyListeners();
     try {
       _categorias = await _repo.listarCategorias();
+      _categoriasCarregadas = true;
+    } catch (e) {
+      _erro = _mensagemErro(e, acao: 'carregar categorias');
+      // _categoriasCarregadas permanece false enquanto nunca houver sucesso
+    } finally {
+      _carregando = false;
       notifyListeners();
-    } catch (_) {}
+    }
   }
 
   Future<MaterialModel?> buscarPorId(int id) async {
     try {
       return await _repo.buscarPorId(id);
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erro = _mensagemErro(e, acao: 'carregar material');
       notifyListeners();
       return null;
     }
@@ -108,7 +139,7 @@ class MaterialProvider extends ChangeNotifier {
       await recarregar();
       return true;
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erro = _mensagemErro(e, acao: 'cadastrar material');
       notifyListeners();
       return false;
     }
@@ -120,7 +151,7 @@ class MaterialProvider extends ChangeNotifier {
       await recarregar();
       return true;
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erro = _mensagemErro(e, acao: 'atualizar material');
       notifyListeners();
       return false;
     }
@@ -132,7 +163,7 @@ class MaterialProvider extends ChangeNotifier {
       await recarregar();
       return true;
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erro = _mensagemErro(e, acao: 'desativar material');
       notifyListeners();
       return false;
     }
@@ -144,7 +175,7 @@ class MaterialProvider extends ChangeNotifier {
       await recarregar();
       return true;
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erro = _mensagemErro(e, acao: 'confirmar estoque');
       notifyListeners();
       return false;
     }
@@ -156,7 +187,7 @@ class MaterialProvider extends ChangeNotifier {
       await recarregar();
       return true;
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erro = _mensagemErro(e, acao: 'excluir material');
       notifyListeners();
       return false;
     }
@@ -168,7 +199,7 @@ class MaterialProvider extends ChangeNotifier {
       await carregar();
       return true;
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erro = _mensagemErro(e, acao: 'reativar material');
       notifyListeners();
       return false;
     }
@@ -196,13 +227,34 @@ class MaterialProvider extends ChangeNotifier {
     }
   }
 
+  /// Atualiza diretamente o custo de última compra do material sem OC.
+  Future<bool> atualizarCustoManual(
+    int id, {
+    double? ultimoValorPago,
+    double? ultimoValorPagoM2,
+  }) async {
+    try {
+      await _repo.atualizarCustoManual(
+        id,
+        ultimoValorPago:   ultimoValorPago,
+        ultimoValorPagoM2: ultimoValorPagoM2,
+      );
+      await recarregar();
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e, acao: 'atualizar custo');
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<bool> excluirFilhoEspecifico(int materialId, int filhoId) async {
     try {
       await _repo.excluirFilhoEspecifico(materialId, filhoId);
       await recarregar();
       return true;
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erro = _mensagemErro(e, acao: 'excluir item');
       notifyListeners();
       return false;
     }
@@ -223,7 +275,7 @@ class MaterialProvider extends ChangeNotifier {
       await recarregar();
       return true;
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erro = _mensagemErro(e, acao: 'atualizar item');
       notifyListeners();
       return false;
     }
