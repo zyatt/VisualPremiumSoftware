@@ -206,9 +206,9 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: AppTheme.background,
       body: Padding(
-        padding: EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -222,15 +222,15 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                          ?.copyWith(color: AppTheme.textPrimary),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
                       'Gerencie fornecedores e seus materiais',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          ?.copyWith(color: AppTheme.textSecondary),
                     ),
                   ],
                 ),
@@ -254,24 +254,24 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.primary,
                     foregroundColor: Colors.white,
-                    padding: EdgeInsets.symmetric(
+                    padding: const EdgeInsets.symmetric(
                         horizontal: 20, vertical: 12),
                   ),
                 ),
-                SizedBox(width: 10),
+                const SizedBox(width: 10),
                 IconButton(
                   onPressed: () => context.read<FornecedorProvider>().carregar(),
-                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  icon: const Icon(Icons.refresh, size: 18, color: AppTheme.textSecondary),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
+                    backgroundColor: AppTheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    side: const BorderSide(color: AppTheme.divider),
                   ),
                 ),
               ],
             ),
-            SizedBox(height: 20),
+            const SizedBox(height: 20),
 
             Row(
               children: [
@@ -279,9 +279,9 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                   width: 120,
                   child: TextField(
                     controller: _buscaIdCtrl,
-                    decoration: InputDecoration(
+                    decoration: const InputDecoration(
                       hintText: 'ID...',
-                      prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
+                      prefixIcon: Icon(Icons.tag, color: AppTheme.textHint, size: 18),
                       isDense: true,
                     ),
                     keyboardType: TextInputType.number,
@@ -293,26 +293,26 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
                 ),
-                SizedBox(width: 12),
+                const SizedBox(width: 12),
                 Expanded(
                   flex: 3,
                   child: TextField(
                     controller: _buscaCtrl,
                     decoration: InputDecoration(
                       hintText: 'Buscar por nome, vendedor ou CNPJ…',
-                      prefixIcon: Icon(Icons.search,
-                          color: Theme.of(context).colorScheme.outline, size: 20),
+                      prefixIcon: const Icon(Icons.search,
+                          color: AppTheme.textHint, size: 20),
                       isDense: true,
                       suffixIcon: ValueListenableBuilder(
                         valueListenable: _buscaCtrl,
                         builder: (_, v, __) => v.text.isNotEmpty
                             ? IconButton(
-                                icon: Icon(Icons.clear, size: 18),
+                                icon: const Icon(Icons.clear, size: 18),
                                 onPressed: () {
                                   _buscaCtrl.clear();
                                   _aplicarFiltros();
                                 },
-                                color: Theme.of(context).colorScheme.outline,
+                                color: AppTheme.textHint,
                               )
                             : const SizedBox.shrink(),
                       ),
@@ -377,23 +377,13 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.cloud_off_outlined,
+                          const Icon(Icons.cloud_off_outlined,
                               size: 48, color: AppTheme.error),
-                          SizedBox(height: 12),
-                          Text(
-                            'Erro ao carregar fornecedores',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurface,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 15,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          SizedBox(height: 4),
+                          const SizedBox(height: 12),
                           Text(
                             prov.erro!,
-                            style: TextStyle(
-                                color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            style: const TextStyle(
+                                color: AppTheme.textSecondary),
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 16),
@@ -418,9 +408,9 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                                 ? Icons.search_off_outlined
                                 : Icons.storefront_outlined,
                             size: 64,
-                            color: Theme.of(context).colorScheme.outline,
+                            color: AppTheme.textHint,
                           ),
-                          SizedBox(height: 16),
+                          const SizedBox(height: 16),
                           Text(
                             _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty || _buscaIdCtrl.text.isNotEmpty
                                 ? 'Nenhum fornecedor encontrado'
@@ -428,9 +418,9 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyLarge
-                                ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                ?.copyWith(color: AppTheme.textSecondary),
                           ),
-                          SizedBox(height: 8),
+                          const SizedBox(height: 8),
                           Text(
                             _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty || _buscaIdCtrl.text.isNotEmpty
                                 ? 'Tente um termo diferente.'
@@ -438,7 +428,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyMedium
-                                ?.copyWith(color: Theme.of(context).colorScheme.outline),
+                                ?.copyWith(color: AppTheme.textHint),
                           ),
                         ],
                       ),
@@ -501,22 +491,22 @@ class _TabelaFornecedores extends StatelessWidget {
       ? SizedBox(width: col.fixed, child: child)
       : Expanded(flex: (col.flex! * 10).round(), child: child);
 
-  Widget _cabecalho(BuildContext context) => Container(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+  Widget _cabecalho() => Container(
+        color: AppTheme.surfaceVariant,
         child: Row(
           children: [
             for (final col in _cols)
               _colWrap(
                 col,
                 Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
                     col.label,
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      color: AppTheme.textSecondary,
                     ),
                   ),
                 ),
@@ -531,10 +521,10 @@ class _TabelaFornecedores extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _cabecalho(context),
+        _cabecalho(),
         for (int i = 0; i < fornecedores.length; i++) ...[
           if (i > 0)
-            Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
+            const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
           _LinhaFornecedor(
             fornecedor:  fornecedores[i],
             cols:        _cols,
@@ -543,7 +533,7 @@ class _TabelaFornecedores extends StatelessWidget {
             onMateriais: onMateriais,
           ),
         ],
-        Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
+        const Divider(height: 0, thickness: 0.8, color: AppTheme.divider),
       ],
     );
   }
@@ -583,18 +573,18 @@ class _LinhaFornecedorState extends State<_LinhaFornecedor> {
       ? SizedBox(width: col.fixed, child: child)
       : Expanded(flex: (col.flex! * 10).round(), child: child);
 
-  static Widget _cell(String text, BuildContext context) => Padding(
-        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+  static Widget _cell(String text) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         child: Text(
           text,
           textAlign: TextAlign.center,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+          style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
         ),
       );
 
-  static Widget _vDivider(BuildContext context) => VerticalDivider(
-        width: 1, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant,
+  static Widget _vDivider() => const VerticalDivider(
+        width: 1, thickness: 0.5, color: AppTheme.divider,
       );
 
   @override
@@ -603,8 +593,8 @@ class _LinhaFornecedorState extends State<_LinhaFornecedor> {
     final cols = widget.cols;
 
     final bgColor = _hovered
-        ? Color(0xFFFF9800).withValues(alpha: 0.10)
-        : Theme.of(context).colorScheme.surface;
+        ? const Color(0xFFFF9800).withValues(alpha: 0.10)
+        : AppTheme.surface;
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
@@ -621,43 +611,43 @@ class _LinhaFornecedorState extends State<_LinhaFornecedor> {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 _colWrap(cols[0], Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
                     '${f.id}',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      color: AppTheme.textSecondary,
                       fontFeatures: [FontFeature.tabularFigures()],
                     ),
                   ),
                 )),
-                _vDivider(context),
+                _vDivider(),
                 _colWrap(cols[1], Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
                     f.nomeFantasia,
                     textAlign: TextAlign.center,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurface,
+                      color: AppTheme.textPrimary,
                     ),
                   ),
                 )),
-                _vDivider(context),
-                _colWrap(cols[2], _cell(f.razaoSocial ?? '—', context)),
-                _vDivider(context),
-                _colWrap(cols[3], _cell(f.cnpj != null ? f.cnpjFormatado : '—', context)),
-                _vDivider(context),
-                _colWrap(cols[4], _cell(f.telefone != null ? f.telefoneFormatado : '—', context)),
-                _vDivider(context),
-                _colWrap(cols[5], _cell(f.nomeVendedor ?? '—', context)),
-                _vDivider(context),
-                _colWrap(cols[6], _cell(f.tipoFornecedor ?? '—', context)),
-                _vDivider(context),
+                _vDivider(),
+                _colWrap(cols[2], _cell(f.razaoSocial ?? '—')),
+                _vDivider(),
+                _colWrap(cols[3], _cell(f.cnpj != null ? f.cnpjFormatado : '—')),
+                _vDivider(),
+                _colWrap(cols[4], _cell(f.telefone != null ? f.telefoneFormatado : '—')),
+                _vDivider(),
+                _colWrap(cols[5], _cell(f.nomeVendedor ?? '—')),
+                _vDivider(),
+                _colWrap(cols[6], _cell(f.tipoFornecedor ?? '—')),
+                _vDivider(),
                 _colWrap(cols[7], _MateriaisCell(
                   count: f.materiais.length,
                   onTap: () => widget.onMateriais(f),
@@ -885,19 +875,14 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
         backgroundColor: AppTheme.success,
       ));
     } else {
-      final detalhe = prov.erro ?? '';
-      final prefixo = _editando
-          ? 'Erro ao atualizar fornecedor'
-          : 'Erro ao cadastrar fornecedor';
-      setState(() => _erroDialog =
-          detalhe.isEmpty ? prefixo : '$prefixo: $detalhe');
+      setState(() => _erroDialog = prov.erro ?? 'Erro ao salvar.');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      backgroundColor: AppTheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: SizedBox(
         width: 480,
@@ -907,14 +892,14 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
           children: [
             // ── Cabeçalho ────────────────────────────────────────────
             Padding(
-              padding: EdgeInsets.fromLTRB(24, 20, 16, 0),
+              padding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
               child: Row(
                 children: [
                   Expanded(
                     child: Text(
                       _editando ? 'Editar fornecedor' : 'Novo fornecedor',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurface,
+                            color: AppTheme.textPrimary,
                             fontWeight: FontWeight.w600,
                           ),
                     ),
@@ -1058,7 +1043,7 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                         ),
                       ]),
 
-                      SizedBox(height: 8),
+                      const SizedBox(height: 8),
                     ],
                   ),
                 ),
@@ -1066,7 +1051,7 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
             ),
 
             // ── Rodapé com ações ──────────────────────────────────────
-            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+            const Divider(height: 1, color: AppTheme.divider),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
@@ -1216,14 +1201,8 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
   Future<void> _recarregar() async {
     final prov = context.read<FornecedorProvider>();
     final atualizado = await prov.buscarPorId(_fornecedor.id);
-    if (!mounted) return;
-    if (atualizado != null) {
+    if (atualizado != null && mounted) {
       setState(() => _fornecedor = atualizado);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(prov.erro ?? 'Erro ao atualizar dados do fornecedor.'),
-        backgroundColor: AppTheme.error,
-      ));
     }
   }
 
@@ -1283,7 +1262,7 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
     final total     = _fornecedor.materiais.length;
 
     return Dialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      backgroundColor: AppTheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
       child: SizedBox(
@@ -1293,7 +1272,7 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
           children: [
             // ── Cabeçalho ──────────────────────────────────────────────────
             Padding(
-              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
               child: Row(
                 children: [
                   Expanded(
@@ -1305,15 +1284,15 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                           style: Theme.of(context)
                               .textTheme
                               .headlineSmall
-                              ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                              ?.copyWith(color: AppTheme.textPrimary),
                         ),
-                        SizedBox(height: 2),
+                        const SizedBox(height: 2),
                         Text(
                           _fornecedor.nomeFantasia,
                           style: Theme.of(context)
                               .textTheme
                               .bodyMedium
-                              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              ?.copyWith(color: AppTheme.textSecondary),
                         ),
                       ],
                     ),
@@ -1324,20 +1303,20 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                     label: const Text('Vincular'),
                     style: FilledButton.styleFrom(
                       backgroundColor: AppTheme.primary,
-                      padding: EdgeInsets.symmetric(
+                      padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 10),
                     ),
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   IconButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    icon: Icon(Icons.close),
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    icon: const Icon(Icons.close),
+                    color: AppTheme.textSecondary,
                   ),
                 ],
               ),
             ),
-            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+            const Divider(height: 1, color: AppTheme.divider),
 
             // ── Barra de filtros ────────────────────────────────────────────
             Padding(
@@ -1351,10 +1330,10 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                         width: 80,
                         child: TextField(
                           controller: _filtroIdCtrl,
-                          decoration: InputDecoration(
+                          decoration: const InputDecoration(
                             hintText: 'ID',
                             prefixIcon: Icon(Icons.tag,
-                                color: Theme.of(context).colorScheme.outline, size: 16),
+                                color: AppTheme.textHint, size: 16),
                             isDense: true,
                             contentPadding: EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 8),
@@ -1365,7 +1344,7 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                           ],
                         ),
                       ),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       // Nome
                       Expanded(
                         flex: 3,
@@ -1373,8 +1352,8 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                           controller: _filtroNomeCtrl,
                           decoration: InputDecoration(
                             hintText: 'Buscar por nome…',
-                            prefixIcon: Icon(Icons.search,
-                                color: Theme.of(context).colorScheme.outline, size: 18),
+                            prefixIcon: const Icon(Icons.search,
+                                color: AppTheme.textHint, size: 18),
                             isDense: true,
                             contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 8),
@@ -1382,23 +1361,23 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                               valueListenable: _filtroNomeCtrl,
                               builder: (_, v, __) => v.text.isNotEmpty
                                   ? IconButton(
-                                      icon: Icon(Icons.clear, size: 16),
+                                      icon: const Icon(Icons.clear, size: 16),
                                       onPressed: _filtroNomeCtrl.clear,
-                                      color: Theme.of(context).colorScheme.outline,
+                                      color: AppTheme.textHint,
                                     )
                                   : const SizedBox.shrink(),
                             ),
                           ),
                         ),
                       ),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       // Limpar todos
                       if (_temFiltro)
                         Tooltip(
                           message: 'Limpar filtros',
                           child: IconButton.outlined(
-                            icon: Icon(Icons.filter_alt_off, size: 18),
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            icon: const Icon(Icons.filter_alt_off, size: 18),
+                            color: AppTheme.textSecondary,
                             visualDensity: VisualDensity.compact,
                             onPressed: _limparFiltros,
                           ),
@@ -1458,9 +1437,9 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                           _temFiltro
                               ? '${materiais.length} de $total material${total != 1 ? 'is' : ''}'
                               : '$total material${total != 1 ? 'is' : ''}',
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 11,
-                            color: Theme.of(context).colorScheme.outline,
+                            color: AppTheme.textHint,
                           ),
                         ),
                       ),
@@ -1468,21 +1447,21 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                 ],
               ),
             ),
-            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+            const Divider(height: 1, color: AppTheme.divider),
 
             // ── Lista ───────────────────────────────────────────────────────
             Expanded(
               child: total == 0
-                  ? Center(
+                  ? const Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(Icons.inventory_2_outlined,
-                              size: 48, color: Theme.of(context).colorScheme.outline),
+                              size: 48, color: AppTheme.textHint),
                           SizedBox(height: 12),
                           Text(
                             'Nenhum material vinculado',
-                            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            style: TextStyle(color: AppTheme.textSecondary),
                           ),
                         ],
                       ),
@@ -1492,13 +1471,13 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.search_off_outlined,
-                                  size: 48, color: Theme.of(context).colorScheme.outline),
-                              SizedBox(height: 12),
-                              Text(
+                              const Icon(Icons.search_off_outlined,
+                                  size: 48, color: AppTheme.textHint),
+                              const SizedBox(height: 12),
+                              const Text(
                                 'Nenhum material encontrado',
                                 style:
-                                    TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                    TextStyle(color: AppTheme.textSecondary),
                               ),
                               const SizedBox(height: 10),
                               TextButton(
@@ -1565,10 +1544,10 @@ class _VinculoCardState extends State<_VinculoCard> {
       child: DecoratedBox(
           decoration: BoxDecoration(
             color: _hovered
-                ? Color(0xFFFF9800).withValues(alpha: 0.08)
-                : Theme.of(context).colorScheme.surfaceContainerHighest,
+                ? const Color(0xFFFF9800).withValues(alpha: 0.08)
+                : AppTheme.surfaceVariant,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+            border: Border.all(color: AppTheme.divider),
           ),
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -1597,10 +1576,10 @@ class _VinculoCardState extends State<_VinculoCard> {
                             children: [
                               Text(
                                 v.descricaoCompleta,
-                                style: TextStyle(
+                                style: const TextStyle(
                                     fontWeight: FontWeight.w600,
                                     fontSize: 13,
-                                    color: Theme.of(context).colorScheme.onSurface),
+                                    color: AppTheme.textPrimary),
                               ),
                               const SizedBox(height: 4),
                               Row(
@@ -1638,13 +1617,13 @@ class _VinculoCardState extends State<_VinculoCard> {
 class _PriceTag extends StatelessWidget {
   final String label;
   final double valor;
-  _PriceTag({required this.label, required this.valor});
+  const _PriceTag({required this.label, required this.valor});
 
   @override
   Widget build(BuildContext context) {
     return RichText(
       text: TextSpan(
-        style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
         children: [
           TextSpan(text: '$label '),
           TextSpan(
@@ -1964,7 +1943,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      backgroundColor: AppTheme.surface,
       title: Text(_editando ? 'Editar valor' : 'Vincular material'),
       content: SizedBox(
         width: 600,
@@ -2066,10 +2045,10 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                         decoration: InputDecoration(
                           labelText: 'Identificador',
                           isDense: true,
-                          prefixIcon: Icon(
+                          prefixIcon: const Icon(
                             Icons.qr_code_outlined,
                             size: 16,
-                            color: Theme.of(context).colorScheme.outline,
+                            color: AppTheme.textHint,
                           ),
                           suffixIcon: _materialIdSelecionado != null &&
                                   _materialIdentificadorCtrl.text.isNotEmpty
@@ -2082,17 +2061,17 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                         onTap: _onFiltroAdicionalFocus,
                       ),
                     ),
-                    SizedBox(width: 12),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: TextFormField(
                         controller: _materialMedidaCtrl,
-                        decoration: InputDecoration(
+                        decoration: const InputDecoration(
                           labelText: 'Medida',
                           isDense: true,
                           prefixIcon: Icon(
                             Icons.straighten_outlined,
                             size: 16,
-                            color: Theme.of(context).colorScheme.outline,
+                            color: AppTheme.textHint,
                           ),
                         ),
                         inputFormatters: [_UpperCaseFormatter()],
@@ -2100,18 +2079,18 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                       ),
                     ),
 
-                    SizedBox(width: 12),
+                    const SizedBox(width: 12),
 
                     Expanded(
                       child: TextFormField(
                         controller: _materialEspessuraCtrl,
-                        decoration: InputDecoration(
+                        decoration: const InputDecoration(
                           labelText: 'Espessura',
                           isDense: true,
                           prefixIcon: Icon(
                             Icons.layers_outlined,
                             size: 16,
-                            color: Theme.of(context).colorScheme.outline,
+                            color: AppTheme.textHint,
                           ),
                         ),
                         inputFormatters: [_UpperCaseFormatter()],
@@ -2119,32 +2098,32 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                       ),
                     ),
 
-                    SizedBox(width: 8),
+                    const SizedBox(width: 8),
 
                     TextButton.icon(
                       onPressed: _limparSelecaoMaterial,
-                      icon: Icon(Icons.clear_all, size: 16),
-                      label: Text('Limpar'),
+                      icon: const Icon(Icons.clear_all, size: 16),
+                      label: const Text('Limpar'),
                       style: TextButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                        foregroundColor: AppTheme.textSecondary,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
                           vertical: 8,
                         ),
-                        textStyle: TextStyle(fontSize: 12),
+                        textStyle: const TextStyle(fontSize: 12),
                       ),
                     ),
                   ],
                 ),
 
                 if (_sugestoes.isNotEmpty) ...[
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Container(
-                    constraints: BoxConstraints(maxHeight: 160),
+                    constraints: const BoxConstraints(maxHeight: 160),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surface,
+                      color: AppTheme.surface,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                      border: Border.all(color: AppTheme.divider),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.08),
@@ -2204,18 +2183,18 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                                     children: [
                                       Text(
                                         m['nome'] ?? '',
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                           fontSize: 13,
-                                          color: Theme.of(context).colorScheme.onSurface,
+                                          color: AppTheme.textPrimary,
                                         ),
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                       if (detalhe.isNotEmpty)
                                         Text(
                                           detalhe,
-                                          style: TextStyle(
+                                          style: const TextStyle(
                                             fontSize: 11,
-                                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                            color: AppTheme.textSecondary,
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -2224,19 +2203,19 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                                 ),
                                 if (jaVinculado)
                                   Container(
-                                    padding: EdgeInsets.symmetric(
+                                    padding: const EdgeInsets.symmetric(
                                         horizontal: 7, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: Theme.of(context).colorScheme.outline
+                                      color: AppTheme.textHint
                                           .withValues(alpha: 0.12),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
-                                    child: Text(
+                                    child: const Text(
                                       'Já vinculado',
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.w600,
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        color: AppTheme.textSecondary,
                                       ),
                                     ),
                                   ),
@@ -2806,7 +2785,7 @@ class _VincularPorMaterialDialogState
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      backgroundColor: AppTheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 32),
       child: SizedBox(
@@ -2816,7 +2795,7 @@ class _VincularPorMaterialDialogState
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: EdgeInsets.fromLTRB(24, 20, 16, 20),
+              padding: const EdgeInsets.fromLTRB(24, 20, 16, 20),
               child: Row(
                 children: [
                   Expanded(
@@ -2828,38 +2807,38 @@ class _VincularPorMaterialDialogState
                           style: Theme.of(context)
                               .textTheme
                               .headlineSmall
-                              ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                              ?.copyWith(color: AppTheme.textPrimary),
                         ),
-                        SizedBox(height: 2),
+                        const SizedBox(height: 2),
                         Text(
                           'Selecione um material e vincule a vários fornecedores',
                           style: Theme.of(context)
                               .textTheme
                               .bodyMedium
-                              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              ?.copyWith(color: AppTheme.textSecondary),
                         ),
                       ],
                     ),
                   ),
                   IconButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    icon: Icon(Icons.close),
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    icon: const Icon(Icons.close),
+                    color: AppTheme.textSecondary,
                   ),
                 ],
               ),
             ),
-            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+            const Divider(height: 1, color: AppTheme.divider),
 
             Padding(
-              padding: EdgeInsets.fromLTRB(24, 16, 24, 0),
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     'Material',
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          color: AppTheme.textSecondary,
                           fontWeight: FontWeight.w600,
                         ),
                   ),
@@ -2937,8 +2916,8 @@ class _VincularPorMaterialDialogState
                           decoration: InputDecoration(
                             labelText: 'Identificador',
                             isDense: true,
-                            prefixIcon: Icon(Icons.qr_code_outlined,
-                                size: 16, color: Theme.of(context).colorScheme.outline),
+                            prefixIcon: const Icon(Icons.qr_code_outlined,
+                                size: 16, color: AppTheme.textHint),
                             suffixIcon: _materialIdSelecionado != null &&
                                     _materialIdentificadorCtrl.text.isNotEmpty
                                 ? const Icon(Icons.check_circle,
@@ -2950,57 +2929,57 @@ class _VincularPorMaterialDialogState
                           onTap: _onFiltroAdicionalFocus,
                         ),
                       ),
-                      SizedBox(width: 12),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: TextField(
                           controller: _materialMedidaCtrl,
-                          decoration: InputDecoration(
+                          decoration: const InputDecoration(
                             labelText: 'Medida',
                             isDense: true,
                             prefixIcon: Icon(Icons.straighten_outlined,
-                                size: 16, color: Theme.of(context).colorScheme.outline),
+                                size: 16, color: AppTheme.textHint),
                           ),
                           inputFormatters: [_UpperCaseFormatter()],
                           onTap: _onFiltroAdicionalFocus,
                         ),
                       ),
-                      SizedBox(width: 12),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: TextField(
                           controller: _materialEspessuraCtrl,
-                          decoration: InputDecoration(
+                          decoration: const InputDecoration(
                             labelText: 'Espessura',
                             isDense: true,
                             prefixIcon: Icon(Icons.layers_outlined,
-                                size: 16, color: Theme.of(context).colorScheme.outline),
+                                size: 16, color: AppTheme.textHint),
                           ),
                           inputFormatters: [_UpperCaseFormatter()],
                           onTap: _onFiltroAdicionalFocus,
                         ),
                       ),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       TextButton.icon(
                         onPressed: _limparSelecaoMaterial,
-                        icon: Icon(Icons.clear_all, size: 16),
-                        label: Text('Limpar'),
+                        icon: const Icon(Icons.clear_all, size: 16),
+                        label: const Text('Limpar'),
                         style: TextButton.styleFrom(
-                          foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                          foregroundColor: AppTheme.textSecondary,
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 8),
-                          textStyle: TextStyle(fontSize: 12),
+                          textStyle: const TextStyle(fontSize: 12),
                         ),
                       ),
                     ],
                   ),
 
                   if (_sugestoes.isNotEmpty) ...[
-                    SizedBox(height: 4),
+                    const SizedBox(height: 4),
                     Container(
-                      constraints: BoxConstraints(maxHeight: 150),
+                      constraints: const BoxConstraints(maxHeight: 150),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
+                        color: AppTheme.surface,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                        border: Border.all(color: AppTheme.divider),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.08),
@@ -3054,16 +3033,16 @@ class _VincularPorMaterialDialogState
                                           CrossAxisAlignment.start,
                                       children: [
                                         Text(m['nome'] ?? '',
-                                            style: TextStyle(
+                                            style: const TextStyle(
                                                 fontSize: 13,
-                                                color: Theme.of(context).colorScheme.onSurface),
+                                                color: AppTheme.textPrimary),
                                             overflow: TextOverflow.ellipsis),
                                         if (detalhe.isNotEmpty)
                                           Text(detalhe,
-                                              style: TextStyle(
+                                              style: const TextStyle(
                                                   fontSize: 11,
                                                   color:
-                                                      Theme.of(context).colorScheme.onSurfaceVariant),
+                                                      AppTheme.textSecondary),
                                               overflow: TextOverflow.ellipsis),
                                       ],
                                     ),
@@ -3076,15 +3055,15 @@ class _VincularPorMaterialDialogState
                       ),
                     ),
                   ],
-                  SizedBox(height: 12),
+                  const SizedBox(height: 12),
                 ],
               ),
             ),
 
-            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+            const Divider(height: 1, color: AppTheme.divider),
 
             Padding(
-              padding: EdgeInsets.fromLTRB(24, 10, 24, 6),
+              padding: const EdgeInsets.fromLTRB(24, 10, 24, 6),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -3093,7 +3072,7 @@ class _VincularPorMaterialDialogState
                       Text(
                         'Fornecedores',
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              color: AppTheme.textSecondary,
                               fontWeight: FontWeight.w600,
                             ),
                       ),
@@ -3115,8 +3094,8 @@ class _VincularPorMaterialDialogState
                           decoration: InputDecoration(
                             hintText: 'Buscar fornecedor para adicionar…',
                             isDense: true,
-                            prefixIcon: Icon(Icons.person_search_outlined,
-                                size: 16, color: Theme.of(context).colorScheme.outline),
+                            prefixIcon: const Icon(Icons.person_search_outlined,
+                                size: 16, color: AppTheme.textHint),
                             suffixIcon: _buscandoFornecedor
                                 ? const Padding(
                                     padding: EdgeInsets.all(10),
@@ -3130,8 +3109,8 @@ class _VincularPorMaterialDialogState
                                   )
                                 : val.text.isNotEmpty
                                     ? IconButton(
-                                        icon: Icon(Icons.clear, size: 16),
-                                        color: Theme.of(context).colorScheme.outline,
+                                        icon: const Icon(Icons.clear, size: 16),
+                                        color: AppTheme.textHint,
                                         onPressed: () {
                                           _buscaFornecedorCtrl.clear();
                                           setState(() => _sugestoesFornecedor = []);
@@ -3164,22 +3143,22 @@ class _VincularPorMaterialDialogState
                                     ? Icons.category_outlined
                                     : Icons.storefront_outlined,
                                 size: 40,
-                                color: Theme.of(context).colorScheme.outline,
+                                color: AppTheme.textHint,
                               ),
-                              SizedBox(height: 10),
+                              const SizedBox(height: 10),
                               Text(
                                 _materialIdSelecionado == null
                                     ? 'Selecione um material para ver os fornecedores vinculados.'
                                     : 'Nenhum fornecedor vinculado ainda.',
-                                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                style: const TextStyle(color: AppTheme.textSecondary),
                                 textAlign: TextAlign.center,
                               ),
                               if (_materialIdSelecionado != null) ...[
-                                SizedBox(height: 6),
-                                Text(
+                                const SizedBox(height: 6),
+                                const Text(
                                   'Use o campo acima para buscar e adicionar fornecedores.',
                                   style: TextStyle(
-                                    color: Theme.of(context).colorScheme.outline,
+                                    color: AppTheme.textHint,
                                     fontSize: 12,
                                   ),
                                   textAlign: TextAlign.center,
@@ -3213,7 +3192,7 @@ class _VincularPorMaterialDialogState
                         ),
             ),
 
-            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+            const Divider(height: 1, color: AppTheme.divider),
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 14, 24, 14),
               child: Row(
@@ -3293,25 +3272,25 @@ class _BuscaFornecedorOverlay extends StatelessWidget {
           child: GestureDetector(
             onTap: onFechar,
             behavior: HitTestBehavior.translucent,
-            child: SizedBox.expand(),
+            child: const SizedBox.expand(),
           ),
         ),
         CompositedTransformFollower(
           link:             layerLink,
           showWhenUnlinked: false,
-          offset:           Offset(0, 40),
+          offset:           const Offset(0, 40),
           child: Align(
             alignment: Alignment.topLeft,
             child: Material(
               elevation:    8,
               borderRadius: BorderRadius.circular(10),
-              color:        Theme.of(context).colorScheme.surface,
+              color:        AppTheme.surface,
               child: Container(
                 width:       500,
-                constraints: BoxConstraints(maxHeight: 280),
+                constraints: const BoxConstraints(maxHeight: 280),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                  border: Border.all(color: AppTheme.divider),
                 ),
                 child: carregando && sugestoes.isEmpty
                     ? const Padding(
@@ -3322,11 +3301,11 @@ class _BuscaFornecedorOverlay extends StatelessWidget {
                         ),
                       )
                     : sugestoes.isEmpty
-                        ? Padding(
+                        ? const Padding(
                             padding: EdgeInsets.all(24),
                             child: Text(
                               'Nenhum fornecedor encontrado.',
-                              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              style: TextStyle(color: AppTheme.textSecondary),
                               textAlign: TextAlign.center,
                             ),
                           )
@@ -3335,7 +3314,7 @@ class _BuscaFornecedorOverlay extends StatelessWidget {
                             padding:    EdgeInsets.zero,
                             itemCount:  sugestoes.length,
                             separatorBuilder: (_, __) =>
-                                Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+                                const Divider(height: 1, color: AppTheme.divider),
                             itemBuilder: (_, i) {
                               final f = sugestoes[i];
                               return InkWell(
@@ -3358,10 +3337,10 @@ class _BuscaFornecedorOverlay extends StatelessWidget {
                                           children: [
                                             Text(
                                               f.nomeFantasia,
-                                              style: TextStyle(
+                                              style: const TextStyle(
                                                 fontSize:   13,
                                                 fontWeight: FontWeight.w600,
-                                                color:      Theme.of(context).colorScheme.onSurface,
+                                                color:      AppTheme.textPrimary,
                                               ),
                                               overflow: TextOverflow.ellipsis,
                                             ),
@@ -3374,9 +3353,9 @@ class _BuscaFornecedorOverlay extends StatelessWidget {
                                                   if (f.nomeVendedor != null)
                                                     f.nomeVendedor!,
                                                 ].join(' · '),
-                                                style: TextStyle(
+                                                style: const TextStyle(
                                                   fontSize: 11,
-                                                  color:    Theme.of(context).colorScheme.onSurfaceVariant,
+                                                  color:    AppTheme.textSecondary,
                                                 ),
                                               ),
                                           ],
@@ -3438,10 +3417,10 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
                       Flexible(
                         child: Text(
                           f.nomeFantasia,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurface,
+                            color: AppTheme.textPrimary,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -3473,9 +3452,9 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
                         if (f.tipoFornecedor != null) f.tipoFornecedor!,
                         if (f.nomeVendedor   != null) f.nomeVendedor!,
                       ].join(' · '),
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 11,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        color: AppTheme.textSecondary,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
