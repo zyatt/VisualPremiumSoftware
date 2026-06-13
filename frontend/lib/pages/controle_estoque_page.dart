@@ -4456,7 +4456,7 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
 
 class _StatusBadgeMini extends StatelessWidget {
   final String status;
-  _StatusBadgeMini({required this.status});
+  const _StatusBadgeMini({required this.status});
 
   @override
   Widget build(BuildContext context) {

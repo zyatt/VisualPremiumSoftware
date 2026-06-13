@@ -9,6 +9,7 @@ import '../providers/ordem_compra_provider.dart';
 import '../providers/estoque_provider.dart';
 import '../providers/fornecedor_provider.dart';
 import '../repositories/ordem_compra_repository.dart';
+import '../repositories/fornecedor_repository.dart';
 import '../theme/app_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2024,8 +2025,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           children: [
             if (_fornecedor == null)
               _aviso('Selecione um fornecedor para ver os materiais disponíveis.')
-            else if (_materiaisDoFornecedor.isEmpty)
-              _aviso('Este fornecedor não possui materiais vinculados.')
             else ...[
               SizedBox(
                 width: double.infinity,
@@ -2035,6 +2034,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
                       context: context,
                       builder: (_) => _AdicionarItemDialog(
                         materiais: _materiaisDoFornecedor,
+                        fornecedorId: _fornecedor!.id,
                         onConfirmar: (lista) {
                           for (final v in lista) {
                             _adicionarItem(v);
@@ -2684,8 +2684,6 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                 if (_fornecedor == null)
                   _aviso(
                       'Selecione um fornecedor para ver os materiais disponíveis.')
-                else if (_materiaisDoFornecedor.isEmpty)
-                  _aviso('Este fornecedor não possui materiais vinculados.')
                 else ...[
                   SizedBox(
                     width: double.infinity,
@@ -2695,6 +2693,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                           context: context,
                           builder: (_) => _AdicionarItemDialog(
                             materiais: _materiaisDoFornecedor,
+                            fornecedorId: _fornecedor!.id,
                             onConfirmar: (lista) {
                               for (final v in lista) {
                                 _adicionarItem(v);
@@ -4124,10 +4123,12 @@ class _FornecedorPickerState extends State<_FornecedorPicker> {
 
 class _AdicionarItemDialog extends StatefulWidget {
   final List<FornecedorMaterialVinculoModel> materiais;
+  final int fornecedorId;
   final void Function(List<FornecedorMaterialVinculoModel>) onConfirmar;
 
   const _AdicionarItemDialog({
     required this.materiais,
+    required this.fornecedorId,
     required this.onConfirmar,
   });
 
@@ -4146,6 +4147,23 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
   // materialId → quantidade de cópias a adicionar
   final Map<int, int> _quantidades = {};
 
+  // ── modo "todo o estoque" ──────────────────────────────────────────────────
+  late bool _verTodoEstoque;
+  bool _buscando = false;
+  List<Map<String, dynamic>> _todosOsMateriais = [];
+
+  /// IDs já vinculados ao fornecedor
+  Set<int> get _idsVinculados =>
+      widget.materiais.map((m) => m.materialId).toSet();
+
+  @override
+  void initState() {
+    super.initState();
+    // Abre já no modo "todo o estoque" se o fornecedor não tiver vinculados
+    _verTodoEstoque = widget.materiais.isEmpty;
+    if (_verTodoEstoque) _carregarTodoEstoque();
+  }
+
   @override
   void dispose() {
     _idCtrl.dispose();
@@ -4157,23 +4175,18 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
     super.dispose();
   }
 
-  List<FornecedorMaterialVinculoModel> get _filtrados {
+  // ── lista filtrada para o modo "só vinculados" ─────────────────────────────
+  List<FornecedorMaterialVinculoModel> get _filtradosVinculados {
     var lista = widget.materiais;
-    final id         = _idCtrl.text.trim();
-    final ident      = _identificadorCtrl.text.trim().toLowerCase();
-    final nome       = _nomeCtrl.text.trim().toLowerCase();
-    final categoria  = _categoriaCtrl.text.trim().toLowerCase();
-    final medida     = _medidaCtrl.text.trim().toLowerCase();
-    final espessura  = _espessuraCtrl.text.trim().toLowerCase();
+    final id        = _idCtrl.text.trim();
+    final ident     = _identificadorCtrl.text.trim().toLowerCase();
+    final nome      = _nomeCtrl.text.trim().toLowerCase();
+    final categoria = _categoriaCtrl.text.trim().toLowerCase();
+    final medida    = _medidaCtrl.text.trim().toLowerCase();
+    final espessura = _espessuraCtrl.text.trim().toLowerCase();
 
-    if (id.isNotEmpty) {
-      lista = lista.where((m) =>
-          m.materialId.toString() == id).toList();
-    }
-    if (ident.isNotEmpty) {
-      lista = lista.where((m) =>
-          (m.materialIdentificador ?? '').toLowerCase().contains(ident)).toList();
-    }
+    if (id.isNotEmpty)        lista = lista.where((m) => m.materialId.toString() == id).toList();
+    if (ident.isNotEmpty)     lista = lista.where((m) => (m.materialIdentificador ?? '').toLowerCase().contains(ident)).toList();
     if (nome.isNotEmpty) {
       final tokens = nome.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
       lista = lista.where((m) {
@@ -4181,19 +4194,46 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
         return tokens.every((t) => desc.contains(t));
       }).toList();
     }
-    if (categoria.isNotEmpty) {
-      lista = lista.where((m) =>
-          m.descricaoCompleta.toLowerCase().contains(categoria)).toList();
-    }
-    if (medida.isNotEmpty) {
-      lista = lista.where((m) =>
-          m.descricaoCompleta.toLowerCase().contains(medida)).toList();
-    }
-    if (espessura.isNotEmpty) {
-      lista = lista.where((m) =>
-          m.descricaoCompleta.toLowerCase().contains(espessura)).toList();
+    if (categoria.isNotEmpty) lista = lista.where((m) => m.descricaoCompleta.toLowerCase().contains(categoria)).toList();
+    if (medida.isNotEmpty)    lista = lista.where((m) => m.descricaoCompleta.toLowerCase().contains(medida)).toList();
+    if (espessura.isNotEmpty) lista = lista.where((m) => m.descricaoCompleta.toLowerCase().contains(espessura)).toList();
+    return lista;
+  }
+
+  // ── lista filtrada para o modo "todo o estoque" (client-side após fetch) ──
+  List<Map<String, dynamic>> get _filtradosTodos {
+    var lista = _todosOsMateriais;
+    final id        = _idCtrl.text.trim();
+    final ident     = _identificadorCtrl.text.trim().toLowerCase();
+    final nome      = _nomeCtrl.text.trim().toLowerCase();
+    final medida    = _medidaCtrl.text.trim().toLowerCase();
+    final espessura = _espessuraCtrl.text.trim().toLowerCase();
+
+    if (id.isNotEmpty)        lista = lista.where((m) => m['id'].toString() == id).toList();
+    if (ident.isNotEmpty)     lista = lista.where((m) => (m['identificador'] ?? '').toString().toLowerCase().contains(ident)).toList();
+    if (espessura.isNotEmpty) lista = lista.where((m) => (m['espessura'] ?? '').toString().toLowerCase().contains(espessura)).toList();
+    if (medida.isNotEmpty)    lista = lista.where((m) => (m['medida'] ?? '').toString().toLowerCase().contains(medida)).toList();
+    if (nome.isNotEmpty) {
+      final tokens = nome.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+      lista = lista.where((m) {
+        final n = (m['nome'] ?? '').toString().toLowerCase();
+        return tokens.every((t) => n.contains(t));
+      }).toList();
     }
     return lista;
+  }
+
+  Future<void> _carregarTodoEstoque() async {
+    setState(() { _buscando = true; });
+    try {
+      final repo = FornecedorRepository();
+      final todos = await repo.buscarMateriais();
+      if (mounted) setState(() { _todosOsMateriais = todos; });
+    } catch (_) {
+      // silencia — a lista fica vazia e o usuário vê o aviso
+    } finally {
+      if (mounted) setState(() { _buscando = false; });
+    }
   }
 
   int get _totalItens => _quantidades.values.fold(0, (s, v) => s + v);
@@ -4217,12 +4257,43 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
 
   void _confirmar() {
     final escolhidos = <FornecedorMaterialVinculoModel>[];
-    for (final m in widget.materiais) {
-      final qty = _quantidades[m.materialId] ?? 0;
-      for (var i = 0; i < qty; i++) {
-        escolhidos.add(m);
+
+    if (!_verTodoEstoque) {
+      // modo vinculados — igual ao original
+      for (final m in widget.materiais) {
+        final qty = _quantidades[m.materialId] ?? 0;
+        for (var i = 0; i < qty; i++) {
+          escolhidos.add(m);
+        }
+      }
+    } else {
+      // modo todo o estoque
+      // Itens já vinculados: usa o FornecedorMaterialVinculoModel existente
+      // Itens não vinculados: cria um sintético com preço 0 (o usuário preenche no card)
+      final vinculadosPorId = { for (final m in widget.materiais) m.materialId: m };
+      for (final m in _todosOsMateriais) {
+        final mid = m['id'] as int;
+        final qty = _quantidades[mid] ?? 0;
+        if (qty == 0) continue;
+        final vinculo = vinculadosPorId[mid] ?? FornecedorMaterialVinculoModel(
+          id:                   0,
+          fornecedorId:         widget.fornecedorId,
+          materialId:           mid,
+          materialNome:         m['nome'] as String?,
+          materialIdentificador: m['identificador'] as String?,
+          materialMedida:       m['medida'] as String?,
+          materialEspessura:    m['espessura'] as String?,
+          preco:                0,
+          precoMetroQuadrado:   0,
+          ativo:                true,
+          materialEspecifico:   m['especifico'] == true,
+        );
+        for (var i = 0; i < qty; i++) {
+          escolhidos.add(vinculo);
+        }
       }
     }
+
     widget.onConfirmar(escolhidos);
     Navigator.pop(context);
   }
@@ -4246,9 +4317,106 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
             borderSide: BorderSide(color: AppTheme.primary, width: 1.5)),
       );
 
+  Widget _buildItem({
+    required int materialId,
+    required String descricao,
+    required String preco,
+    required bool eNovo,
+  }) {
+    final qty = _quantidades[materialId] ?? 0;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        descricao,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: qty > 0
+                              ? AppTheme.primary
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+                    if (eNovo) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'Novo vínculo',
+                          style: TextStyle(fontSize: 10, color: AppTheme.primary, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  preco,
+                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                onPressed: qty == 0
+                    ? null
+                    : () => setState(() {
+                          final novo = qty - 1;
+                          if (novo == 0) { _quantidades.remove(materialId); }
+                          else { _quantidades[materialId] = novo; }
+                        }),
+                icon: const Icon(Icons.remove_circle_outline, size: 22),
+                color: qty == 0 ? Theme.of(context).colorScheme.outline : AppTheme.error,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+              SizedBox(
+                width: 30,
+                child: Text(
+                  '$qty',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: qty > 0 ? AppTheme.primary : Theme.of(context).colorScheme.outline,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: () => setState(() { _quantidades[materialId] = qty + 1; }),
+                icon: const Icon(Icons.add_circle_outline, size: 22),
+                color: AppTheme.primary,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final filtrados = _filtrados;
+    final filtradosVinc = _filtradosVinculados;
+    final filtradosTodos = _verTodoEstoque ? _filtradosTodos : <Map<String, dynamic>>[];
+    final vinculadosIds = _idsVinculados;
 
     return AlertDialog(
       title: Row(
@@ -4277,12 +4445,37 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
       contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       content: SizedBox(
         width: 580,
-        height: 560,
+        height: 580,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── Toggle ver todo estoque ────────────────────────────────────
+            Row(
+              children: [
+                Switch(
+                  value: _verTodoEstoque,
+                  activeThumbColor: AppTheme.primary,
+                  onChanged: (v) {
+                    setState(() { _verTodoEstoque = v; });
+                    if (v && _todosOsMateriais.isEmpty) _carregarTodoEstoque();
+                  },
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Ver todo o estoque',
+                  style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                ),
+                if (_verTodoEstoque && widget.materiais.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '(${widget.materiais.length} já vinculados)',
+                    style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 6),
             // ── Filtros ────────────────────────────────────────────────────
-            // Linha 1: ID + Nome
             Row(
               children: [
                 SizedBox(
@@ -4307,7 +4500,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
               ],
             ),
             const SizedBox(height: 6),
-            // Linha 2: Identificador + Medida + Espessura + limpar
             Row(
               children: [
                 Expanded(
@@ -4320,14 +4512,15 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                Expanded(
-                  child: TextField(
-                    controller: _categoriaCtrl,
-                    decoration: _deco('Categoria', icon: Icons.category_outlined),
-                    onChanged: (_) => setState(() {}),
+                if (!_verTodoEstoque)
+                  Expanded(
+                    child: TextField(
+                      controller: _categoriaCtrl,
+                      decoration: _deco('Categoria', icon: Icons.category_outlined),
+                      onChanged: (_) => setState(() {}),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 6),
+                if (!_verTodoEstoque) const SizedBox(width: 6),
                 Expanded(
                   child: TextField(
                     controller: _medidaCtrl,
@@ -4353,124 +4546,101 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                   ),
                   tooltip: 'Limpar filtros',
                   padding: EdgeInsets.zero,
-                  constraints: BoxConstraints(),
+                  constraints: const BoxConstraints(),
                 ),
               ],
             ),
-            SizedBox(height: 6),
+            const SizedBox(height: 6),
 
-            // ── Contador de resultados ─────────────────────────────────────
+            // ── Contador ───────────────────────────────────────────────────
             Text(
-              '${filtrados.length} ${filtrados.length == 1 ? 'material encontrado' : 'materiais encontrados'}',
+              _verTodoEstoque
+                  ? '${filtradosTodos.length} ${filtradosTodos.length == 1 ? 'material encontrado' : 'materiais encontrados'}'
+                  : '${filtradosVinc.length} ${filtradosVinc.length == 1 ? 'material encontrado' : 'materiais encontrados'}',
               style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
-            SizedBox(height: 6),
+            const SizedBox(height: 6),
             Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
 
-            // ── Lista filtrada ─────────────────────────────────────────────
+            // ── Lista ──────────────────────────────────────────────────────
             Expanded(
-              child: filtrados.isEmpty
-                  ? Center(
-                      child: Text(
-                        'Nenhum material encontrado com esses filtros.',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        textAlign: TextAlign.center,
-                      ),
-                    )
-                  : ListView.separated(
-                      itemCount: filtrados.length,
-                      separatorBuilder: (_, __) =>
-                          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-                      itemBuilder: (_, i) {
-                        final m = filtrados[i];
-                        final qty = _quantidades[m.materialId] ?? 0;
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 10),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      m.descricaoCompleta,
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13,
-                                        color: qty > 0
-                                            ? AppTheme.primary
-                                            : Theme.of(context).colorScheme.onSurface,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      m.preco > 0
-                                          ? 'R\$ ${m.preco.toStringAsFixed(2).replaceAll('.', ',')}${m.precoMetroQuadrado > 0 ? '  •  m²: R\$ ${m.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}' : ''}'
-                                          : m.precoMetroQuadrado > 0
-                                              ? 'm²: R\$ ${m.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}'
-                                              : 'Sem preço cadastrado',
-                                      style: TextStyle(
-                                          fontSize: 11,
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                    ),
-                                  ],
-                                ),
+              child: _verTodoEstoque
+                  ? _buscando
+                      ? const Center(child: CircularProgressIndicator())
+                      : filtradosTodos.isEmpty
+                          ? Center(
+                              child: Text(
+                                'Nenhum material encontrado.',
+                                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                textAlign: TextAlign.center,
                               ),
-                              // Controle de quantidade
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    onPressed: qty == 0
-                                        ? null
-                                        : () => setState(() {
-                                              final novo = qty - 1;
-                                              if (novo == 0) {
-                                                _quantidades.remove(m.materialId);
-                                              } else {
-                                                _quantidades[m.materialId] = novo;
-                                              }
-                                            }),
-                                    icon: Icon(
-                                        Icons.remove_circle_outline, size: 22),
-                                    color: qty == 0
-                                        ? Theme.of(context).colorScheme.outline
-                                        : AppTheme.error,
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                  ),
-                                  SizedBox(
-                                    width: 30,
-                                    child: Text(
-                                      '$qty',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w700,
-                                        color: qty > 0
-                                            ? AppTheme.primary
-                                            : Theme.of(context).colorScheme.outline,
-                                      ),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    onPressed: () => setState(() {
-                                      _quantidades[m.materialId] = qty + 1;
-                                    }),
-                                    icon: const Icon(
-                                        Icons.add_circle_outline, size: 22),
-                                    color: AppTheme.primary,
-                                    padding: EdgeInsets.zero,
-                                    constraints: BoxConstraints(),
-                                  ),
-                                ],
-                              ),
-                            ],
+                            )
+                          : ListView.separated(
+                              itemCount: filtradosTodos.length,
+                              separatorBuilder: (_, __) =>
+                                  Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+                              itemBuilder: (_, i) {
+                                final m = filtradosTodos[i];
+                                final mid = m['id'] as int;
+                                final eNovo = !vinculadosIds.contains(mid);
+                                final partes = <String>[
+                                  if ((m['medida'] ?? '').toString().isNotEmpty) m['medida'].toString(),
+                                  if ((m['espessura'] ?? '').toString().isNotEmpty) m['espessura'].toString(),
+                                  if ((m['identificador'] ?? '').toString().isNotEmpty) m['identificador'].toString(),
+                                ];
+                                final desc = partes.isEmpty
+                                    ? (m['nome'] ?? '').toString()
+                                    : '${m['nome']} · ${partes.join(' · ')}';
+
+                                // Preço do vínculo existente, se houver
+                                final vinculo = widget.materiais.cast<FornecedorMaterialVinculoModel?>()
+                                    .firstWhere((v) => v?.materialId == mid, orElse: () => null);
+                                final precoStr = vinculo != null
+                                    ? (vinculo.preco > 0
+                                        ? 'R\$ ${vinculo.preco.toStringAsFixed(2).replaceAll('.', ',')}${vinculo.precoMetroQuadrado > 0 ? '  •  m²: R\$ ${vinculo.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}' : ''}'
+                                        : vinculo.precoMetroQuadrado > 0
+                                            ? 'm²: R\$ ${vinculo.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}'
+                                            : 'Sem preço cadastrado')
+                                    : 'Sem preço — será vinculado ao salvar';
+
+                                return _buildItem(
+                                  materialId: mid,
+                                  descricao: desc,
+                                  preco: precoStr,
+                                  eNovo: eNovo,
+                                );
+                              },
+                            )
+                  // ── modo vinculados (comportamento original) ─────────────
+                  : filtradosVinc.isEmpty
+                      ? Center(
+                          child: Text(
+                            widget.materiais.isEmpty
+                                ? 'Este fornecedor não possui materiais vinculados.\nUse "Ver todo o estoque" para adicionar.'
+                                : 'Nenhum material encontrado com esses filtros.',
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            textAlign: TextAlign.center,
                           ),
-                        );
-                      },
-                    ),
+                        )
+                      : ListView.separated(
+                          itemCount: filtradosVinc.length,
+                          separatorBuilder: (_, __) =>
+                              Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+                          itemBuilder: (_, i) {
+                            final m = filtradosVinc[i];
+                            final precoStr = m.preco > 0
+                                ? 'R\$ ${m.preco.toStringAsFixed(2).replaceAll('.', ',')}${m.precoMetroQuadrado > 0 ? '  •  m²: R\$ ${m.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}' : ''}'
+                                : m.precoMetroQuadrado > 0
+                                    ? 'm²: R\$ ${m.precoMetroQuadrado.toStringAsFixed(2).replaceAll('.', ',')}'
+                                    : 'Sem preço cadastrado';
+                            return _buildItem(
+                              materialId: m.materialId,
+                              descricao: m.descricaoCompleta,
+                              preco: precoStr,
+                              eNovo: false,
+                            );
+                          },
+                        ),
             ),
           ],
         ),

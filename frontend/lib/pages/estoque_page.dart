@@ -129,18 +129,6 @@ class _EstoquePageState extends State<EstoquePage> {
 
   // ── Ícones e cores ─────────────────────────────────────────────────────────
   static IconData _iconePara(String categoria) {
-    final c = categoria.toUpperCase();
-    if (c.contains('LONA'))      return Icons.straighten;
-    if (c.contains('BANNER'))    return Icons.flag;
-    if (c.contains('VINIL'))     return Icons.layers;
-    if (c.contains('PERFIL'))    return Icons.square_foot;
-    if (c.contains('TINTA'))     return Icons.format_paint;
-    if (c.contains('PAPEL'))     return Icons.description;
-    if (c.contains('ACESSORIO')) return Icons.handyman;
-    if (c.contains('COLA'))      return Icons.water_drop;
-    if (c.contains('TECIDO'))    return Icons.texture;
-    if (c.contains('MADEIRA'))   return Icons.foundation;
-    if (c.contains('METAL'))     return Icons.hardware;
     return Icons.inventory_2;
   }
 
@@ -2259,7 +2247,7 @@ class _SectionHeader extends StatelessWidget {
 
 class _EmptySection extends StatelessWidget {
   final String message;
-  _EmptySection({required this.message});
+  const _EmptySection({required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -3176,7 +3164,7 @@ class _IconBtnState extends State<_IconBtn> {
 
 class _StatusBadge extends StatelessWidget {
   final String status;
-  _StatusBadge({required this.status});
+  const _StatusBadge({required this.status});
 
   @override
   Widget build(BuildContext context) {
@@ -3208,7 +3196,7 @@ class _StatusBadge extends StatelessWidget {
 
 class _PrecosFornecedoresDialog extends StatelessWidget {
   final MaterialModel material;
-  _PrecosFornecedoresDialog({required this.material});
+  const _PrecosFornecedoresDialog({required this.material});
 
   @override
   Widget build(BuildContext context) {
@@ -3377,7 +3365,7 @@ class _FornecedorPrecoRow extends StatelessWidget {
   final bool destacarValor;
   final bool destacarValorM2;
 
-  _FornecedorPrecoRow({
+  const _FornecedorPrecoRow({
     required this.item,
     this.destacarValor = false,
     this.destacarValorM2 = false,

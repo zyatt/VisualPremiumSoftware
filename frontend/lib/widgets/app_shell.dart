@@ -7,6 +7,8 @@ import 'package:provider/provider.dart';
 import '../providers/usuario_provider.dart';
 import '../providers/alertas_estoque_provider.dart';
 import '../providers/theme_provider.dart';   // ← NOVO
+import '../providers/veiculo_provider.dart';
+import '../models/veiculo_model.dart';
 import '../theme/app_theme.dart';
 
 class AppShell extends StatefulWidget {
@@ -24,9 +26,9 @@ class AppShell extends StatefulWidget {
     _NavItem(icon: Icons.history_rounded,                 label: 'Histórico',        route: '/historico'),
     _NavItem(icon: Icons.description_rounded,             label: 'Relatório OS',     route: '/relatorio-os'),
     _NavItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção',         route: '/producao'),
-    _NavItem(icon: Icons.admin_panel_settings_rounded,    label: 'Admin',            route: '/admin'),
     _NavItem(icon: Icons.pie_chart_rounded,               label: 'Gastos',           route: '/gastos-categoria'),
     _NavItem(icon: Icons.directions_car_rounded,          label: 'Veículos',         route: '/veiculos'),
+    _NavItem(icon: Icons.admin_panel_settings_rounded,    label: 'Admin',            route: '/admin'),
   ];
 
   // Itens para COMPRAS (sem Admin; pode ver Produção como somente leitura)
@@ -64,6 +66,8 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<AlertasEstoqueProvider>().iniciarPolling();
+      // Carrega veículos para detectar retiradas do dia
+      context.read<VeiculoProvider>().carregarVeiculos();
     });
   }
 
@@ -169,10 +173,12 @@ class _SidebarContentState extends State<_SidebarContent> {
 
   @override
   Widget build(BuildContext context) {
-    final usuario   = context.watch<UsuarioProvider>().usuarioLogado;
-    final alertas   = context.watch<AlertasEstoqueProvider>();
-    final nAlertas  = alertas.totalAlertas;
-    final nCriticos = alertas.totalCriticos;
+    final usuario      = context.watch<UsuarioProvider>().usuarioLogado;
+    final alertas      = context.watch<AlertasEstoqueProvider>();
+    final nAlertas     = alertas.totalAlertas;
+    final nCriticos    = alertas.totalCriticos;
+    final veiculoProv  = context.watch<VeiculoProvider>();
+    final nRetirada    = veiculoProv.totalRetiradaHoje;
 
     // Cor da sidebar: fixa escura independente do tema do app
     const sidebarBg = AppTheme.sidebar; // 0xFF201E1E
@@ -232,6 +238,16 @@ class _SidebarContentState extends State<_SidebarContent> {
                   totalAlertas: nAlertas,
                   totalCriticos: nCriticos,
                   onTap: () => _mostrarPainelAlertas(context, alertas),
+                ),
+              ),
+
+            // ── Banner de retirada de veículos hoje ───────────────────────
+            if (nRetirada > 0 && !AppShell.isProducaoRole(usuario?.role))
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                child: _RetiradaVeiculosBanner(
+                  total: nRetirada,
+                  onTap: () => _mostrarPainelRetirada(context, veiculoProv),
                 ),
               ),
 
@@ -325,6 +341,13 @@ class _SidebarContentState extends State<_SidebarContent> {
     showDialog(
       context: context,
       builder: (_) => _PainelAlertasDialog(alertas: alertas),
+    );
+  }
+
+  void _mostrarPainelRetirada(BuildContext context, VeiculoProvider provider) {
+    showDialog(
+      context: context,
+      builder: (_) => _PainelRetiradaDialog(provider: provider),
     );
   }
 }
@@ -624,6 +647,266 @@ class _SidebarTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─── Banner compacto de retirada de veículos ─────────────────────────────────
+
+class _RetiradaVeiculosBanner extends StatelessWidget {
+  final int total;
+  final VoidCallback onTap;
+
+  const _RetiradaVeiculosBanner({required this.total, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    const cor   = Color(0xFF1E88E5);
+    const corBg = Color(0x1A1E88E5); // 10% de opacidade
+
+    return Material(
+      color: corBg,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Row(
+            children: [
+              const Icon(Icons.directions_car_rounded, size: 15, color: cor),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  '$total veículo${total > 1 ? 's' : ''} p/ retirar hoje',
+                  style: GoogleFonts.nunito(
+                    color: cor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded,
+                  size: 14, color: Color(0x991E88E5)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Dialog de retirada de veículos hoje ─────────────────────────────────────
+
+class _PainelRetiradaDialog extends StatelessWidget {
+  final VeiculoProvider provider;
+  const _PainelRetiradaDialog({required this.provider});
+
+  String _fmt(DateTime? dt) {
+    if (dt == null) return '—';
+    return '${dt.day.toString().padLeft(2, '0')}/'
+        '${dt.month.toString().padLeft(2, '0')}/'
+        '${dt.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final veiculos = provider.veiculosComRetiradaHoje;
+
+    return AlertDialog(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 12, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      title: Row(
+        children: [
+          const Icon(Icons.directions_car_rounded,
+              color: Color(0xFF1E88E5), size: 20),
+          const SizedBox(width: 8),
+          Text(
+            'Retirada de Veículos — Hoje',
+            style: GoogleFonts.nunito(
+              color: Theme.of(context).colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+            ),
+          ),
+          const Spacer(),
+          IconButton(
+            tooltip: 'Atualizar',
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            onPressed: () => provider.carregarVeiculos(),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 420,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 420),
+          child: provider.carregando
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(32),
+                    child:
+                        CircularProgressIndicator(color: Color(0xFF1E88E5)),
+                  ),
+                )
+              : veiculos.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 32),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.check_circle_outline_rounded,
+                                size: 48, color: Color(0xFF15803D)),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Nenhum veículo para retirar hoje',
+                              style: GoogleFonts.nunito(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: veiculos.map((v) {
+                          // Manutenções com retirada hoje
+                          final mans = v.manutencoes
+                              .where((m) => m.retiradaHoje)
+                              .toList();
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E88E5)
+                                  .withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(10),
+                              border: const Border(
+                                left: BorderSide(
+                                    color: Color(0xFF1E88E5), width: 3),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Veículo
+                                Row(
+                                  children: [
+                                    const Icon(Icons.directions_car_rounded,
+                                        size: 16, color: Color(0xFF1E88E5)),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      v.nome,
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w800,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurface,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF1E88E5)
+                                            .withValues(alpha: 0.12),
+                                        borderRadius:
+                                            BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        v.placa,
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: const Color(0xFF1E88E5),
+                                          letterSpacing: 1.1,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                // Serviços com retirada hoje
+                                ...mans.map((m) => Padding(
+                                      padding: const EdgeInsets.only(
+                                          left: 4, top: 2),
+                                      child: Row(
+                                        children: [
+                                          const Icon(
+                                              Icons.build_circle_outlined,
+                                              size: 12,
+                                              color: Color(0xFF1E88E5)),
+                                          const SizedBox(width: 5),
+                                          Expanded(
+                                            child: Text(
+                                              m.descricao != null &&
+                                                      m.descricao!.isNotEmpty
+                                                  ? '${labelTipo(m.tipo)} — ${m.descricao}'
+                                                  : labelTipo(m.tipo),
+                                              style: GoogleFonts.nunito(
+                                                fontSize: 12,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
+                                              overflow:
+                                                  TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            _fmt(m.dataRetirada),
+                                            style: GoogleFonts.nunito(
+                                              fontSize: 11,
+                                              color: const Color(0xFF1E88E5),
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(
+            'Fechar',
+            style: GoogleFonts.nunito(
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+        ),
+        FilledButton.icon(
+          onPressed: () {
+            Navigator.of(context).pop();
+            context.go('/veiculos');
+          },
+          icon: const Icon(Icons.directions_car_rounded, size: 15),
+          label: Text('Ir para Veículos', style: GoogleFonts.nunito()),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF1E88E5),
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ],
     );
   }
 }

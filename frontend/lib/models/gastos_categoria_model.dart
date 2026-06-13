@@ -62,7 +62,7 @@ class GastoCategoriaModel {
 
   String get categoriaLabel => categoria ?? 'Sem categoria';
 
-  double get totalGeral => totalEntrada + totalSaida;
+  double get totalGeral => totalEntrada;
 
   factory GastoCategoriaModel.fromJson(Map<String, dynamic> json) =>
       GastoCategoriaModel(
@@ -97,7 +97,7 @@ class GastoMensalModel {
     required this.totalSaida,
   });
 
-  double get total => totalEntrada + totalSaida;
+  double get total => totalEntrada;
 
   /// Rótulo curto: "Jan", "Fev", …
   static const _meses = [

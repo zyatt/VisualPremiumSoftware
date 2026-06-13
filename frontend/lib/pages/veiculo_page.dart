@@ -21,6 +21,8 @@ String _fmtData(DateTime? dt) {
 const _coresVeiculo = [
   Color(0xFF5E35B1), Color(0xFF1E88E5), Color(0xFF00897B),
   Color(0xFFE53935), Color(0xFFF4511E), Color(0xFF8E24AA),
+  Color(0xFF039BE5), Color(0xFF43A047), Color(0xFFFFB300),
+  Color(0xFF6D4C41), Color(0xFF546E7A), Color(0xFFD81B60),
 ];
 
 Color _corVeiculo(int i) => _coresVeiculo[i % _coresVeiculo.length];
@@ -36,7 +38,7 @@ IconData _iconeTipo(String tipo) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Página principal
+// Página principal — grade de veículos (cards)
 // ═════════════════════════════════════════════════════════════════════════════
 
 class VeiculoPage extends StatefulWidget {
@@ -59,6 +61,52 @@ class _VeiculoPageState extends State<VeiculoPage> {
     showDialog(
       context: context,
       builder: (_) => _FormVeiculoDialog(veiculo: veiculo),
+    );
+  }
+
+  void _novaManutencao(int veiculoId) {
+    showDialog(
+      context: context,
+      builder: (_) => _FormManutencaoDialog(veiculoId: veiculoId),
+    );
+  }
+
+  void _confirmarDesativar(VeiculoModel veiculo) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        title: Text('Desativar veículo',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
+        content: Text(
+          'Deseja desativar "${veiculo.nome}"?\n'
+          'O histórico de serviços será mantido.',
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await context
+                  .read<VeiculoProvider>()
+                  .desativarVeiculo(veiculo.id);
+            },
+            child:
+                const Text('Desativar', style: TextStyle(color: AppTheme.error)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _abrirHistorico(VeiculoModel veiculo, Color cor) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => VeiculoServicosPage(veiculoId: veiculo.id, cor: cor),
+      ),
     );
   }
 
@@ -116,7 +164,7 @@ class _VeiculoPageState extends State<VeiculoPage> {
                     ),
                     SizedBox(height: 2),
                     Text(
-                      'Gerencie veículos e seus serviços',
+                      'Selecione um veículo para ver o histórico de serviços',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
@@ -198,13 +246,30 @@ class _VeiculoPageState extends State<VeiculoPage> {
                         )
                       : provider.veiculos.isEmpty
                           ? _EmptyState(onAdd: () => _abrirFormVeiculo())
-                          : ListView.separated(
-                              itemCount: provider.veiculos.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 12),
-                              itemBuilder: (ctx, i) => _VeiculoCard(
-                                veiculo: provider.veiculos[i],
-                                cor:     _corVeiculo(i),
+                          : SingleChildScrollView(
+                              child: GridView.builder(
+                                gridDelegate:
+                                    const SliverGridDelegateWithMaxCrossAxisExtent(
+                                  maxCrossAxisExtent: 280,
+                                  mainAxisSpacing: 16,
+                                  crossAxisSpacing: 16,
+                                  childAspectRatio: 1.15,
+                                ),
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: provider.veiculos.length,
+                                itemBuilder: (ctx, i) {
+                                  final v = provider.veiculos[i];
+                                  final cor = _corVeiculo(i);
+                                  return _VeiculoCardGrid(
+                                    veiculo: v,
+                                    cor:     cor,
+                                    onTap:          () => _abrirHistorico(v, cor),
+                                    onEditar:       () => _abrirFormVeiculo(v),
+                                    onNovoServico:  () => _novaManutencao(v.id),
+                                    onDesativar:    () => _confirmarDesativar(v),
+                                  );
+                                },
                               ),
                             ),
             ),
@@ -250,289 +315,517 @@ class _EmptyState extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Card do veículo (expansível)
+// Card de veículo (grade, estilo dos cards de categoria do Estoque)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _VeiculoCard extends StatefulWidget {
-  final VeiculoModel veiculo;
-  final Color        cor;
+class _VeiculoCardGrid extends StatefulWidget {
+  final VeiculoModel  veiculo;
+  final Color         cor;
+  final VoidCallback  onTap;
+  final VoidCallback  onEditar;
+  final VoidCallback  onNovoServico;
+  final VoidCallback  onDesativar;
 
-  const _VeiculoCard({required this.veiculo, required this.cor});
+  const _VeiculoCardGrid({
+    required this.veiculo,
+    required this.cor,
+    required this.onTap,
+    required this.onEditar,
+    required this.onNovoServico,
+    required this.onDesativar,
+  });
 
   @override
-  State<_VeiculoCard> createState() => _VeiculoCardState();
+  State<_VeiculoCardGrid> createState() => _VeiculoCardGridState();
 }
 
-class _VeiculoCardState extends State<_VeiculoCard> {
-  bool _expandido = false;
-
-  void _expandirECarregar() {
-    setState(() => _expandido = !_expandido);
-    if (_expandido) {
-      context
-          .read<VeiculoProvider>()
-          .carregarManutencoes(widget.veiculo.id);
-    }
-  }
-
-  void _editarVeiculo() {
-    showDialog(
-      context: context,
-      builder: (_) => _FormVeiculoDialog(veiculo: widget.veiculo),
-    );
-  }
-
-  void _novaManutencao() {
-    showDialog(
-      context: context,
-      builder: (_) => _FormManutencaoDialog(veiculoId: widget.veiculo.id),
-    ).then((_) {
-      if (_expandido && mounted) {
-        context
-            .read<VeiculoProvider>()
-            .carregarManutencoes(widget.veiculo.id);
-      }
-    });
-  }
-
-  void _confirmarDesativar() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        title: Text('Desativar veículo',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-        content: Text(
-          'Deseja desativar "${widget.veiculo.nome}"?\n'
-          'O histórico de serviços será mantido.',
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar')),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await context
-                  .read<VeiculoProvider>()
-                  .desativarVeiculo(widget.veiculo.id);
-            },
-            child:
-                const Text('Desativar', style: TextStyle(color: AppTheme.error)),
-          ),
-        ],
-      ),
-    );
-  }
+class _VeiculoCardGridState extends State<_VeiculoCardGrid> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
-    final v   = widget.veiculo;
-    final cor = widget.cor;
-    final ult = v.ultimaManutencao;
+    final v    = widget.veiculo;
+    final cor  = widget.cor;
+    final ult  = v.ultimaManutencao;
 
-    return AnimatedContainer(
-      duration: Duration(milliseconds: 200),
-      decoration: BoxDecoration(
-        color:        Theme.of(context).colorScheme.surface,
-        border:       Border.all(
-          color: _expandido ? cor.withValues(alpha: 0.4) : Theme.of(context).colorScheme.outlineVariant,
-          width: _expandido ? 1.5 : 1,
-        ),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        children: [
-          // ── Cabeçalho ───────────────────────────────────────────────────
-          InkWell(
-            onTap: _expandirECarregar,
-            borderRadius: BorderRadius.only(
-              topLeft:     const Radius.circular(14),
-              topRight:    const Radius.circular(14),
-              bottomLeft:  Radius.circular(_expandido ? 0 : 14),
-              bottomRight: Radius.circular(_expandido ? 0 : 14),
+    final retiradaHoje = v.manutencoes.any((m) => m.retiradaHoje);
+    final emAndamento  = ult?.emAndamento ?? false;
+    final ativo        = _hovered;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            color: ativo
+                ? cor.withValues(alpha: 0.12)
+                : Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: ativo ? cor : cor.withValues(alpha: 0.25),
+              width: ativo ? 2 : 1.5,
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  // Ícone
-                  Container(
-                    width: 46, height: 46,
-                    decoration: BoxDecoration(
-                      color:        cor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
+            boxShadow: ativo
+                ? [
+                    BoxShadow(
+                      color: cor.withValues(alpha: 0.20),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    )
+                  ]
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    )
+                  ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 12, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Topo: ícone + ações rápidas ──────────────────────────
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: cor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(Icons.directions_car_rounded, color: cor, size: 24),
                     ),
-                    child: Icon(Icons.directions_car_rounded,
-                        color: cor, size: 24),
-                  ),
-                  const SizedBox(width: 14),
+                    const Spacer(),
+                    _MiniIconBtn(
+                      icon:    Icons.add_circle_outline,
+                      color:   AppTheme.primary,
+                      tooltip: 'Novo serviço',
+                      onTap:   widget.onNovoServico,
+                    ),
+                    _MiniIconBtn(
+                      icon:    Icons.edit_outlined,
+                      color:   Theme.of(context).colorScheme.onSurfaceVariant,
+                      tooltip: 'Editar',
+                      onTap:   widget.onEditar,
+                    ),
+                    _MiniIconBtn(
+                      icon:    Icons.delete_outline,
+                      color:   AppTheme.error,
+                      tooltip: 'Desativar',
+                      onTap:   widget.onDesativar,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
 
-                  // Nome + placa
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(v.nome,
-                            style: TextStyle(
-                              fontSize:   15,
-                              fontWeight: FontWeight.w700,
-                              color:      Theme.of(context).colorScheme.onSurface,
-                            )),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color:        cor.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(6),
-                                border:       Border.all(
-                                    color: cor.withValues(alpha: 0.25)),
-                              ),
-                              child: Text(v.placa,
-                                  style: TextStyle(
-                                    fontSize:   12,
-                                    fontWeight: FontWeight.w700,
-                                    color:      cor,
-                                    letterSpacing: 1.2,
-                                  )),
-                            ),
-                            if (ult != null) ...[
-                              const SizedBox(width: 8),
-                              Text(
-                                ult.emAndamento
-                                    ? '• Em serviço (${labelTipo(ult.tipo)})'
-                                    : '• Último: ${labelTipo(ult.tipo)} em ${_fmtData(ult.dataEnvio)}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: ult.emAndamento
-                                      ? Color(0xFFFFB300)
-                                      : Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ],
+                // ── Nome ──────────────────────────────────────────────────
+                Text(
+                  v.nome,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: ativo ? cor : Theme.of(context).colorScheme.onSurface,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 6),
+
+                // ── Placa ─────────────────────────────────────────────────
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: cor.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: cor.withValues(alpha: 0.25)),
+                  ),
+                  child: Text(
+                    v.placa,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: cor,
+                      letterSpacing: 1.2,
                     ),
                   ),
+                ),
 
-                  // Ações
-                  IconButton(
-                    onPressed: _novaManutencao,
-                    icon: Icon(Icons.add_circle_outline,
-                        size: 20, color: AppTheme.primary),
-                    tooltip: 'Novo serviço',
-                  ),
-                  IconButton(
-                    onPressed: _editarVeiculo,
-                    icon: Icon(Icons.edit_outlined,
-                        size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    tooltip: 'Editar',
-                  ),
-                  IconButton(
-                    onPressed: _confirmarDesativar,
-                    icon: const Icon(Icons.delete_outline,
-                        size: 18, color: AppTheme.error),
-                    tooltip: 'Desativar',
-                  ),
+                const Spacer(),
 
-                  SizedBox(width: 4),
-                  AnimatedRotation(
-                    turns:    _expandido ? 0.5 : 0,
-                    duration: Duration(milliseconds: 200),
-                    child: Icon(Icons.keyboard_arrow_down_rounded,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                // ── Status / último serviço ──────────────────────────────
+                if (retiradaHoje)
+                  _StatusTag(
+                    label: 'Pronto p/ retirada',
+                    color: AppTheme.success,
+                    icon:  Icons.check_circle_outline,
+                  )
+                else if (emAndamento)
+                  _StatusTag(
+                    label: 'Em serviço (${labelTipo(ult!.tipo)})',
+                    color: const Color(0xFFFFB300),
+                    icon:  Icons.build_circle_outlined,
+                  )
+                else if (ult != null)
+                  Text(
+                    'Último: ${labelTipo(ult.tipo)} em ${_fmtData(ult.dataEnvio)}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  )
+                else
+                  Text(
+                    'Nenhum serviço registrado',
+                    style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
                   ),
-                ],
-              ),
+              ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
 
-          // ── Histórico de serviços ────────────────────────────────────────
-          if (_expandido) ...[
-            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-            _HistoricoManutencoes(
-              veiculoId: v.id,
-              cor:       cor,
+/// Pequeno botão de ícone usado nas ações rápidas do card de veículo.
+class _MiniIconBtn extends StatelessWidget {
+  final IconData     icon;
+  final Color        color;
+  final String       tooltip;
+  final VoidCallback onTap;
+
+  const _MiniIconBtn({
+    required this.icon,
+    required this.color,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Icon(icon, size: 18, color: color),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pequena etiqueta de status exibida na base do card de veículo.
+class _StatusTag extends StatelessWidget {
+  final String   label;
+  final Color    color;
+  final IconData icon;
+
+  const _StatusTag({required this.label, required this.color, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color),
+              overflow: TextOverflow.ellipsis,
             ),
-          ],
+          ),
         ],
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Histórico de manutenções dentro do card
-// ─────────────────────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Página de histórico de serviços de um veículo
+// ═════════════════════════════════════════════════════════════════════════════
 
-class _HistoricoManutencoes extends StatelessWidget {
+class VeiculoServicosPage extends StatefulWidget {
   final int   veiculoId;
   final Color cor;
 
-  const _HistoricoManutencoes({
+  const VeiculoServicosPage({
+    super.key,
     required this.veiculoId,
     required this.cor,
   });
 
   @override
+  State<VeiculoServicosPage> createState() => _VeiculoServicosPageState();
+}
+
+class _VeiculoServicosPageState extends State<VeiculoServicosPage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<VeiculoProvider>().carregarManutencoes(widget.veiculoId);
+    });
+  }
+
+  void _novoServico() {
+    showDialog(
+      context: context,
+      builder: (_) => _FormManutencaoDialog(veiculoId: widget.veiculoId),
+    ).then((_) {
+      if (mounted) {
+        context.read<VeiculoProvider>().carregarManutencoes(widget.veiculoId);
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final provider = context.watch<VeiculoProvider>();
+    final veiculo  = provider.veiculos.firstWhere(
+      (v) => v.id == widget.veiculoId,
+      orElse: () => VeiculoModel(
+        id: widget.veiculoId,
+        nome: '',
+        placa: '',
+        ativo: true,
+        manutencoes: const [],
+      ),
+    );
+    final cor          = widget.cor;
+    final carregando   = provider.carregandoManDoVeiculo(widget.veiculoId);
+    final erro         = provider.erroManDoVeiculo(widget.veiculoId);
+    final manutencoes  = provider.manutencoesDoVeiculo(widget.veiculoId);
 
-    if (provider.carregandoMan) {
-      return const Padding(
-        padding: EdgeInsets.all(24),
-        child: Center(
-            child: CircularProgressIndicator(color: AppTheme.primary)),
-      );
-    }
-
-    if (provider.manutencoes.isEmpty) {
-      return Padding(
-        padding: EdgeInsets.all(24),
-        child: Center(
-          child: Text(
-            'Nenhum serviço registrado ainda.',
-            style: TextStyle(
-                color: Theme.of(context).colorScheme.outline, fontSize: 13),
-          ),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Histórico de serviços',
-            style: TextStyle(
-              fontSize:   13,
-              fontWeight: FontWeight.w600,
-              color:      Theme.of(context).colorScheme.onSurfaceVariant,
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Cabeçalho com botão voltar ──────────────────────────────
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                InkWell(
+                  onTap: () => Navigator.of(context).pop(),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Veículos',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: cor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.directions_car_rounded, color: cor, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Text(
+                          veiculo.nome,
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineMedium
+                              ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                        ),
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: cor.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: cor.withValues(alpha: 0.25)),
+                          ),
+                          child: Text(
+                            veiculo.placa,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: cor,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Histórico de serviços',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                FilledButton.icon(
+                  onPressed: _novoServico,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Novo Serviço'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                IconButton(
+                  onPressed: () => context.read<VeiculoProvider>().carregarManutencoes(widget.veiculoId),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 12),
-          ...provider.manutencoes.asMap().entries.map((e) {
-            final i = e.key;
-            final m = e.value;
-            return _LinhaManutencao(
-              manutencao: m,
-              cor:        cor,
-              ultimo:     i == provider.manutencoes.length - 1,
-              veiculoId:  veiculoId,
-            );
-          }),
-        ],
+            const SizedBox(height: 20),
+
+            // ── Conteúdo ──────────────────────────────────────────────────
+            Expanded(
+              child: carregando
+                  ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
+                  : erro != null
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.cloud_off_outlined, size: 48, color: AppTheme.error),
+                              SizedBox(height: 12),
+                              Text(
+                                'Erro ao carregar serviços',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.onSurface,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                erro,
+                                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 16),
+                              FilledButton.icon(
+                                onPressed: () => context.read<VeiculoProvider>().carregarManutencoes(widget.veiculoId),
+                                icon: const Icon(Icons.refresh, size: 18),
+                                label: const Text('Tentar novamente'),
+                                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                              ),
+                            ],
+                          ),
+                        )
+                      : manutencoes.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.build_outlined,
+                                      size: 64, color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.4)),
+                                  SizedBox(height: 16),
+                                  Text(
+                                    'Nenhum serviço registrado ainda',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyLarge
+                                        ?.copyWith(color: Theme.of(context).colorScheme.outline),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  TextButton.icon(
+                                    onPressed: _novoServico,
+                                    icon: const Icon(Icons.add),
+                                    label: const Text('Adicionar serviço'),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : Card(
+                              clipBehavior: Clip.antiAlias,
+                              child: SingleChildScrollView(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: manutencoes.asMap().entries.map((e) {
+                                    final i = e.key;
+                                    final m = e.value;
+                                    return _LinhaManutencao(
+                                      manutencao: m,
+                                      cor:        cor,
+                                      ultimo:     i == manutencoes.length - 1,
+                                      veiculoId:  widget.veiculoId,
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                            ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Linha de uma manutenção dentro do histórico
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _LinhaManutencao extends StatelessWidget {
   final ManutencaoModel manutencao;

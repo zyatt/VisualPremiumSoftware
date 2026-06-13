@@ -248,8 +248,7 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
                 (matProvider.categorias.isNotEmpty ||
                     veiProvider.gastos.isNotEmpty))
               _ResumoGeralGlobal(
-                totalMateriais: matProvider.totalSaidaGeral +
-                    matProvider.totalEntradaGeral,
+                totalMateriais: matProvider.totalEntradaGeral,
                 totalVeiculos: veiProvider.totalGastosGeral,
               ),
 
@@ -1077,8 +1076,8 @@ class _TooltipBar extends StatelessWidget {
           ),
           _TipLinha(
               cor:   const Color(0xFF43A047),
-              label: 'Total',
-              valor: dado.total,
+              label: 'Total entradas',
+              valor: dado.totalEntrada,
               bold:  true),
         ],
       ),

@@ -41,10 +41,14 @@ String _tituloOS(String numeroOS) {
 
 const _corFechada = Color(0xFF4CAF50);
 
-/// Calcula o custo líquido de uma OS: saídas - entradas, agrupado por material.
+/// Calcula o custo líquido de uma OS: saídas - devoluções, agrupado por material.
 /// Usa o preço da saída como referência. Entradas de materiais sem saída são ignoradas.
 /// Processa em ordem cronológica: apenas entradas POSTERIORES à primeira saída
 /// do material são contadas como devolução (evita somar entradas anteriores à saída).
+///
+/// Entradas geradas por Ordem de Compra (observacao ou descricaoItem contendo
+/// "via OC") são reposição de estoque — NÃO são devoluções — e por isso são
+/// ignoradas no cálculo do custo líquido.
 double _totalLiquido(List<MovimentacaoModel> movimentacoes) {
   // materialId → { preco, qtdSaida, qtdEntrada }
   final porMaterial = <int, Map<String, double>>{};
@@ -69,6 +73,12 @@ double _totalLiquido(List<MovimentacaoModel> movimentacoes) {
       if (p > entry['preco']!) entry['preco'] = p;
       entry['qtdSaida'] = entry['qtdSaida']! + m.quantidade;
     } else if (m.tipo == 'ENTRADA') {
+      // Entradas via OC são reposição de estoque, não devoluções — ignorar.
+      final isEntradaOC =
+          (m.observacao?.contains('via OC') ?? false) ||
+          (m.descricaoItem?.contains('via OC') ?? false);
+      if (isEntradaOC) continue;
+
       // Só conta como devolução se já houve ao menos uma saída deste material
       if (porMaterial.containsKey(m.materialId)) {
         porMaterial[m.materialId]!['qtdEntrada'] =

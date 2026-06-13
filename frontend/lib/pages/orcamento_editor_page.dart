@@ -2436,7 +2436,7 @@ class _TabNavBtn extends StatelessWidget {
   final bool enabled;
   final VoidCallback onTap;
 
-  _TabNavBtn({
+  const _TabNavBtn({
     required this.icon,
     required this.enabled,
     required this.onTap,

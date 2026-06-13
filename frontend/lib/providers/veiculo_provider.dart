@@ -27,14 +27,27 @@ class VeiculoProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
-  // ── Manutenções do veículo selecionado ─────────────────────────────────────
-  List<ManutencaoModel> _manutencoes = [];
-  List<ManutencaoModel> get manutencoes => _manutencoes;
+  // ── Veículos com retirada hoje ────────────────────────────────────────────
+  /// Retorna todos os veículos que possuem pelo menos uma manutenção cuja
+  /// dataRetirada é hoje (independentemente de já terem sido retirados ou não).
+  List<VeiculoModel> get veiculosComRetiradaHoje => _veiculos
+      .where((v) => v.manutencoes.any((m) => m.retiradaHoje))
+      .toList();
 
-  bool   _carregandoMan = false;
-  bool   get carregandoMan => _carregandoMan;
-  String? _erroMan;
-  String? get erroMan => _erroMan;
+  int get totalRetiradaHoje => veiculosComRetiradaHoje.length;
+
+  // ── Manutenções por veículo ────────────────────────────────────────────────
+  final Map<int, List<ManutencaoModel>> _manutencoesPorVeiculo = {};
+
+  List<ManutencaoModel> manutencoesDoVeiculo(int veiculoId) =>
+      _manutencoesPorVeiculo[veiculoId] ?? [];
+
+  final Map<int, bool> _carregandoManPorVeiculo = {};
+  bool carregandoManDoVeiculo(int veiculoId) =>
+      _carregandoManPorVeiculo[veiculoId] ?? false;
+
+  final Map<int, String?> _erroManPorVeiculo = {};
+  String? erroManDoVeiculo(int veiculoId) => _erroManPorVeiculo[veiculoId];
 
   // ── Gastos por veículo ─────────────────────────────────────────────────────
   List<GastoVeiculoModel> _gastos = [];
@@ -118,18 +131,18 @@ class VeiculoProvider extends ChangeNotifier {
   // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> carregarManutencoes(int veiculoId) async {
-    _carregandoMan = true;
-    _erroMan       = null;
+    _carregandoManPorVeiculo[veiculoId] = true;
+    _erroManPorVeiculo[veiculoId]       = null;
     notifyListeners();
     try {
-      final list  = await ApiClient.getList('/veiculos/$veiculoId/manutencoes');
-      _manutencoes = list
+      final list = await ApiClient.getList('/veiculos/$veiculoId/manutencoes');
+      _manutencoesPorVeiculo[veiculoId] = list
           .map((e) => ManutencaoModel.fromJson(e as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      _erroMan = _mensagemErro(e);
+      _erroManPorVeiculo[veiculoId] = _mensagemErro(e);
     } finally {
-      _carregandoMan = false;
+      _carregandoManPorVeiculo[veiculoId] = false;
       notifyListeners();
     }
   }
@@ -155,7 +168,7 @@ class VeiculoProvider extends ChangeNotifier {
       await carregarVeiculos(); // atualiza última manutenção no card
       return true;
     } catch (e) {
-      _erroMan = _mensagemErro(e);
+      _erroManPorVeiculo[veiculoId] = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -184,9 +197,10 @@ class VeiculoProvider extends ChangeNotifier {
       }
       await ApiClient.put('/veiculos/manutencoes/$manutencaoId', body);
       await carregarManutencoes(veiculoId);
+      await carregarVeiculos(); // atualiza última manutenção no card
       return true;
     } catch (e) {
-      _erroMan = _mensagemErro(e);
+      _erroManPorVeiculo[veiculoId] = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -196,9 +210,10 @@ class VeiculoProvider extends ChangeNotifier {
     try {
       await ApiClient.delete('/veiculos/manutencoes/$manutencaoId');
       await carregarManutencoes(veiculoId);
+      await carregarVeiculos(); // atualiza última manutenção no card
       return true;
     } catch (e) {
-      _erroMan = _mensagemErro(e);
+      _erroManPorVeiculo[veiculoId] = _mensagemErro(e);
       notifyListeners();
       return false;
     }

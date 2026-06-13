@@ -17,7 +17,8 @@ class OrcamentoRepository {
     final aprovados = await ApiClient.getList('/orcamentos?status=APROVADO');
     final naoAprovados = await ApiClient.getList('/orcamentos?status=NAO_APROVADO');
     final cancelados = await ApiClient.getList('/orcamentos?status=CANCELADO');
-    final todos = [...abertos, ...aguardando, ...aprovados, ...naoAprovados, ...cancelados];
+    final convertidos = await ApiClient.getList('/orcamentos?status=CONVERTIDO');
+    final todos = [...abertos, ...aguardando, ...aprovados, ...naoAprovados, ...cancelados, ...convertidos];
     todos.sort((a, b) {
       final da = DateTime.tryParse(a['criadoEm']?.toString() ?? '') ?? DateTime(0);
       final db = DateTime.tryParse(b['criadoEm']?.toString() ?? '') ?? DateTime(0);

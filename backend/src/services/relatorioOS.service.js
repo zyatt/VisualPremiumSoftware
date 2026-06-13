@@ -16,9 +16,14 @@ async function listar({ busca, materialId, materialNome, materialIdentificador, 
 
   if (busca) where.numeroOS = { contains: busca, mode: 'insensitive' };
 
-  // ── Filtro de período (criação = criadoEm da OS) ──────────────────────────
+  // ── Filtro de período ─────────────────────────────────────────────────────
+  // filtroData é extraído para o escopo da função pois é reutilizado tanto no
+  // where (para selecionar quais OS aparecem) quanto no include (para que as
+  // movimentações retornadas por OS respeitem o mesmo período — garantindo que
+  // o total calculado no Flutter bata com o total de Gastos por Categoria).
+  let filtroData = null;
   if (dataInicio || dataFim) {
-    const filtroData = {};
+    filtroData = {};
     if (dataInicio) filtroData.gte = new Date(dataInicio);
     if (dataFim) {
       const fim = new Date(dataFim);
@@ -51,10 +56,29 @@ async function listar({ busca, materialId, materialNome, materialIdentificador, 
     where.movimentacoes = { some: { material: filtroMaterial } };
   }
 
+  // Monta o where das movimentações no include:
+  // - Se há filtro de data E de material, aplica ambos
+  // - Se há só data, filtra por data
+  // - Se há só material, filtra por material
+  // Isso garante que as movimentações retornadas por cada OS coincidam
+  // exatamente com os dados usados no cálculo de Gastos por Categoria.
+  let whereMovimentacoesInclude = undefined;
+  const temData     = filtroData !== null;
+  const temMaterial = Object.keys(filtroMaterial).length > 0;
+
+  if (temData && temMaterial) {
+    whereMovimentacoesInclude = { criadoEm: filtroData, material: filtroMaterial };
+  } else if (temData) {
+    whereMovimentacoesInclude = { criadoEm: filtroData };
+  } else if (temMaterial) {
+    whereMovimentacoesInclude = { material: filtroMaterial };
+  }
+
   return prisma.relacaoOS.findMany({
     where,
     include: {
       movimentacoes: {
+        where: whereMovimentacoesInclude,
         include: {
           material: { select: { id: true, nome: true, unidade: true, categoria: true, identificador: true, medida: true, espessura: true } },
         },
@@ -126,6 +150,12 @@ async function dadosParaPDF(numeroOS) {
       entry.qtdSaida += Number(m.quantidade);
 
     } else if (m.tipo === 'ENTRADA') {
+      // Entradas via OC são reposição de estoque, não devoluções — ignorar.
+      const isEntradaOC =
+        (m.observacao   && m.observacao.includes('via OC')) ||
+        (m.descricaoItem && m.descricaoItem.includes('via OC'));
+      if (isEntradaOC) continue;
+
       // Só conta como devolução se o material já teve ao menos uma saída nessa OS
       if (porMaterial.has(id)) {
         porMaterial.get(id).qtdEntrada += Number(m.quantidade);

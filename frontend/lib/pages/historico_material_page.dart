@@ -422,7 +422,7 @@ class _BotaoData extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onClear;
 
-  _BotaoData({
+  const _BotaoData({
     required this.label,
     required this.onTap,
     this.onClear,
@@ -468,7 +468,7 @@ class _BotaoData extends StatelessWidget {
 class _CabecalhoTabela extends StatelessWidget {
   final bool mostrarMaterial;
 
-  _CabecalhoTabela({required this.mostrarMaterial});
+  const _CabecalhoTabela({required this.mostrarMaterial});
 
   @override
   Widget build(BuildContext context) {

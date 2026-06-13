@@ -53,12 +53,14 @@ String _statusLabel(String status) {
       return 'Não Aprovado';
     case 'CANCELADO':
       return 'Cancelado';
+    case 'CONVERTIDO':
+      return 'Convertido em OC';
     default:
       return status;
   }
 }
 
-Color _statusColor(String status) {
+Color _statusColor(BuildContext context, String status) {
   switch (status) {
     case 'ABERTO':
       return AppTheme.success;
@@ -70,8 +72,10 @@ Color _statusColor(String status) {
       return AppTheme.warning;
     case 'CANCELADO':
       return AppTheme.error;
+    case 'CONVERTIDO':
+      return const Color(0xFF0288D1);
     default:
-      return AppTheme.textSecondary;
+      return Theme.of(context).colorScheme.onSurfaceVariant;
   }
 }
 
@@ -95,15 +99,17 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
   List<dynamic> _aprovados = [];
   List<dynamic> _rejeitados = [];
   List<dynamic> _cancelados = [];
+  List<dynamic> _convertidos = [];
 
   // ── Busca por material ────────────────────────────────────────────────────
   final TextEditingController _buscaController = TextEditingController();
   String _buscaMaterial = '';
 
-  List<dynamic> get _salvosFiltered    => _filtrar(_salvos);
-  List<dynamic> get _aprovadosFiltered => _filtrar(_aprovados);
-  List<dynamic> get _rejeitadosFiltered => _filtrar(_rejeitados);
-  List<dynamic> get _canceladosFiltered => _filtrar(_cancelados);
+  List<dynamic> get _salvosFiltered      => _filtrar(_salvos);
+  List<dynamic> get _aprovadosFiltered   => _filtrar(_aprovados);
+  List<dynamic> get _rejeitadosFiltered  => _filtrar(_rejeitados);
+  List<dynamic> get _canceladosFiltered  => _filtrar(_cancelados);
+  List<dynamic> get _convertidosFiltered => _filtrar(_convertidos);
 
   List<dynamic> _filtrar(List<dynamic> lista) {
     final q = _buscaMaterial.trim().toLowerCase();
@@ -120,7 +126,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _carregar();
   }
 
@@ -152,6 +158,8 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
             todos.where((o) => o['status'] == 'NAO_APROVADO').toList();
         _cancelados =
             todos.where((o) => o['status'] == 'CANCELADO').toList();
+        _convertidos =
+            todos.where((o) => o['status'] == 'CONVERTIDO').toList();
       });
     } catch (e) {
       if (mounted) setState(() => _erro = _mensagemErro(e, acao: 'carregar histórico'));
@@ -252,8 +260,9 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -264,13 +273,13 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
               children: [
                 IconButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back_ios_new,
-                      size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.arrow_back_ios_new,
+                      size: 18, color: cs.onSurfaceVariant),
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: cs.surface,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: cs.outlineVariant),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -282,30 +291,30 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                       style: Theme.of(context)
                           .textTheme
                           .headlineMedium
-                          ?.copyWith(color: AppTheme.textPrimary),
+                          ?.copyWith(color: cs.onSurface),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${_salvosFiltered.length + _aprovadosFiltered.length + _rejeitadosFiltered.length + _canceladosFiltered.length} '
-                      '${(_salvosFiltered.length + _aprovadosFiltered.length + _rejeitadosFiltered.length + _canceladosFiltered.length) == 1 ? 'orçamento' : 'orçamentos'} no histórico',
+                      '${_salvosFiltered.length + _aprovadosFiltered.length + _rejeitadosFiltered.length + _canceladosFiltered.length + _convertidosFiltered.length} '
+                      '${(_salvosFiltered.length + _aprovadosFiltered.length + _rejeitadosFiltered.length + _canceladosFiltered.length + _convertidosFiltered.length) == 1 ? 'orçamento' : 'orçamentos'} no histórico',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
-                          ?.copyWith(color: AppTheme.textSecondary),
+                          ?.copyWith(color: cs.onSurfaceVariant),
                     ),
                   ],
                 ),
                 const Spacer(),
                 IconButton(
                   onPressed: _carregar,
-                  icon: const Icon(Icons.refresh,
-                      size: 18, color: AppTheme.textSecondary),
+                  icon: Icon(Icons.refresh,
+                      size: 18, color: cs.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: cs.surface,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppTheme.divider),
+                    side: BorderSide(color: cs.outlineVariant),
                   ),
                 ),
               ],
@@ -316,14 +325,14 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
             TextField(
               controller: _buscaController,
               onChanged: (v) => setState(() => _buscaMaterial = v),
-              style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+              style: TextStyle(fontSize: 13, color: cs.onSurface),
               decoration: InputDecoration(
                 hintText: 'Buscar por nome do material...',
-                hintStyle: const TextStyle(fontSize: 13, color: AppTheme.textHint),
-                prefixIcon: const Icon(Icons.search, size: 18, color: AppTheme.textHint),
+                hintStyle: TextStyle(fontSize: 13, color: cs.outline),
+                prefixIcon: Icon(Icons.search, size: 18, color: cs.outline),
                 suffixIcon: _buscaMaterial.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.close, size: 16, color: AppTheme.textHint),
+                        icon: Icon(Icons.close, size: 16, color: cs.outline),
                         onPressed: () {
                           _buscaController.clear();
                           setState(() => _buscaMaterial = '');
@@ -331,16 +340,16 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                       )
                     : null,
                 filled: true,
-                fillColor: AppTheme.surface,
+                fillColor: cs.surface,
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppTheme.divider),
+                  borderSide: BorderSide(color: cs.outlineVariant),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppTheme.divider),
+                  borderSide: BorderSide(color: cs.outlineVariant),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -353,15 +362,15 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
 
             // ── Abas ─────────────────────────────────────────────────────────
             Container(
-              decoration: const BoxDecoration(
-                color: AppTheme.surface,
+              decoration: BoxDecoration(
+                color: cs.surface,
                 border: Border(
-                    bottom: BorderSide(color: AppTheme.divider)),
+                    bottom: BorderSide(color: cs.outlineVariant)),
               ),
               child: TabBar(
                 controller: _tabController,
                 labelColor: AppTheme.primary,
-                unselectedLabelColor: AppTheme.textSecondary,
+                unselectedLabelColor: cs.onSurfaceVariant,
                 indicatorColor: AppTheme.primary,
                 indicatorWeight: 2,
                 labelStyle: const TextStyle(
@@ -371,6 +380,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                   Tab(text: 'Aprovados (${_aprovadosFiltered.length})'),
                   Tab(text: 'Rejeitados (${_rejeitadosFiltered.length})'),
                   Tab(text: 'Cancelados (${_canceladosFiltered.length})'),
+                  Tab(text: 'Convertidos (${_convertidosFiltered.length})'),
                 ],
               ),
             ),
@@ -389,10 +399,10 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                               const Icon(Icons.cloud_off_outlined,
                                   size: 48, color: AppTheme.error),
                               const SizedBox(height: 12),
-                              const Text(
+                              Text(
                                 'Erro ao carregar histórico',
                                 style: TextStyle(
-                                  color: AppTheme.textPrimary,
+                                  color: cs.onSurface,
                                   fontWeight: FontWeight.w600,
                                   fontSize: 15,
                                 ),
@@ -403,8 +413,8 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                                 _erro!.contains(': ')
                                     ? _erro!.substring(_erro!.indexOf(': ') + 2)
                                     : _erro!,
-                                style: const TextStyle(
-                                    color: AppTheme.textSecondary),
+                                style: TextStyle(
+                                    color: cs.onSurfaceVariant),
                                 textAlign: TextAlign.center,
                               ),
                               const SizedBox(height: 16),
@@ -485,6 +495,22 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                                 buscaMaterial: _buscaMaterial,
                               ),
                             ),
+
+                            // ── Convertidos ───────────────────────────────
+                            _buildLista(
+                              lista: _convertidosFiltered,
+                              emptyMessage: _buscaMaterial.isNotEmpty
+                                  ? 'Nenhum orçamento convertido com esse material'
+                                  : 'Nenhum orçamento convertido em OC',
+                              emptyIcon: Icons.shopping_cart_checkout,
+                              emptyColor: const Color(0xFF0288D1),
+                              buscaMaterial: _buscaMaterial,
+                              itemBuilder: (orc) =>
+                                  _OrcamentoHistoricoCard(
+                                orcamento: orc,
+                                buscaMaterial: _buscaMaterial,
+                              ),
+                            ),
                           ],
                         ),
             ),
@@ -502,6 +528,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
     required Widget Function(Map<String, dynamic>) itemBuilder,
     String buscaMaterial = '',
   }) {
+    final cs = Theme.of(context).colorScheme;
     if (lista.isEmpty) {
       return Center(
         child: Column(
@@ -512,10 +539,10 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  color: AppTheme.textHint.withValues(alpha: 0.08),
+                  color: cs.outline.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Icon(Icons.search_off, size: 36, color: AppTheme.textHint),
+                child: Icon(Icons.search_off, size: 36, color: cs.outline),
               ),
               const SizedBox(height: 20),
               Text(
@@ -523,7 +550,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                 style: Theme.of(context)
                     .textTheme
                     .headlineSmall
-                    ?.copyWith(color: AppTheme.textPrimary),
+                    ?.copyWith(color: cs.onSurface),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
@@ -532,7 +559,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                 style: Theme.of(context)
                     .textTheme
                     .bodyMedium
-                    ?.copyWith(color: AppTheme.textSecondary),
+                    ?.copyWith(color: cs.onSurfaceVariant),
               ),
             ] else ...[
               Container(
@@ -550,7 +577,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                 style: Theme.of(context)
                     .textTheme
                     .headlineSmall
-                    ?.copyWith(color: AppTheme.textPrimary),
+                    ?.copyWith(color: cs.onSurface),
               ),
             ],
           ],
@@ -651,12 +678,14 @@ class _OrcamentoHistoricoCardState
     // Conta materiais únicos (não duplicados por fornecedor)
     final grupos = _agruparItensPorMaterial(itens);
     final totalMateriais = grupos.length;
+    final cs = Theme.of(context).colorScheme;
+    final statusColor = _statusColor(context, status);
 
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: cs.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -676,7 +705,7 @@ class _OrcamentoHistoricoCardState
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: _statusColor(status).withValues(alpha: 0.1),
+                      color: statusColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
@@ -686,9 +715,11 @@ class _OrcamentoHistoricoCardState
                               ? Icons.check_circle_outline
                               : status == 'AGUARDANDO_APROVACAO'
                                   ? Icons.pending_outlined
-                                  : Icons.cancel_outlined,
+                                  : status == 'CONVERTIDO'
+                                      ? Icons.shopping_cart_checkout
+                                      : Icons.cancel_outlined,
                       size: 20,
-                      color: _statusColor(status),
+                      color: statusColor,
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -701,10 +732,10 @@ class _OrcamentoHistoricoCardState
                             Expanded(
                               child: Text(
                                 titulo,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w700,
-                                  color: AppTheme.textPrimary,
+                                  color: cs.onSurface,
                                 ),
                               ),
                             ),
@@ -712,8 +743,7 @@ class _OrcamentoHistoricoCardState
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: _statusColor(status)
-                                    .withValues(alpha: 0.1),
+                                color: statusColor.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
@@ -721,7 +751,7 @@ class _OrcamentoHistoricoCardState
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
-                                  color: _statusColor(status),
+                                  color: statusColor,
                                 ),
                               ),
                             ),
@@ -732,23 +762,23 @@ class _OrcamentoHistoricoCardState
                           children: [
                             Text(
                               '$totalMateriais ${totalMateriais == 1 ? 'material' : 'materiais'}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
-                                color: AppTheme.textSecondary,
+                                color: cs.onSurfaceVariant,
                               ),
                             ),
                             if (criadoEm != null) ...[
-                              const Text(
+                              Text(
                                 ' · ',
                                 style: TextStyle(
                                     fontSize: 12,
-                                    color: AppTheme.textSecondary),
+                                    color: cs.onSurfaceVariant),
                               ),
                               Text(
                                 _dataFormatada(criadoEm),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 12,
-                                  color: AppTheme.textSecondary,
+                                  color: cs.onSurfaceVariant,
                                 ),
                               ),
                             ],
@@ -801,8 +831,8 @@ class _OrcamentoHistoricoCardState
                   AnimatedRotation(
                     turns: _expandido ? 0.5 : 0,
                     duration: const Duration(milliseconds: 200),
-                    child: const Icon(Icons.keyboard_arrow_down,
-                        size: 20, color: AppTheme.textHint),
+                    child: Icon(Icons.keyboard_arrow_down,
+                        size: 20, color: cs.outline),
                   ),
                 ],
               ),
@@ -811,7 +841,7 @@ class _OrcamentoHistoricoCardState
 
           // ── Itens expandidos (agrupados por material) ───────────────────
           if (_expandido && grupos.isNotEmpty) ...[
-            const Divider(height: 1, color: AppTheme.divider),
+            Divider(height: 1, color: cs.outlineVariant),
             Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -819,12 +849,12 @@ class _OrcamentoHistoricoCardState
                 children: [
                   Row(
                     children: [
-                      const Text(
+                      Text(
                         'Materiais cotados',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: AppTheme.textSecondary,
+                          color: cs.onSurfaceVariant,
                         ),
                       ),
                       if (widget.buscaMaterial.isNotEmpty) ...[
@@ -854,13 +884,13 @@ class _OrcamentoHistoricoCardState
             ),
           ],
           if (_expandido && grupos.isEmpty) ...[
-            const Divider(height: 1, color: AppTheme.divider),
-            const Padding(
-              padding: EdgeInsets.all(16),
+            Divider(height: 1, color: cs.outlineVariant),
+            Padding(
+              padding: const EdgeInsets.all(16),
               child: Text(
                 'Nenhum material neste orçamento.',
                 style: TextStyle(
-                    fontSize: 12, color: AppTheme.textHint),
+                    fontSize: 12, color: cs.outline),
               ),
             ),
           ],
@@ -907,18 +937,19 @@ class _OrcamentoHistoricoCardState
         .toList();
     final mediaPreco =
         precos.isNotEmpty ? precos.reduce((a, b) => a + b) / precos.length : null;
+    final cs = Theme.of(context).colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: destacado
             ? AppTheme.primary.withValues(alpha: 0.04)
-            : AppTheme.surfaceVariant,
+            : cs.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: destacado
               ? AppTheme.primary.withValues(alpha: 0.35)
-              : AppTheme.divider,
+              : cs.outlineVariant,
           width: destacado ? 1.5 : 1,
         ),
       ),
@@ -951,10 +982,10 @@ class _OrcamentoHistoricoCardState
                           Expanded(
                             child: Text(
                               materialNome,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w700,
-                                color: AppTheme.textPrimary,
+                                color: cs.onSurface,
                               ),
                             ),
                           ),
@@ -982,9 +1013,9 @@ class _OrcamentoHistoricoCardState
                         const SizedBox(height: 2),
                         Text(
                           descricaoItem,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11,
-                            color: AppTheme.textSecondary,
+                            color: cs.onSurfaceVariant,
                             fontStyle: FontStyle.italic,
                           ),
                         ),
@@ -993,9 +1024,9 @@ class _OrcamentoHistoricoCardState
                         const SizedBox(height: 2),
                         Text(
                           subPartes,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11,
-                            color: AppTheme.textSecondary,
+                            color: cs.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -1004,26 +1035,26 @@ class _OrcamentoHistoricoCardState
                         children: [
                           Text(
                             'Qtd: ${quantidade % 1 == 0 ? quantidade.toInt().toString() : quantidade.toString()}',
-                            style: const TextStyle(
-                                fontSize: 11, color: AppTheme.textSecondary),
+                            style: TextStyle(
+                                fontSize: 11, color: cs.onSurfaceVariant),
                           ),
                           if (materialUnidade != null &&
                               materialUnidade.isNotEmpty) ...[
                             Text(
                               ' $materialUnidade',
-                              style: const TextStyle(
-                                  fontSize: 11, color: AppTheme.textSecondary),
+                              style: TextStyle(
+                                  fontSize: 11, color: cs.onSurfaceVariant),
                             ),
                           ],
                           if (mediaPreco != null) ...[
                             const Spacer(),
-                            const Icon(Icons.bar_chart,
-                                size: 11, color: AppTheme.textHint),
+                            Icon(Icons.bar_chart,
+                                size: 11, color: cs.outline),
                             const SizedBox(width: 3),
                             Text(
                               'Média ${_brl(mediaPreco)}',
-                              style: const TextStyle(
-                                  fontSize: 11, color: AppTheme.textHint),
+                              style: TextStyle(
+                                  fontSize: 11, color: cs.outline),
                             ),
                           ],
                         ],
@@ -1037,18 +1068,18 @@ class _OrcamentoHistoricoCardState
 
           // ── Tabela de fornecedores ────────────────────────────────────────
           if (grupo.any((i) => i['fornecedor'] != null)) ...[
-            const Divider(height: 1, color: AppTheme.divider),
+            Divider(height: 1, color: cs.outlineVariant),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
               child: Row(
-                children: const [
+                children: [
                   Expanded(
                     child: Text(
                       'Fornecedor',
                       style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
-                          color: AppTheme.textHint),
+                          color: cs.outline),
                     ),
                   ),
                   SizedBox(
@@ -1059,7 +1090,7 @@ class _OrcamentoHistoricoCardState
                       style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
-                          color: AppTheme.textHint),
+                          color: cs.outline),
                     ),
                   ),
                   SizedBox(
@@ -1070,7 +1101,7 @@ class _OrcamentoHistoricoCardState
                       style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
-                          color: AppTheme.textHint),
+                          color: cs.outline),
                     ),
                   ),
                 ],
@@ -1097,12 +1128,12 @@ class _OrcamentoHistoricoCardState
                 decoration: BoxDecoration(
                   color: selecionado
                       ? AppTheme.primary.withValues(alpha: 0.06)
-                      : AppTheme.surface,
+                      : cs.surface,
                   borderRadius: BorderRadius.circular(7),
                   border: Border.all(
                     color: selecionado
                         ? AppTheme.primary.withValues(alpha: 0.25)
-                        : AppTheme.divider,
+                        : cs.outlineVariant,
                   ),
                 ),
                 child: Row(
@@ -1111,8 +1142,8 @@ class _OrcamentoHistoricoCardState
                       const Icon(Icons.check_circle,
                           size: 13, color: AppTheme.primary)
                     else
-                      const Icon(Icons.circle_outlined,
-                          size: 13, color: AppTheme.textHint),
+                      Icon(Icons.circle_outlined,
+                          size: 13, color: cs.outline),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -1124,7 +1155,7 @@ class _OrcamentoHistoricoCardState
                               : FontWeight.w400,
                           color: selecionado
                               ? AppTheme.primary
-                              : AppTheme.textPrimary,
+                              : cs.onSurface,
                         ),
                       ),
                     ),
@@ -1138,7 +1169,7 @@ class _OrcamentoHistoricoCardState
                           fontWeight: FontWeight.w500,
                           color: selecionado
                               ? AppTheme.primary
-                              : AppTheme.textPrimary,
+                              : cs.onSurface,
                         ),
                       ),
                     ),
@@ -1154,7 +1185,7 @@ class _OrcamentoHistoricoCardState
                               : FontWeight.w500,
                           color: selecionado
                               ? AppTheme.primary
-                              : AppTheme.textPrimary,
+                              : cs.onSurface,
                         ),
                       ),
                     ),

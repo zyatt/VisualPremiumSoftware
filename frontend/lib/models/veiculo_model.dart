@@ -50,7 +50,24 @@ class ManutencaoModel {
         criadoEm:     DateTime.parse(json['criadoEm']),
       );
 
-  bool get emAndamento => dataRetirada == null;
+  /// Em andamento enquanto não houver data de retirada OU enquanto a retirada
+  /// ainda não tiver chegado (retirada >= início do dia de hoje).
+  bool get emAndamento {
+    if (dataRetirada == null) return true;
+    final hoje = DateTime.now();
+    final inicioDiaHoje = DateTime(hoje.year, hoje.month, hoje.day);
+    return !dataRetirada!.isBefore(inicioDiaHoje);
+  }
+
+  /// Verdadeiro apenas quando a data de retirada é exatamente hoje
+  /// (usado para mostrar a notificação de "pronto para retirar").
+  bool get retiradaHoje {
+    if (dataRetirada == null) return false;
+    final hoje = DateTime.now();
+    return dataRetirada!.year  == hoje.year  &&
+           dataRetirada!.month == hoje.month &&
+           dataRetirada!.day   == hoje.day;
+  }
 }
 
 class VeiculoModel {

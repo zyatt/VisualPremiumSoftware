@@ -143,30 +143,33 @@ class _LoadingPageState extends State<LoadingPage>
 
               // ── Barra de progresso ───────────────────────────
               AnimatedBuilder(
-                animation: _barProgress,
-                builder: (_, __) => ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: SizedBox(
-                    height: 3,
-                    child: Stack(
-                      children: [
-                        Container(width: double.infinity, color: track),
-                        FractionallySizedBox(
-                          widthFactor: _barProgress.value,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [
-                                  AppTheme.primaryLight,
-                                  AppTheme.primary,
-                                  AppTheme.primaryDark,
-                                ],
+                animation: Listenable.merge([_barProgress, _logoOpacity]),
+                builder: (_, __) => Opacity(
+                  opacity: _logoOpacity.value, // aparece junto com o logo
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: SizedBox(
+                      height: 3,
+                      child: Stack(
+                        children: [
+                          Container(width: double.infinity, color: track),
+                          FractionallySizedBox(
+                            widthFactor: _barProgress.value,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    AppTheme.primaryLight,
+                                    AppTheme.primary,
+                                    AppTheme.primaryDark,
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(4),
                               ),
-                              borderRadius: BorderRadius.circular(4),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),

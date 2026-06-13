@@ -112,6 +112,63 @@ const _selectMaterial = {
   unidPadrao: true,
 };
 
+/**
+ * Após salvar uma OC, sincroniza os vínculos FornecedorMaterial com base nos
+ * preços informados nos itens. Faz upsert de cada material: se não existia o
+ * vínculo, cria; se já existia, atualiza apenas os campos de preço que foram
+ * informados (> 0). Materiais com usarM2 atualizam precoMetroQuadrado;
+ * demais atualizam preco.
+ */
+async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
+  if (!fornecedorId || !Array.isArray(itens) || itens.length === 0) return;
+
+  // Agrupa por materialId para evitar upserts duplicados (um material pode
+  // aparecer em múltiplas linhas de distribuição de OS)
+  const porMaterial = new Map();
+  for (const item of itens) {
+    const mid = Number(item.materialId);
+    if (!mid) continue;
+    const existing = porMaterial.get(mid);
+    if (!existing) {
+      porMaterial.set(mid, {
+        materialId: mid,
+        usarM2:     item.usarM2 ?? false,
+        preco:      Number(item.precoUnitario ?? 0),
+        precoM2:    Number(item.precoMetroQuadrado ?? 0),
+      });
+    } else {
+      // Mantém o maior preço informado caso haja repetição
+      if (Number(item.precoUnitario ?? 0) > existing.preco) existing.preco = Number(item.precoUnitario);
+      if (Number(item.precoMetroQuadrado ?? 0) > existing.precoM2) existing.precoM2 = Number(item.precoMetroQuadrado);
+    }
+  }
+
+  for (const [materialId, dados] of porMaterial) {
+    const updateData = {};
+    if (!dados.usarM2 && dados.preco > 0) updateData.preco = dados.preco;
+    if (dados.usarM2 && dados.precoM2 > 0) updateData.precoMetroQuadrado = dados.precoM2;
+    // Se ambos foram informados, atualiza os dois
+    if (!dados.usarM2 && dados.precoM2 > 0) updateData.precoMetroQuadrado = dados.precoM2;
+
+    if (Object.keys(updateData).length === 0) continue;
+
+    await prisma.fornecedorMaterial.upsert({
+      where:  { fornecedorId_materialId: { fornecedorId, materialId } },
+      create: {
+        fornecedorId,
+        materialId,
+        preco:               updateData.preco               ?? null,
+        precoMetroQuadrado:  updateData.precoMetroQuadrado  ?? null,
+        ativo: true,
+      },
+      update: {
+        ...updateData,
+        ativo: true,
+      },
+    });
+  }
+}
+
 async function listar(status) {
   const where = {};
   if (status) where.status = status;
@@ -183,7 +240,7 @@ async function criar(data, usuarioId) {
     return acc + Number(item.quantidade) * precoBase;
   }, 0);
 
-  return prisma.ordemCompra.create({
+  const oc = await prisma.ordemCompra.create({
     data: {
       ...ordemData,
       usuarioId,
@@ -219,6 +276,11 @@ async function criar(data, usuarioId) {
       fornecedor: true,
     },
   });
+
+  // Sincroniza vínculos FornecedorMaterial com os preços informados nos itens
+  await _sincronizarVinculosFornecedor(ordemData.fornecedorId, itens || []);
+
+  return oc;
 }
 
 async function atualizar(id, data) {
@@ -264,6 +326,11 @@ async function atualizar(id, data) {
     }
     await recalcularTotal(id);
   }
+
+  // Sincroniza vínculos FornecedorMaterial com os preços informados nos itens
+  const fornecedorIdFinal = ordemData.fornecedorId
+    ?? (await prisma.ordemCompra.findUnique({ where: { id }, select: { fornecedorId: true } }))?.fornecedorId;
+  await _sincronizarVinculosFornecedor(fornecedorIdFinal, itens || []);
 
   return ordem;
 }
