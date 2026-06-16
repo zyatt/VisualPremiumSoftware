@@ -4,7 +4,7 @@ const { authMiddleware, roleMiddleware } = require('../middlewares/auth.middlewa
 
 // COMPRAS pode apenas criar (cadastrar) e ler materiais.
 // Editar, desativar, reativar, excluir e gerir filhos específicos exigem ADMIN ou GERENTE.
-const LEITURA      = ['ADMIN', 'GERENTE', 'COMPRAS'];
+const LEITURA      = ['ADMIN', 'GERENTE', 'COMPRAS', 'ORCAMENTISTA'];
 const CADASTRO     = ['ADMIN', 'GERENTE', 'COMPRAS']; // criar novo material
 const ESCRITA      = ['ADMIN', 'GERENTE'];             // editar / manter
 const EXCLUSAO     = ['ADMIN', 'GERENTE'];             // desativar / excluir

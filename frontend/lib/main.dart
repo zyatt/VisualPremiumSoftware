@@ -8,6 +8,7 @@ import 'theme/app_theme.dart';
 
 import 'providers/usuario_provider.dart';
 import 'providers/material_provider.dart';
+import 'providers/produto_provider.dart';
 import 'providers/estoque_provider.dart';
 import 'providers/fornecedor_provider.dart';
 import 'providers/orcamento_provider.dart';
@@ -19,7 +20,8 @@ import 'providers/audit_log_provider.dart';
 import 'providers/gastos_categoria_provider.dart';
 import 'providers/alertas_estoque_provider.dart';
 import 'providers/veiculo_provider.dart';
-import 'providers/theme_provider.dart';           // ← NOVO
+import 'providers/theme_provider.dart';
+import 'providers/orcamento_venda_provider.dart';
 
 import 'widgets/update_checker_widget.dart';
 
@@ -56,6 +58,7 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: usuarioProvider),
         ChangeNotifierProvider.value(value: orcamentoProvider),
         ChangeNotifierProvider(create: (_) => MaterialProvider()),
+        ChangeNotifierProvider(create: (_) => ProdutoProvider()),
         ChangeNotifierProvider(create: (_) => EstoqueProvider()),
         ChangeNotifierProvider(create: (_) => FornecedorProvider()),
         ChangeNotifierProvider(create: (_) => OrdemCompraProvider()),
@@ -66,7 +69,8 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => GastosCategoriaProvider()),
         ChangeNotifierProvider(create: (_) => AlertasEstoqueProvider()),
         ChangeNotifierProvider(create: (_) => VeiculoProvider()),
-        ChangeNotifierProvider(create: (_) => ThemeProvider()),  // ← NOVO
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => OrcamentoVendaProvider()),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, _) {

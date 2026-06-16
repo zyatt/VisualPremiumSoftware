@@ -1,5 +1,5 @@
 #define MyAppName "Visual Premium Software"
-#define MyAppVersion "1.7.0"
+#define MyAppVersion "1.8.0"
 #define MyAppPublisher "Matheus Vinícius" 
 #define MyAppExeName "visualpremiumsoftware.exe"
 #define MyAppId "{{7B8E0F9A-2C4D-4B1E-9A0A-3C8E2F5A1234}"

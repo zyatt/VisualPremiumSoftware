@@ -6,21 +6,23 @@ import 'package:provider/provider.dart';
 
 import '../providers/usuario_provider.dart';
 import '../providers/alertas_estoque_provider.dart';
-import '../providers/theme_provider.dart';   // ← NOVO
+import '../providers/theme_provider.dart';
 import '../providers/veiculo_provider.dart';
 import '../models/veiculo_model.dart';
 import '../theme/app_theme.dart';
 
 class AppShell extends StatefulWidget {
-  final Widget child;
-  const AppShell({super.key, required this.child});
+  final StatefulNavigationShell navigationShell;
+  const AppShell({super.key, required this.navigationShell});
 
   // Itens visíveis para ADMIN e GERENTE (acesso total)
   static const _navItemsCompleto = [
     _NavItem(icon: Icons.home_rounded,                    label: 'Início',           route: '/inicio'),
     _NavItem(icon: Icons.inventory_2_rounded,             label: 'Estoque',          route: '/estoque'),
+    _NavItem(icon: Icons.shopping_bag_rounded,            label: 'Produtos',         route: '/produtos'),
     _NavItem(icon: Icons.people_rounded,                  label: 'Fornecedores',     route: '/fornecedores'),
-    _NavItem(icon: Icons.request_quote_rounded,           label: 'Orçamento',        route: '/orcamento'),
+    _NavItem(icon: Icons.request_quote_rounded,           label: 'Orç. Compras',     route: '/orcamento'),
+    _NavItem(icon: Icons.sell_rounded,                    label: 'Orç. Vendas',      route: '/orcamento-venda'), // ← NOVO
     _NavItem(icon: Icons.shopping_cart_rounded,           label: 'Ordem de Compra',  route: '/ordem-compra'),
     _NavItem(icon: Icons.sync_alt_rounded,                label: 'Controle Estoque', route: '/controle-estoque'),
     _NavItem(icon: Icons.history_rounded,                 label: 'Histórico',        route: '/historico'),
@@ -31,18 +33,25 @@ class AppShell extends StatefulWidget {
     _NavItem(icon: Icons.admin_panel_settings_rounded,    label: 'Admin',            route: '/admin'),
   ];
 
-  // Itens para COMPRAS (sem Admin; pode ver Produção como somente leitura)
+  // Itens para COMPRAS
   static const _navItemsCompras = [
     _NavItem(icon: Icons.home_rounded,                    label: 'Início',           route: '/inicio'),
     _NavItem(icon: Icons.inventory_2_rounded,             label: 'Estoque',          route: '/estoque'),
     _NavItem(icon: Icons.people_rounded,                  label: 'Fornecedores',     route: '/fornecedores'),
-    _NavItem(icon: Icons.request_quote_rounded,           label: 'Orçamento',        route: '/orcamento'),
+    _NavItem(icon: Icons.request_quote_rounded,           label: 'Orç. Compras',     route: '/orcamento'),
     _NavItem(icon: Icons.shopping_cart_rounded,           label: 'Ordem de Compra',  route: '/ordem-compra'),
     _NavItem(icon: Icons.sync_alt_rounded,                label: 'Controle Estoque por OS', route: '/controle-estoque'),
     _NavItem(icon: Icons.history_rounded,                 label: 'Histórico',        route: '/historico'),
     _NavItem(icon: Icons.description_rounded,             label: 'Relatório OS',     route: '/relatorio-os'),
     _NavItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção',         route: '/producao'),
     _NavItem(icon: Icons.directions_car_rounded,          label: 'Veículos',         route: '/veiculos'),
+  ];
+
+  // Itens para ORCAMENTISTA (apenas visualização)
+  static const _navItemsOrcamentista = [
+    _NavItem(icon: Icons.sell_rounded,                    label: 'Orç. Vendas',      route: '/orcamento-venda'),
+    _NavItem(icon: Icons.inventory_2_rounded,             label: 'Estoque',          route: '/estoque'),
+    _NavItem(icon: Icons.shopping_bag_rounded,            label: 'Produtos',         route: '/produtos'),
   ];
 
   // Único item visível para o cargo PRODUCAO
@@ -66,7 +75,6 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<AlertasEstoqueProvider>().iniciarPolling();
-      // Carrega veículos para detectar retiradas do dia
       context.read<VeiculoProvider>().carregarVeiculos();
     });
   }
@@ -86,12 +94,15 @@ class _AppShellState extends State<AppShell> {
     final roleUp     = usuario?.role.trim().toUpperCase() ?? '';
     final isAdmin    = roleUp == 'ADMIN';
     final isGerente  = roleUp == 'GERENTE';
+    final isOrcamentista = roleUp == 'ORCAMENTISTA';
 
     final List<_NavItem> items;
     if (isProducao) {
       items = AppShell._navItemsProducao;
     } else if (isAdmin || isGerente) {
       items = AppShell._navItemsCompleto;
+    } else if (isOrcamentista) {
+      items = AppShell._navItemsOrcamentista;
     } else {
       items = AppShell._navItemsCompras;
     }
@@ -101,7 +112,7 @@ class _AppShellState extends State<AppShell> {
         children: [
           if (isWide)
             _Sidebar(currentRoute: location, items: items),
-          Expanded(child: widget.child),
+          Expanded(child: widget.navigationShell),
         ],
       ),
       drawer: isWide
@@ -163,7 +174,6 @@ class _SidebarContentState extends State<_SidebarContent> {
     if (mounted) setState(() => _version = info.version);
   }
 
-  // ── Dialog de configurações ──────────────────────────────────
   void _abrirConfiguracoes(BuildContext context) {
     showDialog(
       context: context,
@@ -180,8 +190,7 @@ class _SidebarContentState extends State<_SidebarContent> {
     final veiculoProv  = context.watch<VeiculoProvider>();
     final nRetirada    = veiculoProv.totalRetiradaHoje;
 
-    // Cor da sidebar: fixa escura independente do tema do app
-    const sidebarBg = AppTheme.sidebar; // 0xFF201E1E
+    const sidebarBg = AppTheme.sidebar;
 
     return Container(
       color: sidebarBg,
@@ -258,13 +267,13 @@ class _SidebarContentState extends State<_SidebarContent> {
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 children: widget.items
-                    .map((item) => _SidebarTile(
-                          item: item,
-                          isActive: widget.currentRoute == item.route ||
-                              (item.route != '/inicio' &&
-                                  widget.currentRoute.startsWith(item.route)),
-                        ))
-                    .toList(),
+                  .map((item) => _SidebarTile(
+                        item: item,
+                        isActive: widget.currentRoute == item.route ||
+                            (item.route != '/inicio' &&
+                                widget.currentRoute.startsWith('${item.route}/')),
+                      ))
+                  .toList(),
               ),
             ),
 
@@ -312,7 +321,6 @@ class _SidebarContentState extends State<_SidebarContent> {
                       ],
                     ),
                   ),
-                  // ── Botão de configurações ────────────────────────────
                   IconButton(
                     tooltip: 'Configurações',
                     icon: const Icon(Icons.settings_rounded, size: 18, color: Colors.white38),
@@ -455,7 +463,6 @@ class _ConfiguracoesDialog extends StatelessWidget {
                           horizontal: 12, vertical: 10),
                       child: Row(
                         children: [
-                          // Ícone animado que troca conforme o tema
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 250),
                             transitionBuilder: (child, anim) => ScaleTransition(
@@ -496,7 +503,6 @@ class _ConfiguracoesDialog extends StatelessWidget {
                               ],
                             ),
                           ),
-                          // Toggle switch
                           Switch(
                             value: isDark,
                             onChanged: (_) =>
@@ -662,7 +668,7 @@ class _RetiradaVeiculosBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const cor   = Color(0xFF1E88E5);
-    const corBg = Color(0x1A1E88E5); // 10% de opacidade
+    const corBg = Color(0x1A1E88E5);
 
     return Material(
       color: corBg,
@@ -780,7 +786,6 @@ class _PainelRetiradaDialog extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: veiculos.map((v) {
-                          // Manutenções com retirada hoje
                           final mans = v.manutencoes
                               .where((m) => m.retiradaHoje)
                               .toList();
@@ -799,7 +804,6 @@ class _PainelRetiradaDialog extends StatelessWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Veículo
                                 Row(
                                   children: [
                                     const Icon(Icons.directions_car_rounded,
@@ -838,7 +842,6 @@ class _PainelRetiradaDialog extends StatelessWidget {
                                   ],
                                 ),
                                 const SizedBox(height: 6),
-                                // Serviços com retirada hoje
                                 ...mans.map((m) => Padding(
                                       padding: const EdgeInsets.only(
                                           left: 4, top: 2),
@@ -983,12 +986,12 @@ class _PainelAlertasDialog extends StatelessWidget {
       backgroundColor: Theme.of(context).colorScheme.surface,
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 12, 0),
       contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-      actionsPadding: EdgeInsets.fromLTRB(12, 0, 12, 12),
+      actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       title: Row(
         children: [
-          Icon(Icons.notifications_active_rounded,
+          const Icon(Icons.notifications_active_rounded,
               color: Color(0xFFDC2626), size: 20),
-          SizedBox(width: 8),
+          const SizedBox(width: 8),
           Text(
             'Alertas de Estoque',
             style: GoogleFonts.nunito(
@@ -997,10 +1000,10 @@ class _PainelAlertasDialog extends StatelessWidget {
               fontSize: 15,
             ),
           ),
-          Spacer(),
+          const Spacer(),
           IconButton(
             tooltip: 'Atualizar',
-            icon: Icon(Icons.refresh_rounded, size: 18),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
             color: Theme.of(context).colorScheme.onSurfaceVariant,
             onPressed: () => alertas.carregar(),
           ),
@@ -1024,9 +1027,9 @@ class _PainelAlertasDialog extends StatelessWidget {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.check_circle_outline_rounded,
+                            const Icon(Icons.check_circle_outline_rounded,
                                 size: 48, color: Color(0xFF15803D)),
-                            SizedBox(height: 12),
+                            const SizedBox(height: 12),
                             Text(
                               'Nenhum material em alerta',
                               style: GoogleFonts.nunito(
@@ -1140,7 +1143,7 @@ class _AlertaSecaoHeader extends StatelessWidget {
 }
 
 class _AlertaItemTile extends StatelessWidget {
-  final dynamic alerta; // AlertaEstoqueModel
+  final dynamic alerta;
   const _AlertaItemTile({required this.alerta});
 
   @override

@@ -1144,9 +1144,13 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   // ── Ações de material ──────────────────────────────────────────────────────
 
   void _abrirHistoricoPrecos(MaterialModel material) {
+    final materialProvider = context.read<MaterialProvider>();
     showDialog(
       context: context,
-      builder: (_) => _HistoricoPrecoDialog(material: material),
+      builder: (_) => ChangeNotifierProvider<MaterialProvider>.value(
+        value: materialProvider,
+        child: _HistoricoPrecoDialog(material: material),
+      ),
     );
   }
 
@@ -4680,7 +4684,9 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
   @override
   void initState() {
     super.initState();
-    _carregar();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _carregar();
+    });
   }
 
   Future<void> _salvarCustoManual() async {

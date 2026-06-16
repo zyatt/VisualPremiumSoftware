@@ -14,5 +14,5 @@ comando pra jogar um último valor pro material
 
 UPDATE materiais
 SET
-    "ultimoValorPago" = 0.041
-WHERE id = 470;
+    "ultimoValorPago" = 3.80
+WHERE id = 209;

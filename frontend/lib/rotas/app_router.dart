@@ -2,12 +2,14 @@
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:visual_premium/pages/gastos_categoria_page.dart';
-import 'package:visual_premium/pages/veiculo_page.dart';         // ← NOVO
+import 'package:visual_premium/pages/veiculo_page.dart';
+import 'package:visual_premium/pages/orcamento_venda_page.dart'; // ← NOVO
 import '../pages/admin_page.dart';
 import '../pages/loading_page.dart';
 import '../pages/login_page.dart';
 import '../pages/inicio_page.dart';
 import '../pages/estoque_page.dart';
+import '../pages/produto_page.dart';
 import '../pages/fornecedores_page.dart';
 import '../pages/orcamento_page.dart';
 import '../pages/ordem_compra_page.dart';
@@ -19,18 +21,37 @@ import '../widgets/app_shell.dart';
 import '../providers/usuario_provider.dart';
 
 class AppRouter {
-  static final rootNavigatorKey   = GlobalKey<NavigatorState>();
-  static final _shellNavigatorKey = GlobalKey<NavigatorState>();
+  static final rootNavigatorKey = GlobalKey<NavigatorState>();
+
+  // Uma chave de Navigator por branch, para que cada seção mantenha sua
+  // própria pilha de navegação (e portanto seu estado) preservada quando o
+  // usuário troca de página pelo menu lateral.
+  static final _inicioNavigatorKey          = GlobalKey<NavigatorState>(debugLabel: 'inicio');
+  static final _estoqueNavigatorKey         = GlobalKey<NavigatorState>(debugLabel: 'estoque');
+  static final _produtosNavigatorKey        = GlobalKey<NavigatorState>(debugLabel: 'produtos');
+  static final _fornecedoresNavigatorKey    = GlobalKey<NavigatorState>(debugLabel: 'fornecedores');
+  static final _orcamentoNavigatorKey       = GlobalKey<NavigatorState>(debugLabel: 'orcamento');
+  static final _orcamentoVendaNavigatorKey  = GlobalKey<NavigatorState>(debugLabel: 'orcamento-venda');
+  static final _ordemCompraNavigatorKey     = GlobalKey<NavigatorState>(debugLabel: 'ordem-compra');
+  static final _controleEstoqueNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'controle-estoque');
+  static final _historicoNavigatorKey       = GlobalKey<NavigatorState>(debugLabel: 'historico');
+  static final _relatorioOSNavigatorKey     = GlobalKey<NavigatorState>(debugLabel: 'relatorio-os');
+  static final _producaoNavigatorKey        = GlobalKey<NavigatorState>(debugLabel: 'producao');
+  static final _adminNavigatorKey           = GlobalKey<NavigatorState>(debugLabel: 'admin');
+  static final _gastosCategoriaNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'gastos-categoria');
+  static final _veiculosNavigatorKey        = GlobalKey<NavigatorState>(debugLabel: 'veiculos');
 
   static const _rotasBloqueadasParaProducao = [
     '/inicio',
     '/estoque',
+    '/produtos',
     '/fornecedores',
     '/orcamento',
     '/ordem-compra',
     '/controle-estoque',
     '/historico',
     '/relatorio-os',
+    '/orcamento-venda', // ← NOVO
   ];
 
   static GoRouter buildRouter(UsuarioProvider usuarioProvider) {
@@ -46,7 +67,6 @@ class AppRouter {
         final naLogin = path == '/login';
         final naLoading = path == '/';
 
-        // Loading nunca é redirecionada — ela mesma navega após a animação
         if (naLoading) return null;
 
         if (!logado) {
@@ -59,10 +79,12 @@ class AppRouter {
         final isAdmin    = roleUp == 'ADMIN';
         final isGerente  = roleUp == 'GERENTE';
         final isCompras  = roleUp == 'COMPRAS';
+        final isOrcamentista = roleUp == 'ORCAMENTISTA';
 
-        // Sai do login quando logado
         if (naLogin) {
-          return isProducao ? '/producao' : '/inicio';
+          if (isProducao) return '/producao';
+          if (isOrcamentista) return '/orcamento-venda';
+          return '/inicio';
         }
 
         if (isAdmin || isGerente) return null;
@@ -77,6 +99,24 @@ class AppRouter {
 
         if (isCompras && path.startsWith('/admin')) return '/inicio';
 
+        if (isCompras &&
+            (path.startsWith('/produtos') ||
+                path.startsWith('/orcamento-venda'))) {
+          return '/inicio';
+        }
+
+        // ORCAMENTISTA: acesso somente a estoque, produtos e orçamento de vendas
+        if (isOrcamentista) {
+          const rotasPermitidas = [
+            '/orcamento-venda',
+            '/estoque',
+            '/produtos',
+          ];
+          if (!rotasPermitidas.any((r) => path.startsWith(r))) {
+            return '/orcamento-venda';
+          }
+        }
+
         return null;
       },
 
@@ -90,52 +130,106 @@ class AppRouter {
           builder: (_, __) => const LoginPage(),
         ),
 
-        ShellRoute(
-          navigatorKey: _shellNavigatorKey,
-          builder: (_, __, child) => AppShell(child: child),
-          routes: [
-            GoRoute(path: '/inicio', builder: (_, __) => const InicioPage()),
-
-            GoRoute(
-              path: '/estoque',
-              builder: (context, __) => EstoquePage(
-                roleUsuario:
-                    Provider.of<UsuarioProvider>(context, listen: false)
-                            .usuarioLogado
-                            ?.role ??
-                        '',
-              ),
+        StatefulShellRoute.indexedStack(
+          builder: (context, state, navigationShell) =>
+              AppShell(navigationShell: navigationShell),
+          branches: [
+            StatefulShellBranch(
+              navigatorKey: _inicioNavigatorKey,
+              routes: [
+                GoRoute(path: '/inicio', builder: (_, __) => const InicioPage()),
+              ],
             ),
-
-            GoRoute(
-                path: '/fornecedores',
-                builder: (_, __) => const FornecedoresPage()),
-            GoRoute(
-                path: '/orcamento',
-                builder: (_, __) => const OrcamentoPage()),
-            GoRoute(
-                path: '/ordem-compra',
-                builder: (_, state) =>
-                    OrdemCompraPage(ocIdParaAbrir: state.extra as int?)),
-            GoRoute(
-                path: '/controle-estoque',
-                builder: (_, __) => const ControleEstoquePage()),
-            GoRoute(
-                path: '/historico',
-                builder: (_, __) => const HistoricoPage()),
-            GoRoute(
-                path: '/relatorio-os',
-                builder: (_, __) => const RelatorioOSPage()),
-            GoRoute(
-                path: '/producao',
-                builder: (_, __) => const ProducaoPage()),
-            GoRoute(path: '/admin', builder: (_, __) => const AdminPage()),
-            GoRoute(
-                path: '/gastos-categoria',
-                builder: (_, __) => const GastosCategoriaPage()),
-            GoRoute(
-                path: '/veiculos',                              // ← NOVO
-                builder: (_, __) => const VeiculoPage()),
+            StatefulShellBranch(
+              navigatorKey: _estoqueNavigatorKey,
+              routes: [
+                GoRoute(
+                  path: '/estoque',
+                  builder: (context, __) => EstoquePage(
+                    roleUsuario:
+                        Provider.of<UsuarioProvider>(context, listen: false)
+                                .usuarioLogado
+                                ?.role ??
+                            '',
+                  ),
+                ),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _produtosNavigatorKey,
+              routes: [
+                GoRoute(path: '/produtos', builder: (_, __) => const ProdutoPage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _fornecedoresNavigatorKey,
+              routes: [
+                GoRoute(path: '/fornecedores', builder: (_, __) => const FornecedoresPage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _orcamentoNavigatorKey,
+              routes: [
+                GoRoute(path: '/orcamento', builder: (_, __) => const OrcamentoPage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _ordemCompraNavigatorKey,
+              routes: [
+                GoRoute(
+                    path: '/ordem-compra',
+                    builder: (_, state) =>
+                        OrdemCompraPage(ocIdParaAbrir: state.extra as int?)),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _controleEstoqueNavigatorKey,
+              routes: [
+                GoRoute(path: '/controle-estoque', builder: (_, __) => const ControleEstoquePage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _historicoNavigatorKey,
+              routes: [
+                GoRoute(path: '/historico', builder: (_, __) => const HistoricoPage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _relatorioOSNavigatorKey,
+              routes: [
+                GoRoute(path: '/relatorio-os', builder: (_, __) => const RelatorioOSPage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _producaoNavigatorKey,
+              routes: [
+                GoRoute(path: '/producao', builder: (_, __) => const ProducaoPage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _adminNavigatorKey,
+              routes: [
+                GoRoute(path: '/admin', builder: (_, __) => const AdminPage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _gastosCategoriaNavigatorKey,
+              routes: [
+                GoRoute(path: '/gastos-categoria', builder: (_, __) => const GastosCategoriaPage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _veiculosNavigatorKey,
+              routes: [
+                GoRoute(path: '/veiculos', builder: (_, __) => const VeiculoPage()),
+              ],
+            ),
+            StatefulShellBranch(                                   // ← NOVO
+              navigatorKey: _orcamentoVendaNavigatorKey,
+              routes: [
+                GoRoute(path: '/orcamento-venda', builder: (_, __) => const OrcamentoVendaPage()),
+              ],
+            ),
           ],
         ),
       ],

@@ -675,11 +675,12 @@ class _RoleLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label) = switch (role) {
-      'ADMIN'               => ('Administrador'),
-      'GERENTE'             => ('Gerente'),
-      'COMPRAS'             => ('Compras'),
-      'PRODUCAO' || 'PRODUÇÃO' => ('Produção'),
-      _                     => (role),
+      'ADMIN'                   => ('Administrador'),
+      'GERENTE'                 => ('Gerente'),
+      'COMPRAS'                 => ('Compras'),
+      'ORCAMENTISTA'            => ('Orçamentista'),
+      'PRODUCAO' || 'PRODUÇÃO'  => ('Produção'),
+      _                         => (role),
     };
 
     return Container(
@@ -727,7 +728,13 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
 
   bool get _isEdicao => widget.usuario != null;
 
-  static const _roles = ['ADMIN', 'GERENTE', 'COMPRAS', 'PRODUCAO'];
+  static const _roles = [
+    'ADMIN',
+    'GERENTE',
+    'COMPRAS',
+    'ORCAMENTISTA',
+    'PRODUCAO',
+  ];
 
   @override
   void initState() {
@@ -794,12 +801,13 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
   }
 
   String _roleLabel(String role) => switch (role) {
-        'ADMIN'    => 'Administrador',
-        'GERENTE'  => 'Gerente',
-        'COMPRAS'  => 'Compras',
-        'PRODUCAO' => 'Produção',
-        _          => role,
-      };
+    'ADMIN'        => 'Administrador',
+    'GERENTE'      => 'Gerente',
+    'COMPRAS'      => 'Compras',
+    'ORCAMENTISTA' => 'Orçamentista',
+    'PRODUCAO'     => 'Produção',
+    _              => role,
+  };
 
   @override
   Widget build(BuildContext context) {

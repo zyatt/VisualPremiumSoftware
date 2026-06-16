@@ -5,7 +5,7 @@ const pdfCtrl = require('../controllers/estoque.pdf.controller');
 
 const { authMiddleware, roleMiddleware } = require('../middlewares/auth.middleware');
 
-const LEITURA  = ['ADMIN','GERENTE','COMPRAS'];
+const LEITURA  = ['ADMIN','GERENTE','COMPRAS','ORCAMENTISTA'];
 const ESCRITA  = ['ADMIN','GERENTE','COMPRAS'];
 const EXCLUSAO = ['ADMIN','GERENTE','COMPRAS'];
 

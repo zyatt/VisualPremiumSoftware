@@ -101,14 +101,6 @@ class _LoginPageState extends State<LoginPage> {
                             letterSpacing: -0.3,
                           ),
                         ),
-                        Text(
-                          'Gestão de Estoque e Compras',
-                          style: GoogleFonts.nunito(
-                            fontSize: 12,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-
                         const SizedBox(height: 32),
 
                         // Erro

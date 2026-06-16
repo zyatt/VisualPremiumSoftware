@@ -19,6 +19,7 @@ model Usuario {
   orcamentosCriados    Orcamento[]           @relation("OrcamentoCriador")
   ordens_compra        OrdemCompra[]
   solicitacoesProducao SolicitacaoProducao[]
+  orcamentosVendaCriados OrcamentoVenda[]    @relation("OrcamentoVendaCriador")
 
   @@map("usuarios")
 }
@@ -37,9 +38,7 @@ model Material {
   valorMetroQuadrado   Decimal?                 @db.Decimal(15, 5)
   quantidade           Decimal                  @default(0) @db.Decimal(10, 3)
   estoqueMinimo        Decimal                  @default(0) @db.Decimal(10, 3)
-  /// Quantidade padrão de cada unidade de compra (ex: 18000 para thinner 18L em ml)
   qtdPadrao            Decimal?                 @db.Decimal(15, 5)
-  /// Unidade da quantidade padrão (ex: "ml", "m", "L"). Pode diferir de `unidade`.
   unidPadrao           String?
   status               StatusEstoque            @default(OK)
   estoqueConfirmado    Boolean                  @default(false)
@@ -57,6 +56,8 @@ model Material {
   ordemItens           OrdemCompraItem[]
   SolicitacoesProducao SolicitacaoProducao[]
   auditLogs            AuditLogMaterial[]
+  produtoMateriais     ProdutoMaterial[]
+  orcamentoVendaItemMateriais OrcamentoVendaItemMaterial[]
 
   @@unique([nome, medida, espessura])
   @@map("materiais")
@@ -252,16 +253,12 @@ model MovimentacaoEstoque {
   @@map("movimentacoes_estoque")
 }
 
-// Campo `observacao` adicionado para registrar a observação da solicitação.
-// Status simplificado: apenas FINALIZADA é usado daqui em diante.
-// Os valores ABERTA e EM_USO permanecem no enum para compatibilidade com
-// registros históricos já existentes no banco.
 model SolicitacaoProducao {
   id                  Int                       @id @default(autoincrement())
   numeroOS            String
   materialId          Int
   descricaoItem       String?
-  observacao          String?                   // observação opcional da saída
+  observacao          String?
   quantidadeReservada Decimal                   @db.Decimal(10, 3)
   quantidadeUsada     Decimal                   @default(0) @db.Decimal(10, 3)
   status              StatusSolicitacaoProducao @default(FINALIZADA)
@@ -288,11 +285,164 @@ model BaixaProducao {
   @@map("baixas_producao")
 }
 
+model AuditLogMaterial {
+  id           Int      @id @default(autoincrement())
+  materialId   Int
+  acao         String
+  campo        String?
+  valorAntes   String?
+  valorDepois  String?
+  usuarioId    Int?
+  usuarioNome  String?
+  criadoEm     DateTime @default(now())
+  material     Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([materialId])
+  @@index([criadoEm])
+  @@map("audit_log_materiais")
+}
+
+model Veiculo {
+  id           Int                  @id @default(autoincrement())
+  nome         String
+  placa        String               @unique
+  ativo        Boolean              @default(true)
+  criadoEm     DateTime             @default(now())
+  atualizadoEm DateTime             @updatedAt
+  manutencoes  ManutencaoVeiculo[]
+
+  @@map("veiculos")
+}
+
+model ManutencaoVeiculo {
+  id           Int       @id @default(autoincrement())
+  veiculoId    Int
+  tipo         String
+  descricao    String?
+  valor        Decimal   @db.Decimal(10, 2)
+  dataEnvio    DateTime
+  dataRetirada DateTime?
+  criadoEm     DateTime  @default(now())
+  veiculo      Veiculo   @relation(fields: [veiculoId], references: [id])
+
+  @@map("manutencoes_veiculo")
+}
+
+// ─── NOVAS ENTIDADES ──────────────────────────────────────────────────────────
+
+model Cliente {
+  id              Int              @id @default(autoincrement())
+  nome            String
+  telefone        String?
+  email           String?
+  documento       String?
+  observacao      String?
+  ativo           Boolean          @default(true)
+  criadoEm        DateTime         @default(now())
+  atualizadoEm    DateTime         @updatedAt
+  orcamentosVenda OrcamentoVenda[]
+
+  @@map("clientes")
+}
+
+model Produto {
+  id             Int                  @id @default(autoincrement())
+  nome           String
+  descricao      String?
+  categoria      String?
+  ativo          Boolean              @default(true)
+  criadoEm       DateTime             @default(now())
+  atualizadoEm   DateTime             @updatedAt
+  materiais      ProdutoMaterial[]
+  orcamentoItens OrcamentoVendaItem[]
+
+  @@map("produtos")
+}
+
+/// Vincula um material a um produto com a quantidade padrão por unidade do produto.
+model ProdutoMaterial {
+  id         Int      @id @default(autoincrement())
+  produtoId  Int
+  materialId Int
+  /// Quantidade do material necessária para 1 unidade do produto.
+  quantidade Decimal  @default(1) @db.Decimal(10, 4)
+  observacao String?
+  criadoEm   DateTime @default(now())
+  produto    Produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  material   Material @relation(fields: [materialId], references: [id])
+
+  @@unique([produtoId, materialId])
+  @@map("produto_materiais")
+}
+
+model OrcamentoVenda {
+  id           Int                  @id @default(autoincrement())
+  numero       String               @unique
+  clienteId    Int?
+  clienteNome  String?
+  criadorId    Int?
+  status       StatusOrcamentoVenda @default(EM_ANDAMENTO)
+  observacao   String?
+  valorTotal   Decimal              @default(0) @db.Decimal(15, 2)
+  /// Percentual de margem global aplicado sobre o custo (opcional).
+  margemLucro  Decimal?             @db.Decimal(5, 2)
+  criadoEm     DateTime             @default(now())
+  atualizadoEm DateTime             @updatedAt
+  cliente      Cliente?             @relation(fields: [clienteId], references: [id])
+  criador      Usuario?             @relation("OrcamentoVendaCriador", fields: [criadorId], references: [id])
+  itens        OrcamentoVendaItem[]
+
+  @@map("orcamentos_venda")
+}
+
+/// Produto selecionado dentro de um orçamento de venda.
+model OrcamentoVendaItem {
+  id               Int                         @id @default(autoincrement())
+  orcamentoVendaId Int
+  produtoId        Int
+  quantidade       Decimal                     @default(1) @db.Decimal(10, 3)
+  observacao       String?
+  criadoEm         DateTime                    @default(now())
+  orcamentoVenda   OrcamentoVenda              @relation(fields: [orcamentoVendaId], references: [id], onDelete: Cascade)
+  produto          Produto                     @relation(fields: [produtoId], references: [id])
+  materiais        OrcamentoVendaItemMaterial[]
+
+  @@map("orcamento_venda_itens")
+}
+
+/// Detalhe de material dentro de um item do orçamento de venda.
+/// Permite ajuste de quantidade e registra snapshot do preço médio.
+model OrcamentoVendaItemMaterial {
+  id                   Int                @id @default(autoincrement())
+  orcamentoVendaItemId Int
+  materialId           Int
+  /// Quantidade ajustada pelo usuário.
+  quantidade           Decimal            @db.Decimal(10, 4)
+  /// Snapshot do preço médio dos fornecedores no momento do orçamento.
+  precoMedio           Decimal?           @db.Decimal(15, 5)
+  precoMedioM2         Decimal?           @db.Decimal(15, 5)
+  /// Preço unitário final (pode ser editado manualmente).
+  precoUnitario        Decimal?           @db.Decimal(15, 5)
+  /// Dimensões informadas pelo usuário no orçamento (para cálculo de área).
+  largura              Decimal?           @db.Decimal(10, 4)
+  comprimento          Decimal?           @db.Decimal(10, 4)
+  usarM2               Boolean            @default(false)
+  criadoEm             DateTime           @default(now())
+  orcamentoVendaItem   OrcamentoVendaItem @relation(fields: [orcamentoVendaItemId], references: [id], onDelete: Cascade)
+  material             Material           @relation(fields: [materialId], references: [id])
+
+  @@unique([orcamentoVendaItemId, materialId])
+  @@map("orcamento_venda_item_materiais")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+
 enum Role {
   ADMIN
   GERENTE
   COMPRAS
   PRODUCAO
+  ORCAMENTISTA
 }
 
 enum StatusEstoque {
@@ -322,54 +472,14 @@ enum TipoMovimentacao {
   SAIDA
 }
 
-// ABERTA e EM_USO mantidos apenas para compatibilidade com dados históricos.
-// Novas solicitações são criadas diretamente como FINALIZADA.
 enum StatusSolicitacaoProducao {
   ABERTA
   EM_USO
   FINALIZADA
 }
 
-model AuditLogMaterial {
-  id           Int      @id @default(autoincrement())
-  materialId   Int
-  acao         String   // 'CADASTRO' | 'EDICAO' | 'DESATIVACAO' | 'REATIVACAO' | 'EXCLUSAO' | 'ESTOQUE_CONFIRMADO' | 'FILHO_EDITADO' | 'FILHO_EXCLUIDO'
-  campo        String?  // campo alterado (só em EDICAO / FILHO_EDITADO)
-  valorAntes   String?  // valor anterior (serializado como string/JSON)
-  valorDepois  String?  // novo valor
-  usuarioId    Int?
-  usuarioNome  String?
-  criadoEm     DateTime @default(now())
-  material     Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
-
-  @@index([materialId])
-  @@index([criadoEm])
-  @@map("audit_log_materiais")
-}
-
-model Veiculo {
-  id           Int                  @id @default(autoincrement())
-  nome         String
-  placa        String               @unique
-  ativo        Boolean              @default(true)
-  criadoEm     DateTime             @default(now())
-  atualizadoEm DateTime             @updatedAt
-  manutencoes  ManutencaoVeiculo[]
-
-  @@map("veiculos")
-}
-
-model ManutencaoVeiculo {
-  id           Int       @id @default(autoincrement())
-  veiculoId    Int
-  tipo         String    // "MANUTENCAO" | "LIMPEZA" | "REVISAO" | "PNEU" | "OUTRO"
-  descricao    String?
-  valor        Decimal   @db.Decimal(10, 2)
-  dataEnvio    DateTime
-  dataRetirada DateTime?
-  criadoEm     DateTime  @default(now())
-
-  veiculo      Veiculo   @relation(fields: [veiculoId], references: [id])
-
-  @@map("manutencoes_veiculo")
+enum StatusOrcamentoVenda {
+  EM_ANDAMENTO
+  APROVADO
+  NAO_APROVADO
 }
