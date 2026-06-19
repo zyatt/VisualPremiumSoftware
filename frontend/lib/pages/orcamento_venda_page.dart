@@ -11,6 +11,7 @@ import '../models/material_model.dart';
 import '../providers/material_provider.dart';
 import '../providers/produto_provider.dart';
 import '../providers/usuario_provider.dart';
+import '../repositories/configuracao_repository.dart';
 import '../theme/app_theme.dart';
 
 // ─── Página principal ─────────────────────────────────────────────────────────
@@ -624,6 +625,26 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
   _ItemRascunho? _item;
   bool _salvando = false;
 
+  // ── Markup: faixas carregadas da API ──────────────────────────────────────
+  List<MarkupFaixa> _faixasMarkup = [];
+  double? get _percentualMarkupAtual {
+    if (_faixasMarkup.isEmpty) return null;
+    final custo = _item?.subtotal ?? 0;
+    for (final f in _faixasMarkup) {
+      if (custo >= f.valorMin && (f.valorMax == null || custo <= f.valorMax!)) {
+        return f.percentual;
+      }
+    }
+    return _faixasMarkup.last.percentual;
+  }
+
+  double get _totalComMarkup {
+    final custo = _item?.subtotal ?? 0;
+    final pct = _percentualMarkupAtual;
+    if (pct == null || pct <= 0) return custo;
+    return custo * (1 + pct / 100);
+  }
+
   // ── Busca de produtos (painel esquerdo) ───────────────────────────────────
   final _produtoBuscaCtrl = TextEditingController();
   String _produtoBusca    = '';
@@ -685,6 +706,11 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
       if (prodProv.produtos.isEmpty) {
         await prodProv.carregar(ativo: true);
       }
+      // Carrega faixas de markup para exibição em tempo real
+      try {
+        final faixas = await ConfiguracaoRepository().listarFaixas();
+        if (mounted) setState(() => _faixasMarkup = faixas);
+      } catch (_) {}
     });
   }
 
@@ -922,7 +948,10 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
           'materiais': _item!.materiais.map((m) => {
             'materialId':    m.materialId,
             'quantidade':    m.quantidade,
+            // precoUnitario = custo da peça com dimensões informadas (ou custo bruto)
             'precoUnitario': m.precoUnitarioCalculado,
+            // precoMedio = custo bruto da unidade (fallback no backend para _decomporCustos)
+            'precoMedio':    m.custoUnitario,
             'largura':       m._largura,
             'comprimento':   m._comprimento,
           }).toList(),
@@ -1175,31 +1204,56 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
         const SizedBox(height: 28),
 
         // ── Total ──────────────────────────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          decoration: BoxDecoration(
-            color: AppTheme.primary.withValues(alpha: 0.06),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: AppTheme.primary.withValues(alpha: 0.15)),
-          ),
-          child: Row(
-            children: [
-              Text('Total estimado',
-                  style: GoogleFonts.nunito(
-                      fontSize: 13, color: cs.onSurfaceVariant)),
-              const Spacer(),
-              Text(
-                _fmtBrl(_item?.subtotal ?? 0),
-                style: GoogleFonts.raleway(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.primary,
+        Builder(builder: (context) {
+          final subtotalLocal  = _item?.subtotal ?? 0;
+          final markupPct      = _percentualMarkupAtual;
+          final totalComMarkup = _totalComMarkup;
+
+          // Em edição sem mudanças locais ainda exibimos o valorTotal do servidor,
+          // mas assim que o usuário alterar qualquer campo passamos a calcular local.
+          final valorExibido = totalComMarkup;
+
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                  color: AppTheme.primary.withValues(alpha: 0.15)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Total estimado',
+                        style: GoogleFonts.nunito(
+                            fontSize: 13, color: cs.onSurfaceVariant)),
+                    if (markupPct != null && markupPct > 0) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Custo: ${_fmtBrl(subtotalLocal)}  ·  Markup: ${markupPct.toStringAsFixed(0)}%',
+                        style: GoogleFonts.nunito(
+                            fontSize: 10,
+                            color: AppTheme.primary.withValues(alpha: 0.65)),
+                      ),
+                    ],
+                  ],
                 ),
-              ),
-            ],
-          ),
-        ),
+                const Spacer(),
+                Text(
+                  _fmtBrl(valorExibido),
+                  style: GoogleFonts.raleway(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
 
         const SizedBox(height: 80),
       ],
@@ -1615,17 +1669,55 @@ class _ItemRascunhoCard extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                           color: cs.onSurfaceVariant)),
                 ),
+                // Larg. — mesma largura do campoNumerico (72) + padding (4 cada lado)
                 SizedBox(
-                  width: 90,
-                  child: Text('Quantidade',
+                  width: 80,
+                  child: Text('Larg.',
                       textAlign: TextAlign.center,
                       style: GoogleFonts.nunito(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
                           color: cs.onSurfaceVariant)),
                 ),
+                // Separador ×
+                const SizedBox(width: 14),
+                // Comp. — mesma largura do campoNumerico (72) + padding (4 cada lado)
+                SizedBox(
+                  width: 80,
+                  child: Text('Comp.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.nunito(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurfaceVariant)),
+                ),
+                const SizedBox(width: 4),
+                // Qtd. — mesma largura do campoNumerico (72) + padding (4 cada lado)
+                SizedBox(
+                  width: 80,
+                  child: Text('Qtd.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.nunito(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurfaceVariant)),
+                ),
+                // Espaço da unidade
+                const SizedBox(width: 34),
+                // Custo unit.
                 SizedBox(
                   width: 90,
+                  child: Text('Custo unit.',
+                      textAlign: TextAlign.right,
+                      style: GoogleFonts.nunito(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurfaceVariant)),
+                ),
+                const SizedBox(width: 8),
+                // Subtotal
+                SizedBox(
+                  width: 100,
                   child: Text('Subtotal',
                       textAlign: TextAlign.right,
                       style: GoogleFonts.nunito(
@@ -1729,7 +1821,11 @@ class _MaterialLinhaRascunho extends StatelessWidget {
       );
     }
 
-    return Padding(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
       child: Row(
         children: [
@@ -1790,18 +1886,22 @@ class _MaterialLinhaRascunho extends StatelessWidget {
             hint: 'Qtd.',
           ),
 
-          // Unidade — à direita do campo qtd
-          if (mat.unidade != null)
-            Padding(
-              padding: const EdgeInsets.only(left: 4, right: 6),
-              child: Text(
-                mat.unidade!,
-                style: GoogleFonts.nunito(
-                    fontSize: 10, color: cs.onSurfaceVariant),
-              ),
-            )
-          else
-            const SizedBox(width: 6),
+          // Unidade — largura fixa para não deslocar colunas seguintes
+          SizedBox(
+            width: 34,
+            child: mat.unidade != null
+                ? Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Text(
+                      mat.unidade!,
+                      style: GoogleFonts.nunito(
+                          fontSize: 10, color: cs.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  )
+                : null,
+          ),
 
           // Custo unitário (custo bruto da unidade/chapa)
           SizedBox(
@@ -1839,6 +1939,47 @@ class _MaterialLinhaRascunho extends StatelessWidget {
           ),
         ],
       ),
+        ),
+
+        // ── Linha de sobra ────────────────────────────────────────────────
+        if (mat.areaSobraM2 != null && mat.custoSobra != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3CD),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFFE8A000).withValues(alpha: 0.35)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              child: Row(
+                children: [
+                  const Icon(Icons.content_cut_rounded,
+                      size: 12, color: Color(0xFF92400E)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Sobra: ${_fmtM2(mat.areaSobraM2!)} m² '
+                      '(${_fmtQtd(mat.refLargura!)} × ${_fmtQtd(mat.refComprimento!)} '
+                      '− ${_fmtQtd(mat.larguraDigitada!)} × ${_fmtQtd(mat.comprimentoDigitado!)})',
+                      style: GoogleFonts.nunito(
+                          fontSize: 10,
+                          color: const Color(0xFF92400E)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _fmtBrl(mat.custoSobra!),
+                    style: GoogleFonts.nunito(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF92400E)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -2176,6 +2317,10 @@ class _MaterialRascunho {
   double? get _comprimento =>
       double.tryParse(comprimentoCtrl.text.replaceAll(',', '.'));
 
+  /// Públicos para uso no widget de exibição de sobra.
+  double? get larguraDigitada  => _largura;
+  double? get comprimentoDigitado => _comprimento;
+
   /// Custo por m² calculado a partir das dimensões de referência e último custo.
   double? get custoPorM2 {
     if (!temDimensoes) return null;
@@ -2197,6 +2342,29 @@ class _MaterialRascunho {
   }
 
   double get subtotal => quantidade * (precoUnitarioCalculado ?? 0);
+
+  /// Área da sobra em m²: (área da chapa de referência) − (área cortada pelo usuário).
+  /// Só existe quando o material tem dimensões de referência E o usuário preencheu
+  /// as dimensões da peça desejada.
+  double? get areaSobraM2 {
+    if (!temDimensoes) return null;
+    final l = _largura;
+    final c = _comprimento;
+    if (l == null || l <= 0 || c == null || c <= 0) return null;
+    final areaRef    = refLargura! * refComprimento!;
+    final areaCortada = l * c;
+    if (areaCortada >= areaRef) return null; // sem sobra
+    return areaRef - areaCortada;
+  }
+
+  /// Custo monetário da sobra (parte que vai para o lixo).
+  double? get custoSobra {
+    final sobra = areaSobraM2;
+    if (sobra == null) return null;
+    final cpm2 = custoPorM2;
+    if (cpm2 == null || cpm2 <= 0) return null;
+    return sobra * cpm2 * quantidade;
+  }
 
   void dispose() {
     qtdCtrl.dispose();
@@ -2433,14 +2601,14 @@ class _IconBtn extends StatelessWidget {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
 String _fmtBrl(double v) {
   // Usa até 5 casas decimais, remove zeros à direita, mantém mínimo 2
   String dec = v.toStringAsFixed(5).split('.')[1];
   while (dec.length > 2 && dec.endsWith('0')) {
     dec = dec.substring(0, dec.length - 1);
   }
-  final intPart = v.toStringAsFixed(0);
+  // ✅ CORREÇÃO: truncate() garante que a parte inteira nunca é arredondada
+  final intPart = v.truncate().toString();
   final buf = StringBuffer();
   int cnt = 0;
   for (int i = intPart.length - 1; i >= 0; i--) {
@@ -2453,3 +2621,12 @@ String _fmtBrl(double v) {
 
 String _fmtQtd(double v) =>
     v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+
+String _fmtM2(double v) {
+  // Exibe até 4 casas, remove zeros à direita, mantém mínimo 2
+  String dec = v.toStringAsFixed(4).split('.')[1];
+  while (dec.length > 2 && dec.endsWith('0')) {
+    dec = dec.substring(0, dec.length - 1);
+  }
+  return '${v.truncate()},$dec';
+}

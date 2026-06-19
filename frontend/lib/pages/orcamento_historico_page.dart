@@ -177,30 +177,18 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
       if (!mounted) return;
 
       final itens = (orcamentoCompleto['itens'] as List? ?? []);
-      final Map<String, ItemOrcamentoData> itensPorChave = {};
+      final Map<int, ItemOrcamentoData> itensPorChave = {};
 
       for (final item in itens) {
         final materialId = item['materialId'] as int;
         final materialData = item['material'] as Map<String, dynamic>?;
         final fornecedorId = item['fornecedorId'] as int?;
         final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
-        final especifico = materialData?['especifico'] as bool? ?? false;
 
-        final chave = especifico
-            ? 'esp_${materialId}_${(item['descricaoItem'] as String? ?? '').trim().toLowerCase()}'
-            : 'mat_$materialId';
-
-        if (!itensPorChave.containsKey(chave)) {
-          itensPorChave[chave] = ItemOrcamentoData(
+        if (!itensPorChave.containsKey(materialId)) {
+          itensPorChave[materialId] = ItemOrcamentoData(
             materialId: materialId,
             materialNome: materialData?['nome'] as String? ?? '',
-            materialUnidade: materialData?['unidade'] as String?,
-            materialCategoria: materialData?['categoria'] as String?,
-            materialMedida: materialData?['medida'] as String?,
-            materialEspessura: materialData?['espessura'] as String?,
-            materialIdentificador: materialData?['identificador'] as String?,
-            materialEspecifico: especifico,
-            descricao: item['descricaoItem'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             precos: {},
             modoOrcamento: (item['usarM2'] as bool? ?? false)
@@ -210,7 +198,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
         }
 
         if (fornecedorId != null && fornecedorData != null) {
-          itensPorChave[chave]!.precos[fornecedorId] =
+          itensPorChave[materialId]!.precos[fornecedorId] =
               PrecoFornecedorData(
             fornecedorNome:
                 fornecedorData['nomeFantasia'] as String? ?? '',
@@ -223,7 +211,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
           );
 
           if (item['selecionado'] as bool? ?? false) {
-            itensPorChave[chave]!.fornecedorSelecionado = fornecedorId;
+            itensPorChave[materialId]!.fornecedorSelecionado = fornecedorId;
           }
         }
       }
@@ -649,17 +637,7 @@ class _OrcamentoHistoricoCardState
     for (final raw in itens) {
       final item = raw as Map<String, dynamic>;
       final materialId = item['materialId']?.toString() ?? '';
-      final especifico =
-          (item['material'] as Map<String, dynamic>?)?['especifico'] as bool? ??
-              false;
-      // Materiais específicos são agrupados por materialId + descricaoItem,
-      // pois cada combinação (material + descrição) representa um item distinto,
-      // mas todos os fornecedores desse item devem aparecer juntos.
-      // Usamos normalização para evitar quebras por espaços extras.
-      final chave = especifico
-          ? 'esp_${materialId}_${(item['descricaoItem'] as String? ?? '').trim().toLowerCase()}'
-          : 'mat_$materialId';
-      grupos.putIfAbsent(chave, () => []).add(item);
+      grupos.putIfAbsent(materialId, () => []).add(item);
     }
     return grupos.values.toList();
   }
@@ -908,25 +886,9 @@ class _OrcamentoHistoricoCardState
         primeiroItem['material'] as Map<String, dynamic>?;
     final materialNome = materialData?['nome'] as String? ??
         'Material #${primeiroItem['materialId']}';
-    final materialMedida = materialData?['medida'] as String?;
-    final materialEspessura = materialData?['espessura'] as String?;
-    final materialIdentificador = materialData?['identificador'] as String?;
     final materialUnidade = materialData?['unidade'] as String?;
-    final especifico = materialData?['especifico'] as bool? ?? false;
     final quantidade =
         double.tryParse(primeiroItem['quantidade']?.toString() ?? '1') ?? 1;
-
-    // Subtítulo com atributos extras do material (medida · espessura · identificador)
-    final subPartes = [
-      materialMedida,
-      materialEspessura,
-      materialIdentificador,
-    ].where((s) => s != null && s.isNotEmpty).join(' · ');
-
-    // Descrição do item (só para materiais específicos)
-    final descricaoItem = especifico
-        ? primeiroItem['descricaoItem'] as String?
-        : null;
 
     // Calcula média de preços unitários (excluindo nulos)
     final precos = grupo
@@ -977,59 +939,14 @@ class _OrcamentoHistoricoCardState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              materialNome,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: cs.onSurface,
-                              ),
-                            ),
-                          ),
-                          if (especifico)
-                            Container(
-                              margin: const EdgeInsets.only(left: 6),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 5, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primary.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text(
-                                'Específico',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.primary,
-                                ),
-                              ),
-                            ),
-                        ],
+                      Text(
+                        materialNome,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurface,
+                        ),
                       ),
-                      if (descricaoItem != null && descricaoItem.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          descricaoItem,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: cs.onSurfaceVariant,
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                      ],
-                      if (subPartes.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          subPartes,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: cs.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
                       const SizedBox(height: 4),
                       Row(
                         children: [

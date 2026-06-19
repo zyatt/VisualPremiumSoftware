@@ -59,10 +59,10 @@ class OrdemCompraPage extends StatefulWidget {
   const OrdemCompraPage({super.key, this.ocIdParaAbrir});
 
   @override
-  State<OrdemCompraPage> createState() => _OrdemCompraPageState();
+  State<OrdemCompraPage> createState() => OrdemCompraPageState();
 }
 
-class _OrdemCompraPageState extends State<OrdemCompraPage>
+class OrdemCompraPageState extends State<OrdemCompraPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _buscaNumeroCtrl      = TextEditingController();
@@ -107,6 +107,27 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
         }
       }
     });
+  }
+
+  /// Chamado externamente (via GlobalKey) quando a branch já está montada
+  /// e o initState não será re-executado (StatefulShellRoute preserva estado).
+  /// Recarrega as OCs e abre os detalhes da OC com o [id] informado.
+  Future<void> abrirOcPorId(int id) async {
+    if (!mounted) return;
+    final provider = context.read<OrdemCompraProvider>();
+    await provider.carregar();
+    if (!mounted) return;
+    final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
+    final raw = todas.cast<dynamic>().firstWhere(
+      (o) {
+        final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
+        return m.id == id;
+      },
+      orElse: () => null,
+    );
+    if (raw != null && mounted) {
+      _verDetalhes(context, raw);
+    }
   }
 
   @override
@@ -1509,19 +1530,14 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                       Icons.format_list_numbered,
                       'Qtd: ${item.quantidade}',
                     ),
-                    if (item.materialQtdPadrao != null && item.materialQtdPadrao! > 0)
-                      _itemChip(
-                        Icons.warehouse_outlined,
-                        () {
-                          final real = item.quantidadeEstoque;
-                          final unid = item.materialUnidPadrao ?? '';
-                          final label = real % 1 == 0
-                              ? real.toInt().toString()
-                              : real.toStringAsFixed(2);
-                          return 'Estoque: $label${unid.isNotEmpty ? ' $unid' : ''}';
-                        }(),
+                    // Exibe a quantidade por unidade logo após a quantidade principal
+                    if (item.qtdUnidade != null && item.qtdUnidade! > 0)
+                      _itemChipDestaque(
+                        Icons.inventory_2_outlined,
+                        '${item.qtdUnidade! % 1 == 0 ? item.qtdUnidade!.toInt() : item.qtdUnidade} ${item.materialUnidade ?? 'unid.'}/unidade',
+                        ativo: true,
                       ),
-                   _itemChipDestaque(
+                    _itemChipDestaque(
                       Icons.attach_money,
                       () {
                         if (item.qtdUnidade != null && item.qtdUnidade! > 0) {
@@ -1776,7 +1792,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           materialEspessura:     i.materialEspessura,
           materialIdentificador: i.materialIdentificador,
           descricaoItem:         i.descricaoItem,
-          materialEspecifico:    i.materialEspecifico,
           numeroOS:              i.numeroOS,
           quantidade:            i.quantidade,
           qtdUnidade:            i.qtdUnidade,
@@ -1794,8 +1809,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     if (mounted) {
       setState(() {
         _fornecedor = f;
-        // Reavalia materialEspecifico com base no vínculo real do fornecedor,
-        // garantindo que itens específicos sem descrição prévia exibam o campo.
         if (f != null) {
           for (final item in _itens) {
             final vinculo = f.materiais.cast<FornecedorMaterialVinculoModel?>().firstWhere(
@@ -1803,8 +1816,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
               orElse: () => null,
             );
             if (vinculo != null) {
-              item.materialEspecifico = vinculo.materialEspecifico;
-              // Preenche dimensões para cálculo automático do preço m²
               item.materialLargura     = vinculo.materialLargura;
               item.materialComprimento = vinculo.materialComprimento;
             }
@@ -1834,10 +1845,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       if (mounted) {
         setState(() {
           _fornecedor = completo ?? selected;
-          // Itens são mantidos ao trocar fornecedor.
-          // Para cada item, atualiza preço e materialEspecifico se houver
-          // vínculo já cadastrado no novo fornecedor. Caso contrário, mantém
-          // os valores atuais — o backend cria o vínculo automaticamente ao salvar.
           final novosFornecedorMateriais = _fornecedor?.materiais ?? [];
           for (final item in _itens) {
             final vinculo = novosFornecedorMateriais
@@ -1851,7 +1858,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
               if (vinculo.preco > 0) {
                 item.precoUnitario = vinculo.preco;
               }
-              item.materialEspecifico = vinculo.materialEspecifico;
             }
           }
         });
@@ -1879,10 +1885,8 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         materialMedida:         vinculo.materialMedida,
         materialEspessura:      vinculo.materialEspessura,
         materialIdentificador:  vinculo.materialIdentificador,
-        // Dimensões do material (necessárias para calcular preço/m² automático).
         materialLargura:        vinculo.materialLargura,
         materialComprimento:    vinculo.materialComprimento,
-        materialEspecifico:     vinculo.materialEspecifico,
         numeroOS:               osAuto,
         quantidade:             1,
         precoUnitario:          vinculo.preco,
@@ -2325,7 +2329,6 @@ class ItemPreCarregadoOC {
   final String materialNome;
   final double quantidade;
   final double precoUnitario;
-  final bool materialEspecifico;
   final double? precoMetroQuadrado;
   final String? descricao;
 
@@ -2336,7 +2339,6 @@ class ItemPreCarregadoOC {
     required this.precoUnitario,
     this.precoMetroQuadrado,
     this.descricao,
-    this.materialEspecifico = false,
   });
 }
 
@@ -2385,18 +2387,17 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       _fornecedor = widget.fornecedorInicial;
     }
     for (final item in widget.itensPreCarregados) {
-      _itens.add(_ItemRascunho(
-        materialId:         item.materialId,
-        materialNome:       item.materialNome,
-        materialEspecifico: item.materialEspecifico,
-        numeroOS:           '',
-        quantidade:         item.quantidade,
-        precoUnitario:      item.precoUnitario,
-        precoMetroQuadrado: item.precoMetroQuadrado,
-        descricaoItem:      item.descricao,
-      ));
+        _itens.add(_ItemRascunho(
+          materialId:         item.materialId,
+          materialNome:       item.materialNome,
+          numeroOS:           '',
+          quantidade:         item.quantidade,
+          precoUnitario:      item.precoUnitario,
+          precoMetroQuadrado: item.precoMetroQuadrado,
+          descricaoItem:      item.descricao,
+        ));
+      }
     }
-  }
 
   Future<void> _carregarProximoId() async {
     final id = await _repo.proximoId();
@@ -2555,7 +2556,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         .showSnackBar(SnackBar(content: Text(msg), backgroundColor: AppTheme.error));
   }
 
-  void _adicionarItem(FornecedorMaterialVinculoModel vinculo) {
+   void _adicionarItem(FornecedorMaterialVinculoModel vinculo) {
     // Se há exatamente 1 OS cadastrada, preenche automaticamente
     final osAuto = _numerosOS.length == 1 ? _numerosOS.first : '';
     setState(() {
@@ -2568,7 +2569,6 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         materialIdentificador:  vinculo.materialIdentificador,
         materialLargura:        vinculo.materialLargura,
         materialComprimento:    vinculo.materialComprimento,
-        materialEspecifico:     vinculo.materialEspecifico,
         numeroOS:               osAuto,
         quantidade:             1,
         precoUnitario:          vinculo.preco,
@@ -3353,24 +3353,14 @@ class _ItemRascunho {
   String? materialMedida;
   String? materialEspessura;
   String? materialIdentificador;
-  /// Largura do material em metros (ex: 2.0 para chapa 2×1).
   double? materialLargura;
-  /// Comprimento do material em metros (ex: 1.0 para chapa 2×1).
   double? materialComprimento;
-  /// Indica se o material é específico (exige descrição personalizada na OC).
-  bool? materialEspecifico;
-  /// Descrição personalizada na OC (ex: "Tinta Branca Fosca 18L").
   String? descricaoItem;
   String numeroOS;
-  /// Quantidade de embalagens/peças (o número que o usuário digita como "Qtd").
   double quantidade;
-  /// Quantidade da unidade de medida por embalagem/peça.
-  /// Ex: 50 para uma lona de 50 M/L; 18000 para uma lata de 18000 ML.
-  /// Quando preenchido, o estoque recebe quantidade × qtdUnidade.
   double? qtdUnidade;
   double precoUnitario;
   double? precoMetroQuadrado;
-  /// Distribuição da quantidade por OS.
   List<_DistribuicaoLinha> distribuicao;
 
   _ItemRascunho({
@@ -3382,7 +3372,6 @@ class _ItemRascunho {
     this.materialIdentificador,
     this.materialLargura,
     this.materialComprimento,
-    this.materialEspecifico,
     this.descricaoItem,
     required this.numeroOS,
     required this.quantidade,
@@ -3404,26 +3393,22 @@ class _ItemRascunho {
     return precoUnitario / (materialLargura! * materialComprimento!);
   }
 
-  /// True quando a unidade exige campo de quantidade por embalagem/peça.
-  /// Materiais UNIDADE simples não precisam desse campo.
   bool get precisaQtdUnidade {
     final u = (materialUnidade ?? '').toUpperCase().trim();
     return u.isNotEmpty && u != 'UNIDADE';
   }
 
-  /// Rótulo dinâmico para o campo de quantidade por unidade.
-  /// Ex: "M/L por peça", "ML por embalagem", "KG por embalagem".
   String get labelQtdUnidade {
     final u = (materialUnidade ?? '').toUpperCase().trim();
     switch (u) {
-      case 'M/L':    return 'M/L por peça';
-      case 'ML':     return 'ML por embalagem';
-      case 'KG':     return 'KG por embalagem';
-      case 'G':      return 'g por embalagem';
-      case 'L':      return 'L por embalagem';
-      case 'M':      return 'M por peça';
+      case 'M/L':    return 'M/L por unidade';
+      case 'ML':     return 'ML por unidade';
+      case 'KG':     return 'KG por unidade';
+      case 'G':      return 'g por unidade';
+      case 'L':      return 'L por unidade';
+      case 'M':      return 'M por unidade';
       case 'M2':
-      case 'M²':     return 'M² por peça';
+      case 'M²':     return 'M² por unidade';
       default:       return '$u por unidade';
     }
   }
@@ -3660,9 +3645,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     final item = widget.item;
     final total = item.precoTotal;
     final unidade = (item.materialUnidade ?? '').toUpperCase().trim();
-    final labelQtd = unidade.isNotEmpty && unidade != 'UNIDADE'
-        ? 'Qtd (peças/emb.)'
-        : 'Quantidade';
+    final labelQtd = 'Quantidade';
 
     return Container(
       margin: EdgeInsets.only(bottom: 10),
@@ -3711,26 +3694,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
               ),
             ],
           ),
-          SizedBox(height: 8),
-          if (item.materialEspecifico == true) ...[
-            Text(
-              'Descrição adicional',
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 4),
-            TextFormField(
-              controller: _descricaoCtrl,
-              decoration: _deco('Descrição do material...'),
-              onChanged: (v) {
-                item.descricaoItem = v.trim().isEmpty ? null : v.trim();
-                widget.onChanged();
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
+          const SizedBox(height: 8),
           _DistribuicaoSection(
             item: item,
             numerosOS: widget.numerosOS,
@@ -4616,7 +4580,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
           preco:                0,
           precoMetroQuadrado:   0,
           ativo:                true,
-          materialEspecifico:   m['especifico'] == true,
           materialUnidade:      m['unidade'] as String?,
           // Dimensões para cálculo automático de preço/m²
           materialLargura:      m['largura'] != null

@@ -74,25 +74,6 @@ const listarHistoricoPrecos = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-const atualizarFilhoEspecifico = async (req, res, next) => {
-  try {
-    const { usuarioId, usuarioNome } = _usuario(req);
-    res.json(await svc.atualizarFilhoEspecifico(
-      +req.params.id, +req.params.filhoId, req.body, usuarioId, usuarioNome,
-    ));
-  } catch (e) { next(e); }
-};
-
-const excluirFilhoEspecifico = async (req, res, next) => {
-  try {
-    const { usuarioId, usuarioNome } = _usuario(req);
-    await svc.excluirFilhoEspecifico(
-      +req.params.id, +req.params.filhoId, usuarioId, usuarioNome,
-    );
-    res.status(204).send();
-  } catch (e) { next(e); }
-};
-
 module.exports = {
   listar,
   buscarPorId,
@@ -105,6 +86,4 @@ module.exports = {
   atualizarCustoManual,
   listarCategorias,
   listarHistoricoPrecos,
-  atualizarFilhoEspecifico,
-  excluirFilhoEspecifico,
 };

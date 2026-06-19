@@ -20,6 +20,10 @@ import '../pages/producao_page.dart';
 import '../widgets/app_shell.dart';
 import '../providers/usuario_provider.dart';
 
+/// Chave global que permite chamar métodos do state de OrdemCompraPage
+/// mesmo quando a branch já está montada (StatefulShellRoute preserva estado).
+final ordemCompraPageKey = GlobalKey<OrdemCompraPageState>();
+
 class AppRouter {
   static final rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -178,8 +182,10 @@ class AppRouter {
               routes: [
                 GoRoute(
                     path: '/ordem-compra',
-                    builder: (_, state) =>
-                        OrdemCompraPage(ocIdParaAbrir: state.extra as int?)),
+                    builder: (_, state) => OrdemCompraPage(
+                          key: ordemCompraPageKey,
+                          ocIdParaAbrir: state.extra as int?,
+                        )),
               ],
             ),
             StatefulShellBranch(

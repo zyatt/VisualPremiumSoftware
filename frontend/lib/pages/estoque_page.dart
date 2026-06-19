@@ -8,7 +8,6 @@ import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../models/material_model.dart';
-import '../providers/estoque_provider.dart';
 import '../providers/material_provider.dart';
 import '../providers/orcamento_provider.dart';
 import '../providers/produto_provider.dart';
@@ -16,6 +15,8 @@ import '../providers/orcamento_venda_provider.dart';
 import '../providers/alertas_estoque_provider.dart';
 import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
+
+// ── Formatação de preço: até 6 casas decimais, sem zeros à direita ────────────
 
 class _UpperCaseFormatter extends TextInputFormatter {
   static final _acentos = {
@@ -1175,6 +1176,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         onDesativar: (!isCompras && material != null) ? _desativar : null,
         onReativar:  (!isCompras && material != null) ? _reativar  : null,
         onExcluir:   (!isCompras && material != null) ? _excluir   : null,
+        roleUsuario: widget.roleUsuario,
       ),
     );
     if (!mounted) return;
@@ -1191,7 +1193,10 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   void _abrirPrecosFornecedores(MaterialModel material) {
     showDialog(
       context: context,
-      builder: (_) => _PrecosFornecedoresDialog(material: material),
+      builder: (_) => ChangeNotifierProvider<MaterialProvider>.value(
+        value: context.read<MaterialProvider>(),
+        child: _HistoricoPrecoDialog(material: material),
+      ),
     );
   }
 
@@ -1389,7 +1394,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         materialEspessura:     m.espessura,
         materialIdentificador: m.identificador,
         materialStatus:        m.status,
-        materialEspecifico:    m.especifico,
         precos:                precos,
       );
     }).toList();
@@ -2541,7 +2545,6 @@ class _LinhaMateria extends StatefulWidget {
  
 class _LinhaMateriaState extends State<_LinhaMateria> {
   bool _hovered  = false;
-  bool _expandido = false; // apenas para materiais específicos
  
   void _onHover(PointerHoverEvent _) {
     if (!_hovered) setState(() => _hovered = true);
@@ -2583,41 +2586,6 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
         inativo ? Opacity(opacity: 0.45, child: child) : child;
  
     Widget estoqueAtualCell() {
-      if (m.especifico) {
-        final total = m.quantidadeTotal;
-        final label = total.toStringAsFixed(total % 1 == 0 ? 0 : 2);
-        return Padding(
-          padding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-              ),
-              const SizedBox(width: 4),
-              // Seta clicável separada para expandir/recolher
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => setState(() => _expandido = !_expandido),
-                child: Tooltip(
-                  message: _expandido ? 'Recolher variações' : 'Expandir variações',
-                  child: AnimatedRotation(
-                    turns: _expandido ? 0.5 : 0.0,
-                    duration: const Duration(milliseconds: 200),
-                    child: const Icon(
-                      Icons.expand_more,
-                      size: 18,
-                      color: Color(0xFFE85D04),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      }
       return maybeOpacity(_cell(
         m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2),
         context,
@@ -2740,7 +2708,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _colWrap(cols[widget.mostrarCategoria ? 13 : 12], maybeOpacity(Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-                    child: _StatusBadge(status: m.status),
+                    child: _StatusBadgeEstoque(status: m.status),
                   ),
                 ))),
 
@@ -2775,77 +2743,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
  
   @override
   Widget build(BuildContext context) {
-    final m = widget.material;
- 
-    if (!m.especifico) {
-      // Comportamento original para materiais não-específicos
-      return _buildLinhaRaiz(context);
-    }
- 
-    // Material específico: linha pai + filhos expansíveis
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildLinhaRaiz(context),
- 
-        // Painel de filhos
-        AnimatedSize(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeInOut,
-          child: _expandido
-              ? Container(
-                  decoration: BoxDecoration(
-                    color: Color(0xFFE85D04).withValues(alpha: 0.03),
-                    border: Border(
-                      left: BorderSide(
-                        color: Color(0xFFE85D04).withValues(alpha: 0.4),
-                        width: 3,
-                      ),
-                      bottom: BorderSide(
-                        color: Theme.of(context).colorScheme.outlineVariant,
-                        width: 0.8,
-                      ),
-                    ),
-                  ),
-                  child: m.filhosEspecificos.isEmpty
-                      ? Padding(
-                          padding: EdgeInsets.symmetric(vertical: 14, horizontal: 24),
-                          child: Text(
-                            'Nenhum estoque registrado ainda. '
-                            'Finalize uma Ordem de Compra com este material para criar entradas.',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context).colorScheme.outline,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        )
-                      : Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Divider(height: 0, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant),
-                            for (int i = 0; i < m.filhosEspecificos.length; i++) ...[
-                              if (i > 0)
-                                Divider(
-                                  height: 0,
-                                  thickness: 0.5,
-                                  color: Theme.of(context).colorScheme.outlineVariant,
-                                ),
-                              _LinhaFilhoEspecifico(
-                                filho:                m.filhosEspecificos[i],
-                                pai:                  m,
-                                cols:                 widget.cols,
-                                onVerHistoricoPrecos: widget.onVerHistoricoPrecos,
-                                mostrarCategoria:     widget.mostrarCategoria,
-                              ),
-                            ],
-                          ],
-                        ),
-                )
-              : SizedBox.shrink(),
-        ),
-      ],
-    );
+    return _buildLinhaRaiz(context);
   }
  
   static Widget _vDivider(BuildContext context) => VerticalDivider(
@@ -2853,1080 +2751,14 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
       );
 }
 
-class _LinhaFilhoEspecifico extends StatefulWidget {
-  final EstoqueEspecificoModel filho;
-  final MaterialModel pai;
-  final List<_ColDef> cols;
-  final void Function(MaterialModel) onVerHistoricoPrecos;
-  final bool mostrarCategoria;
- 
-  const _LinhaFilhoEspecifico({
-    required this.filho,
-    required this.pai,
-    required this.cols,
-    required this.onVerHistoricoPrecos,
-    this.mostrarCategoria = true,
-  });
- 
-  @override
-  State<_LinhaFilhoEspecifico> createState() => _LinhaFilhoEspecificoState();
-}
- 
-class _LinhaFilhoEspecificoState extends State<_LinhaFilhoEspecifico> {
-  bool _hovered = false;
- 
-  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
-      ? SizedBox(width: col.fixed, child: child)
-      : Expanded(flex: (col.flex! * 10).round(), child: child);
-
-  static Widget _vDivider(BuildContext context) => VerticalDivider(
-        width: 1, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant,
-      );
-
-  static Widget _emptyCell() => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        child: SizedBox.shrink(),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final filho = widget.filho;
-    final pai   = widget.pai;
-    final cols  = widget.cols;
-
-    final qtd      = filho.quantidade;
-    final qtdLabel = qtd.toStringAsFixed(qtd % 1 == 0 ? 0 : 2);
-
-    final Color qtdColor = qtd <= 0
-        ? AppTheme.error
-        : qtd < 3
-            ? AppTheme.warning
-            : AppTheme.success;
-
-    final bgColor = _hovered
-        ? const Color(0xFFE85D04).withValues(alpha: 0.06)
-        : Colors.transparent;
-
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,          // <-- cursor de mão
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
-      child: GestureDetector(                    // <-- clique → dialog
-        behavior: HitTestBehavior.opaque,
-        onTap: () async {
-          // Verifica se a descrição deste filho está em uso em alguma OS em
-          // andamento. Impede renomear uma variação que já foi movimentada
-          // e ainda está aberta no Controle de Estoque.
-          final estoqueProvider = context.read<EstoqueProvider>();
-          final descricaoBloqueada = estoqueProvider.relacoesOS
-              .where((r) => r.status == 'EM_ANDAMENTO')
-              .any((r) => r.movimentacoes.any((m) =>
-                  m.materialId == filho.materialId &&
-                  (m.descricaoItem?.toUpperCase().trim() ==
-                      filho.descricao.toUpperCase().trim())));
-
-          await showDialog<bool>(
-            context: context,
-            builder: (_) => _EditarFilhoEspecificoDialog(
-              filho:              filho,
-              pai:                pai,
-              descricaoBloqueada: descricaoBloqueada,
-            ),
-          );
-          // O provider já recarrega internamente ao salvar;
-          // não precisa de ação extra aqui.
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          color: bgColor,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 44),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // col[0]: ID — ícone de sub-item
-                _colWrap(cols[0], Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                  child: Center(
-                    child: Icon(
-                      Icons.subdirectory_arrow_right,
-                      size: 16,
-                      color: const Color(0xFFE85D04).withValues(alpha: 0.6),
-                    ),
-                  ),
-                )),
-                _vDivider(context),
-
-                // col[1]: Identificador — vazio
-                _colWrap(cols[1], _emptyCell()),
-                _vDivider(context),
-
-                // col[2]: Nome → descrição do filho + ícones de ação no hover
-                _colWrap(cols[2], Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          filho.descricao,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontStyle: FontStyle.italic,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                )),
-                _vDivider(context),
-
-                // col Categoria (apenas em Geral / Sem categoria) + Medida + Espessura + Largura + Comprimento: vazios
-                if (widget.mostrarCategoria) ...[
-                  _colWrap(cols[3], _emptyCell()),
-                  _vDivider(context),
-                ],
-                _colWrap(cols[widget.mostrarCategoria ? 4 : 3], _emptyCell()),
-                _vDivider(context),
-                _colWrap(cols[widget.mostrarCategoria ? 5 : 4], _emptyCell()),
-                _vDivider(context),
-
-                // col Largura — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], _emptyCell()),
-                _vDivider(context),
-
-                // col Comprimento — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], _emptyCell()),
-                _vDivider(context),
-
-                // col Estoque atual do filho
-                _colWrap(cols[widget.mostrarCategoria ? 8 : 7], Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                  child: Center(
-                    child: Text(
-                      qtdLabel,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: qtdColor,
-                      ),
-                    ),
-                  ),
-                )),
-                _vDivider(context),
-
-                // col Estoque mínimo — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 9 : 8], _emptyCell()),
-                _vDivider(context),
-
-                // col Unidade — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], _emptyCell()),
-                _vDivider(context),
-
-                // col Custo última compra do filho
-                _colWrap(cols[widget.mostrarCategoria ? 11 : 10], _CustoCell(
-                  valor:        filho.ultimoValorPago,
-                  temHistorico: filho.ultimoValorPago != null,
-                  onTap:        () => widget.onVerHistoricoPrecos(pai),
-                )),
-                _vDivider(context),
-
-                // col Custo m² última compra do filho
-                _colWrap(cols[widget.mostrarCategoria ? 12 : 11], _CustoCell(
-                  valor:        filho.ultimoValorPagoM2,
-                  temHistorico: filho.ultimoValorPagoM2 != null,
-                  onTap:        () => widget.onVerHistoricoPrecos(pai),
-                )),
-                _vDivider(context),
-
-                // col Status — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 13 : 12], _emptyCell()),
-                // col Histórico — vazio
-                _colWrap(cols[widget.mostrarCategoria ? 14 : 13], _emptyCell()),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ValorCell extends StatefulWidget {
-  final double? valor;
-  final bool temFornecedores;
-  final VoidCallback onTap;
-
-  const _ValorCell({
-    required this.valor,
-    required this.temFornecedores,
-    required this.onTap,
-  });
-
-  @override
-  State<_ValorCell> createState() => _ValorCellState();
-}
-
-class _ValorCellState extends State<_ValorCell> {
-  bool _hovered = false;
-
-  void _onHover(PointerHoverEvent _) {
-    if (!_hovered) setState(() => _hovered = true);
-  }
-
-  void _onExit(PointerExitEvent _) {
-    if (_hovered) setState(() => _hovered = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hasValue = widget.valor != null && widget.valor! > 0;
-    final label    = hasValue ? 'R\$ ${widget.valor!.toStringAsFixed(2)}' : '—';
-    final canTap   = widget.temFornecedores;
-    final showHover = canTap && _hovered;
-
-    return MouseRegion(
-      cursor: canTap ? SystemMouseCursors.click : MouseCursor.defer,
-      onHover: _onHover,
-      onExit: _onExit,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: canTap ? widget.onTap : null,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-            decoration: BoxDecoration(
-              color: showHover
-                  ? AppTheme.primary.withValues(alpha: 0.12)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(
-              label,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                color: showHover
-                    ? AppTheme.primary
-                    : hasValue ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.outline,
-                fontWeight: hasValue ? FontWeight.w500 : FontWeight.normal,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _IconBtn extends StatefulWidget {
-  final IconData icon;
-  final Color color;
-  final VoidCallback onPressed;
-  final String tooltip;
-
-  const _IconBtn({
-    required this.icon,
-    required this.color,
-    required this.onPressed,
-    required this.tooltip,
-  });
-
-  @override
-  State<_IconBtn> createState() => _IconBtnState();
-}
-
-class _IconBtnState extends State<_IconBtn> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: widget.tooltip,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onHover: (_) { if (!_hovered) setState(() => _hovered = true); },
-        onExit:  (_) { if (_hovered)  setState(() => _hovered = false); },
-        child: GestureDetector(
-          onTap: widget.onPressed,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: _hovered
-                  ? widget.color.withValues(alpha: 0.12)
-                  : Colors.transparent,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(widget.icon, size: 18, color: widget.color),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusBadge extends StatelessWidget {
-  final String status;
-  const _StatusBadge({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    final (label, color) = switch (status) {
-      'OK'      => ('OK',      AppTheme.statusOk),
-      'LIMITE'  => ('LIMITE',  AppTheme.statusBaixo),
-      'CRITICO' => ('CRITICO', AppTheme.statusCritico),
-      'INATIVO' => ('INATIVO', Theme.of(context).colorScheme.outline),
-      _         => ('—',       Theme.of(context).colorScheme.outline),
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      ),
-    );
-  }
-}
-
-class _PrecosFornecedoresDialog extends StatelessWidget {
-  final MaterialModel material;
-  const _PrecosFornecedoresDialog({required this.material});
-
-  @override
-  Widget build(BuildContext context) {
-    final lista     = material.fornecedorMateriais;
-    final ordenados = [...lista]..sort((a, b) => a.preco.compareTo(b.preco));
-
-    final temMediano  = material.precoMediano != null && material.precoMediano! > 0;
-    final temM2       = material.precoM2Mediano != null && material.precoM2Mediano! > 0;
-
-    return AlertDialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      title: Text('Preços — ${material.nome}'),
-      content: SizedBox(
-        width: 500,
-        child: lista.isEmpty
-            ? const Text('Nenhum fornecedor vinculado a este material.')
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (temMediano || temM2)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.06),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.analytics_outlined, size: 16, color: AppTheme.primary),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Wrap(
-                              spacing: 16,
-                              runSpacing: 4,
-                              children: [
-                                Text(
-                                  'Valor médio entre fornecedores:',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                if (temMediano)
-                                  RichText(
-                                    text: TextSpan(
-                                      style: TextStyle(fontSize: 12),
-                                      children: [
-                                        TextSpan(
-                                          text: 'Valor: ',
-                                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                        ),
-                                        TextSpan(
-                                          text: 'R\$ ${material.precoMediano!.toStringAsFixed(2)}',
-                                          style: const TextStyle(
-                                            color: AppTheme.primary,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                if (temM2)
-                                  RichText(
-                                    text: TextSpan(
-                                      style: TextStyle(fontSize: 12),
-                                      children: [
-                                        TextSpan(
-                                          text: 'Valor m²: ',
-                                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                        ),
-                                        TextSpan(
-                                          text: 'R\$ ${material.precoM2Mediano!.toStringAsFixed(2)}',
-                                          style: const TextStyle(
-                                            color: AppTheme.primary,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Fornecedor',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 120,
-                        child: Text(
-                          'Valor',
-                          textAlign: TextAlign.right,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 120,
-                        child: Text(
-                          'Valor m²',
-                          textAlign: TextAlign.right,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 12),
-
-                  ...List.generate(ordenados.length, (i) {
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _FornecedorPrecoRow(
-                          item: ordenados[i],
-
-                          destacarValor:
-                              material.precoMediano != null &&
-                              ordenados[i].preco == material.precoMediano,
-
-                          destacarValorM2:
-                              material.precoM2Mediano != null &&
-                              ordenados[i].precoMetroQuadrado ==
-                                  material.precoM2Mediano,
-                        ),
-                        if (i < ordenados.length - 1)
-                          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-                      ],
-                    );
-                  }),
-                ],
-              ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Fechar'),
-        ),
-      ],
-    );
-  }
-}
-
-class _FornecedorPrecoRow extends StatelessWidget {
-  final FornecedorMaterialModel item;
-
-  final bool destacarValor;
-  final bool destacarValorM2;
-
-  const _FornecedorPrecoRow({
-    required this.item,
-    this.destacarValor = false,
-    this.destacarValorM2 = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              item.fornecedorNome.isEmpty ? '—' : item.fornecedorNome,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface,
-                fontSize: 13,
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 120,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: destacarValor
-                    ? const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      )
-                    : EdgeInsets.zero,
-                decoration: destacarValor
-                    ? BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6),
-                      )
-                    : null,
-                child: Text(
-                  item.preco > 0
-                      ? 'R\$ ${item.preco.toStringAsFixed(2)}'
-                      : '—',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: destacarValor
-                        ? AppTheme.primary
-                        : Theme.of(context).colorScheme.onSurface,
-                    fontWeight: destacarValor
-                        ? FontWeight.w700
-                        : FontWeight.normal,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 120,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: destacarValorM2
-                    ? const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      )
-                    : EdgeInsets.zero,
-                decoration: destacarValorM2
-                    ? BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6),
-                      )
-                    : null,
-                child: Text(
-                  item.precoMetroQuadrado > 0
-                      ? 'R\$ ${item.precoMetroQuadrado.toStringAsFixed(2)}'
-                      : '—',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: destacarValorM2
-                        ? AppTheme.primary
-                        : Theme.of(context).colorScheme.onSurface,
-                    fontWeight: destacarValorM2
-                        ? FontWeight.w700
-                        : FontWeight.normal,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Row clicável do painel lateral de fornecedores no _MaterialFormDialog
-// Ao clicar fecha o dialog e navega para a página de orçamento com o material
-// ─────────────────────────────────────────────────────────────────────────────
-class _FornecedorPainelRow extends StatefulWidget {
-  final FornecedorMaterialModel fm;
-  final MaterialModel           material;
-  final bool                    isMediano;
-  final bool                    showDivider;
-
-  const _FornecedorPainelRow({
-    required this.fm,
-    required this.material,
-    required this.isMediano,
-    required this.showDivider,
-  });
-
-  @override
-  State<_FornecedorPainelRow> createState() => _FornecedorPainelRowState();
-}
-
-class _FornecedorPainelRowState extends State<_FornecedorPainelRow> {
-  bool _hovered = false;
-
-  void _irParaOrcamento() {
-    // Fecha o dialog primeiro
-    Navigator.of(context, rootNavigator: true).pop(false);
-    // Adiciona o material ao orçamento via provider e navega
-    context.read<OrcamentoProvider>().adicionarMaterialDireto(
-      material:   widget.material,
-      fornecedor: widget.fm,
-    );
-    context.go('/orcamento');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final fm = widget.fm;
-    final temPrecoUnit = fm.preco > 0;
-    final temPrecoM2   = fm.precoMetroQuadrado > 0;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        MouseRegion(
-          cursor: SystemMouseCursors.click,
-          onHover: (_) { if (!_hovered) setState(() => _hovered = true); },
-          onExit:  (_) { if (_hovered)  setState(() => _hovered = false); },
-          child: GestureDetector(
-            onTap: _irParaOrcamento,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              color: _hovered
-                  ? AppTheme.primary.withValues(alpha: 0.07)
-                  : Colors.transparent,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              child: Row(
-                children: [
-                  // Nome do fornecedor
-                  Expanded(
-                    child: Row(
-                      children: [
-                        if (widget.isMediano) ...[
-                          const Tooltip(
-                            message: 'Preço mediano',
-                            child: Icon(Icons.show_chart,
-                                size: 12, color: AppTheme.primary),
-                          ),
-                          const SizedBox(width: 4),
-                        ],
-                        Expanded(
-                          child: Text(
-                            fm.fornecedorNome.isEmpty ? '—' : fm.fornecedorNome,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: _hovered
-                                  ? AppTheme.primary
-                                  : Theme.of(context).colorScheme.onSurface,
-                              fontWeight: widget.isMediano
-                                  ? FontWeight.w600
-                                  : FontWeight.normal,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Preço unitário
-                  SizedBox(
-                    width: 68,
-                    child: Text(
-                      temPrecoUnit
-                          ? 'R\$ ${fm.preco.toStringAsFixed(2)}'
-                          : '—',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: temPrecoUnit
-                            ? (_hovered ? AppTheme.primary : Theme.of(context).colorScheme.onSurface)
-                            : Theme.of(context).colorScheme.outline,
-                        fontWeight: temPrecoUnit ? FontWeight.w500 : FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                  // Preço m²
-                  SizedBox(
-                    width: 68,
-                    child: Text(
-                      temPrecoM2
-                          ? 'R\$ ${fm.precoMetroQuadrado.toStringAsFixed(2)}'
-                          : '—',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: temPrecoM2
-                            ? (_hovered ? AppTheme.primary : Theme.of(context).colorScheme.onSurface)
-                            : Theme.of(context).colorScheme.outline,
-                        fontWeight: temPrecoM2 ? FontWeight.w500 : FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        if (widget.showDivider)
-          Divider(height: 0, thickness: 0.4, color: Theme.of(context).colorScheme.outlineVariant),
-      ],
-    );
-  }
-}
-
-class _EditarFilhoEspecificoDialog extends StatefulWidget {
-  final EstoqueEspecificoModel filho;
-  final MaterialModel pai;
-  final bool descricaoBloqueada;
-
-  const _EditarFilhoEspecificoDialog({
-    required this.filho,
-    required this.pai,
-    this.descricaoBloqueada = false,
-  });
-
-  @override
-  State<_EditarFilhoEspecificoDialog> createState() =>
-      _EditarFilhoEspecificoDialogState();
-}
-
-class _EditarFilhoEspecificoDialogState extends State<_EditarFilhoEspecificoDialog> {
-  late final TextEditingController _descCtrl;
-  late final TextEditingController _qtdCtrl;
-  bool _salvando   = false;
-  bool _excluindo  = false;
-  String? _erro;
-
-  @override
-  void initState() {
-    super.initState();
-    _descCtrl   = TextEditingController(text: widget.filho.descricao);
-    _qtdCtrl = TextEditingController(
-      text: widget.filho.quantidade.toStringAsFixed(
-        widget.filho.quantidade % 1 == 0 ? 0 : 2,
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _descCtrl.dispose();
-    _qtdCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _salvar() async {
-    final novaDesc = _descCtrl.text.trim();
-    if (novaDesc.isEmpty) {
-      setState(() => _erro = 'A descrição não pode ser vazia.');
-      return;
-    }
-    // Garante que a descrição não mudou se estiver bloqueada por OS em andamento
-    if (widget.descricaoBloqueada &&
-        novaDesc.toUpperCase() != widget.filho.descricao.toUpperCase()) {
-      setState(() => _erro =
-          'Não é possível renomear uma variação com OS em andamento.');
-      return;
-    }
-    setState(() { _salvando = true; _erro = null; });
-
-    final novaQtd = double.tryParse(_qtdCtrl.text.replaceAll(',', '.'));
-
-    final ok = await context.read<MaterialProvider>().atualizarFilhoEspecifico(
-      widget.pai.id,
-      widget.filho.id,
-      descricao:  novaDesc != widget.filho.descricao ? novaDesc : null,
-      quantidade: novaQtd,
-    );
-
-    if (!mounted) return;
-    if (ok) {
-      Navigator.of(context).pop(true);
-    } else {
-      setState(() {
-        _salvando = false;
-        _erro = context.read<MaterialProvider>().erro ?? 'Erro ao salvar.';
-      });
-    }
-  }
-
-  Future<void> _excluir() async {
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Excluir variação'),
-        content: Text(
-          'Tem certeza que deseja excluir a variação "${widget.filho.descricao}"?\n\n'
-          'O estoque desta variação (${widget.filho.quantidade.toStringAsFixed(widget.filho.quantidade % 1 == 0 ? 0 : 2)} '
-          '${widget.pai.unidade ?? ''}) será removido permanentemente.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
-            child: const Text('Excluir'),
-          ),
-        ],
-      ),
-    );
-    if (confirmar != true || !mounted) return;
-    setState(() { _excluindo = true; _erro = null; });
-
-    final ok = await context.read<MaterialProvider>().excluirFilhoEspecifico(
-      widget.pai.id,
-      widget.filho.id,
-    );
-
-    if (!mounted) return;
-    if (ok) {
-      Navigator.of(context).pop(true);
-    } else {
-      setState(() {
-        _excluindo = false;
-        _erro = context.read<MaterialProvider>().erro ?? 'Erro ao excluir.';
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final pai = widget.pai;
-
-    return AlertDialog(
-      title: Row(
-        children: [
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Editar variação', style: TextStyle(fontSize: 16)),
-                Text(
-                  pai.nome,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.normal,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Estoque atual (somente leitura) ───────────────────────────
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE85D04).withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Color(0xFFE85D04).withValues(alpha: 0.25),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.inventory_2_outlined,
-                      size: 16, color: Color(0xFFE85D04)),
-                  SizedBox(width: 8),
-                  Text(
-                    'Estoque atual: ',
-                    style: TextStyle(
-                        fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  ),
-                  Text(
-                    () {
-                      final q = widget.filho.quantidade;
-                      return '${q.toStringAsFixed(q % 1 == 0 ? 0 : 2)} ${pai.unidade ?? ''}';
-                    }(),
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFE85D04),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Quantidade em estoque',
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 6),
-            TextField(
-              controller: _qtdCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [_DecimalInputFormatter()],
-              decoration: InputDecoration(
-                hintText: '0',
-                isDense:  true,
-                suffixText: widget.pai.unidade ?? '',
-              ),
-            ),
-            SizedBox(height: 16),
-
-            // ── Descrição ──────────────────────────────────────────────────
-            Text(
-              'Descrição / nome da variação',
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-            ),
-            SizedBox(height: 6),
-            if (widget.descricaoBloqueada) ...[
-              // Campo somente leitura — há OS em andamento usando esta variação
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.07),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.lock_outline, size: 15, color: Theme.of(context).colorScheme.outline),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        widget.filho.descricao,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              SizedBox(height: 6),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline, size: 13, color: Theme.of(context).colorScheme.outline),
-                  SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      'Este material possui OS em andamento. O nome não pode ser alterado.',
-                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                    ),
-                  ),
-                ],
-              ),
-            ] else ...[
-              TextField(
-                controller: _descCtrl,
-                autofocus:  true,
-                inputFormatters: [_NoCommaFormatter()],
-                decoration: const InputDecoration(
-                  hintText: 'Ex: Tinta Branca Fosca 18L',
-                  isDense:  true,
-                ),
-                onSubmitted: (_) => _salvar(),
-              ),
-            ],
-            const SizedBox(height: 16),
-
-            if (_erro != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _erro!,
-                style: const TextStyle(
-                    fontSize: 12, color: AppTheme.error),
-              ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        // Botão excluir (esquerda)
-        TextButton.icon(
-          onPressed: (_salvando || _excluindo) ? null : _excluir,
-          icon: _excluindo
-              ? const SizedBox(
-                  width: 14, height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.error),
-                )
-              : const Icon(Icons.delete_outline, size: 16, color: AppTheme.error),
-          label: const Text('Excluir', style: TextStyle(color: AppTheme.error)),
-        ),
-        const Spacer(),
-        TextButton(
-          onPressed: (_salvando || _excluindo) ? null : () => Navigator.of(context).pop(false),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton.icon(
-          onPressed: (_salvando || _excluindo) ? null : _salvar,
-          icon: _salvando
-              ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Icon(Icons.save_outlined, size: 16),
-          label: const Text('Salvar'),
-          style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFFE85D04),
-            foregroundColor: Colors.white,
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 class _MaterialFormDialog extends StatefulWidget {
   final MaterialModel? material;
   final void Function(MaterialModel)? onDesativar;
   final void Function(MaterialModel)? onReativar;
   final void Function(MaterialModel)? onExcluir;
-  const _MaterialFormDialog({this.material, this.onDesativar, this.onReativar, this.onExcluir});
+  final String? roleUsuario;
+  const _MaterialFormDialog({this.material, this.onDesativar, this.onReativar, this.onExcluir, this.roleUsuario});
 
   @override
   State<_MaterialFormDialog> createState() => _MaterialFormDialogState();
@@ -3947,12 +2779,15 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   late final TextEditingController _comprimento;
   late final TextEditingController _quantidade;
   late final TextEditingController _estoqueMinimo;
-  late final TextEditingController _qtdPadrao;
-  late final TextEditingController _unidPadrao;
 
   bool get _editando => widget.material != null;
   late bool _estoqueConfirmado;
-  late bool _especifico;
+
+  /// COMPRAS não pode definir a quantidade no cadastro — a entrada de
+  /// estoque deve ser feita pela página de Controle de Estoque (movimentação
+  /// de ENTRADA vinculada a uma OS), garantindo rastreabilidade.
+  bool get _bloquearQuantidade =>
+      widget.roleUsuario == 'COMPRAS' && !_editando;
 
   /// Normaliza valores de unidade salvos com grafia antiga no banco de dados.
   /// Ex.: "M2" (sem símbolo Unicode) → "M²"
@@ -3976,7 +2811,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     super.initState();
     final m        = widget.material;
     _estoqueConfirmado = m?.estoqueConfirmado ?? false;
-    _especifico        = m?.especifico ?? false;
     _nome          = TextEditingController(text: m?.nome ?? '');
     _identificador = TextEditingController(text: m?.identificador ?? '');
     _unidade       = _normalizarUnidade(m?.unidade);
@@ -3989,11 +2823,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         text: m != null ? m.quantidade.toString() : '0');
     _estoqueMinimo = TextEditingController(
         text: m != null ? m.estoqueMinimo.toString() : '0');
-    _qtdPadrao     = TextEditingController(
-        text: m?.qtdPadrao != null
-            ? m!.qtdPadrao!.toStringAsFixed(m.qtdPadrao! % 1 == 0 ? 0 : 5)
-            : '');
-    _unidPadrao    = TextEditingController(text: m?.unidPadrao ?? '');
   }
 
   @override
@@ -4001,7 +2830,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     for (final c in [
       _nome, _identificador, _categoria, _medida, _espessura,
       _largura, _comprimento, _quantidade, _estoqueMinimo,
-      _qtdPadrao, _unidPadrao,
     ]) {
       c.dispose();
     }
@@ -4021,14 +2849,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       'espessura':     _espessura.text.trim().isEmpty ? null : _espessura.text.trim(),
       'largura':       _largura.text.trim().isEmpty ? null : double.tryParse(_largura.text.trim()),
       'comprimento':   _comprimento.text.trim().isEmpty ? null : double.tryParse(_comprimento.text.trim()),
-      'quantidade':    double.tryParse(_quantidade.text) ?? 0,
+      'quantidade':    _bloquearQuantidade ? 0 : (double.tryParse(_quantidade.text) ?? 0),
       'estoqueMinimo': double.tryParse(_estoqueMinimo.text) ?? 0,
       'estoqueConfirmado': _estoqueConfirmado,
-      'especifico': _especifico,
-      'qtdPadrao':  _qtdPadrao.text.trim().isEmpty
-          ? null
-          : double.tryParse(_qtdPadrao.text.trim().replaceAll(',', '.')),
-      'unidPadrao': _unidPadrao.text.trim().isEmpty ? null : _unidPadrao.text.trim(),
     };
 
     final provider = context.read<MaterialProvider>();
@@ -4192,7 +3015,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
-                child: TextFormField(
+                child: _bloquearQuantidade
+                    ? _QuantidadeBloqueadaInfo()
+                    : TextFormField(
                   controller: _quantidade,
                   decoration: const InputDecoration(labelText: 'Quantidade'),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -4219,54 +3044,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
             ]),
             SizedBox(height: 10),
-            // ── Qtd Padrão / Unid Padrão ────────────────────────────────
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.info_outline, size: 14, color: Theme.of(context).colorScheme.outline),
-                SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'Preenchimento por unidade de compra (opcional). '
-                    'Ex: thinner 18 L → Qtd: 18000, Unid: ml. '
-                    'Ao finalizar uma OC, o custo será dividido por essa qtd '
-                    'e registrado por unidade menor.',
-                    style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Row(children: [
-              Expanded(
-                flex: 2,
-                child: TextFormField(
-                  controller: _qtdPadrao,
-                  decoration: const InputDecoration(
-                    labelText: 'Qtd padrão',
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [_DecimalInputFormatter()],
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return null;
-                    final n = double.tryParse(v.trim().replaceAll(',', '.'));
-                    if (n == null || n <= 0) return 'Número inválido';
-                    return null;
-                  },
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextFormField(
-                  controller: _unidPadrao,
-                  decoration: const InputDecoration(
-                    labelText: 'Unid. padrão',
-                  ),
-                  textCapitalization: TextCapitalization.characters,
-                  inputFormatters: [_UpperCaseFormatter()],
-                ),
-              ),
-            ]),
             const SizedBox(height: 10),
             InkWell(
               borderRadius: BorderRadius.circular(8),
@@ -4309,48 +3086,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 ),
               ),
             ),
-            const SizedBox(height: 4),
-            InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: () => setState(() => _especifico = !_especifico),
-              child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                child: Row(
-                  children: [
-                    Icon(
-                      _especifico
-                          ? Icons.check_circle
-                          : Icons.radio_button_unchecked,
-                      size: 20,
-                      color: _especifico ? AppTheme.primary : Theme.of(context).colorScheme.outline,
-                    ),
-                    SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Material específico',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: _especifico
-                                ? Theme.of(context).colorScheme.onSurface
-                                : Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        Text(
-                          _especifico
-                              ? 'Exigirá descrição personalizada na ordem de compra'
-                              : 'Material genérico (sem descrição adicional na OC)',
-                          style: TextStyle(
-                              fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
+
           ],
         ),
       ),
@@ -4442,11 +3178,45 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     final isMediano = material!.precoMediano != null &&
                         fm.preco == material.precoMediano;
 
-                    return _FornecedorPainelRow(
-                      fm:           fm,
-                      material:     material,
-                      isMediano:    isMediano,
-                      showDivider:  i < ordenados.length - 1,
+                    final fmPreco   = fm.preco > 0 ? 'R\$ ${fm.preco.toStringAsFixed(2)}' : '—';
+                    final fmPrecoM2 = fm.precoMetroQuadrado > 0 ? 'R\$ ${fm.precoMetroQuadrado.toStringAsFixed(2)}' : '—';
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  fm.fornecedorNome,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: isMediano ? FontWeight.w700 : FontWeight.w400,
+                                    color: isMediano
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Theme.of(context).colorScheme.onSurface,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              SizedBox(
+                                width: 68,
+                                child: Text(fmPreco, textAlign: TextAlign.right,
+                                    style: const TextStyle(fontSize: 11)),
+                              ),
+                              SizedBox(
+                                width: 68,
+                                child: Text(fmPrecoM2, textAlign: TextAlign.right,
+                                    style: const TextStyle(fontSize: 11)),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (i < ordenados.length - 1)
+                          Divider(height: 0, thickness: 0.5,
+                              color: Theme.of(context).colorScheme.outlineVariant),
+                      ],
                     );
                   }),
                 ),
@@ -4598,12 +3368,48 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   }
 }
 
-/// Formata um valor monetário com até 5 casas decimais, removendo zeros
+/// Substitui o campo "Quantidade" no cadastro quando o usuário é COMPRAS.
+/// Indica que a entrada de estoque deve ser feita pela página de Controle
+/// de Estoque, garantindo que toda entrada fique vinculada a uma OS.
+class _QuantidadeBloqueadaInfo extends StatelessWidget {
+  const _QuantidadeBloqueadaInfo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.warning.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.warning.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline, color: AppTheme.warning, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'A entrada de quantidade deve ser feita na página de '
+              'Controle de Estoque, vinculada a uma OS.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Formata um valor monetário com até 6 casas decimais, removendo zeros
 /// desnecessários à direita (mínimo 2 casas para manter padrão monetário).
-/// Ex: 1.5 → "1,50" | 0.12345 → "0,12345" | 1.00 → "1,00"
+/// Ex: 1.5 → "1,50" | 0.123456 → "0,123456" | 1.00 → "1,00"
 String _formatarCusto(double valor) {
-  // Tenta de 5 até 2 casas decimais e usa a primeira que não tenha zero final
-  for (int casas = 5; casas >= 2; casas--) {
+  // Tenta de 6 até 2 casas decimais e usa a primeira que não tenha zero final
+  for (int casas = 6; casas >= 2; casas--) {
     final str = valor.toStringAsFixed(casas);
     if (!str.endsWith('0')) return str;
   }
@@ -5172,7 +3978,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                   width: 90,
                                   child: Text(
                                     !h.usarM2 && h.precoUnitario > 0
-                                        ? 'R\$ ${h.precoUnitario.toStringAsFixed(5)}'
+                                        ? 'R\$ ${h.precoUnitario.toStringAsFixed(6)}'
                                         : '—',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
@@ -5190,7 +3996,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                   width: 90,
                                   child: Text(
                                     h.usarM2 && h.precoM2 != null && h.precoM2! > 0
-                                        ? 'R\$ ${h.precoM2!.toStringAsFixed(5)}'
+                                        ? 'R\$ ${h.precoM2!.toStringAsFixed(6)}'
                                         : '—',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
@@ -5207,7 +4013,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                 SizedBox(
                                   width: 90,
                                   child: Text(
-                                    'R\$ ${h.total.toStringAsFixed(5)}',
+                                    'R\$ ${h.total.toStringAsFixed(6)}',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
                                       fontSize: 13,
@@ -5419,6 +4225,37 @@ class _BannerSecao extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ── _StatusBadgeEstoque ──────────────────────────────────────────────────────
+// Badge de status de material (OK / LIMITE / CRITICO / INATIVO).
+class _StatusBadgeEstoque extends StatelessWidget {
+  final String status;
+  const _StatusBadgeEstoque({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    Color bg, fg;
+    switch (status) {
+      case 'OK':
+        bg = AppTheme.statusOk.withValues(alpha: 0.1);
+        fg = AppTheme.statusOk;
+      case 'LIMITE':
+        bg = AppTheme.statusBaixo.withValues(alpha: 0.1);
+        fg = AppTheme.statusBaixo;
+      case 'CRITICO':
+        bg = AppTheme.statusCritico.withValues(alpha: 0.1);
+        fg = AppTheme.statusCritico;
+      default:
+        bg = Theme.of(context).colorScheme.surfaceContainerHighest;
+        fg = Theme.of(context).colorScheme.onSurfaceVariant;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      child: Text(status, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: fg)),
     );
   }
 }

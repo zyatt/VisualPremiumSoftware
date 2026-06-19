@@ -64,49 +64,10 @@ async function listar(filtros = {}) {
         where: { ativo: true },
         include: { fornecedor: { select: { id: true, nomeFantasia: true } } },
       },
-      // ▼ NOVO: inclui filhos de estoque específico
-      estoquesEspecificos: {
-        orderBy: { descricao: 'asc' },
-      },
     },
     orderBy: [{ ativo: 'desc' }, { nome: 'asc' }],
   });
 
-  // Para materiais específicos, busca o último preço de ENTRADA por descricaoItem
-  const idsEspecificos = materiais.filter((m) => m.especifico).map((m) => m.id);
-  const ultimasMovimentacoes = idsEspecificos.length
-  ? await prisma.movimentacaoEstoque.findMany({
-      where: {
-        materialId:    { in: idsEspecificos },
-        tipo:          'ENTRADA',
-        descricaoItem: { not: null },
-        OR: [                          // ← era só precoUnitario: { not: null }
-          { precoUnitario: { not: null } },
-          { precoM2:       { not: null } },
-        ],
-      },
-      orderBy: { criadoEm: 'desc' },
-      select: {
-        materialId:    true,
-        descricaoItem: true,
-        precoUnitario: true,
-        precoM2:       true,
-      },
-    })
-  : [];
-
-  // Monta mapa: `${materialId}__${descricaoItem}` → { precoUnitario, precoM2 }
-  // Como está ordenado desc, o primeiro encontrado por chave é o mais recente
-  const precoFilhoMap = new Map();
-  for (const mov of ultimasMovimentacoes) {
-    const chave = `${mov.materialId}__${mov.descricaoItem}`;
-    if (!precoFilhoMap.has(chave)) {
-      precoFilhoMap.set(chave, {
-        ultimoValorPago:   mov.precoUnitario != null ? Number(mov.precoUnitario) : null,
-        ultimoValorPagoM2: mov.precoM2       != null ? Number(mov.precoM2)       : null,
-      });
-    }
-  }
 
   return materiais.map((m) => {
     const precos = m.fornecedorMateriais
@@ -127,18 +88,8 @@ async function listar(filtros = {}) {
     const custoUltimaCompra   = _normalizarPreco(m.ultimoValorPago);
     const custoM2UltimaCompra = _normalizarPreco(m.ultimoValorPagoM2);
 
-    // Enriquece filhos específicos com o último custo de ENTRADA por descrição
-    const estoquesEspecificosEnriquecidos = m.especifico
-      ? m.estoquesEspecificos.map((filho) => {
-          const chave  = `${m.id}__${filho.descricao}`;
-          const precos = precoFilhoMap.get(chave) ?? { ultimoValorPago: null, ultimoValorPagoM2: null };
-          return { ...filho, ...precos };
-        })
-      : m.estoquesEspecificos;
-
     return {
       ...m,
-      estoquesEspecificos:  estoquesEspecificosEnriquecidos,
       precoMediano:         media(precos),
       precoM2Mediano:       media(precosM2),
       custoUltimaCompra,
@@ -162,53 +113,11 @@ async function buscarPorId(id) {
           ordemCompra: { select: { id: true, data: true } },
         },
       },
-      // ▼ NOVO
-      estoquesEspecificos: {
-        orderBy: { descricao: 'asc' },
-      },
     },
   });
 
   if (!m) return null;
 
-  // Enriquece filhos com o último preço de ENTRADA por descricaoItem
-  if (m.especifico && m.estoquesEspecificos?.length) {
-    const ultimasMovs = await prisma.movimentacaoEstoque.findMany({
-      where: {
-        materialId:    m.id,
-        tipo:          'ENTRADA',
-        descricaoItem: { not: null },
-        OR: [
-          { precoUnitario: { not: null } },
-          { precoM2:       { not: null } },
-        ],
-      },
-      orderBy: { criadoEm: 'desc' },
-      select: {
-        descricaoItem: true,
-        precoUnitario: true,
-        precoM2:       true,
-      },
-    });
-
-    const precoMap = new Map();
-    for (const mov of ultimasMovs) {
-      if (!precoMap.has(mov.descricaoItem)) {
-        precoMap.set(mov.descricaoItem, {
-          ultimoValorPago:   mov.precoUnitario != null ? Number(mov.precoUnitario) : null,
-          ultimoValorPagoM2: mov.precoM2       != null ? Number(mov.precoM2)       : null,
-        });
-      }
-    }
-
-    m = {
-      ...m,
-      estoquesEspecificos: m.estoquesEspecificos.map((filho) => ({
-        ...filho,
-        ...(precoMap.get(filho.descricao) ?? { ultimoValorPago: null, ultimoValorPagoM2: null }),
-      })),
-    };
-  }
 
   return {
     ...m,
@@ -237,8 +146,6 @@ async function criar(data, usuarioId, usuarioNome) {
   if (duplicado) _throwDuplicado(medidaTrimmed, espessuraTrimmed);
 
   const status = calcularStatus(data.quantidade || 0, data.estoqueMinimo || 0, true);
-  data.especifico = data.especifico === true;
-
   data.ultimoValorPago   = _normalizarPreco(data.ultimoValorPago);
   data.ultimoValorPagoM2 = _normalizarPreco(data.ultimoValorPagoM2);
 
@@ -394,75 +301,6 @@ async function listarHistoricoPrecos(materialId, limite = 50) {
   });
 }
 
-async function excluirFilhoEspecifico(materialId, filhoId, usuarioId, usuarioNome) {
-  const filho = await prisma.estoqueEspecifico.findUnique({ where: { id: filhoId } });
-  if (!filho || filho.materialId !== materialId) {
-    throw { status: 404, message: 'Variação não encontrada' };
-  }
-
-  await auditSvc.registrar(materialId, 'FILHO_EXCLUIDO', {
-    campo:      filho.descricao,
-    valorAntes: `qtd ${filho.quantidade}`,
-    usuarioId,
-    usuarioNome,
-  });
-
-  await prisma.estoqueEspecifico.delete({ where: { id: filhoId } });
-}
-
-async function atualizarFilhoEspecifico(materialId, filhoId, data, usuarioId, usuarioNome) {
-  const filho = await prisma.estoqueEspecifico.findUnique({ where: { id: filhoId } });
-  if (!filho || filho.materialId !== materialId) {
-    throw { status: 404, message: 'Variação não encontrada' };
-  }
-
-  // Verifica duplicidade de descrição (se mudou)
-  const novaDesc = data.descricao?.trim();
-  if (novaDesc && novaDesc !== filho.descricao) {
-    const duplicado = await prisma.estoqueEspecifico.findUnique({
-      where: { materialId_descricao: { materialId, descricao: novaDesc } },
-    });
-    if (duplicado) throw { status: 409, message: `Já existe uma variação com a descrição "${novaDesc}"` };
-  }
-
-  const updateData = {};
-  if (novaDesc) updateData.descricao = novaDesc;
-    if (data.quantidade !== undefined) {
-    const novaQtd = Number(data.quantidade);
-    if (isNaN(novaQtd) || novaQtd < 0) {
-      throw { status: 400, message: 'Quantidade inválida' };
-    }
-    updateData.quantidade = novaQtd;
-  }
-
-  const snapAntes = await prisma.estoqueEspecifico.findUnique({ where: { id: filhoId } });
-
-  const result = await prisma.estoqueEspecifico.update({
-    where: { id: filhoId },
-    data:  updateData,
-  });
-
-  const partes = [];
-  if (data.descricao && data.descricao.trim() !== snapAntes.descricao) {
-    partes.push(`descrição: "${snapAntes.descricao}" → "${data.descricao.trim()}"`);
-  }
-  if (data.quantidade !== undefined && Number(data.quantidade) !== Number(snapAntes.quantidade)) {
-    partes.push(`qtd: ${snapAntes.quantidade} → ${data.quantidade}`);
-  }
-
-  if (partes.length > 0) {
-    await auditSvc.registrar(materialId, 'FILHO_EDITADO', {
-      campo:       snapAntes.descricao,
-      valorAntes:  partes.map(p => p.split(' → ')[0].split(': ')[1]).join(' | '),
-      valorDepois: partes.map(p => p.split(' → ')[1]).join(' | '),
-      usuarioId,
-      usuarioNome,
-    });
-  }
-
-  return result;
-}
-
 async function atualizarCustoManual(id, data, usuarioId, usuarioNome) {
   const material = await prisma.material.findUnique({ where: { id } });
   if (!material) throw { status: 404, message: 'Material não encontrado' };
@@ -480,18 +318,37 @@ async function atualizarCustoManual(id, data, usuarioId, usuarioNome) {
 
   const result = await prisma.material.update({ where: { id }, data: updateData });
 
-  await auditSvc.registrar(id, 'CUSTO_MANUAL', {
-    valorAntes:  JSON.stringify({
-      ultimoValorPago:   material.ultimoValorPago   != null ? Number(material.ultimoValorPago)   : null,
-      ultimoValorPagoM2: material.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null,
-    }),
-    valorDepois: JSON.stringify({
-      ultimoValorPago:   novoUnitario ?? (material.ultimoValorPago   != null ? Number(material.ultimoValorPago)   : null),
-      ultimoValorPagoM2: novoM2       ?? (material.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null),
-    }),
-    usuarioId,
-    usuarioNome,
-  });
+  if (novoUnitario !== material.ultimoValorPago) {
+    await auditSvc.registrar(id, 'CUSTO_MANUAL', {
+      campo: 'Último Valor Pago',
+      valorAntes:
+        material.ultimoValorPago != null
+          ? Number(material.ultimoValorPago).toFixed(2)
+          : null,
+      valorDepois:
+        novoUnitario != null
+          ? Number(novoUnitario).toFixed(2)
+          : null,
+      usuarioId,
+      usuarioNome,
+    });
+  }
+
+  if (novoM2 !== material.ultimoValorPagoM2) {
+    await auditSvc.registrar(id, 'CUSTO_MANUAL', {
+      campo: 'Último Valor Pago m²',
+      valorAntes:
+        material.ultimoValorPagoM2 != null
+          ? Number(material.ultimoValorPagoM2).toFixed(2)
+          : null,
+      valorDepois:
+        novoM2 != null
+          ? Number(novoM2).toFixed(2)
+          : null,
+      usuarioId,
+      usuarioNome,
+    });
+  }
 
   return {
     ...result,
@@ -513,6 +370,4 @@ module.exports = {
   atualizarCustoManual,
   listarCategorias,
   listarHistoricoPrecos,
-  atualizarFilhoEspecifico,
-  excluirFilhoEspecifico,
 };

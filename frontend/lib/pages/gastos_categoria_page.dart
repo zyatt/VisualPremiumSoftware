@@ -900,127 +900,134 @@ class _BarChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final maxVal = dados.fold(0.0, (mx, d) => d.total > mx ? d.total : mx);
 
+    // Alturas fixas das regiões para evitar overflow
+    const double chartHeight = 160.0;
+    const double labelHeight = 24.0;
+    const double totalHeight = chartHeight + labelHeight;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final totalWidth = constraints.maxWidth;
         final barWidth   = totalWidth / dados.length;
 
         return SizedBox(
-          height: 200,
+          height: totalHeight,
           child: Stack(
-            clipBehavior: Clip.none,
+            clipBehavior: Clip.hardEdge,
             children: [
-              // Barras + rótulos
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: List.generate(dados.length, (i) {
-                  final d       = dados[i];
-                  final frac    = maxVal > 0 ? d.total / maxVal : 0.0;
-                  final hovered = hoveredIndex == i;
+              // ── Barras ────────────────────────────────────────────────
+              Positioned(
+                top: 0, left: 0, right: 0,
+                height: chartHeight,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: List.generate(dados.length, (i) {
+                    final d         = dados[i];
+                    final frac      = maxVal > 0 ? d.total / maxVal : 0.0;
+                    final hovered   = hoveredIndex == i;
+                    final altTotal  = chartHeight * frac * progresso;
+                    final fracSaida = d.total > 0 ? d.totalSaida / d.total : 0.0;
+                    final altSaida   = altTotal * fracSaida;
+                    final altEntrada = altTotal * (1 - fracSaida);
 
-                  return Expanded(
-                    child: MouseRegion(
-                      onEnter: (_) => onHover(i),
-                      onExit:  (_) => onHover(null),
-                      child: GestureDetector(
-                        onTapDown: (_) => onHover(i),
-                        child: SizedBox(
-                          height: 200,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              // Espaço reservado para tooltip (nunca ocupa)
-                              const SizedBox(height: 60),
-
-                              // Barras empilhadas
-                              Flexible(
-                                child: LayoutBuilder(
-                                  builder: (_, bc) {
-                                    final altMax     = bc.maxHeight;
-                                    final altTotal   = altMax * frac * progresso;
-                                    final fracSaida  = d.total > 0
-                                        ? d.totalSaida / d.total
-                                        : 0.0;
-                                    final altSaida   = altTotal * fracSaida;
-                                    final altEntrada = altTotal * (1 - fracSaida);
-
-                                    return Column(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      children: [
-                                        if (altEntrada > 0)
-                                          Container(
-                                            height: altEntrada,
-                                            margin: const EdgeInsets.symmetric(
-                                                horizontal: 2),
-                                            decoration: BoxDecoration(
-                                              color: _corEntrada.withValues(
-                                                  alpha: hovered ? 1.0 : 0.8),
-                                              borderRadius:
-                                                  const BorderRadius.vertical(
-                                                      top: Radius.circular(4)),
-                                            ),
-                                          ),
-                                        if (altSaida > 0)
-                                          Container(
-                                            height: altSaida,
-                                            margin: const EdgeInsets.symmetric(
-                                                horizontal: 2),
-                                            decoration: BoxDecoration(
-                                              color: _corSaida.withValues(
-                                                  alpha: hovered ? 1.0 : 0.8),
-                                              borderRadius: altEntrada > 0
-                                                  ? BorderRadius.zero
-                                                  : const BorderRadius.vertical(
-                                                      top: Radius.circular(4)),
-                                            ),
-                                          ),
-                                        if (altTotal == 0)
-                                          Container(
-                                            height: 3,
-                                            margin: EdgeInsets.symmetric(
-                                                horizontal: 2),
-                                            decoration: BoxDecoration(
-                                              color: Theme.of(context).colorScheme.outlineVariant,
-                                              borderRadius:
-                                                  BorderRadius.circular(2),
-                                            ),
-                                          ),
-                                      ],
-                                    );
-                                  },
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(d.label,
-                                  style: TextStyle(
-                                    fontSize:   10,
-                                    fontWeight: hovered
-                                        ? FontWeight.w700
-                                        : FontWeight.normal,
-                                    color: hovered
-                                        ? Theme.of(context).colorScheme.onSurface
-                                        : Theme.of(context).colorScheme.outline,
-                                  )),
-                            ],
+                    return Expanded(
+                      child: MouseRegion(
+                        onEnter: (_) => onHover(i),
+                        onExit:  (_) => onHover(null),
+                        child: GestureDetector(
+                          onTapDown: (_) => onHover(i),
+                          child: SizedBox(
+                            height: chartHeight,
+                            child: Stack(
+                              clipBehavior: Clip.hardEdge,
+                              children: [
+                                // Barra de saída (na base)
+                                if (altSaida > 0)
+                                  Positioned(
+                                    bottom: 0,
+                                    left: 2, right: 2,
+                                    height: altSaida,
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: _corSaida.withValues(alpha: hovered ? 1.0 : 0.8),
+                                        borderRadius: altEntrada > 0
+                                            ? BorderRadius.zero
+                                            : const BorderRadius.vertical(
+                                                top: Radius.circular(4)),
+                                      ),
+                                    ),
+                                  ),
+                                // Barra de entrada (acima da saída)
+                                if (altEntrada > 0)
+                                  Positioned(
+                                    bottom: altSaida,
+                                    left: 2, right: 2,
+                                    height: altEntrada,
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: _corEntrada.withValues(alpha: hovered ? 1.0 : 0.8),
+                                        borderRadius: const BorderRadius.vertical(
+                                            top: Radius.circular(4)),
+                                      ),
+                                    ),
+                                  ),
+                                // Marcador quando sem dados
+                                if (altTotal == 0)
+                                  Positioned(
+                                    bottom: 0,
+                                    left: 2, right: 2,
+                                    height: 3,
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context).colorScheme.outlineVariant,
+                                        borderRadius: BorderRadius.circular(2),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  );
-                }),
+                    );
+                  }),
+                ),
               ),
 
-              // Tooltip flutuante via Stack — não causa overflow
-              if (hoveredIndex != null) ...[
-                Builder(builder: (context) {
-                  final i       = hoveredIndex!;
-                  final d       = dados[i];
-                  const tipW    = 165.0;
-                  // Centro da barra
-                  double left   = barWidth * i + barWidth / 2 - tipW / 2;
-                  // Clamp para não sair pelas bordas
-                  left = left.clamp(0.0, (totalWidth - tipW).clamp(0.0, double.infinity));
+              // ── Rótulos dos meses ─────────────────────────────────────
+              Positioned(
+                bottom: 0, left: 0, right: 0,
+                height: labelHeight,
+                child: Row(
+                  children: List.generate(dados.length, (i) {
+                    final d       = dados[i];
+                    final hovered = hoveredIndex == i;
+                    return Expanded(
+                      child: Center(
+                        child: Text(
+                          d.label,
+                          style: TextStyle(
+                            fontSize:   10,
+                            fontWeight: hovered ? FontWeight.w700 : FontWeight.normal,
+                            color: hovered
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).colorScheme.outline,
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              ),
 
+              // ── Tooltip flutuante ─────────────────────────────────────
+              if (hoveredIndex != null)
+                Builder(builder: (context) {
+                  final i    = hoveredIndex!;
+                  final d    = dados[i];
+                  const tipW = 165.0;
+                  double left = barWidth * i + barWidth / 2 - tipW / 2;
+                  left = left.clamp(0.0, (totalWidth - tipW).clamp(0.0, double.infinity));
                   return Positioned(
                     top:  0,
                     left: left,
@@ -1029,7 +1036,6 @@ class _BarChart extends StatelessWidget {
                     ),
                   );
                 }),
-              ],
             ],
           ),
         );

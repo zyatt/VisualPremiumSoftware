@@ -1,23 +1,3 @@
-// ── Variação de material específico (filho) na visão de produção ──────────────
-class FilhoEspecificoProducaoModel {
-  final int id;
-  final String descricao;
-  final double quantidade;
-
-  FilhoEspecificoProducaoModel({
-    required this.id,
-    required this.descricao,
-    required this.quantidade,
-  });
-
-  factory FilhoEspecificoProducaoModel.fromJson(Map<String, dynamic> json) =>
-      FilhoEspecificoProducaoModel(
-        id:        (json['id'] as num?)?.toInt() ?? 0,
-        descricao: json['descricao']?.toString() ?? '',
-        quantidade: double.tryParse(json['quantidade'].toString()) ?? 0.0,
-      );
-}
-
 class MaterialProducaoModel {
   final int id;
   final String nome;
@@ -29,9 +9,7 @@ class MaterialProducaoModel {
   final double quantidade;
   final double emUso;
   final double estoqueMinimo;
-  final bool especifico;
   final String statusReal;
-  final List<FilhoEspecificoProducaoModel> filhosEspecificos;
 
   MaterialProducaoModel({
     required this.id,
@@ -44,9 +22,7 @@ class MaterialProducaoModel {
     required this.quantidade,
     required this.emUso,
     required this.estoqueMinimo,
-    required this.especifico,
     required this.statusReal,
-    this.filhosEspecificos = const [],
   });
 
   factory MaterialProducaoModel.fromJson(Map<String, dynamic> json) {
@@ -69,10 +45,6 @@ class MaterialProducaoModel {
       emUso:          parseDouble(json['emUso'], 0.0),
       estoqueMinimo:  parseDouble(json['estoqueMinimo'], 0.0),
       statusReal:     json['statusReal']?.toString() ?? 'OK',
-      especifico:     json['especifico'] == true,
-      filhosEspecificos: (json['estoquesEspecificos'] as List? ?? [])
-          .map((e) => FilhoEspecificoProducaoModel.fromJson(e as Map<String, dynamic>))
-          .toList(),
     );
   }
 }

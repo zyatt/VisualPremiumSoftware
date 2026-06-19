@@ -4,8 +4,21 @@ const svc         = require('./relatorioOS.service');
 
 // ── Helpers de formatação ─────────────────────────────────────────────────────
 
+/**
+ * Formata um valor monetário com até 6 casas decimais,
+ * removendo zeros à direita (mínimo 2 casas).
+ * Ex.: 1.5 → "R$ 1,50";  0.000125 → "R$ 0,000125";  1.23456 → "R$ 1,23456"
+ */
 function formatCurrency(value) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value ?? 0);
+  const n = Number(value ?? 0);
+  // Renderiza com 6 casas e remove zeros à direita, mantendo mínimo 2
+  const s6 = n.toFixed(6);
+  const trimmed = s6.replace(/0+$/, '');
+  const [intPart, decPart = ''] = trimmed.split('.');
+  const dec = decPart.length < 2 ? decPart.padEnd(2, '0') : decPart;
+  // Formata parte inteira com separador de milhar brasileiro
+  const intFormatted = new Intl.NumberFormat('pt-BR').format(parseInt(intPart, 10));
+  return `R$ ${intFormatted},${dec}`;
 }
 
 function formatDate(date) {

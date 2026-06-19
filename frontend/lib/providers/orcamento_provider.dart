@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -46,8 +45,6 @@ class ItemOrcamentoData {
   final String? materialEspessura;
   final String? materialIdentificador;
   final String? materialStatus;
-  final bool materialEspecifico;
-  String? descricao;
   double quantidade;
   Map<int, PrecoFornecedorData> precos;
   int? fornecedorSelecionado;
@@ -63,8 +60,6 @@ class ItemOrcamentoData {
     this.materialEspessura,
     this.materialIdentificador,
     this.materialStatus,
-    this.materialEspecifico = false,
-    this.descricao,
     this.quantidade = 1,
     Map<int, PrecoFornecedorData>? precos,
     this.fornecedorSelecionado,
@@ -82,8 +77,6 @@ class ItemOrcamentoData {
         'materialEspessura': materialEspessura,
         'materialIdentificador': materialIdentificador,
         'materialStatus': materialStatus,
-        'materialEspecifico': materialEspecifico,
-        'descricao': descricao,
         'quantidade': quantidade,
         'precos': precos.map((k, v) => MapEntry(k.toString(), v.toJson())),
         'fornecedorSelecionado': fornecedorSelecionado,
@@ -101,8 +94,6 @@ class ItemOrcamentoData {
         materialEspessura: j['materialEspessura'] as String?,
         materialIdentificador: j['materialIdentificador'] as String?,
         materialStatus: j['materialStatus'] as String?,
-        materialEspecifico: j['materialEspecifico'] as bool? ?? false,
-        descricao: j['descricao'] as String?,
         quantidade: (j['quantidade'] as num).toDouble(),
         precos: (j['precos'] as Map<String, dynamic>).map(
           (k, v) => MapEntry(
@@ -344,21 +335,19 @@ class OrcamentoProvider extends ChangeNotifier {
   void adicionarItem(ItemOrcamentoData item) {
     if (tabAtual == null) return;
 
-    // Deduplica apenas para materiais não-específicos adicionados manualmente
-    // (sem itemId pré-existente), usando materialId como chave.
+    // Deduplica itens adicionados manualmente (sem itemId pré-existente),
+    // usando materialId como chave.
     // Itens restaurados do servidor já chegam com itemId próprio e NÃO devem
     // ser colapsados — cada combinação (material + fornecedor) é uma linha distinta.
-    if (!item.materialEspecifico) {
-      final idx = tabAtual!.itens.indexWhere(
-        (i) => i.itemId == item.itemId ||
-               (i.materialId == item.materialId && !i.materialEspecifico),
-      );
-      if (idx >= 0) {
-        tabAtual!.itens[idx] = item;
-        _salvarAbas();
-        notifyListeners();
-        return;
-      }
+    final idx = tabAtual!.itens.indexWhere(
+      (i) => i.itemId == item.itemId ||
+             i.materialId == item.materialId,
+    );
+    if (idx >= 0) {
+      tabAtual!.itens[idx] = item;
+      _salvarAbas();
+      notifyListeners();
+      return;
     }
 
     tabAtual!.itens.add(item);
@@ -404,7 +393,6 @@ class OrcamentoProvider extends ChangeNotifier {
     bool clearFornecedor = false,
     ModoOrcamento? modoOrcamento,
     Map<int, PrecoFornecedorData>? precos,
-    String? descricao,
   }) {
     if (tabAtual == null) return;
     final idx = tabAtual!.itens.indexWhere((i) => i.itemId == itemId);
@@ -420,8 +408,6 @@ class OrcamentoProvider extends ChangeNotifier {
       materialEspessura: old.materialEspessura,
       materialIdentificador: old.materialIdentificador,
       materialStatus: old.materialStatus,
-      materialEspecifico: old.materialEspecifico,
-      descricao: descricao ?? old.descricao,
       quantidade: quantidade ?? old.quantidade,
       precos: precos ?? old.precos,
       fornecedorSelecionado: clearFornecedor
@@ -515,7 +501,6 @@ class OrcamentoProvider extends ChangeNotifier {
       materialEspessura:     material.espessura,
       materialIdentificador: material.identificador,
       materialStatus:        material.status,
-      materialEspecifico:    material.especifico,
       precos:                precos,
       fornecedorSelecionado: fornecedor.fornecedorId,
     );

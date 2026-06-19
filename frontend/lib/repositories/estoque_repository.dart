@@ -79,7 +79,6 @@ class EstoqueRepository {
     double? precoM2,
     String? observacao,
     int? ordemCompraId,
-    String? descricaoItem,
     double? larguraUsada,
     double? comprimentoUsado,
   }) async {
@@ -92,7 +91,6 @@ class EstoqueRepository {
       if (precoM2 != null)          'precoM2':          precoM2,
       if (observacao != null)       'observacao':       observacao,
       if (ordemCompraId != null)    'ordemCompraId':    ordemCompraId,
-      if (descricaoItem != null)    'descricaoItem':    descricaoItem,
       if (larguraUsada != null)     'larguraUsada':     larguraUsada,
       if (comprimentoUsado != null) 'comprimentoUsado': comprimentoUsado,
     });

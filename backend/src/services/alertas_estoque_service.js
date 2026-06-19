@@ -24,7 +24,6 @@ async function listarAlertasEstoque() {
       quantidade:    true,
       estoqueMinimo: true,
       status:        true,
-      especifico:    true,
     },
     orderBy: [
       // CRITICO antes de LIMITE (ordem alfabética inversa: C < L)
@@ -50,7 +49,6 @@ async function listarAlertasEstoque() {
     quantidade:    Number(m.quantidade),
     estoqueMinimo: Number(m.estoqueMinimo),
     status:        m.status,
-    especifico:    m.especifico,
   }));
 }
 

@@ -38,17 +38,13 @@ model Material {
   valorMetroQuadrado   Decimal?                 @db.Decimal(15, 6)
   quantidade           Decimal                  @default(0) @db.Decimal(10, 3)
   estoqueMinimo        Decimal                  @default(0) @db.Decimal(10, 3)
-  qtdPadrao            Decimal?                 @db.Decimal(15, 6)
-  unidPadrao           String?
   status               StatusEstoque            @default(OK)
   estoqueConfirmado    Boolean                  @default(false)
   ativo                Boolean                  @default(true)
-  especifico           Boolean                  @default(false)
   ultimoValorPago      Decimal?                 @db.Decimal(15, 6)
   ultimoValorPagoM2    Decimal?                 @db.Decimal(15, 6)
   criadoEm             DateTime                 @default(now())
   atualizadoEm         DateTime                 @updatedAt
-  estoquesEspecificos  EstoqueEspecifico[]
   fornecedorMateriais  FornecedorMaterial[]
   historicoPrecos      HistoricoPrecoMaterial[]
   movimentacoes        MovimentacaoEstoque[]
@@ -64,20 +60,6 @@ model Material {
   @@map("materiais")
 }
 
-model EstoqueEspecifico {
-  id                Int      @id @default(autoincrement())
-  materialId        Int
-  descricao         String
-  quantidade        Decimal  @default(0) @db.Decimal(10, 3)
-  criadoEm          DateTime @default(now())
-  atualizadoEm      DateTime @updatedAt
-  ultimoValorPago   Decimal? @db.Decimal(15, 6)
-  ultimoValorPagoM2 Decimal? @db.Decimal(15, 6)
-  material          Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
-
-  @@unique([materialId, descricao])
-  @@map("estoque_especificos")
-}
 
 model HistoricoPrecoMaterial {
   id            Int         @id @default(autoincrement())

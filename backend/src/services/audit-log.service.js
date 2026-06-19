@@ -18,7 +18,6 @@ const _LABELS = {
   estoqueMinimo:     'Estoque Mínimo',
   status:            'Status',
   ativo:             'Ativo',
-  especifico:        'Específico',
   ultimoValorPago:   'Último Valor Pago',
   ultimoValorPagoM2: 'Último Valor Pago m²',
 };
@@ -32,6 +31,9 @@ const _IGNORAR = new Set([
 
 function _str(v) {
   if (v === null || v === undefined) return null;
+  // Objetos aninhados não devem ser serializados como JSON bruto —
+  // retorna null para que o chamador trate campo a campo.
+  if (typeof v === 'object' && !Array.isArray(v)) return null;
   return String(v);
 }
 
@@ -45,9 +47,9 @@ function _label(campo) {
  * Cria um ou mais registros de audit_log_materiais.
  *
  * @param {number}  materialId
- * @param {string}  acao        - 'CADASTRO' | 'EDICAO' | 'DESATIVACAO' | 'REATIVACAO' | 'EXCLUSAO' | 'ESTOQUE_CONFIRMADO' | 'FILHO_EDITADO' | 'FILHO_EXCLUIDO'
+ * @param {string}  acao        - 'CADASTRO' | 'EDICAO' | 'DESATIVACAO' | 'REATIVACAO' | 'EXCLUSAO' | 'ESTOQUE_CONFIRMADO'
  * @param {object}  opts
- * @param {string}  [opts.campo]       - campo alterado (EDICAO / FILHO_EDITADO)
+ * @param {string}  [opts.campo]       - campo alterado (EDICAO)
  * @param {*}       [opts.valorAntes]  - valor anterior
  * @param {*}       [opts.valorDepois] - novo valor
  * @param {number}  [opts.usuarioId]

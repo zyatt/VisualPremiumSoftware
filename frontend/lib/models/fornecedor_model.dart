@@ -9,9 +9,6 @@ class FornecedorMaterialVinculoModel {
   final double preco;
   final double precoMetroQuadrado;
   final bool ativo;
-  /// Quando true, o material exige descrição personalizada na OC.
-  final bool materialEspecifico;
-  /// Unidade de medida do material no estoque (ex: "UNIDADE", "ML", "M/L", "KG").
   final String? materialUnidade;
   /// Largura da chapa/material (m) — usado para calcular preço/m² automaticamente.
   final double? materialLargura;
@@ -29,7 +26,6 @@ class FornecedorMaterialVinculoModel {
     required this.preco,
     required this.precoMetroQuadrado,
     required this.ativo,
-    this.materialEspecifico = false,
     this.materialUnidade,
     this.materialLargura,
     this.materialComprimento,
@@ -59,7 +55,33 @@ class FornecedorMaterialVinculoModel {
     return '${materialNome ?? 'Material #$materialId'} · ${partes.join(' · ')}';
   }
 
-  String get especifico => descricaoCompleta;
+  /// Formata um preço com até 6 casas decimais, removendo zeros trailing
+  /// mas mantendo no mínimo 2 casas (ex: 1.5 → "1.50", 0.000123 → "0.000123").
+  static String formatarPreco(double valor) {
+    if (valor == 0) return '0,00';
+    
+    // Formata com 6 casas decimais
+    String s = valor.toStringAsFixed(6);
+    
+    // Remove zeros trailing, incluindo o ponto se todos os decimais forem zero
+    s = s.replaceAll(RegExp(r'\.?0*$'), '');
+    
+    // Se não tem ponto decimal, adiciona ,00
+    if (!s.contains('.')) {
+      return '$s,00';
+    }
+    
+    // Garante mínimo de 2 casas decimais
+    final partes = s.split('.');
+    final decimais = partes[1];
+    
+    if (decimais.length < 2) {
+      s = '${partes[0]}.${decimais.padRight(2, '0')}';
+    }
+    
+    // Substitui ponto por vírgula
+    return s.replaceAll('.', ',');
+  }
 
   factory FornecedorMaterialVinculoModel.fromJson(Map<String, dynamic> json) =>
       FornecedorMaterialVinculoModel(
@@ -73,7 +95,6 @@ class FornecedorMaterialVinculoModel {
         preco:                double.tryParse(json['preco'].toString()) ?? 0,
         precoMetroQuadrado:   double.tryParse(json['precoMetroQuadrado'].toString()) ?? 0,
         ativo:                json['ativo'] ?? true,
-        materialEspecifico:   json['material']?['especifico'] ?? false,
         materialUnidade:      json['material']?['unidade'],
         materialLargura:      json['material']?['largura'] != null
             ? double.tryParse(json['material']['largura'].toString())

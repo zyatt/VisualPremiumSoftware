@@ -6,15 +6,12 @@ class MovimentacaoModel {
   final String? materialIdentificador;
   final String? materialMedida;
   final String? materialEspessura;
-  final double? materialQtdPadrao;
-  final String? materialUnidPadrao;
   final String tipo;
   final double quantidade;
   final String numeroOS;
   final double? precoUnitario;
   final double? precoM2;
   final String? observacao;
-  final String? descricaoItem;
   final DateTime criadoEm;
   // Presentes apenas em saídas de material UNIDADE com modo dimensional ativo.
   // Quando não nulos, indicam que precoM2 é o custo proporcional da área usada
@@ -30,21 +27,17 @@ class MovimentacaoModel {
     this.materialIdentificador,
     this.materialMedida,
     this.materialEspessura,
-    this.materialQtdPadrao,
-    this.materialUnidPadrao,
     required this.tipo,
     required this.quantidade,
     required this.numeroOS,
     this.precoUnitario,
     this.precoM2,
     this.observacao,
-    this.descricaoItem,
     required this.criadoEm,
     this.larguraUsada,
     this.comprimentoUsado,
   });
 
-  /// True quando esta saída foi registrada com modo dimensional (largura × comprimento).
   /// Nesse caso, [precoM2] é o custo proporcional total da área consumida, não o custo/m².
   bool get usouModoDimensional =>
       larguraUsada != null && larguraUsada! > 0 &&
@@ -59,10 +52,6 @@ class MovimentacaoModel {
         materialIdentificador: json['material']?['identificador'],
         materialMedida:        json['material']?['medida'],
         materialEspessura:     json['material']?['espessura'],
-        materialQtdPadrao:     json['material']?['qtdPadrao'] != null
-            ? double.tryParse(json['material']['qtdPadrao'].toString())
-            : null,
-        materialUnidPadrao:    json['material']?['unidPadrao'],
         tipo:                  json['tipo'],
         quantidade:            double.tryParse(json['quantidade'].toString()) ?? 0,
         numeroOS:              json['numeroOS']?.toString() ?? '',
@@ -73,7 +62,6 @@ class MovimentacaoModel {
             ? double.tryParse(json['precoM2'].toString())
             : null,
         observacao:            json['observacao'],
-        descricaoItem:         json['descricaoItem'],
         criadoEm:              DateTime.parse(json['criadoEm']).toLocal(),
         larguraUsada:          json['larguraUsada'] != null
             ? double.tryParse(json['larguraUsada'].toString())

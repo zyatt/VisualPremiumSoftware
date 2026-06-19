@@ -7,8 +7,6 @@ class OrdemCompraItemModel {
   final String? materialMedida;
   final String? materialEspessura;
   final String? materialIdentificador;
-  final double? materialQtdPadrao;
-  final String? materialUnidPadrao;
   final String? descricaoItem;
   final String numeroOS;
   /// Quantidade de embalagens/peças compradas (o que o usuário digita como "qtd").
@@ -21,7 +19,6 @@ class OrdemCompraItemModel {
   final double? precoMetroQuadrado;
   final double precoTotal;
   final bool usarM2;
-  final bool materialEspecifico;
 
   OrdemCompraItemModel({
     this.id,
@@ -31,8 +28,6 @@ class OrdemCompraItemModel {
     this.materialMedida,
     this.materialEspessura,
     this.materialIdentificador,
-    this.materialQtdPadrao,
-    this.materialUnidPadrao,
     this.descricaoItem,
     required this.numeroOS,
     required this.quantidade,
@@ -41,38 +36,18 @@ class OrdemCompraItemModel {
     this.precoMetroQuadrado,
     required this.precoTotal,
     this.usarM2 = false,
-    this.materialEspecifico = false,
   });
 
   /// Quantidade real que entra no estoque ao finalizar a OC.
   ///
-  /// Prioridade:
-  /// 1. Se [qtdUnidade] foi informado na OC (novo fluxo), usa quantidade × qtdUnidade.
-  ///    Exemplo: 2 lonas × 50 M/L cada → 100 M/L no estoque.
-  /// 2. Se o material tem [materialQtdPadrao] (fluxo legado), usa quantidade × qtdPadrao.
-  ///    Exemplo: 2 latas de thinner 18000 ml → 36000 ml no estoque.
-  /// 3. Caso contrário, retorna [quantidade] diretamente.
+  /// Se [qtdUnidade] foi informado na OC, usa quantidade × qtdUnidade.
+  /// Exemplo: 2 lonas × 50 M/L cada → 100 M/L no estoque.
+  /// Caso contrário, retorna [quantidade] diretamente.
   double get quantidadeEstoque {
     if (usarM2) return quantidade;
-    // Novo fluxo: qtdUnidade informada explicitamente na OC
     if (qtdUnidade != null && qtdUnidade! > 0) return quantidade * qtdUnidade!;
-    // Fluxo legado: qtdPadrao do cadastro do material
-    final qtd = materialQtdPadrao;
-    if (qtd == null || qtd <= 0) return quantidade;
-    return quantidade * qtd;
-  }
-
-  /// Custo calculado por unidade de medida (M/L, ML, KG etc.).
-  ///
-  /// Usa [qtdUnidade] quando disponível (novo fluxo), senão [materialQtdPadrao].
-  /// Retorna null quando nenhum dos dois está definido ou usarM2 está ativo.
-  double? get custoPorUnidPadrao {
-    if (usarM2) return null;
-    final qtd = qtdUnidade ?? materialQtdPadrao;
-    if (qtd == null || qtd <= 0) return null;
-    if (precoUnitario <= 0) return null;
-    return precoUnitario / qtd;
-  }
+    return quantidade;
+  } 
 
   factory OrdemCompraItemModel.fromJson(Map<String, dynamic> json) => OrdemCompraItemModel(
     id:                     json['id'],
@@ -82,10 +57,6 @@ class OrdemCompraItemModel {
     materialMedida:         json['material']?['medida'],
     materialEspessura:      json['material']?['espessura'],
     materialIdentificador:  json['material']?['identificador'],
-    materialQtdPadrao:      json['material']?['qtdPadrao'] != null
-        ? double.tryParse(json['material']['qtdPadrao'].toString())
-        : null,
-    materialUnidPadrao:     json['material']?['unidPadrao'],
     descricaoItem:          json['descricaoItem'],
     numeroOS:               json['numeroOS'] ?? '',
     quantidade:             double.tryParse(json['quantidade']?.toString() ?? '0') ?? 0,
@@ -98,7 +69,6 @@ class OrdemCompraItemModel {
         : null,
     precoTotal:             double.tryParse(json['precoTotal']?.toString() ?? '0') ?? 0,
     usarM2:                 json['usarM2'] == true,
-    materialEspecifico:     json['material']?['especifico'] == true,
   );
 }
 

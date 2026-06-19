@@ -83,10 +83,6 @@ class MaterialRepository {
         .toList();
   }
 
-  Future<void> excluirFilhoEspecifico(int materialId, int filhoId) async {
-    await ApiClient.delete('/materiais/$materialId/especificos/$filhoId');
-  }
-
   /// PATCH /api/materiais/:id/custo
   /// Atualiza diretamente o custo de última compra do material (inserção manual).
   /// Útil quando não há OC registrada mas o custo real precisa ser refletido.
@@ -100,23 +96,5 @@ class MaterialRepository {
     if (ultimoValorPagoM2 != null) body['ultimoValorPagoM2'] = ultimoValorPagoM2;
     final data = await ApiClient.patch('/materiais/$id/custo', body);
     return MaterialModel.fromJson(data);
-  }
-
-  Future<EstoqueEspecificoModel> atualizarFilhoEspecifico(
-    int materialId,
-    int filhoId, {
-    String? descricao,
-    double? ultimoValorPago,
-    double? ultimoValorPagoM2,
-    double? quantidade,
-  }) async {
-    final body = <String, dynamic>{};
-    if (descricao != null)         body['descricao']         = descricao;
-    if (ultimoValorPago != null)   body['ultimoValorPago']   = ultimoValorPago;
-    if (ultimoValorPagoM2 != null) body['ultimoValorPagoM2'] = ultimoValorPagoM2;
-    if (quantidade != null)        body['quantidade']        = quantidade;
-
-    final data = await ApiClient.patch('/materiais/$materialId/especificos/$filhoId', body);
-    return EstoqueEspecificoModel.fromJson(data);
   }
 }

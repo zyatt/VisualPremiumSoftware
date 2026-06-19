@@ -28,7 +28,7 @@ const renomearOS = async (req, res, next) => {
 };
 const atualizarPrecoMovimentacao = async (req, res, next) => {
   try {
-    res.json(await svc.atualizarPrecoMovimentacao(+req.params.movimentacaoId, req.body, req.user));
+    res.json(await svc.atualizarPrecoMovimentacao(+req.params.movimentacaoId, req.body, req.usuario));
   } catch (e) { next(e); }
 };
 

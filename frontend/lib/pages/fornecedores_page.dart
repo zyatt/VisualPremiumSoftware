@@ -1632,7 +1632,7 @@ class _PriceTag extends StatelessWidget {
         children: [
           TextSpan(text: '$label '),
           TextSpan(
-            text: 'R\$ ${valor.toStringAsFixed(2)}',
+            text: 'R\$ ${FornecedorMaterialVinculoModel.formatarPreco(valor)}',
             style: const TextStyle(
                 color: AppTheme.success, fontWeight: FontWeight.w600),
           ),
@@ -1690,8 +1690,8 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
       _materialMedidaCtrl.text = v.materialMedida ?? '';
       _materialEspessuraCtrl.text = v.materialEspessura ?? '';
       _materialIdSelecionado = v.materialId;
-      _precoCtrl.text = v.preco.toStringAsFixed(2);
-      _precoM2Ctrl.text = v.precoMetroQuadrado.toStringAsFixed(2);
+      _precoCtrl.text = v.preco == 0 ? '' : FornecedorMaterialVinculoModel.formatarPreco(v.preco).replaceAll(',', '.');
+      _precoM2Ctrl.text = v.precoMetroQuadrado == 0 ? '' : FornecedorMaterialVinculoModel.formatarPreco(v.precoMetroQuadrado).replaceAll(',', '.');
     }
 
     _materialIdCtrl.addListener(_onIdChanged);

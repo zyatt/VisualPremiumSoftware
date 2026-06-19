@@ -1,40 +1,3 @@
-// ── Filho de estoque específico ───────────────────────────────────────────────
-// Representa uma variação de um material específico (ex: "Tinta Branca Fosca 18L")
-// com sua própria quantidade em estoque.
-class EstoqueEspecificoModel {
-  final int id;
-  final int materialId;
-  final String descricao;
-  final double quantidade;
-  final double? ultimoValorPago;
-  final double? ultimoValorPagoM2;
-
-  EstoqueEspecificoModel({
-    required this.id,
-    required this.materialId,
-    required this.descricao,
-    required this.quantidade,
-    this.ultimoValorPago,
-    this.ultimoValorPagoM2,
-  });
-
-  factory EstoqueEspecificoModel.fromJson(Map<String, dynamic> json) =>
-      EstoqueEspecificoModel(
-        id:                (json['id'] as num?)?.toInt() ?? 0,
-        materialId:        (json['materialId'] as num?)?.toInt() ?? 0,
-        descricao:         json['descricao'] ?? '',
-        quantidade:        double.tryParse(json['quantidade'].toString()) ?? 0,
-        ultimoValorPago:   json['ultimoValorPago'] != null
-            ? double.tryParse(json['ultimoValorPago'].toString())
-            : null,
-        ultimoValorPagoM2: json['ultimoValorPagoM2'] != null
-            ? double.tryParse(json['ultimoValorPagoM2'].toString())
-            : null,
-      );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
 class HistoricoPrecoModel {
   final int id;
   final int materialId;
@@ -151,27 +114,14 @@ class MaterialModel {
   final String status;
   final bool estoqueConfirmado;
   final bool ativo;
-  final bool especifico;
 
   final double? ultimoValorPago;
   final double? ultimoValorPagoM2;
   final double? precoMediano;
   final double? precoM2Mediano;
 
-  // ── NOVOS ─────────────────────────────────────────────────────────────────
-  /// Quantidade padrão de compra/uso (opcional).
-  final double? qtdPadrao;
-
-  /// Unidade padrão associada a [qtdPadrao] (opcional, ex: "m²", "kg").
-  final String? unidPadrao;
-  // ──────────────────────────────────────────────────────────────────────────
-
   final List<FornecedorMaterialModel> fornecedorMateriais;
   final List<HistoricoPrecoModel> historicoPrecos;
-
-  /// Filhos de estoque (somente populado quando [especifico] == true).
-  /// Cada item representa uma variação comprada com sua própria quantidade.
-  final List<EstoqueEspecificoModel> filhosEspecificos;
 
   MaterialModel({
     required this.id,
@@ -190,24 +140,16 @@ class MaterialModel {
     required this.status,
     required this.estoqueConfirmado,
     required this.ativo,
-    required this.especifico,
     this.ultimoValorPago,
     this.ultimoValorPagoM2,
     this.precoMediano,
     this.precoM2Mediano,
-    this.qtdPadrao,
-    this.unidPadrao,
     this.fornecedorMateriais = const [],
     this.historicoPrecos = const [],
-    this.filhosEspecificos = const [],
   });
 
   /// Soma das quantidades dos filhos específicos.
   /// Para materiais não-específicos retorna [quantidade] normalmente.
-  double get quantidadeTotal {
-    if (!especifico) return quantidade;
-    return filhosEspecificos.fold(0.0, (acc, f) => acc + f.quantidade);
-  }
 
   /// Retorna a área total em m² para materiais do tipo UNIDADE que possuam
   /// largura e comprimento cadastrados.
@@ -252,21 +194,15 @@ class MaterialModel {
       status:             json['status'] ?? 'OK',
       estoqueConfirmado:  json['estoqueConfirmado'] ?? false,
       ativo:              json['ativo'] ?? true,
-      especifico:         json['especifico'] ?? false,
       ultimoValorPago:    parseDoubleOrNull(json['custoUltimaCompra']),
       ultimoValorPagoM2:  parseDoubleOrNull(json['custoM2UltimaCompra']),
       precoMediano:       parseDoubleOrNull(json['precoMediano']),
       precoM2Mediano:     parseDoubleOrNull(json['precoM2Mediano']),
-      qtdPadrao:          parseDoubleOrNull(json['qtdPadrao']),
-      unidPadrao:         json['unidPadrao'],
       fornecedorMateriais: (json['fornecedorMateriais'] as List? ?? [])
           .map((f) => FornecedorMaterialModel.fromJson(f as Map<String, dynamic>))
           .toList(),
       historicoPrecos: (json['historicoPrecos'] as List? ?? [])
           .map((h) => HistoricoPrecoModel.fromJson(h as Map<String, dynamic>))
-          .toList(),
-      filhosEspecificos: (json['estoquesEspecificos'] as List? ?? [])
-          .map((e) => EstoqueEspecificoModel.fromJson(e as Map<String, dynamic>))
           .toList(),
     );
   }

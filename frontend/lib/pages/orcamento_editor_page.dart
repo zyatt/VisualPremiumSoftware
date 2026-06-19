@@ -213,9 +213,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
       if (!mounted) return;
       final todos = context.read<MaterialProvider>().materiais;
       final provider = context.read<OrcamentoProvider>();
-      final idsJaAdicionados = provider.tabAtual?.itens.where((i) => !i.materialEspecifico).map((i) => i.materialId).toSet() ?? {};
+      final idsJaAdicionados = provider.tabAtual?.itens.map((i) => i.materialId).toSet() ?? {};
       setState(() {
-        _resultadosBusca = todos.where((m) => m.especifico || !idsJaAdicionados.contains(m.id)).toList();
+        _resultadosBusca = todos.where((m) => !idsJaAdicionados.contains(m.id)).toList();
       });
     } finally {
       if (mounted) setState(() => _buscando = false);
@@ -241,7 +241,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
       materialEspessura: material.espessura,
       materialIdentificador: material.identificador,
       materialStatus: material.status,
-      materialEspecifico: material.especifico,
       precos: precos,
     ));
     _searchIdCtrl.clear();
@@ -299,8 +298,27 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     final tab = provider.tabAtual;
     if (tab == null || itemIndex >= tab.itens.length) return;
     final item = tab.itens[itemIndex];
+
+    // Recarrega a lista de fornecedores do servidor antes de abrir o diálogo,
+    // garantindo que fornecedores cadastrados por outros usuários apareçam
+    // (e que vínculos novos não sejam erroneamente exibidos como "já vinculados").
+    await context.read<FornecedorProvider>().carregar();
+    if (!mounted) return;
+
     final fornecedores = context.read<FornecedorProvider>().fornecedores;
-    final idsJaVinculados = item.precos.keys.toSet();
+
+    // Busca do servidor os fornecedores já vinculados a ESTE material específico.
+    // Usar só item.precos.keys não é suficiente: o cache local pode ter IDs de
+    // outro material (situação que ocorreu com ABS ACO ESCOVADO PRATA vs DOURADO).
+    final vinculadosNoServidor =
+        await context.read<FornecedorProvider>().listarPorMaterial(item.materialId);
+    if (!mounted) return;
+
+    // União: já está no orçamento local OU já está vinculado ao material no servidor.
+    final idsJaVinculados = {
+      ...item.precos.keys,
+      ...vinculadosNoServidor.map((f) => f.id),
+    };
 
     final selecionados = await showDialog<List<int>>(
       context: context,
@@ -443,10 +461,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
       await _sincronizarFornecedoresOcultos(orcId, tabAtualizado);
       for (final item in tabAtualizado.itens) {
         if (item.precos.isEmpty) {
-          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false, 'descricaoItem': item.descricao});
+          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'descricaoItem': item.descricao});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key});
           }
         }
       }
@@ -521,10 +539,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
       await _sincronizarFornecedoresOcultos(orcId, tab);
       for (final item in tab.itens) {
         if (item.precos.isEmpty) {
-          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false, 'descricaoItem': item.descricao});
+          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'descricaoItem': item.descricao});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key});
           }
         }
       }
@@ -564,13 +582,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
         final repo = OrcamentoRepository();
         await repo.limparItens(id);
         for (final item in tab.itens) {
-          if (item.precos.isEmpty) {
-            await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false, 'descricaoItem': item.descricao});
-          } else {
-            for (final entry in item.precos.entries) {
-              await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'descricaoItem': item.descricao});
-            }
+         if (item.precos.isEmpty) {
+          await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
+        } else {
+          for (final entry in item.precos.entries) {
+            await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key});
           }
+        }
         }
       }
       await OrcamentoRepository().aprovar(id);
@@ -722,13 +740,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
         await _sincronizarFornecedoresOcultos(orcId, tab);
         await repo.limparItens(orcId);
         for (final item in tab.itens) {
-          if (item.precos.isEmpty) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false, 'descricaoItem': item.descricao});
-          } else {
-            for (final entry in item.precos.entries) {
-              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'descricaoItem': item.descricao});
-            }
+        if (item.precos.isEmpty) {
+          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
+        } else {
+          for (final entry in item.precos.entries) {
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key});
           }
+        }
         }
       } else {
         final criado = await repo.criar(tab.titulo);
@@ -737,10 +755,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
         await _sincronizarFornecedoresOcultos(orcId, tab);
         for (final item in tab.itens) {
           if (item.precos.isEmpty) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false, 'descricaoItem': item.descricao});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
           } else {
             for (final entry in item.precos.entries) {
-              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'descricaoItem': item.descricao});
+              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key});
             }
           }
         }
@@ -781,11 +799,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
   bool _podeGerarOC(List<ItemOrcamentoData> itens) {
     if (itens.isEmpty) return false;
     final ocultos = context.read<OrcamentoProvider>().tabAtual?.fornecedoresOcultos.toSet() ?? const <int>{};
-    if (!itens.every((i) => i.fornecedorSelecionado != null && !ocultos.contains(i.fornecedorSelecionado))) return false;
-    for (final item in itens) {
-      if (item.materialEspecifico && (item.descricao == null || item.descricao!.trim().isEmpty)) return false;
-    }
-    return true;
+    return itens.every((i) => i.fornecedorSelecionado != null && !ocultos.contains(i.fornecedorSelecionado));
   }
 
   int _fornecedoresSelecionados(List<ItemOrcamentoData> itens) =>
@@ -1081,7 +1095,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
   Widget _buildBarraAcoes(OrcamentoProvider provider, List<ItemOrcamentoData> itens, OrcamentoTab tab) {
     final podeGerar = _podeGerarOC(itens);
     final fornsSel = _fornecedoresSelecionados(itens);
-    final matEspSemDesc = itens.where((i) => i.materialEspecifico && (i.descricao == null || i.descricao!.trim().isEmpty)).length;
     final mostrarBotaoAprovar = tab.aguardandoAprovacao;
 
     const btnPad = EdgeInsets.symmetric(horizontal: 8, vertical: 5);
@@ -1126,7 +1139,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
             ),
           if (tab.modoGerarOC)
             Tooltip(
-              message: podeGerar ? 'Gerar Ordens de Compra' : matEspSemDesc > 0 ? 'Preencha a descrição dos materiais específicos' : 'Selecione um fornecedor para cada material',
+              message: podeGerar ? 'Gerar Ordens de Compra' : 'Selecione um fornecedor para cada material',
               child: FilledButton.icon(
                 onPressed: podeGerar ? () => _gerarOrdemCompra(itens) : null,
                 icon: const Icon(Icons.shopping_cart_checkout, size: iconSize),
@@ -1423,7 +1436,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                             dense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                             title: Row(children: [
                               Expanded(child: Text(m.nome, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
-                              if (m.especifico) Container(margin: EdgeInsets.only(left: 4), padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2), decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(3)), child: Text('ESP', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700, color: AppTheme.primary))),
+
                             ]),
                             subtitle: sub.isNotEmpty ? Text(sub, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)) : null,
                             trailing: _StatusChip(status: m.status),
@@ -1682,13 +1695,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                 const SizedBox(width: 3),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Flexible(child: Text(item.materialNome, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), softWrap: true)),
-                      if (item.materialEspecifico) Container(margin: const EdgeInsets.only(left: 3), padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1), decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(3)), child: const Text('ESP', style: TextStyle(fontSize: 7, fontWeight: FontWeight.w700, color: AppTheme.primary))),
-                    ]),
-                    if ([item.materialMedida, item.materialEspessura, item.materialIdentificador].any((s) => s != null && s.isNotEmpty))
-                      Text([item.materialMedida, item.materialEspessura, item.materialIdentificador].where((s) => s != null && s.isNotEmpty).join(' · '), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), softWrap: true),
-                    if (item.materialEspecifico) _DescricaoField(key: ValueKey('desc_${item.itemId}'), value: item.descricao ?? '', onChanged: (d) => provider.atualizarItemParcial(item.itemId, descricao: d)),
+                    Flexible(child: Text(item.materialNome, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), softWrap: true)),
+                      if ([item.materialMedida, item.materialEspessura, item.materialIdentificador].any((s) => s != null && s.isNotEmpty))
+                        Text([item.materialMedida, item.materialEspessura, item.materialIdentificador].where((s) => s != null && s.isNotEmpty).join(' · '), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), softWrap: true),
                     const SizedBox(height: 3),
                     FittedBox(
                       fit: BoxFit.scaleDown,
@@ -1960,58 +1969,6 @@ class _StatusChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
       child: Text(status, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: fg)),
-    );
-  }
-}
-
-class _DescricaoField extends StatefulWidget {
-  final String value;
-  final ValueChanged<String> onChanged;
-  const _DescricaoField({super.key, required this.value, required this.onChanged});
-
-  @override
-  State<_DescricaoField> createState() => _DescricaoFieldState();
-}
-
-class _DescricaoFieldState extends State<_DescricaoField> {
-  late TextEditingController _ctrl;
-  bool _editando = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = TextEditingController(text: widget.value);
-  }
-
-  @override
-  void didUpdateWidget(_DescricaoField oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!_editando && oldWidget.value != widget.value) {
-      if (_ctrl.text != widget.value) {
-        _ctrl.text = widget.value;
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: _ctrl,
-      decoration: InputDecoration(hintText: 'Descrição *', isDense: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(3)), contentPadding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3)),
-      style: const TextStyle(fontSize: 9),
-      onTap: () => setState(() => _editando = true),
-      onChanged: widget.onChanged,
-      onEditingComplete: () {
-        setState(() => _editando = false);
-        FocusScope.of(context).unfocus();
-      },
-      onSubmitted: (_) => setState(() => _editando = false),
     );
   }
 }

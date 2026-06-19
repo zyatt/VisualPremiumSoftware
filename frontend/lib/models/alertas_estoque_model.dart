@@ -11,7 +11,6 @@ class AlertaEstoqueModel {
   final double estoqueMinimo;
   /// 'CRITICO' | 'LIMITE'
   final String status;
-  final bool especifico;
 
   const AlertaEstoqueModel({
     required this.id,
@@ -24,7 +23,6 @@ class AlertaEstoqueModel {
     required this.quantidade,
     required this.estoqueMinimo,
     required this.status,
-    required this.especifico,
   });
 
   bool get isCritico => status == 'CRITICO';
@@ -41,6 +39,5 @@ class AlertaEstoqueModel {
         quantidade:    (json['quantidade'] as num?)?.toDouble() ?? 0,
         estoqueMinimo: (json['estoqueMinimo'] as num?)?.toDouble() ?? 0,
         status:        json['status'] ?? 'CRITICO',
-        especifico:    json['especifico'] ?? false,
       );
 }

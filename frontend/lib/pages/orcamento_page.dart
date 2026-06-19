@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -67,14 +66,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   bool _salvandoPreco = false;
   // (flags de edição foram movidos para OrcamentoTab no provider)
 
-  // Campos de busca avançada de materiais
-  final _searchIdCtrl = TextEditingController();
-  final _searchNomeCtrl = TextEditingController();
-  final _searchIdentificadorCtrl = TextEditingController();
-  final _searchMedidaCtrl = TextEditingController();
-  final _searchEspCtrl = TextEditingController();
-  Timer? _debounceMatBusca;
-
   // Modo de ordenação da tabela de totais por fornecedor
 
   // _abaVisivel controla a visibilidade do editor inline (quando usado)
@@ -96,12 +87,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   @override
   void dispose() {
     _mainTabController.dispose();
-    _debounceMatBusca?.cancel();
-    _searchIdCtrl.dispose();
-    _searchNomeCtrl.dispose();
-    _searchIdentificadorCtrl.dispose();
-    _searchMedidaCtrl.dispose();
-    _searchEspCtrl.dispose();
     super.dispose();
   }
 
@@ -296,30 +281,18 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       final orcamentoCompleto = await OrcamentoRepository().buscarPorId(orcId);
       final itens = (orcamentoCompleto['itens'] as List? ?? []);
 
-      final Map<String, ItemOrcamentoData> itensPorChave = {};
+      final Map<int, ItemOrcamentoData> itensPorChave = {};
 
       for (final item in itens) {
         final materialId = item['materialId'] as int;
         final materialData = item['material'] as Map<String, dynamic>?;
         final fornecedorId = item['fornecedorId'] as int?;
         final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
-        final especifico = materialData?['especifico'] as bool? ?? false;
 
-        final chave = especifico
-            ? 'esp_${materialId}_${(item['descricaoItem'] as String? ?? '').trim().toLowerCase()}'
-            : 'mat_$materialId';
-
-        if (!itensPorChave.containsKey(chave)) {
-          itensPorChave[chave] = ItemOrcamentoData(
+        if (!itensPorChave.containsKey(materialId)) {
+          itensPorChave[materialId] = ItemOrcamentoData(
             materialId: materialId,
             materialNome: materialData?['nome'] as String? ?? '',
-            materialUnidade: materialData?['unidade'] as String?,
-            materialCategoria: materialData?['categoria'] as String?,
-            materialMedida: materialData?['medida'] as String?,
-            materialEspessura: materialData?['espessura'] as String?,
-            materialIdentificador: materialData?['identificador'] as String?,
-            materialEspecifico: especifico,
-            descricao: item['descricaoItem'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             precos: {},
             modoOrcamento: (item['usarM2'] as bool? ?? false)
@@ -329,7 +302,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         }
 
         if (fornecedorId != null && fornecedorData != null) {
-          itensPorChave[chave]!.precos[fornecedorId] = PrecoFornecedorData(
+          itensPorChave[materialId]!.precos[fornecedorId] = PrecoFornecedorData(
             fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
             preco: item['precoUnitario'] != null
                 ? double.tryParse(item['precoUnitario'].toString())
@@ -340,7 +313,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           );
 
           if (item['selecionado'] as bool? ?? false) {
-            itensPorChave[chave]!.fornecedorSelecionado = fornecedorId;
+            itensPorChave[materialId]!.fornecedorSelecionado = fornecedorId;
           }
         }
       }
@@ -413,35 +386,19 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       final itens = (orcamentoCompleto['itens'] as List? ?? []);
 
       // Agrupa por materialId: cada material vira 1 ItemOrcamentoData com N precos
-      // (um por fornecedor). Usa String como chave para suportar material específico
-      // salvo mais de uma vez (usa itemId do DB como desambiguador).
-      final Map<String, ItemOrcamentoData> itensPorChave = {};
+      // (um por fornecedor).
+      final Map<int, ItemOrcamentoData> itensPorChave = {};
 
       for (final item in itens) {
         final materialId = item['materialId'] as int;
         final materialData = item['material'] as Map<String, dynamic>?;
         final fornecedorId = item['fornecedorId'] as int?;
         final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
-        final especifico = materialData?['especifico'] as bool? ?? false;
 
-        // Materiais específicos são agrupados por materialId + descricaoItem,
-        // pois cada combinação é um item distinto mas seus fornecedores devem
-        // aparecer juntos. Genéricos: agrupados por materialId.
-        final chave = especifico
-            ? 'esp_${materialId}_${(item['descricaoItem'] as String? ?? '').trim().toLowerCase()}'
-            : 'mat_$materialId';
-
-        if (!itensPorChave.containsKey(chave)) {
-          itensPorChave[chave] = ItemOrcamentoData(
+        if (!itensPorChave.containsKey(materialId)) {
+          itensPorChave[materialId] = ItemOrcamentoData(
             materialId: materialId,
             materialNome: materialData?['nome'] as String? ?? '',
-            materialUnidade: materialData?['unidade'] as String?,
-            materialCategoria: materialData?['categoria'] as String?,
-            materialMedida: materialData?['medida'] as String?,
-            materialEspessura: materialData?['espessura'] as String?,
-            materialIdentificador: materialData?['identificador'] as String?,
-            materialEspecifico: especifico,
-            descricao: item['descricaoItem'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             precos: {},
             modoOrcamento: (item['usarM2'] as bool? ?? false)
@@ -451,7 +408,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         }
 
         if (fornecedorId != null && fornecedorData != null) {
-          itensPorChave[chave]!.precos[fornecedorId] = PrecoFornecedorData(
+          itensPorChave[materialId]!.precos[fornecedorId] = PrecoFornecedorData(
             fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
             preco: item['precoUnitario'] != null
                 ? double.tryParse(item['precoUnitario'].toString())
@@ -462,7 +419,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           );
 
           if (item['selecionado'] as bool? ?? false) {
-            itensPorChave[chave]!.fornecedorSelecionado = fornecedorId;
+            itensPorChave[materialId]!.fornecedorSelecionado = fornecedorId;
           }
         }
       }
@@ -1027,7 +984,7 @@ class _DescricaoFieldState extends State<_DescricaoField> {
       maxLines: 2,
       inputFormatters: [_NoCommaFormatter()],
       decoration: InputDecoration(
-        hintText: 'Especificação do material',
+        hintText: 'Descrição',
         isDense: true,
         filled: true,
         fillColor: Theme.of(context).colorScheme.surface,
@@ -1321,111 +1278,6 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
 }
 
 // ─── Sub-widgets (reutilizados) ───────────────────────────────────────────────
-
-// ignore: unused_element
-class _MaterialChip extends StatelessWidget {
-  final String nome;
-  final bool selecionado;
-  final bool especifico;
-  final String? descricao;
-  final VoidCallback onRemover;
-
-  const _MaterialChip({
-    required this.nome,
-    required this.selecionado,
-    required this.especifico,
-    required this.onRemover,
-  }) : descricao = null;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: selecionado
-            ? AppTheme.statusOk.withValues(alpha: 0.08)
-            : AppTheme.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: selecionado
-              ? AppTheme.statusOk.withValues(alpha: 0.4)
-              : AppTheme.primary.withValues(alpha: 0.3),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (selecionado)
-            const Padding(
-              padding: EdgeInsets.only(right: 4),
-              child: Icon(Icons.check_circle, size: 11, color: AppTheme.statusOk),
-            ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    nome,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: selecionado ? AppTheme.statusOk : AppTheme.primary,
-                    ),
-                  ),
-                  if (especifico) ...[
-                    const SizedBox(width: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 4, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                      child: const Text(
-                        'ESP',
-                        style: TextStyle(
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              if (especifico && descricao != null && descricao!.isNotEmpty)
-                Text(
-                  descricao!,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: selecionado
-                        ? AppTheme.statusOk.withValues(alpha: 0.8)
-                        : AppTheme.primary.withValues(alpha: 0.8),
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-            ],
-          ),
-          const SizedBox(width: 4),
-          GestureDetector(
-            onTap: onRemover,
-            child: Icon(
-              Icons.close,
-              size: 13,
-              color: selecionado
-                  ? AppTheme.statusOk.withValues(alpha: 0.7)
-                  : AppTheme.primary.withValues(alpha: 0.7),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _QuantidadeField extends StatefulWidget {
   final double value;

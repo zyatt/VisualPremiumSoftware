@@ -88,7 +88,6 @@ class EstoqueProvider extends ChangeNotifier {
     double? precoM2,
     String? observacao,
     int? ordemCompraId,
-    String? descricaoItem,
     double? larguraUsada,
     double? comprimentoUsado,
   }) async {
@@ -102,7 +101,6 @@ class EstoqueProvider extends ChangeNotifier {
         precoM2:          precoM2,
         observacao:       observacao,
         ordemCompraId:    ordemCompraId,
-        descricaoItem:    descricaoItem,
         larguraUsada:     larguraUsada,
         comprimentoUsado: comprimentoUsado,
       );
@@ -128,7 +126,6 @@ class EstoqueProvider extends ChangeNotifier {
     double? precoM2,
     String? observacao,
     int? ordemCompraId,
-    String? descricaoItem,
     double? larguraUsada,
     double? comprimentoUsado,
   }) async {
@@ -142,7 +139,6 @@ class EstoqueProvider extends ChangeNotifier {
         precoM2:          precoM2,
         observacao:       observacao,
         ordemCompraId:    ordemCompraId,
-        descricaoItem:    descricaoItem,
         larguraUsada:     larguraUsada,
         comprimentoUsado: comprimentoUsado,
       );

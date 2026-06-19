@@ -6,7 +6,7 @@ const _includeSolicitacao = {
     select: {
       id: true, nome: true, unidade: true, quantidade: true,
       estoqueMinimo: true, identificador: true, medida: true,
-      espessura: true, categoria: true, especifico: true, status: true,
+      espessura: true, categoria: true, status: true,
       ultimoValorPago: true, ultimoValorPagoM2: true, largura: true, comprimento: true,
     },
   },
@@ -61,7 +61,6 @@ async function listarMateriais({ busca, categoria, status, id, identificador, me
 
   const materiais = await prisma.material.findMany({
     where,
-    include: { estoquesEspecificos: true },
     orderBy: [{ categoria: 'asc' }, { nome: 'asc' }],
   });
 
@@ -84,44 +83,17 @@ async function criarSolicitacao({ materialId, descricaoItem, quantidadeReservada
   // Normaliza o número da OS: sem espaços extras, maiúsculas
   const numeroOSNorm = (numeroOS ?? '').trim().toUpperCase();
 
-  if (material.especifico) {
-    const desc = (descricaoItem ?? '').trim();
-    if (!desc) throw { status: 400, message: 'Materiais específicos exigem uma descrição' };
-
-    const filho = await prisma.estoqueEspecifico.findUnique({
-      where: { materialId_descricao: { materialId, descricao: desc } },
-    });
-    const saldo = filho ? Number(filho.quantidade) : 0;
-    if (saldo < Number(quantidadeReservada)) {
-      throw {
-        status: 400,
-        message: `Estoque insuficiente para "${desc}": disponível ${saldo} ${material.unidade ?? ''}`.trim(),
-      };
-    }
-    const novaQtd = saldo - Number(quantidadeReservada);
-    if (novaQtd === 0) {
-      await prisma.estoqueEspecifico.delete({
-        where: { materialId_descricao: { materialId, descricao: desc } },
-      });
-    } else {
-      await prisma.estoqueEspecifico.update({
-        where: { materialId_descricao: { materialId, descricao: desc } },
-        data:  { quantidade: novaQtd },
-      });
-    }
-  } else {
-    const saldo = Number(material.quantidade);
-    if (saldo < Number(quantidadeReservada)) {
-      throw {
-        status: 400,
-        message: `Estoque insuficiente: disponível ${saldo} ${material.unidade ?? ''}`.trim(),
-      };
-    }
-    await prisma.material.update({
-      where: { id: materialId },
-      data:  { quantidade: { decrement: Number(quantidadeReservada) } },
-    });
+  const saldo = Number(material.quantidade);
+  if (saldo < Number(quantidadeReservada)) {
+    throw {
+      status: 400,
+      message: `Estoque insuficiente: disponível ${saldo} ${material.unidade ?? ''}`.trim(),
+    };
   }
+  await prisma.material.update({
+    where: { id: materialId },
+    data:  { quantidade: { decrement: Number(quantidadeReservada) } },
+  });
 
   const qtd = Number(quantidadeReservada);
 
@@ -205,19 +177,10 @@ async function finalizarSolicitacao({ solicitacaoId }) {
   const sobra = Math.max(0, Number(sol.quantidadeReservada) - Number(sol.quantidadeUsada));
 
   if (sobra > 0) {
-    if (sol.material.especifico && sol.descricaoItem) {
-      const desc = sol.descricaoItem.trim();
-      await prisma.estoqueEspecifico.upsert({
-        where:  { materialId_descricao: { materialId: sol.materialId, descricao: desc } },
-        create: { materialId: sol.materialId, descricao: desc, quantidade: sobra },
-        update: { quantidade: { increment: sobra } },
-      });
-    } else {
-      await prisma.material.update({
-        where: { id: sol.materialId },
-        data:  { quantidade: { increment: sobra } },
-      });
-    }
+    await prisma.material.update({
+      where: { id: sol.materialId },
+      data:  { quantidade: { increment: sobra } },
+    });
   }
 
   const finalizada = await prisma.solicitacaoProducao.update({
@@ -271,17 +234,8 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
   const precoUnitario = material?.ultimoValorPago   ? Number(material.ultimoValorPago)   : null;
   let precoM2       = material?.ultimoValorPagoM2 ? Number(material.ultimoValorPagoM2) : null;
 
-  // Para material específico (filho), tenta pegar o preço do estoque específico
   let precoUnitarioFinal = precoUnitario;
   let precoM2Final       = precoM2;
-  if (sol.descricaoItem) {
-    const filho = await prisma.estoqueEspecifico.findUnique({
-      where: { materialId_descricao: { materialId: sol.materialId, descricao: sol.descricaoItem.trim() } },
-      select: { ultimoValorPago: true, ultimoValorPagoM2: true },
-    }).catch(() => null);
-    if (filho?.ultimoValorPago)   precoUnitarioFinal = Number(filho.ultimoValorPago);
-    if (filho?.ultimoValorPagoM2) precoM2Final       = Number(filho.ultimoValorPagoM2);
-  }
 
   // ── Custo proporcional por dimensão usada (igual ao estoque.service.js) ──────
   const _unidadeMat = (material?.unidade ?? '').toLowerCase().trim();
@@ -440,7 +394,6 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
                 status:            _calcularStatus(areaRetalho, 0, true),
                 estoqueConfirmado: false,
                 ativo:             true,
-                especifico:        false,
                 ultimoValorPago:   null,
                 ultimoValorPagoM2: custoM2Retalho,
               },

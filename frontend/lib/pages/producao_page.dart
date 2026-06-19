@@ -169,7 +169,7 @@ class _ProducaoPageState extends State<ProducaoPage>
 
 // ─────────────────────────────────────────────
 // ABA ESTOQUE — grade de categorias
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 
 class _EstoqueTab extends StatefulWidget {
   const _EstoqueTab();
@@ -1619,15 +1619,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
   bool  _modoDimensional  = false;
   String? _erro;
 
-  FilhoEspecificoProducaoModel? _filhoSelecionado;
-
-  @override
-  void initState() {
-    super.initState();
-    final filhos = widget.material.filhosEspecificos;
-    if (filhos.length == 1) _filhoSelecionado = filhos.first;
-  }
-
   @override
   void dispose() {
     _osCtrl.dispose();
@@ -1638,10 +1629,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
     super.dispose();
   }
 
-  // Apenas materiais com unidade exatamente "UNIDADE" (chapa/peça) podem usar
-  // o modo dimensional. Materiais M² já são medidos em área (sem necessidade
-  // de informar dimensão) e materiais metro linear (m, m/l, ml…) têm largura
-  // fixa — o comprimento cortado já é a própria quantidade informada.
   bool get _temMedidaDimensional {
     final unidade = widget.material.unidade?.toUpperCase().trim() ?? '';
     if (unidade != 'UNIDADE') return false;
@@ -1669,15 +1656,8 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
   Future<void> _confirmar() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (widget.material.especifico && _filhoSelecionado == null) {
-      setState(() => _erro = 'Selecione a variação do material');
-      return;
-    }
-
     final os = _osCtrl.text.trim();
     
-    // No modo dimensional, usa sempre quantidade = 1
-    // Fora do modo dimensional, usa o valor digitado
     final qtd = _modoDimensional 
         ? 1.0 
         : double.tryParse(_qtdCtrl.text.replaceAll(',', '.'));
@@ -1702,7 +1682,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
 
     final ok = await context.read<ProducaoProvider>().criarSolicitacao(
           materialId:          widget.material.id,
-          descricaoItem:       _filhoSelecionado?.descricao,
           quantidadeReservada: qtd,
           numeroOS:            os,
           larguraUsada:        largUsada,
@@ -1728,12 +1707,8 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final m      = widget.material;
-    final filhos = m.filhosEspecificos;
-
-    final disponivel = m.especifico && _filhoSelecionado != null
-        ? _filhoSelecionado!.quantidade
-        : m.quantidade;
+    final m = widget.material;
+    final disponivel = m.quantidade + m.emUso;
     final unidade = m.unidade ?? '';
 
     final detalhes = <String>[];
@@ -1779,331 +1754,232 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
               ),
               const SizedBox(height: 12),
 
-              if (m.especifico) ...[
-                if (filhos.isEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.statusCritico.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                          color: AppTheme.statusCritico.withValues(alpha: 0.3)),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.warning_amber_rounded,
-                            size: 16, color: AppTheme.statusCritico),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Nenhuma variação em estoque para este material.',
-                            style: TextStyle(
-                              fontSize: 12, color: AppTheme.statusCritico),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else ...[
-                  DropdownButtonFormField<FilhoEspecificoProducaoModel>(
-                    initialValue: _filhoSelecionado,
-                    decoration: const InputDecoration(
-                      labelText: 'Variação *',
-                      isDense:   true,
-                    ),
-                    isExpanded: true,
-                    items: filhos.map((f) {
-                      final qtdStr = f.quantidade.toStringAsFixed(
-                          f.quantidade % 1 == 0 ? 0 : 2);
-                      return DropdownMenuItem(
-                        value: f,
+              Builder(builder: (_) {
+                final chapa = _medidaChapa;
+                if (!_temMedidaDimensional || chapa == null) {
+                  return const SizedBox.shrink();
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    InkWell(
+                      onTap: () => setState(() {
+                        _modoDimensional = !_modoDimensional;
+                        if (_modoDimensional) {
+                          _qtdCtrl.text = '1';
+                          _larguraCtrl.clear();
+                          _alturaCtrl.clear();
+                        } else {
+                          _larguraCtrl.clear();
+                          _alturaCtrl.clear();
+                          _qtdCtrl.clear();
+                        }
+                      }),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Expanded(
-                              child: Text(
-                                f.descricao,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 13),
+                            Icon(
+                              _modoDimensional
+                                  ? Icons.toggle_on
+                                  : Icons.toggle_off_outlined,
+                              size: 20,
+                              color: _modoDimensional
+                                  ? AppTheme.primary
+                                  : Theme.of(context).colorScheme.outline,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Informar por dimensão usada',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: _modoDimensional
+                                    ? AppTheme.primary
+                                    : Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
                             ),
-                            SizedBox(width: 8),
+                            const SizedBox(width: 6),
                             Container(
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
                               decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                color: AppTheme.primary.withValues(alpha: 0.10),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
-                                '$qtdStr $unidade',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                                'Para chapas',
+                                style: const TextStyle(
+                                    fontSize: 10,
+                                    color: AppTheme.primary,
+                                    fontWeight: FontWeight.w600),
                               ),
                             ),
                           ],
                         ),
-                      );
-                    }).toList(),
-                    onChanged: (f) => setState(() {
-                      _filhoSelecionado = f;
-                      _erro = null;
-                    }),
-                    validator: (_) => _filhoSelecionado == null
-                        ? 'Selecione a variação'
-                        : null,
-                  ),
-                  if (_filhoSelecionado != null) ...[
-                    SizedBox(height: 6),
-                    Text(
-                      'Disponível: ${_filhoSelecionado!.quantidade.toStringAsFixed(_filhoSelecionado!.quantidade % 1 == 0 ? 0 : 2)} $unidade',
-                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
+                      ),
                     ),
-                  ],
-                ],
-                const SizedBox(height: 12),
-              ],
 
-              if (!m.especifico || filhos.isNotEmpty) ...[
-                Builder(builder: (_) {
-                  final chapa = _medidaChapa;
-                  if (!_temMedidaDimensional || chapa == null) {
-                    return const SizedBox.shrink();
-                  }
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      InkWell(
-                        onTap: () => setState(() {
-                          _modoDimensional = !_modoDimensional;
-                          if (_modoDimensional) {
-                            _qtdCtrl.text = '1';
-                            _larguraCtrl.clear();
-                            _alturaCtrl.clear();
-                          } else {
-                            _larguraCtrl.clear();
-                            _alturaCtrl.clear();
-                            _qtdCtrl.clear();
-                          }
-                        }),
-                        borderRadius: BorderRadius.circular(6),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _modoDimensional
-                                    ? Icons.toggle_on
-                                    : Icons.toggle_off_outlined,
-                                size: 20,
-                                color: _modoDimensional
-                                    ? AppTheme.primary
-                                    : Theme.of(context).colorScheme.outline,
+                    if (_modoDimensional) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _larguraCtrl,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              decoration: InputDecoration(
+                                labelText: 'Largura usada (m)',
+                                isDense:    true,
+                                suffixText: '/ ${_fmt(chapa.$1)} m',
+                                suffixStyle: TextStyle(
+                                    fontSize: 11, color: Theme.of(context).colorScheme.outline),
                               ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Informar por dimensão usada',
+                              onChanged: (_) => setState(() {}),
+                            ),
+                          ),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Text('×',
                                 style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: _modoDimensional
-                                      ? AppTheme.primary
-                                      : Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
+                                    fontSize: 16,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                          Expanded(
+                            child: TextField(
+                              controller: _alturaCtrl,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              decoration: InputDecoration(
+                                labelText: 'Comprimento usado (m)',
+                                isDense:    true,
+                                suffixText: '/ ${_fmt(chapa.$2)} m',
+                                suffixStyle: TextStyle(
+                                    fontSize: 11, color: Theme.of(context).colorScheme.outline),
                               ),
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 5, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.primary.withValues(alpha: 0.10),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  'Para chapas',
-                                  style: const TextStyle(
-                                      fontSize: 10,
-                                      color: AppTheme.primary,
-                                      fontWeight: FontWeight.w600),
+                              onChanged: (_) => setState(() {}),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      Builder(builder: (_) {
+                        final larg = double.tryParse(
+                            _larguraCtrl.text.replaceAll(',', '.'));
+                        final alt  = double.tryParse(
+                            _alturaCtrl.text.replaceAll(',', '.'));
+                        if (larg == null || larg <= 0 ||
+                            alt == null  || alt  <= 0) {
+                          return const SizedBox.shrink();
+                        }
+                        final areaUsada = larg * alt;
+                        final areaTotal = chapa.$1 * chapa.$2;
+                        final fracao    = areaUsada / areaTotal;
+                        final pct       = (fracao * 100).toStringAsFixed(1);
+                        final qtdCalc   = fracao.toStringAsFixed(4).replaceAll(RegExp(r'0+$'), '');
+                        final qtdDisplay = qtdCalc.endsWith('.') ? '${qtdCalc}0' : qtdCalc;
+                        
+                        return Container(
+                          margin: const EdgeInsets.only(top: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.07),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                                color: AppTheme.primary.withValues(alpha: 0.20)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.calculate_outlined,
+                                  size: 14, color: AppTheme.primary),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: RichText(
+                                  text: TextSpan(
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                    children: [
+                                      TextSpan(
+                                          text: '${_fmt(larg)} × ${_fmt(alt)} m  =  '),
+                                      TextSpan(
+                                        text: '${_fmt(areaUsada)} m²',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            color: Theme.of(context).colorScheme.onSurface),
+                                      ),
+                                      const TextSpan(text: '  →  '),
+                                      TextSpan(
+                                        text: qtdDisplay,
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            color: AppTheme.primary),
+                                      ),
+                                      TextSpan(
+                                        text: ' ${m.unidade ?? 'UN'}  ($pct% da chapa)',
+                                        style: TextStyle(
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
                           ),
-                        ),
-                      ),
-
-                      if (_modoDimensional) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _larguraCtrl,
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                decoration: InputDecoration(
-                                  labelText: 'Largura usada (m)',
-                                  isDense:    true,
-                                  suffixText: '/ ${_fmt(chapa.$1)} m',
-                                  suffixStyle: TextStyle(
-                                      fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                                ),
-                                onChanged: (_) => setState(() {}),
-                              ),
-                            ),
-                            Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 8),
-                              child: Text('×',
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                      fontWeight: FontWeight.w700)),
-                            ),
-                            Expanded(
-                              child: TextField(
-                                controller: _alturaCtrl,
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                decoration: InputDecoration(
-                                  labelText: 'Comprimento usado (m)',
-                                  isDense:    true,
-                                  suffixText: '/ ${_fmt(chapa.$2)} m',
-                                  suffixStyle: TextStyle(
-                                      fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                                ),
-                                onChanged: (_) => setState(() {}),
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        Builder(builder: (_) {
-                          final larg = double.tryParse(
-                              _larguraCtrl.text.replaceAll(',', '.'));
-                          final alt  = double.tryParse(
-                              _alturaCtrl.text.replaceAll(',', '.'));
-                          if (larg == null || larg <= 0 ||
-                              alt == null  || alt  <= 0) {
-                            return const SizedBox.shrink();
-                          }
-                          final areaUsada = larg * alt;
-                          final areaTotal = chapa.$1 * chapa.$2;
-                          final fracao    = areaUsada / areaTotal;
-                          final pct       = (fracao * 100).toStringAsFixed(1);
-                          final qtdCalc   = fracao.toStringAsFixed(4).replaceAll(RegExp(r'0+$'), '');
-                          final qtdDisplay = qtdCalc.endsWith('.') ? '${qtdCalc}0' : qtdCalc;
-                          
-                          return Container(
-                            margin: const EdgeInsets.only(top: 8),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: AppTheme.primary.withValues(alpha: 0.07),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                  color: AppTheme.primary.withValues(alpha: 0.20)),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.calculate_outlined,
-                                    size: 14, color: AppTheme.primary),
-                                SizedBox(width: 8),
-                                Expanded(
-                                  child: RichText(
-                                    text: TextSpan(
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                      children: [
-                                        TextSpan(
-                                            text: '${_fmt(larg)} × ${_fmt(alt)} m  =  '),
-                                        TextSpan(
-                                          text: '${_fmt(areaUsada)} m²',
-                                          style: TextStyle(
-                                              fontWeight: FontWeight.w700,
-                                              color: Theme.of(context).colorScheme.onSurface),
-                                        ),
-                                        const TextSpan(text: '  →  '),
-                                        TextSpan(
-                                          text: qtdDisplay,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w700,
-                                              color: AppTheme.primary),
-                                        ),
-                                        TextSpan(
-                                          text: ' ${m.unidade ?? 'UN'}  ($pct% da chapa)',
-                                          style: TextStyle(
-                                              color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                        const SizedBox(height: 8),
-                      ],
-
-                      const SizedBox(height: 4),
+                        );
+                      }),
+                      const SizedBox(height: 8),
                     ],
-                  );
-                }),
-              ],
 
-              if (!m.especifico || filhos.isNotEmpty) ...[
-                TextFormField(
-                  controller: _qtdCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Quantidade *',
-                    isDense:   true,
-                    suffixText: unidade,
-                    helperText: _modoDimensional
-                        ? 'Bloqueado: quantidade fixa em 1'
-                        : null,
-                    helperStyle: TextStyle(
-                        fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  ),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  readOnly: _modoDimensional,
-                  validator: (v) {
-                    if (_erro != null) return _erro;
-                    final qtd =
-                        double.tryParse((v ?? '').replaceAll(',', '.'));
-                    if (qtd == null || qtd <= 0) return 'Quantidade inválida';
-                    if (m.especifico && _filhoSelecionado != null) {
-                      if (qtd > _filhoSelecionado!.quantidade) {
-                        return 'Máximo disponível: ${_filhoSelecionado!.quantidade.toStringAsFixed(2)} $unidade';
-                      }
-                    }
-                    return null;
-                  },
-                  onChanged: (_) {
-                    if (_erro != null) setState(() => _erro = null);
-                  },
-                ),
-                if (!m.especifico) ...[
-                  SizedBox(height: 8),
-                  Text(
-                    'Disponível: ${disponivel.toStringAsFixed(disponivel % 1 == 0 ? 0 : 2)} $unidade',
-                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
-                  ),
-                ],
-                const SizedBox(height: 12),
+                    const SizedBox(height: 4),
+                  ],
+                );
+              }),
 
-                TextFormField(
-                  controller: _obsCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Observação (opcional)',
-                    isDense:   true,
-                  ),
-                  maxLines: 2,
+              TextFormField(
+                controller: _qtdCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Quantidade *',
+                  isDense:   true,
+                  suffixText: unidade,
+                  helperText: _modoDimensional
+                      ? 'Bloqueado: quantidade fixa em 1'
+                      : null,
+                  helperStyle: TextStyle(
+                      fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
-              ],
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                readOnly: _modoDimensional,
+                validator: (v) {
+                  if (_erro != null) return _erro;
+                  final qtd =
+                      double.tryParse((v ?? '').replaceAll(',', '.'));
+                  if (qtd == null || qtd <= 0) return 'Quantidade inválida';
+                  return null;
+                },
+                onChanged: (_) {
+                  if (_erro != null) setState(() => _erro = null);
+                },
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Disponível: ${disponivel.toStringAsFixed(disponivel % 1 == 0 ? 0 : 2)} $unidade',
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
+              ),
+              const SizedBox(height: 12),
+
+              TextFormField(
+                controller: _obsCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Observação (opcional)',
+                  isDense:   true,
+                ),
+                maxLines: 2,
+              ),
 
               if (_erro != null) ...[
                 const SizedBox(height: 8),
@@ -2123,9 +1999,7 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: (m.especifico && filhos.isEmpty) || _enviando
-              ? null
-              : _confirmar,
+          onPressed: _enviando ? null : _confirmar,
           child: _enviando
               ? const SizedBox(
                   width: 18,

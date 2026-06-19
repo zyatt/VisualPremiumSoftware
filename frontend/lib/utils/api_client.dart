@@ -4,6 +4,13 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
+  /// Timeout aplicado a toda requisição. Sem isso, uma chamada que nunca
+  /// recebe resposta (ex: túnel reconectando, backend reiniciando no meio
+  /// da requisição) deixa o `await` pendurado para sempre — e como nenhum
+  /// catch/finally roda, o `carregando` do provider nunca volta a `false`,
+  /// travando a tela no loading indefinidamente.
+  static const _timeout = Duration(seconds: 15);
+
   static String get _base {
     final tunnel = dotenv.env['API_TUNNEL_URL'] ?? '';
     if (tunnel.isNotEmpty) return tunnel;
@@ -34,13 +41,13 @@ class ApiClient {
   }
 
   static Future<Map<String, dynamic>> get(String path) async {
-    final res = await http.get(_uri(path), headers: _headers);
+    final res = await http.get(_uri(path), headers: _headers).timeout(_timeout);
     _check(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   static Future<List<dynamic>> getList(String path) async {
-    final res = await http.get(_uri(path), headers: _headers);
+    final res = await http.get(_uri(path), headers: _headers).timeout(_timeout);
     _check(res);
     return jsonDecode(res.body) as List<dynamic>;
   }
@@ -50,7 +57,7 @@ class ApiClient {
       _uri(path),
       headers: _headers,
       body: jsonEncode(body),
-    );
+    ).timeout(_timeout);
     _check(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -60,7 +67,7 @@ class ApiClient {
       _uri(path),
       headers: _headers,
       body: jsonEncode(body),
-    );
+    ).timeout(_timeout);
     _check(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -72,20 +79,20 @@ class ApiClient {
       _uri(path),
       headers: _headers,
       body: body != null ? jsonEncode(body) : null,
-    );
+    ).timeout(_timeout);
     _check(res);
     if (res.body.isEmpty) return {};
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   static Future<void> delete(String path) async {
-    final res = await http.delete(_uri(path), headers: _headers);
+    final res = await http.delete(_uri(path), headers: _headers).timeout(_timeout);
     _check(res);
   }
 
   /// Baixa uma resposta binária (ex: PDF) e retorna os bytes brutos.
   static Future<List<int>> getBytes(String path) async {
-    final res = await http.get(_uri(path), headers: _headers);
+    final res = await http.get(_uri(path), headers: _headers).timeout(_timeout);
     _check(res);
     return res.bodyBytes;
   }
@@ -96,7 +103,7 @@ class ApiClient {
       _uri(path),
       headers: _headers,
       body: jsonEncode(body),
-    );
+    ).timeout(_timeout);
     _check(res);
     return res.bodyBytes;
   }
@@ -117,7 +124,7 @@ class ApiClient {
     _uri(path),
     headers: _headers,
     body: jsonEncode(body),
-  );
+  ).timeout(_timeout);
   _check(res);
   return jsonDecode(res.body) as List<dynamic>;
 }

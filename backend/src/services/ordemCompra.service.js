@@ -31,53 +31,17 @@ function _calcularStatus(quantidade, estoqueMinimo, ativo) {
   return 'CRITICO';
 }
 
-/**
- * Calcula o custo por unidade padrão quando o material possui qtdPadrao.
- *
- * Exemplo: thinner 18 L (qtdPadrao = 18000 ml).
- *   - Comprador registra precoUnitario = 250 (por embalagem de 18 L)
- *   - custoPorUnidPadrao = 250 / 18000 = 0.013888... (por ml)
- *
- * Retorna null quando qtdPadrao não está definida, zero ou usarM2 está ativo
- * (nesse caso o preço de referência é por m² e não faz sentido dividir).
- */
-function _calcularCustoPorUnidPadrao({ precoUnitario, usarM2, qtdPadrao }) {
-  if (usarM2) return null;
-  const qtd = Number(qtdPadrao ?? 0);
-  if (!qtd) return null;
-  const preco = Number(precoUnitario ?? 0);
-  if (!preco) return null;
-  return preco / qtd;
-}
-
-/**
- * Calcula a quantidade real que entra no estoque.
- *
- * Quando o material tem qtdPadrao (ex: thinner 18 L = 18000 ml) e o usuário
- * comprou 2 embalagens, a quantidade real que sobe no estoque é 2 × 18000 = 36000.
- * Sem qtdPadrao, retorna a quantidade da OC sem alteração.
- */
-  function _calcularQuantidadeReal({ quantidade, usarM2, qtdUnidade, qtdPadrao }) {
+function _calcularQuantidadeReal({ quantidade, usarM2, qtdUnidade }) {
     if (usarM2) return Number(quantidade);
-    // Novo fluxo: qtdUnidade informada explicitamente na OC tem prioridade
+
     const qtdUnit = Number(qtdUnidade ?? 0);
-    if (qtdUnit > 0) return Number(quantidade) * qtdUnit;
-    // Fluxo legado: qtdPadrao do cadastro do material
-    const qtd = Number(qtdPadrao ?? 0);
-    if (!qtd) return Number(quantidade);
-    return Number(quantidade) * qtd;
+    if (qtdUnit > 0) {
+        return Number(quantidade) * qtdUnit;
+    }
+
+    return Number(quantidade);
 }
 
-/**
- * Expande itens que possuem distribuição por OS em múltiplos registros.
- *
- * Quando um item tem campo `distribuicao` (array de {os, quantidade}), cada
- * linha gera um OrdemCompraItem separado com o mesmo material/preço mas
- * com numeroOS e quantidade individuais.
- *
- * Itens sem `distribuicao` ou com apenas uma linha são mantidos como estão
- * (usando o campo `numeroOS` diretamente).
- */
 function _expandirItensComDistribuicao(itens) {
   const resultado = [];
   for (const item of itens) {
@@ -115,17 +79,13 @@ function _expandirItensComDistribuicao(itens) {
   return resultado;
 }
 
-// ── select de material reutilizável (inclui qtdPadrao e unidPadrao) ───────────
 const _selectMaterial = {
   id: true,
   nome: true,
   unidade: true,
-  especifico: true,
   medida: true,
   espessura: true,
   identificador: true,
-  qtdPadrao: true,
-  unidPadrao: true,
 };
 
 /**
@@ -428,12 +388,11 @@ async function recalcularTotal(ordemCompraId) {
 // FINALIZAR
 // ─────────────────────────────────────────────────────────────────────────────
 async function finalizar(id) {
-  const ordem = await prisma.ordemCompra.findUnique({
+ const ordem = await prisma.ordemCompra.findUnique({
     where: { id },
     include: {
       itens: {
         include: {
-          // inclui qtdPadrao e unidPadrao para cálculo do custo por unid padrão
           material: true,
         },
       },
@@ -475,17 +434,6 @@ async function finalizar(id) {
     };
   }
 
-  const itensSemDescricao = ordem.itens.filter(
-    (item) => item.material?.especifico && (!item.descricaoItem || !item.descricaoItem.trim())
-  );
-  if (itensSemDescricao.length > 0) {
-    const nomes = itensSemDescricao.map((i) => i.material?.nome || `ID ${i.materialId}`).join(', ');
-    throw {
-      status: 400,
-      message: `Os seguintes materiais específicos exigem uma descrição: ${nomes}`,
-    };
-  }
-
   const finalizada = await prisma.ordemCompra.update({
     where: { id },
     data: { status: 'FINALIZADO' },
@@ -494,7 +442,6 @@ async function finalizar(id) {
   for (const item of ordem.itens) {
     const numeroOSLimpo = item.numeroOS.trim();
     const material      = item.material;
-    const eEspecifico   = material?.especifico === true;
     const osEhNumerica  = /^\d+$/.test(numeroOSLimpo);
 
     let relacaoOS;
@@ -573,32 +520,10 @@ async function finalizar(id) {
       ? _normalizarPreco(precoM2Bruto)
       : null;
 
-    // ── Custo por unidade padrão ──────────────────────────────────────────────
-    const custoPorUnidPadrao = _calcularCustoPorUnidPadrao({
-      precoUnitario: precoUnitarioFinal,
-      usarM2: item.usarM2,
-      qtdPadrao: material?.qtdPadrao,
-    });
-
     const novoUltimoValorPago = item.usarM2
       ? null
-      : (custoPorUnidPadrao ?? precoUnitarioFinal ?? null);
+      : (precoUnitarioFinal ?? null);
 
-    // ── Custo por m² automático ───────────────────────────────────────────────
-    // Deriva o custo/m² a partir do preço unitário para materiais que possuem
-    // dimensões cadastradas mas NÃO estão no modo usarM2.
-    //
-    // Dois casos conforme a unidade de estoque do material:
-    //
-    // 1. Metro linear (unidade = 'm', 'ml', 'metro linear', etc.)
-    //    O preço informado na OC já é por metro linear (ex: R$20/m para lona 3,20m).
-    //    custo/m² = precoUnitario / largura
-    //    Ex: 20 / 3,20 = 6,25 R$/m²
-    //
-    // 2. Unidade inteira / peça (chapa, placa, folha)
-    //    O preço informado é por peça inteira.
-    //    custo/m² = precoUnitario / (largura × comprimento)
-    //    Ex: 1000 / (1,22 × 2,44) = 335,66 R$/m²
     const _larguraMat     = material?.largura     != null ? Number(material.largura)     : null;
     const _comprimentoMat = material?.comprimento != null ? Number(material.comprimento) : null;
     const _areaTotal      = (_larguraMat != null && _comprimentoMat != null && _larguraMat > 0 && _comprimentoMat > 0)
@@ -609,7 +534,7 @@ async function finalizar(id) {
     const _unidade = (material?.unidade ?? '').toString().toLowerCase().trim();
     const _eMetroLinear = ['m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'].includes(_unidade);
 
-    const novoUltimoValorPagoM2 = item.usarM2
+     const novoUltimoValorPagoM2 = item.usarM2
       ? (precoM2Final ?? null)
       : (() => {
           if (novoUltimoValorPago == null || novoUltimoValorPago <= 0) return null;
@@ -624,21 +549,12 @@ async function finalizar(id) {
           return null;
         })();
 
-    // O preço que vai para a movimentação:
-    //   • se tem qtdPadrao → custo por unidade menor
-    //   • caso contrário   → preço unitário original
-    const precoUnitarioMovimentacao = custoPorUnidPadrao ?? precoUnitarioFinal;
+    const precoUnitarioMovimentacao = precoUnitarioFinal;
 
-    // ── Quantidade real no estoque ────────────────────────────────────────────
-    // Se o material tem qtdPadrao, a quantidade comprada (em embalagens) é
-    // multiplicada pela qtdPadrao para refletir a unidade do estoque.
-    // Ex: 2 latas de thinner 18 L (qtdPadrao = 18000 ml) → 36000 ml no estoque.
-    // Exemplo em finalizar (e idem em reverter):
     const quantidadeReal = _calcularQuantidadeReal({
       quantidade: item.quantidade,
       usarM2:     item.usarM2,
-      qtdUnidade: item.qtdUnidade,   // ← ADICIONAR
-      qtdPadrao:  material?.qtdPadrao,
+      qtdUnidade: item.qtdUnidade,
     });
 
     await prisma.movimentacaoEstoque.create({
@@ -659,42 +575,24 @@ async function finalizar(id) {
       },
     });
 
-    if (eEspecifico) {
-      const descricao = item.descricaoItem.trim();
-      await prisma.estoqueEspecifico.upsert({
-        where:  { materialId_descricao: { materialId: item.materialId, descricao } },
-        create: { materialId: item.materialId, descricao, quantidade: quantidadeReal },
-        update: { quantidade: { increment: quantidadeReal } },
-      });
-      if (novoUltimoValorPago !== null || novoUltimoValorPagoM2 !== null) {
-        await prisma.material.update({
-          where: { id: item.materialId },
-          data: {
-            ultimoValorPago:   novoUltimoValorPago,
-            ultimoValorPagoM2: novoUltimoValorPagoM2,
-          },
-        });
-      }
-    } else {
-      const matAtual       = await prisma.material.findUnique({ where: { id: item.materialId } });
-      const novaQuantidade = Number(matAtual.quantidade) + quantidadeReal;
-      const novoStatus     = _calcularStatus(novaQuantidade, matAtual.estoqueMinimo, matAtual.ativo);
+    const matAtual       = await prisma.material.findUnique({ where: { id: item.materialId } });
+    const novaQuantidade = Number(matAtual.quantidade) + quantidadeReal;
+    const novoStatus     = _calcularStatus(novaQuantidade, matAtual.estoqueMinimo, matAtual.ativo);
 
-      const patchPreco = {};
-      if (novoUltimoValorPago !== null || novoUltimoValorPagoM2 !== null) {
-        patchPreco.ultimoValorPago   = novoUltimoValorPago;
-        patchPreco.ultimoValorPagoM2 = novoUltimoValorPagoM2;
-      }
-
-      await prisma.material.update({
-        where: { id: item.materialId },
-        data: {
-          quantidade: novaQuantidade,
-          status:     novoStatus,
-          ...patchPreco,
-        },
-      });
+    const patchPreco = {};
+    if (novoUltimoValorPago !== null || novoUltimoValorPagoM2 !== null) {
+      patchPreco.ultimoValorPago   = novoUltimoValorPago;
+      patchPreco.ultimoValorPagoM2 = novoUltimoValorPagoM2;
     }
+
+    await prisma.material.update({
+      where: { id: item.materialId },
+      data: {
+        quantidade: novaQuantidade,
+        status:     novoStatus,
+        ...patchPreco,
+      },
+    });
 
     await prisma.historicoPrecoMaterial.create({
       data: {
@@ -741,10 +639,9 @@ async function reverter(id) {
   if (ordem.status !== 'FINALIZADO') throw { status: 400, message: 'Apenas ordens finalizadas podem ser revertidas' };
 
   for (const item of ordem.itens) {
-    const material    = item.material;
+    const material = item.material;
     if (!material) continue;
 
-    const eEspecifico   = material.especifico === true;
     const numeroOSLimpo = item.numeroOS?.trim() || 'OUTROS';
 
     let relacaoOS = await prisma.relacaoOS.findUnique({ where: { numeroOS: numeroOSLimpo } });
@@ -765,58 +662,23 @@ async function reverter(id) {
       orderBy: { criadoEm: 'desc' },
     });
 
-    if (eEspecifico) {
-      const descricao = (item.descricaoItem ?? '').trim();
-      if (descricao) {
-        const filho = await prisma.estoqueEspecifico.findUnique({
-          where: { materialId_descricao: { materialId: item.materialId, descricao } },
-        });
-        if (filho) {
-          const quantidadeRealReverter = _calcularQuantidadeReal({
-            quantidade: item.quantidade,
-            usarM2:     item.usarM2,
-            qtdPadrao:  material?.qtdPadrao,
-          });
-          const novaQtd = Math.max(0, Number(filho.quantidade) - quantidadeRealReverter);
-          if (novaQtd === 0) {
-            await prisma.estoqueEspecifico.delete({
-              where: { materialId_descricao: { materialId: item.materialId, descricao } },
-            });
-          } else {
-            await prisma.estoqueEspecifico.update({
-              where: { materialId_descricao: { materialId: item.materialId, descricao } },
-              data:  { quantidade: novaQtd },
-            });
-          }
-        }
-      }
-      const anteriorUsarM2 = historicoAnterior?.usarM2 ?? false;
-      await prisma.material.update({
-        where: { id: item.materialId },
-        data: {
-          ultimoValorPago:   anteriorUsarM2 ? null : (historicoAnterior?.precoUnitario ?? null),
-          ultimoValorPagoM2: anteriorUsarM2 ? (historicoAnterior?.precoM2 ?? null) : null,
-        },
-      });
-    } else {
-      const quantidadeRealReverter = _calcularQuantidadeReal({
-        quantidade: item.quantidade,
-        usarM2:     item.usarM2,
-        qtdPadrao:  material?.qtdPadrao,
-      });
-      const novaQuantidade = Math.max(0, Number(material.quantidade) - quantidadeRealReverter);
-      const novoStatus     = _calcularStatus(novaQuantidade, material.estoqueMinimo, material.ativo);
-      const anteriorUsarM2 = historicoAnterior?.usarM2 ?? false;
-      await prisma.material.update({
-        where: { id: item.materialId },
-        data: {
-          quantidade:        novaQuantidade,
-          status:            novoStatus,
-          ultimoValorPago:   anteriorUsarM2 ? null : (historicoAnterior?.precoUnitario ?? null),
-          ultimoValorPagoM2: anteriorUsarM2 ? (historicoAnterior?.precoM2 ?? null) : null,
-        },
-      });
-    }
+    const quantidadeRealReverter = _calcularQuantidadeReal({
+      quantidade: item.quantidade,
+      usarM2:     item.usarM2,
+      qtdUnidade: item.qtdUnidade,
+    });
+    const novaQuantidade = Math.max(0, Number(material.quantidade) - quantidadeRealReverter);
+    const novoStatus     = _calcularStatus(novaQuantidade, material.estoqueMinimo, material.ativo);
+    const anteriorUsarM2 = historicoAnterior?.usarM2 ?? false;
+    await prisma.material.update({
+      where: { id: item.materialId },
+      data: {
+        quantidade:        novaQuantidade,
+        status:            novoStatus,
+        ultimoValorPago:   anteriorUsarM2 ? null : (historicoAnterior?.precoUnitario ?? null),
+        ultimoValorPagoM2: anteriorUsarM2 ? (historicoAnterior?.precoM2 ?? null) : null,
+      },
+    });
   }
 
   const relacoes = await prisma.relacaoOS.findMany({ include: { movimentacoes: true } });

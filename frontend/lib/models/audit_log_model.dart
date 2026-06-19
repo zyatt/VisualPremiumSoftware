@@ -67,6 +67,7 @@ class AuditLogModel {
       case 'REATIVACAO':         return 'Reativação';
       case 'EXCLUSAO':           return 'Exclusão';
       case 'ESTOQUE_CONFIRMADO': return 'Estoque confirmado';
+      case 'CUSTO_MANUAL':       return 'Custo manual';
       case 'FILHO_EDITADO':      return 'Variação editada';
       case 'FILHO_EXCLUIDO':     return 'Variação excluída';
       default:                   return acao;
@@ -83,6 +84,7 @@ class AuditLogModel {
       case 'REATIVACAO':         return '#7C3AED'; // roxo
       case 'EXCLUSAO':           return '#DC2626'; // vermelho
       case 'ESTOQUE_CONFIRMADO': return '#0891B2'; // ciano
+      case 'CUSTO_MANUAL':       return '#7C3AED'; // roxo
       case 'FILHO_EDITADO':      return '#1E88E5'; // azul
       case 'FILHO_EXCLUIDO':     return '#E85D04'; // laranja
       default:                   return '#6B7280'; // cinza

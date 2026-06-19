@@ -8,7 +8,6 @@ const _includeMovimentacoes = {
         select: {
           id: true, nome: true, unidade: true,
           identificador: true, medida: true, espessura: true,
-          especifico: true, qtdPadrao: true, unidPadrao: true,
         },
       },
     },
@@ -65,36 +64,13 @@ async function registrarMovimentacao({
     }
   }
 
-  // Material específico: descricaoItem obrigatória
-  if (material.especifico) {
-    const desc = (descricaoItem ?? '').trim();
-    if (!desc) {
-      throw { status: 400, message: 'Materiais específicos exigem uma descrição para movimentação de estoque' };
-    }
-  }
-
   if (tipo === 'SAIDA') {
-    if (material.especifico) {
-      // Verifica saldo do filho específico
-      const desc  = (descricaoItem ?? '').trim();
-      const filho = await prisma.estoqueEspecifico.findUnique({
-        where: { materialId_descricao: { materialId, descricao: desc } },
-      });
-      const saldoFilho = filho ? Number(filho.quantidade) : 0;
-      if (saldoFilho < quantidade) {
-        throw {
-          status: 400,
-          message: `Estoque insuficiente para "${desc}": disponível ${saldoFilho} ${material.unidade ?? ''}`.trim(),
-        };
-      }
-    } else {
-      const saldo = Number(material.quantidade);
-      if (saldo < quantidade) {
-        throw {
-          status: 400,
-          message: `Estoque insuficiente: disponível ${saldo} ${material.unidade ?? ''}`.trim(),
-        };
-      }
+    const saldo = Number(material.quantidade);
+    if (saldo < quantidade) {
+      throw {
+        status: 400,
+        message: `Estoque insuficiente: disponível ${saldo} ${material.unidade ?? ''}`.trim(),
+      };
     }
   }
 
@@ -155,17 +131,6 @@ async function registrarMovimentacao({
       }
     }
   }
-  // ── Custo por unidade menor ───────────────────────────────────────────────
-  // Se o material tem qtdPadrao (ex: thinner 18 L = 18000 ml), o precoUnitario
-  // registrado no estoque deve ser o custo por unidade menor (R$/ml, R$/m etc.).
-  // O front envia o precoUnitarioSugerido que já vem do campo ultimoValorPago
-  // do material — que é o custo por unidade menor gravado pela OC.
-  // Portanto, para movimentações manuais, apenas repassamos o valor sem alterar.
-  // O único ajuste necessário é: se o front ainda não tiver o custo por unidade
-  // menor disponível (ex: primeiro uso, sem OC prévia) e enviar o preço de
-  // embalagem com o flag `precoEhEmbalagem: true`, aí dividimos aqui.
-  // Na prática, o front passa item.precoUnitarioSugerido = material.ultimoValorPago
-  // que a OC já gravou como custo/unidade — logo não é necessário dividir novamente.
   const precoUnitarioFinal = precoUnitario ?? null;
 
   // ── Custo proporcional por dimensão usada ─────────────────────────────────
@@ -208,16 +173,18 @@ async function registrarMovimentacao({
             ? Number(precoUnitario) / areaTotal
             : null);
       if (custoM2 != null) {
-        // Arredonda para 5 casas decimais (precisão do campo Decimal(15,5))
-        precoM2Final = Math.round(custoM2 * areaUsada * 100000) / 100000;
+        // Arredonda para 6 casas decimais (precisão do campo Decimal(15,6))
+        precoM2Final = Math.round(custoM2 * areaUsada * 1000000) / 1000000;
       }
     }
   }
 
-  // Monta observação: usa a que veio do front, ou gera automaticamente com o nome do usuário
+  // Monta observação: a mensagem automática (tipo + usuário) sempre aparece;
+  // se o usuário preencher uma observação, ela é adicionada abaixo, não substitui.
+  const obsAutomatica = `${tipo === 'SAIDA' ? 'Saída' : 'Entrada'} via controle de estoque – ${usuarioNome ?? 'Usuário'}`;
   const obsFinal = (observacao && observacao.trim())
-    ? observacao.trim()
-    : `${tipo === 'SAIDA' ? 'Saída' : 'Entrada'} via controle de estoque – ${usuarioNome ?? 'Usuário'}`;
+    ? `${obsAutomatica}\n${observacao.trim()}`
+    : obsAutomatica;
 
   // Cria a movimentação
   const [movimentacao] = await prisma.$transaction([
@@ -237,49 +204,16 @@ async function registrarMovimentacao({
         comprimentoUsado: (comprimentoUsado != null ? Number(comprimentoUsado) : null),
       },
     }),
-    // Para material normal: atualiza quantidade direta; para específico: será feito abaixo
-    ...(material.especifico
-      ? []
-      : [
-          prisma.material.update({
-            where: { id: materialId },
-            data:  { quantidade: { increment: delta } },
-          }),
-        ]),
+    prisma.material.update({
+      where: { id: materialId },
+      data:  { quantidade: { increment: delta } },
+    }),
   ]);
 
-  if (material.especifico) {
-    // Atualiza ou cria filho em EstoqueEspecifico
-    const desc = (descricaoItem ?? '').trim();
-    if (tipo === 'ENTRADA') {
-      await prisma.estoqueEspecifico.upsert({
-        where:  { materialId_descricao: { materialId, descricao: desc } },
-        create: { materialId, descricao: desc, quantidade },
-        update: { quantidade: { increment: Number(quantidade) } },
-      });
-    } else {
-      const filho    = await prisma.estoqueEspecifico.findUnique({
-        where: { materialId_descricao: { materialId, descricao: desc } },
-      });
-      const novaQtd  = Math.max(0, Number(filho?.quantidade ?? 0) - Number(quantidade));
-      if (novaQtd === 0) {
-        await prisma.estoqueEspecifico.delete({
-          where: { materialId_descricao: { materialId, descricao: desc } },
-        });
-      } else {
-        await prisma.estoqueEspecifico.update({
-          where: { materialId_descricao: { materialId, descricao: desc } },
-          data:  { quantidade: novaQtd },
-        });
-      }
-    }
-    // Não recalcula status de material específico (ele não tem quantidade própria)
-  } else {
-    // Recalcula status do material normal
-    const atualizado = await prisma.material.findUnique({ where: { id: materialId } });
-    const novoStatus = _calcularStatus(atualizado.quantidade, atualizado.estoqueMinimo, atualizado.ativo);
-    await prisma.material.update({ where: { id: materialId }, data: { status: novoStatus } });
-  }
+  // Recalcula status do material
+  const atualizado = await prisma.material.findUnique({ where: { id: materialId } });
+  const novoStatus = _calcularStatus(atualizado.quantidade, atualizado.estoqueMinimo, atualizado.ativo);
+  await prisma.material.update({ where: { id: materialId }, data: { status: novoStatus } });
 
   // ── Retalho ───────────────────────────────────────────────────────────────
   // Quando o usuário informa dimensão usada numa saída de material UNIDADE,
@@ -288,7 +222,6 @@ async function registrarMovimentacao({
   // O retalho é identificado por: mesmo nome + identificador 'RETALHO' + espessura.
   if (
     tipo === 'SAIDA' &&
-    !material.especifico &&
     larguraUsada != null && comprimentoUsado != null &&
     material.largura != null && material.comprimento != null
   ) {
@@ -343,7 +276,9 @@ async function registrarMovimentacao({
                 nome:              material.nome,
                 unidade:           'M2',
                 categoria:         material.categoria   ?? null,
-                medida:            material.medida      ?? null,
+                // Retalho não herda a medida da chapa de origem (ex.: "2X1"):
+                // a medida representa o tamanho da chapa inteira, não da sobra.
+                medida:            null,
                 espessura:         material.espessura   ?? null,
                 identificador:     'RETALHO',
                 quantidade:        areaRetalho,
@@ -351,7 +286,6 @@ async function registrarMovimentacao({
                 status:            _calcularStatus(areaRetalho, 0, true),
                 estoqueConfirmado: false,
                 ativo:             true,
-                especifico:        false,
                 // Retalho é medido em M2: apenas custo/m² faz sentido
                 ultimoValorPago:   null,
                 ultimoValorPagoM2: custoM2Retalho,
@@ -365,9 +299,7 @@ async function registrarMovimentacao({
               retalhoMat = await prisma.material.findFirst({
                 where: {
                   nome:      { equals: material.nome, mode: 'insensitive' },
-                  medida:    material.medida
-                    ? { equals: material.medida,    mode: 'insensitive' }
-                    : null,
+                  medida:    null,
                   espessura: material.espessura
                     ? { equals: material.espessura, mode: 'insensitive' }
                     : null,
@@ -422,41 +354,17 @@ async function removerMovimentacao(movimentacaoId) {
   // Reverte o delta
   const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
 
-  if (material?.especifico) {
-    // Reverte no filho EstoqueEspecifico
-    await prisma.movimentacaoEstoque.delete({ where: { id: movimentacaoId } });
+  await prisma.$transaction([
+    prisma.movimentacaoEstoque.delete({ where: { id: movimentacaoId } }),
+    prisma.material.update({
+      where: { id: mov.materialId },
+      data:  { quantidade: { increment: delta } },
+    }),
+  ]);
 
-    const desc = (mov.descricaoItem ?? '').trim();
-    if (desc) {
-      const filho   = await prisma.estoqueEspecifico.findUnique({
-        where: { materialId_descricao: { materialId: mov.materialId, descricao: desc } },
-      });
-      const novaQtd = Math.max(0, Number(filho?.quantidade ?? 0) + delta);
-      if (novaQtd === 0) {
-        await prisma.estoqueEspecifico.delete({
-          where: { materialId_descricao: { materialId: mov.materialId, descricao: desc } },
-        });
-      } else {
-        await prisma.estoqueEspecifico.upsert({
-          where:  { materialId_descricao: { materialId: mov.materialId, descricao: desc } },
-          create: { materialId: mov.materialId, descricao: desc, quantidade: Math.max(0, delta) },
-          update: { quantidade: novaQtd },
-        });
-      }
-    }
-  } else {
-    await prisma.$transaction([
-      prisma.movimentacaoEstoque.delete({ where: { id: movimentacaoId } }),
-      prisma.material.update({
-        where: { id: mov.materialId },
-        data:  { quantidade: { increment: delta } },
-      }),
-    ]);
-
-    const mat      = await prisma.material.findUnique({ where: { id: mov.materialId } });
-    const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
-    await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
-  }
+  const mat      = await prisma.material.findUnique({ where: { id: mov.materialId } });
+  const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
+  await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
 
   // Se a RelacaoOS ficou sem movimentações, exclui ela
   const count = await prisma.movimentacaoEstoque.count({ where: { relacaoOSId: relacao.id } });
@@ -485,34 +393,13 @@ async function excluirRelacaoOS(relacaoOSId) {
   for (const mov of relacao.movimentacoes) {
     const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
 
-    if (mov.material?.especifico) {
-      const desc = (mov.descricaoItem ?? '').trim();
-      if (desc) {
-        const filho   = await prisma.estoqueEspecifico.findUnique({
-          where: { materialId_descricao: { materialId: mov.materialId, descricao: desc } },
-        });
-        const novaQtd = Math.max(0, Number(filho?.quantidade ?? 0) + delta);
-        if (novaQtd === 0) {
-          await prisma.estoqueEspecifico.delete({
-            where: { materialId_descricao: { materialId: mov.materialId, descricao: desc } },
-          }).catch(() => {}); // ignora se não existia
-        } else {
-          await prisma.estoqueEspecifico.upsert({
-            where:  { materialId_descricao: { materialId: mov.materialId, descricao: desc } },
-            create: { materialId: mov.materialId, descricao: desc, quantidade: novaQtd },
-            update: { quantidade: novaQtd },
-          });
-        }
-      }
-    } else {
-      await prisma.material.update({
-        where: { id: mov.materialId },
-        data:  { quantidade: { increment: delta } },
-      });
-      const mat = await prisma.material.findUnique({ where: { id: mov.materialId } });
-      const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
-      await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
-    }
+    await prisma.material.update({
+      where: { id: mov.materialId },
+      data:  { quantidade: { increment: delta } },
+    });
+    const mat = await prisma.material.findUnique({ where: { id: mov.materialId } });
+    const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
+    await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
   }
 
   await prisma.movimentacaoEstoque.deleteMany({ where: { relacaoOSId: relacao.id } });
@@ -580,7 +467,7 @@ async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, preco
   }
 
   // ── Monta entradas de audit (captura valorAntes antes de atualizar) ──────────
-  const _fmt = (v) => v != null ? `R$ ${Number(v).toFixed(5)}` : null;
+  const _fmt = (v) => v != null ? `R$ ${Number(v).toFixed(6)}` : null;
 
   const auditEntries = [];
 
@@ -618,7 +505,6 @@ async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, preco
           select: {
             id: true, nome: true, unidade: true,
             identificador: true, medida: true, espessura: true,
-            especifico: true,
           },
         },
       },

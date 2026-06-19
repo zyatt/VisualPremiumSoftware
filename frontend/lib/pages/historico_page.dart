@@ -418,6 +418,14 @@ class _HistoricoCardState extends State<_HistoricoCard> {
   String _moeda(double v) =>
       'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
 
+  /// Formata preço unitário com até 6 casas decimais,
+  /// removendo zeros à direita (ex: 0,500000 → 0,5 / 0,010000 → 0,01).
+  String _moedaUnitario(double v) {
+    final s = v.toStringAsFixed(6);
+    final trimmed = s.replaceAll(RegExp(r'0+$'), '').replaceAll(RegExp(r'\.$'), '');
+    return 'R\$ ${trimmed.replaceAll('.', ',')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final o = widget.ordem;
@@ -645,12 +653,12 @@ class _HistoricoCardState extends State<_HistoricoCard> {
                                                     'Quantidade: ${_fmtNum(item.quantidade)}'),
                                                 _itemChipDestaque(
                                                     Icons.attach_money,
-                                                    'Unitário: ${_moeda(item.precoUnitario)}',
+                                                    'Unitário: ${_moedaUnitario(item.precoUnitario)}',
                                                     ativo: !item.usarM2),
                                                 if (item.precoMetroQuadrado != null)
                                                   _itemChipDestaque(
                                                       Icons.square_foot,
-                                                      'm²: ${_moeda(item.precoMetroQuadrado!)}',
+                                                      'm²: ${_moedaUnitario(item.precoMetroQuadrado!)}',
                                                       ativo: item.usarM2),
                                               ],
                                             ),
@@ -786,6 +794,14 @@ class _HistoricoDetalhePage extends StatelessWidget {
 
   String _moeda(double v) =>
       'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
+
+  /// Formata preço unitário com até 6 casas decimais,
+  /// removendo zeros à direita (ex: 0,500000 → 0,5 / 0,010000 → 0,01).
+  String _moedaUnitario(double v) {
+    final s = v.toStringAsFixed(6);
+    final trimmed = s.replaceAll(RegExp(r'0+$'), '').replaceAll(RegExp(r'\.$'), '');
+    return 'R\$ ${trimmed.replaceAll('.', ',')}';
+  }
 
   String _fmtNum(double v) =>
       v == v.truncateToDouble() ? v.toInt().toString() : v.toString();
@@ -938,11 +954,11 @@ class _HistoricoDetalhePage extends StatelessWidget {
                         _itemChip(context, Icons.format_list_numbered,
                             'Quantidade: ${_fmtNum(item.quantidade)}'),
                         _itemChipDestaque(context, Icons.attach_money,
-                            'Unitário: ${_moeda(item.precoUnitario)}',
+                            'Unitário: ${_moedaUnitario(item.precoUnitario)}',
                             ativo: !item.usarM2),
                         if (item.precoMetroQuadrado != null)
                           _itemChipDestaque(context, Icons.square_foot,
-                              'm²: ${_moeda(item.precoMetroQuadrado!)}',
+                              'm²: ${_moedaUnitario(item.precoMetroQuadrado!)}',
                               ativo: item.usarM2),
                       ]),
                     ],

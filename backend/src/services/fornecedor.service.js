@@ -42,7 +42,6 @@ async function listar(busca, tipo, id) {
               medida: true,
               espessura: true,
               unidade: true,
-              especifico: true,
               largura: true,
               comprimento: true,
             },
@@ -92,7 +91,6 @@ async function buscarPorId(id) {
               medida: true,
               espessura: true,
               unidade: true,
-              especifico: true,
               largura: true,
               comprimento: true,
             },
@@ -177,9 +175,24 @@ async function remover(id) {
   ]);
 }
 
+/**
+ * Converte um valor de preço para string decimal com até 6 casas,
+ * evitando imprecisão de ponto flutuante ao gravar no campo Decimal(15,6).
+ * O Prisma aceita strings numéricas diretamente em campos Decimal.
+ */
+function _normalizarPrecoDecimal(valor) {
+  if (valor == null || valor === '') return null;
+  // Já é string numérica vinda do Flutter — preserva como está (até 6 casas)
+  const str = String(valor).trim();
+  const num = Number(str);
+  if (isNaN(num)) return null;
+  // Formata com até 6 casas decimais, sem zeros desnecessários à direita
+  return parseFloat(num.toFixed(6)).toString();
+}
+
 async function vincularMaterial(fornecedorId, materialId, preco, precoMetroQuadrado) {
-  const precoVal           = preco            != null ? parseFloat(preco)            : null;
-  const precoM2Val         = precoMetroQuadrado != null ? parseFloat(precoMetroQuadrado) : null;
+  const precoVal   = _normalizarPrecoDecimal(preco);
+  const precoM2Val = _normalizarPrecoDecimal(precoMetroQuadrado);
 
   return prisma.fornecedorMaterial.upsert({
     where: { fornecedorId_materialId: { fornecedorId, materialId } },

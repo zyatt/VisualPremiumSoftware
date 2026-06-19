@@ -13,7 +13,6 @@ const _itensInclude = {
           medida: true,
           espessura: true,
           identificador: true,
-          especifico: true,
         },
       },
       fornecedor: { select: { id: true, nomeFantasia: true } },
@@ -79,13 +78,6 @@ async function adicionarItem(
   orcamentoId, materialId, fornecedorId, quantidade, precoUnitario,
   { precoM2 = null, usarM2 = false, selecionado = false, descricaoItem = null } = {}
   ) {
-  // Verifica se o material é específico (pode ter múltiplas linhas com mesmo materialId)
-  const material = await prisma.material.findUnique({
-    where: { id: materialId },
-    select: { especifico: true },
-  });
-  const especifico = material?.especifico ?? false;
-
   const data = {
     fornecedorId: fornecedorId ?? null,
     quantidade,
@@ -96,16 +88,12 @@ async function adicionarItem(
     descricaoItem: descricaoItem ?? null,
   };
 
-  // Materiais específicos nunca fazem upsert por (materialId, fornecedorId)
-  // pois podem existir múltiplas linhas com a mesma combinação.
-  if (!especifico) {
-    const existente = await prisma.orcamentoItem.findFirst({
-      where: { orcamentoId, materialId, fornecedorId: fornecedorId ?? null },
-    });
+  const existente = await prisma.orcamentoItem.findFirst({
+    where: { orcamentoId, materialId, fornecedorId: fornecedorId ?? null },
+  });
 
-    if (existente) {
-      return prisma.orcamentoItem.update({ where: { id: existente.id }, data });
-    }
+  if (existente) {
+    return prisma.orcamentoItem.update({ where: { id: existente.id }, data });
   }
 
   return prisma.orcamentoItem.create({

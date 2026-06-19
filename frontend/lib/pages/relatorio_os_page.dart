@@ -14,8 +14,18 @@ import '../theme/app_theme.dart';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-String _brl(double v) =>
-    v == 0 ? '—' : 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
+/// Formata um valor monetário com até 6 casas decimais,
+/// removendo zeros à direita desnecessários (mínimo 2 casas).
+String _brl(double v) {
+  if (v == 0) return '—';
+  final s6 = v.toStringAsFixed(6);
+  // Remove zeros à direita mas mantém ao menos 2 casas decimais
+  final trimmed = s6.replaceAll(RegExp(r'0+$'), '');
+  final partes = trimmed.split('.');
+  final dec = partes.length > 1 ? partes[1] : '';
+  final decFinal = dec.length < 2 ? dec.padRight(2, '0') : dec;
+  return 'R\$ ${partes[0]},$decFinal';
+}
 
 String _fmtData(DateTime? dt) {
   if (dt == null) return '—';
@@ -75,8 +85,7 @@ double _totalLiquido(List<MovimentacaoModel> movimentacoes) {
     } else if (m.tipo == 'ENTRADA') {
       // Entradas via OC são reposição de estoque, não devoluções — ignorar.
       final isEntradaOC =
-          (m.observacao?.contains('via OC') ?? false) ||
-          (m.descricaoItem?.contains('via OC') ?? false);
+          (m.observacao?.contains('via OC') ?? false);
       if (isEntradaOC) continue;
 
       // Só conta como devolução se já houve ao menos uma saída deste material
@@ -1477,17 +1486,6 @@ class _MovimentacaoSection extends StatelessWidget {
                                     fontSize: 11,
                                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                                     fontWeight: FontWeight.w500,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              if (m.descricaoItem != null &&
-                                  m.descricaoItem!.isNotEmpty)
-                                Text(
-                                  m.descricaoItem!,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
