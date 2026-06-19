@@ -111,4 +111,14 @@ class ApiClient {
       throw Exception(msg);
     }
   }
+
+  static Future<List<dynamic>> putList(String path, Map<String, dynamic> body) async {
+  final res = await http.put(
+    _uri(path),
+    headers: _headers,
+    body: jsonEncode(body),
+  );
+  _check(res);
+  return jsonDecode(res.body) as List<dynamic>;
+}
 }

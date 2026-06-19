@@ -57,11 +57,15 @@ function _calcularCustoPorUnidPadrao({ precoUnitario, usarM2, qtdPadrao }) {
  * comprou 2 embalagens, a quantidade real que sobe no estoque é 2 × 18000 = 36000.
  * Sem qtdPadrao, retorna a quantidade da OC sem alteração.
  */
-function _calcularQuantidadeReal({ quantidade, usarM2, qtdPadrao }) {
-  if (usarM2) return Number(quantidade);
-  const qtd = Number(qtdPadrao ?? 0);
-  if (!qtd) return Number(quantidade);
-  return Number(quantidade) * qtd;
+  function _calcularQuantidadeReal({ quantidade, usarM2, qtdUnidade, qtdPadrao }) {
+    if (usarM2) return Number(quantidade);
+    // Novo fluxo: qtdUnidade informada explicitamente na OC tem prioridade
+    const qtdUnit = Number(qtdUnidade ?? 0);
+    if (qtdUnit > 0) return Number(quantidade) * qtdUnit;
+    // Fluxo legado: qtdPadrao do cadastro do material
+    const qtd = Number(qtdPadrao ?? 0);
+    if (!qtd) return Number(quantidade);
+    return Number(quantidade) * qtd;
 }
 
 /**
@@ -83,13 +87,25 @@ function _expandirItensComDistribuicao(itens) {
 
     if (dist.length > 0) {
       for (const linha of dist) {
+        // Calcula precoTotal considerando qtdUnidade
+        let precoTotal;
+        if (item.usarM2 && Number(item.precoMetroQuadrado) > 0) {
+          precoTotal = Number(linha.quantidade) * Number(item.precoMetroQuadrado);
+        } else {
+          const precoUnit = Number(item.precoUnitario ?? 0);
+          const qtdUnit = item.qtdUnidade != null ? Number(item.qtdUnidade) : null;
+          if (qtdUnit != null && qtdUnit > 0) {
+            precoTotal = Number(linha.quantidade) * qtdUnit * precoUnit;
+          } else {
+            precoTotal = Number(linha.quantidade) * precoUnit;
+          }
+        }
+        
         resultado.push({
           ...item,
           numeroOS:   String(linha.os).trim(),
           quantidade: Number(linha.quantidade),
-          precoTotal: item.usarM2 && Number(item.precoMetroQuadrado) > 0
-            ? Number(linha.quantidade) * Number(item.precoMetroQuadrado)
-            : Number(linha.quantidade) * Number(item.precoUnitario ?? 0),
+          precoTotal,
         });
       }
     } else {
@@ -229,15 +245,22 @@ async function criar(data, usuarioId) {
   ordemData.status         = ordemData.status         ?? 'EM_ANDAMENTO';
 
   const osArray = _normalizarNumerosOS(numerosOS);
-
-  // Expande itens com distribuição por OS em múltiplos registros
   const itensExpandidos = _expandirItensComDistribuicao(itens || []);
 
   const valorTotal = itensExpandidos.reduce((acc, item) => {
-    const precoBase = item.usarM2 && Number(item.precoMetroQuadrado) > 0
-      ? Number(item.precoMetroQuadrado)
-      : Number(item.precoUnitario);
-    return acc + Number(item.quantidade) * precoBase;
+    let precoItem;
+    if (item.usarM2 && Number(item.precoMetroQuadrado) > 0) {
+      precoItem = Number(item.quantidade) * Number(item.precoMetroQuadrado);
+    } else {
+      const precoUnit = Number(item.precoUnitario ?? 0);
+      const qtdUnit = item.qtdUnidade != null ? Number(item.qtdUnidade) : null;
+      if (qtdUnit != null && qtdUnit > 0) {
+        precoItem = Number(item.quantidade) * qtdUnit * precoUnit;
+      } else {
+        precoItem = Number(item.quantidade) * precoUnit;
+      }
+    }
+    return acc + precoItem;
   }, 0);
 
   const oc = await prisma.ordemCompra.create({
@@ -252,17 +275,29 @@ async function criar(data, usuarioId) {
         ? {
             create: itensExpandidos.map((item) => {
               const usarM2 = item.usarM2 ?? false;
+              let precoTotal;
+              if (usarM2 && Number(item.precoMetroQuadrado) > 0) {
+                precoTotal = Number(item.quantidade) * Number(item.precoMetroQuadrado);
+              } else {
+                const precoUnit = Number(item.precoUnitario ?? 0);
+                const qtdUnit = item.qtdUnidade != null ? Number(item.qtdUnidade) : null;
+                if (qtdUnit != null && qtdUnit > 0) {
+                  precoTotal = Number(item.quantidade) * qtdUnit * precoUnit;
+                } else {
+                  precoTotal = Number(item.quantidade) * precoUnit;
+                }
+              }
+              
               return {
                 material:           { connect: { id: item.materialId } },
                 descricaoItem:      item.descricaoItem?.trim() || null,
                 numeroOS:           item.numeroOS,
                 quantidade:         Number(item.quantidade),
+                qtdUnidade:         item.qtdUnidade != null ? Number(item.qtdUnidade) : null,
                 precoUnitario:      usarM2 ? 0 : Number(item.precoUnitario ?? 0),
                 precoMetroQuadrado: usarM2 ? Number(item.precoMetroQuadrado ?? 0) : 0,
                 usarM2,
-                precoTotal:         usarM2 && Number(item.precoMetroQuadrado) > 0
-                  ? Number(item.quantidade) * Number(item.precoMetroQuadrado)
-                  : Number(item.quantidade) * Number(item.precoUnitario ?? 0),
+                precoTotal,
               };
             }),
           }
@@ -277,9 +312,7 @@ async function criar(data, usuarioId) {
     },
   });
 
-  // Sincroniza vínculos FornecedorMaterial com os preços informados nos itens
   await _sincronizarVinculosFornecedor(ordemData.fornecedorId, itens || []);
-
   return oc;
 }
 
@@ -308,18 +341,30 @@ async function atualizar(id, data) {
       await prisma.ordemCompraItem.createMany({
         data: itensExpandidos.map((item) => {
           const usarM2 = item.usarM2 ?? false;
+          let precoTotal;
+          if (usarM2 && Number(item.precoMetroQuadrado) > 0) {
+            precoTotal = Number(item.quantidade) * Number(item.precoMetroQuadrado);
+          } else {
+            const precoUnit = Number(item.precoUnitario ?? 0);
+            const qtdUnit = item.qtdUnidade != null ? Number(item.qtdUnidade) : null;
+            if (qtdUnit != null && qtdUnit > 0) {
+              precoTotal = Number(item.quantidade) * qtdUnit * precoUnit;
+            } else {
+              precoTotal = Number(item.quantidade) * precoUnit;
+            }
+          }
+          
           return {
             ordemCompraId:      id,
             materialId:         item.materialId,
             descricaoItem:      item.descricaoItem?.trim() || null,
             numeroOS:           item.numeroOS,
             quantidade:         Number(item.quantidade),
+            qtdUnidade:         item.qtdUnidade != null ? Number(item.qtdUnidade) : null,
             precoUnitario:      usarM2 ? 0 : Number(item.precoUnitario ?? 0),
             precoMetroQuadrado: usarM2 ? Number(item.precoMetroQuadrado ?? 0) : 0,
             usarM2,
-            precoTotal:         usarM2 && Number(item.precoMetroQuadrado) > 0
-              ? Number(item.quantidade) * Number(item.precoMetroQuadrado)
-              : Number(item.quantidade) * Number(item.precoUnitario ?? 0),
+            precoTotal,
           };
         }),
       });
@@ -327,7 +372,6 @@ async function atualizar(id, data) {
     await recalcularTotal(id);
   }
 
-  // Sincroniza vínculos FornecedorMaterial com os preços informados nos itens
   const fornecedorIdFinal = ordemData.fornecedorId
     ?? (await prisma.ordemCompra.findUnique({ where: { id }, select: { fornecedorId: true } }))?.fornecedorId;
   await _sincronizarVinculosFornecedor(fornecedorIdFinal, itens || []);
@@ -540,9 +584,45 @@ async function finalizar(id) {
       ? null
       : (custoPorUnidPadrao ?? precoUnitarioFinal ?? null);
 
+    // ── Custo por m² automático ───────────────────────────────────────────────
+    // Deriva o custo/m² a partir do preço unitário para materiais que possuem
+    // dimensões cadastradas mas NÃO estão no modo usarM2.
+    //
+    // Dois casos conforme a unidade de estoque do material:
+    //
+    // 1. Metro linear (unidade = 'm', 'ml', 'metro linear', etc.)
+    //    O preço informado na OC já é por metro linear (ex: R$20/m para lona 3,20m).
+    //    custo/m² = precoUnitario / largura
+    //    Ex: 20 / 3,20 = 6,25 R$/m²
+    //
+    // 2. Unidade inteira / peça (chapa, placa, folha)
+    //    O preço informado é por peça inteira.
+    //    custo/m² = precoUnitario / (largura × comprimento)
+    //    Ex: 1000 / (1,22 × 2,44) = 335,66 R$/m²
+    const _larguraMat     = material?.largura     != null ? Number(material.largura)     : null;
+    const _comprimentoMat = material?.comprimento != null ? Number(material.comprimento) : null;
+    const _areaTotal      = (_larguraMat != null && _comprimentoMat != null && _larguraMat > 0 && _comprimentoMat > 0)
+      ? _larguraMat * _comprimentoMat
+      : null;
+
+    // Detecta se o material é armazenado por metro linear
+    const _unidade = (material?.unidade ?? '').toString().toLowerCase().trim();
+    const _eMetroLinear = ['m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'].includes(_unidade);
+
     const novoUltimoValorPagoM2 = item.usarM2
       ? (precoM2Final ?? null)
-      : null;
+      : (() => {
+          if (novoUltimoValorPago == null || novoUltimoValorPago <= 0) return null;
+          // Metro linear: divide pelo comprimento (largura da bobina/rolo)
+          if (_eMetroLinear && _larguraMat != null && _larguraMat > 0) {
+            return novoUltimoValorPago / _larguraMat;
+          }
+          // Peça inteira: divide pela área total da peça
+          if (_areaTotal != null && _areaTotal > 0) {
+            return novoUltimoValorPago / _areaTotal;
+          }
+          return null;
+        })();
 
     // O preço que vai para a movimentação:
     //   • se tem qtdPadrao → custo por unidade menor
@@ -553,9 +633,11 @@ async function finalizar(id) {
     // Se o material tem qtdPadrao, a quantidade comprada (em embalagens) é
     // multiplicada pela qtdPadrao para refletir a unidade do estoque.
     // Ex: 2 latas de thinner 18 L (qtdPadrao = 18000 ml) → 36000 ml no estoque.
+    // Exemplo em finalizar (e idem em reverter):
     const quantidadeReal = _calcularQuantidadeReal({
       quantidade: item.quantidade,
       usarM2:     item.usarM2,
+      qtdUnidade: item.qtdUnidade,   // ← ADICIONAR
       qtdPadrao:  material?.qtdPadrao,
     });
 
@@ -568,7 +650,10 @@ async function finalizar(id) {
         relacaoOSId:   relacaoOS.id,
         ordemCompraId: id,
         precoUnitario: precoUnitarioMovimentacao,
-        precoM2:       precoM2Final,
+        // Para materiais com dimensões comprados por unidade (usarM2=false),
+        // grava o custo/m² calculado na movimentação de entrada, para que
+        // o estoque_service possa derivá-lo ao criar o retalho na saída.
+        precoM2:       item.usarM2 ? precoM2Final : novoUltimoValorPagoM2,
         descricaoItem: item.descricaoItem ?? null,
         observacao:    `Entrada via OC #${id}`,
       },

@@ -16,6 +16,11 @@ class MovimentacaoModel {
   final String? observacao;
   final String? descricaoItem;
   final DateTime criadoEm;
+  // Presentes apenas em saídas de material UNIDADE com modo dimensional ativo.
+  // Quando não nulos, indicam que precoM2 é o custo proporcional da área usada
+  // (não o custo/m² do material), e o valor correto da saída é precoM2 × 1.
+  final double? larguraUsada;
+  final double? comprimentoUsado;
 
   MovimentacaoModel({
     required this.id,
@@ -35,7 +40,15 @@ class MovimentacaoModel {
     this.observacao,
     this.descricaoItem,
     required this.criadoEm,
+    this.larguraUsada,
+    this.comprimentoUsado,
   });
+
+  /// True quando esta saída foi registrada com modo dimensional (largura × comprimento).
+  /// Nesse caso, [precoM2] é o custo proporcional total da área consumida, não o custo/m².
+  bool get usouModoDimensional =>
+      larguraUsada != null && larguraUsada! > 0 &&
+      comprimentoUsado != null && comprimentoUsado! > 0;
 
   factory MovimentacaoModel.fromJson(Map<String, dynamic> json) =>
       MovimentacaoModel(
@@ -62,6 +75,12 @@ class MovimentacaoModel {
         observacao:            json['observacao'],
         descricaoItem:         json['descricaoItem'],
         criadoEm:              DateTime.parse(json['criadoEm']).toLocal(),
+        larguraUsada:          json['larguraUsada'] != null
+            ? double.tryParse(json['larguraUsada'].toString())
+            : null,
+        comprimentoUsado:      json['comprimentoUsado'] != null
+            ? double.tryParse(json['comprimentoUsado'].toString())
+            : null,
       );
 }
 

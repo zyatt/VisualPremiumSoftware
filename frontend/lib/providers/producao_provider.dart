@@ -111,6 +111,8 @@ class ProducaoProvider with ChangeNotifier {
     String? descricaoItem,
     required double quantidadeReservada,
     required String numeroOS,
+    double? larguraUsada,
+    double? comprimentoUsado,
   }) async {
     _erro = null;
     try {
@@ -119,6 +121,8 @@ class ProducaoProvider with ChangeNotifier {
         descricaoItem: descricaoItem,
         quantidadeReservada: quantidadeReservada,
         numeroOS: numeroOS,
+        larguraUsada: larguraUsada,
+        comprimentoUsado: comprimentoUsado,
       );
       await carregarMateriais();
       await carregarHistorico();

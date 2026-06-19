@@ -167,9 +167,9 @@ class _ProducaoPageState extends State<ProducaoPage>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // ABA ESTOQUE — grade de categorias
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
 
 class _EstoqueTab extends StatefulWidget {
   const _EstoqueTab();
@@ -418,7 +418,7 @@ class _EstoqueTabState extends State<_EstoqueTab> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // CARD DE CATEGORIA
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -501,7 +501,7 @@ class _CategoriaCardProducaoState extends State<_CategoriaCardProducao> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PÁGINA DE IDENTIFICADORES (nível 2 da hierarquia: categoria → identificador)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 
 class _ProducaoIdentificadorPage extends StatefulWidget {
   final String   categoriaId;
@@ -809,9 +809,9 @@ class _ProducaoIdentificadorPageState extends State<_ProducaoIdentificadorPage> 
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // CARD DE IDENTIFICADOR
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 
 class _IdentificadorCardProducao extends StatefulWidget {
   final String     label;
@@ -901,7 +901,7 @@ class _IdentificadorCardProducaoState extends State<_IdentificadorCardProducao> 
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // PÁGINA DE MATERIAIS POR CATEGORIA
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -910,12 +910,8 @@ class _ProducaoCategoriaPage extends StatefulWidget {
   final String   categoriaLabel;
   final Color    cor;
   final IconData icone;
-  /// Quando não-null, pré-preenche o filtro de identificador (vindo de
-  /// _ProducaoIdentificadorPage). String vazia = sem identificador.
   final String?  identificadorFiltro;
-  /// Rótulo do identificador para exibir no breadcrumb (null = sem filtro).
   final String?  identificadorLabel;
-  /// Se true, exibe breadcrumb de volta à tela de identificadores.
   final bool     mostrarBotaoIdentificadores;
 
   const _ProducaoCategoriaPage({
@@ -953,7 +949,6 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
   @override
   void initState() {
     super.initState();
-    // Pré-preenche o filtro de identificador vindo da página anterior
     if (widget.identificadorFiltro != null) {
       _identificadorCtrl.text = widget.identificadorFiltro!;
     }
@@ -1008,7 +1003,6 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
             Row(
               children: [
                 InkWell(
@@ -1099,7 +1093,6 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
             ),
             const SizedBox(height: 20),
 
-            // ── Linha 1: ID · Busca · Status · Limpar ──────────────────────
             Row(
               children: [
                 SizedBox(
@@ -1162,7 +1155,6 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
             ),
             const SizedBox(height: 10),
 
-            // ── Linha 2: Identificador · Medida · Espessura ─────────────────
             Row(
               children: [
                 Expanded(
@@ -1209,7 +1201,6 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
             ),
             const SizedBox(height: 16),
 
-            // ── Tabela ──────────────────────────────────────────────────────
             Expanded(
               child: Consumer<ProducaoProvider>(
                 builder: (_, provider, __) {
@@ -1306,10 +1297,6 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TABELA DE MATERIAIS
-// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TABELA DE MATERIAIS
@@ -1455,7 +1442,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
     final podeOperar = role != 'COMPRAS';
 
     final bgColor = _hovered && podeOperar
-        ? Color(0xFFFF9800).withValues(alpha: 0.10)
+        ? Color(0xFF009800).withValues(alpha: 0.10)
         : Theme.of(context).colorScheme.surface;
 
     return MouseRegion(
@@ -1472,7 +1459,6 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // ID
                 _colWrap(cols[0], Padding(
                   padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
@@ -1487,11 +1473,9 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 )),
                 _vDivider(),
 
-                // Identificador
                 _colWrap(cols[1], _cell(m.identificador?.isNotEmpty == true ? m.identificador! : '—')),
                 _vDivider(),
 
-                // Nome
                 _colWrap(cols[2], Padding(
                   padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
@@ -1506,31 +1490,25 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 )),
                 _vDivider(),
 
-                // Categoria (oculta quando categoria específica selecionada)
                 if (widget.mostrarCategoria) ...[
                   _colWrap(cols[3], _cell(m.categoria ?? '—')),
                   _vDivider(),
                 ],
 
-                // Unidade
                 _colWrap(cols[widget.mostrarCategoria ? 4 : 3], _cell(m.unidade ?? '—')),
                 _vDivider(),
 
-                // Medida
                 _colWrap(cols[widget.mostrarCategoria ? 5 : 4], _cell(m.medida ?? '—')),
                 _vDivider(),
 
-                // Espessura
                 _colWrap(cols[widget.mostrarCategoria ? 6 : 5], _cell(m.espessura ?? '—')),
                 _vDivider(),
 
-                // Estoque atual
                 _colWrap(cols[widget.mostrarCategoria ? 7 : 6], _cell(
                   m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2),
                 )),
                 _vDivider(),
 
-                // Em uso
                 _colWrap(cols[widget.mostrarCategoria ? 8 : 7], Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
@@ -1547,7 +1525,6 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 )),
                 _vDivider(),
 
-                // Disponível
                 _colWrap(cols[widget.mostrarCategoria ? 9 : 8], Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
@@ -1562,7 +1539,6 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 )),
                 _vDivider(),
 
-                // Status
                 _colWrap(cols[widget.mostrarCategoria ? 10 : 9], Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
@@ -1621,7 +1597,7 @@ class _StatusBadge extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DIALOG — SOLICITAR MATERIAL (baixa imediata)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 
 class _SolicitarMaterialDialog extends StatefulWidget {
   final MaterialProducaoModel material;
@@ -1662,15 +1638,19 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
     super.dispose();
   }
 
-  // ── Detecta medida no formato "LxA" ou "LxAM" (ex: "2X1", "1.20X0.80M") ──
+  // Apenas materiais com unidade exatamente "UNIDADE" (chapa/peça) podem usar
+  // o modo dimensional. Materiais M² já são medidos em área (sem necessidade
+  // de informar dimensão) e materiais metro linear (m, m/l, ml…) têm largura
+  // fixa — o comprimento cortado já é a própria quantidade informada.
   bool get _temMedidaDimensional {
+    final unidade = widget.material.unidade?.toUpperCase().trim() ?? '';
+    if (unidade != 'UNIDADE') return false;
     final medida = widget.material.medida;
     if (medida == null || medida.isEmpty) return false;
     return RegExp(r'^\d+([.,]\d+)?\s*[xX]\s*\d+([.,]\d+)?\s*M?$', caseSensitive: false)
         .hasMatch(medida.trim());
   }
 
-  /// Parseia "2X1" ou "1.20X0.80M" → (largura, comprimento). Retorna null se inválido.
   (double l, double a)? get _medidaChapa {
     final medida = widget.material.medida;
     if (medida == null) return null;
@@ -1686,22 +1666,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
   String _fmt(double v) =>
       v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
 
-  void _recalcularQtd() {
-    final chapa = _medidaChapa;
-    if (chapa == null) return;
-    final larg = double.tryParse(_larguraCtrl.text.replaceAll(',', '.'));
-    final alt  = double.tryParse(_alturaCtrl.text.replaceAll(',', '.'));
-    if (larg == null || alt == null || larg <= 0 || alt <= 0) {
-      setState(() {});
-      return;
-    }
-    final fracaoBruta = (larg * alt) / (chapa.$1 * chapa.$2);
-    final fracao  = double.parse(fracaoBruta.toStringAsFixed(4));
-    final qtdStr  = fracao.toStringAsFixed(4).replaceAll(RegExp(r'0+$'), '');
-    _qtdCtrl.text = qtdStr.endsWith('.') ? '${qtdStr}0' : qtdStr;
-    setState(() {});
-  }
-
   Future<void> _confirmar() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -1710,8 +1674,13 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
       return;
     }
 
-    final os  = _osCtrl.text.trim();
-    final qtd = double.tryParse(_qtdCtrl.text.replaceAll(',', '.'));
+    final os = _osCtrl.text.trim();
+    
+    // No modo dimensional, usa sempre quantidade = 1
+    // Fora do modo dimensional, usa o valor digitado
+    final qtd = _modoDimensional 
+        ? 1.0 
+        : double.tryParse(_qtdCtrl.text.replaceAll(',', '.'));
 
     if (qtd == null || qtd <= 0) {
       setState(() => _erro = 'Quantidade inválida');
@@ -1720,11 +1689,24 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
 
     setState(() { _enviando = true; _erro = null; });
 
+    double? largUsada;
+    double? compUsado;
+    if (_modoDimensional && _temMedidaDimensional) {
+      final l = double.tryParse(_larguraCtrl.text.replaceAll(',', '.'));
+      final c = double.tryParse(_alturaCtrl.text.replaceAll(',', '.'));
+      if (l != null && l > 0 && c != null && c > 0) {
+        largUsada = l;
+        compUsado = c;
+      }
+    }
+
     final ok = await context.read<ProducaoProvider>().criarSolicitacao(
           materialId:          widget.material.id,
           descricaoItem:       _filhoSelecionado?.descricao,
           quantidadeReservada: qtd,
           numeroOS:            os,
+          larguraUsada:        largUsada,
+          comprimentoUsado:    compUsado,
         );
 
     if (!mounted) return;
@@ -1784,7 +1766,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
               ],
               const SizedBox(height: 16),
 
-              // ── Número da OS ─────────────────────────────────────────────
               TextFormField(
                 controller: _osCtrl,
                 decoration: const InputDecoration(
@@ -1798,7 +1779,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
               ),
               const SizedBox(height: 12),
 
-              // ── Variação (material específico) ───────────────────────────
               if (m.especifico) ...[
                 if (filhos.isEmpty)
                   Container(
@@ -1887,7 +1867,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                 const SizedBox(height: 12),
               ],
 
-              // ── Modo dimensional (chapas com medida LxA) ─────────────
               if (!m.especifico || filhos.isNotEmpty) ...[
                 Builder(builder: (_) {
                   final chapa = _medidaChapa;
@@ -1897,11 +1876,14 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Toggle
                       InkWell(
                         onTap: () => setState(() {
                           _modoDimensional = !_modoDimensional;
-                          if (!_modoDimensional) {
+                          if (_modoDimensional) {
+                            _qtdCtrl.text = '1';
+                            _larguraCtrl.clear();
+                            _alturaCtrl.clear();
+                          } else {
                             _larguraCtrl.clear();
                             _alturaCtrl.clear();
                             _qtdCtrl.clear();
@@ -1954,7 +1936,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                         ),
                       ),
 
-                      // Campos largura × comprimento
                       if (_modoDimensional) ...[
                         const SizedBox(height: 8),
                         Row(
@@ -1970,7 +1951,7 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                                   suffixStyle: TextStyle(
                                       fontSize: 11, color: Theme.of(context).colorScheme.outline),
                                 ),
-                                onChanged: (_) => _recalcularQtd(),
+                                onChanged: (_) => setState(() {}),
                               ),
                             ),
                             Padding(
@@ -1992,13 +1973,12 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                                   suffixStyle: TextStyle(
                                       fontSize: 11, color: Theme.of(context).colorScheme.outline),
                                 ),
-                                onChanged: (_) => _recalcularQtd(),
+                                onChanged: (_) => setState(() {}),
                               ),
                             ),
                           ],
                         ),
 
-                        // Preview do cálculo
                         Builder(builder: (_) {
                           final larg = double.tryParse(
                               _larguraCtrl.text.replaceAll(',', '.'));
@@ -2012,6 +1992,9 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                           final areaTotal = chapa.$1 * chapa.$2;
                           final fracao    = areaUsada / areaTotal;
                           final pct       = (fracao * 100).toStringAsFixed(1);
+                          final qtdCalc   = fracao.toStringAsFixed(4).replaceAll(RegExp(r'0+$'), '');
+                          final qtdDisplay = qtdCalc.endsWith('.') ? '${qtdCalc}0' : qtdCalc;
+                          
                           return Container(
                             margin: const EdgeInsets.only(top: 8),
                             padding: const EdgeInsets.symmetric(
@@ -2044,7 +2027,7 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                                         ),
                                         const TextSpan(text: '  →  '),
                                         TextSpan(
-                                          text: _qtdCtrl.text,
+                                          text: qtdDisplay,
                                           style: const TextStyle(
                                               fontWeight: FontWeight.w700,
                                               color: AppTheme.primary),
@@ -2071,7 +2054,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                 }),
               ],
 
-              // ── Quantidade ───────────────────────────────────────────────
               if (!m.especifico || filhos.isNotEmpty) ...[
                 TextFormField(
                   controller: _qtdCtrl,
@@ -2080,7 +2062,7 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                     isDense:   true,
                     suffixText: unidade,
                     helperText: _modoDimensional
-                        ? 'Calculado automaticamente'
+                        ? 'Bloqueado: quantidade fixa em 1'
                         : null,
                     helperStyle: TextStyle(
                         fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
@@ -2113,7 +2095,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                 ],
                 const SizedBox(height: 12),
 
-                // ── Observação ─────────────────────────────────────────────
                 TextFormField(
                   controller: _obsCtrl,
                   decoration: const InputDecoration(
@@ -2124,7 +2105,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                 ),
               ],
 
-              // ── Erro geral ───────────────────────────────────────────────
               if (_erro != null) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -2160,9 +2140,9 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // ABA HISTÓRICO
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
 
 class _HistoricoTab extends StatefulWidget {
   const _HistoricoTab();
@@ -2257,16 +2237,15 @@ class _HistoricoTabState extends State<_HistoricoTab> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // CARD DO HISTÓRICO
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 
 class _HistoricoCard extends StatelessWidget {
   final SolicitacaoProducaoModel solicitacao;
   const _HistoricoCard({required this.solicitacao});
 
   static DateTime _toBrasilia(DateTime dt) {
-    // Garante que o DateTime seja tratado como UTC antes de aplicar o offset de Brasília (UTC-3)
     final emUtc = dt.isUtc ? dt : DateTime.utc(
       dt.year, dt.month, dt.day,
       dt.hour, dt.minute, dt.second, dt.millisecond,
@@ -2327,13 +2306,12 @@ class _HistoricoCard extends StatelessWidget {
         '${data.minute.toString().padLeft(2, '0')}';
 
     final detalhes = <String>[];
-    if (s.materialIdentificador != null && s.materialIdentificador!.isNotEmpty) {
+    if (s.materialIdentificador != null&& s.materialIdentificador!.isNotEmpty) {
       detalhes.add(s.materialIdentificador!);
     }
     if (s.materialMedida != null) detalhes.add(s.materialMedida!);
     if (s.materialEspessura != null) detalhes.add(s.materialEspessura!);
 
-    // Verificar role para mostrar botão de exclusão
     final role = context.watch<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
     final podeExcluir = role == 'ADMIN' || role == 'GERENTE';
 
@@ -2460,9 +2438,9 @@ class _HistoricoCard extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // PAGINAÇÃO
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 
 class _BarraPaginacao extends StatelessWidget {
   final int paginaAtual;

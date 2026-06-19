@@ -222,11 +222,15 @@ async function criar(data, usuarioId, usuarioNome) {
   const medidaTrimmed    = data.medida?.trim()       ?? null;
   const espessuraTrimmed = data.espessura?.trim()    ?? null;
 
+  const identificadorTrimmed = data.identificador?.trim() ?? null;
   const duplicado = await prisma.material.findFirst({
     where: {
-      nome:      { equals: nomeTrimmed, mode: 'insensitive' },
-      medida:    medidaTrimmed    ? { equals: medidaTrimmed,    mode: 'insensitive' } : null,
-      espessura: espessuraTrimmed ? { equals: espessuraTrimmed, mode: 'insensitive' } : null,
+      nome:         { equals: nomeTrimmed, mode: 'insensitive' },
+      identificador: identificadorTrimmed
+        ? { equals: identificadorTrimmed, mode: 'insensitive' }
+        : null,
+      medida:       medidaTrimmed    ? { equals: medidaTrimmed,    mode: 'insensitive' } : null,
+      espessura:    espessuraTrimmed ? { equals: espessuraTrimmed, mode: 'insensitive' } : null,
     },
   });
 
@@ -261,12 +265,16 @@ async function atualizar(id, data, usuarioId, usuarioNome) {
   const medidaTrimmed      = (data.medida       ?? atual.medida)?.trim()       ?? null;
   const espessuraTrimmed   = (data.espessura    ?? atual.espessura)?.trim()    ?? null;
 
+  const identificadorTrimmed = (data.identificador ?? atual.identificador)?.trim() ?? null;
   const duplicado = await prisma.material.findFirst({
     where: {
-      id:        { not: id },
-      nome:      { equals: nomeTrimmed, mode: 'insensitive' },
-      medida:    medidaTrimmed    ? { equals: medidaTrimmed,    mode: 'insensitive' } : null,
-      espessura: espessuraTrimmed ? { equals: espessuraTrimmed, mode: 'insensitive' } : null,
+      id:           { not: id },
+      nome:         { equals: nomeTrimmed, mode: 'insensitive' },
+      identificador: identificadorTrimmed
+        ? { equals: identificadorTrimmed, mode: 'insensitive' }
+        : null,
+      medida:       medidaTrimmed    ? { equals: medidaTrimmed,    mode: 'insensitive' } : null,
+      espessura:    espessuraTrimmed ? { equals: espessuraTrimmed, mode: 'insensitive' } : null,
     },
   });
 

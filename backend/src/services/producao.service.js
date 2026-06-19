@@ -1,4 +1,3 @@
-// producao.service.js
 const prisma = require('../utils/prisma');
 
 // ── Include reutilizável ──────────────────────────────────────────────────────
@@ -8,7 +7,7 @@ const _includeSolicitacao = {
       id: true, nome: true, unidade: true, quantidade: true,
       estoqueMinimo: true, identificador: true, medida: true,
       espessura: true, categoria: true, especifico: true, status: true,
-      ultimoValorPago: true, ultimoValorPagoM2: true,
+      ultimoValorPago: true, ultimoValorPagoM2: true, largura: true, comprimento: true,
     },
   },
   baixas: { orderBy: { criadoEm: 'asc' } },
@@ -78,7 +77,7 @@ async function listarMateriais({ busca, categoria, status, id, identificador, me
 }
 
 // ── Criar solicitação ─────────────────────────────────────────────────────────
-async function criarSolicitacao({ materialId, descricaoItem, quantidadeReservada, numeroOS, usuarioId, usuarioNome }) {
+async function criarSolicitacao({ materialId, descricaoItem, quantidadeReservada, numeroOS, usuarioId, usuarioNome, larguraUsada, comprimentoUsado }) {
   const material = await prisma.material.findUnique({ where: { id: materialId } });
   if (!material || !material.ativo) throw { status: 404, message: 'Material não encontrado ou inativo' };
 
@@ -148,7 +147,7 @@ async function criarSolicitacao({ materialId, descricaoItem, quantidadeReservada
     include: _includeSolicitacao,
   });
 
-  await _registrarSaidaControleEstoque(solicitacao);
+  await _registrarSaidaControleEstoque(solicitacao, { larguraUsada, comprimentoUsado });
 
   return solicitacao;
 }
@@ -257,7 +256,7 @@ async function excluirHistorico(solicitacaoId) {
 }
 
 // ── Registrar saída no controle de estoque ────────────────────────────────────
-async function _registrarSaidaControleEstoque(sol) {
+async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUsado } = {}) {
   const qtdUsada = Number(sol.quantidadeUsada);
   if (qtdUsada <= 0) return;
 
@@ -267,10 +266,10 @@ async function _registrarSaidaControleEstoque(sol) {
   // Busca o preço do material (último valor pago registrado)
   const material = sol.material ?? await prisma.material.findUnique({
     where: { id: sol.materialId },
-    select: { ultimoValorPago: true, ultimoValorPagoM2: true },
+    select: { ultimoValorPago: true, ultimoValorPagoM2: true, largura: true, comprimento: true, unidade: true },
   });
   const precoUnitario = material?.ultimoValorPago   ? Number(material.ultimoValorPago)   : null;
-  const precoM2       = material?.ultimoValorPagoM2 ? Number(material.ultimoValorPagoM2) : null;
+  let precoM2       = material?.ultimoValorPagoM2 ? Number(material.ultimoValorPagoM2) : null;
 
   // Para material específico (filho), tenta pegar o preço do estoque específico
   let precoUnitarioFinal = precoUnitario;
@@ -284,29 +283,56 @@ async function _registrarSaidaControleEstoque(sol) {
     if (filho?.ultimoValorPagoM2) precoM2Final       = Number(filho.ultimoValorPagoM2);
   }
 
+  // ── Custo proporcional por dimensão usada (igual ao estoque.service.js) ──────
+  const _unidadeMat = (material?.unidade ?? '').toLowerCase().trim();
+  const _eMetroLinear = ['m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'].includes(_unidadeMat);
+
+  // Para material metro linear, precoM2 (ultimoValorPagoM2) é o custo/m² puro —
+  // que NÃO deve ser multiplicado pela quantidade em metros no relatório.
+  // O valor correto é precoUnitario (custo/metro linear = ultimoValorPago).
+  // Zeramos precoM2Final para que o relatório use apenas precoUnitario.
+  if (_eMetroLinear) {
+    precoM2Final = null;
+  }
+
+  if (
+    larguraUsada != null && comprimentoUsado != null &&
+    !_eMetroLinear &&
+    material?.largura != null && material?.comprimento != null
+  ) {
+    const larg      = Number(larguraUsada);
+    const comp      = Number(comprimentoUsado);
+    const largTotal = Number(material.largura);
+    const compTotal = Number(material.comprimento);
+
+    if (larg > 0 && comp > 0 && largTotal > 0 && compTotal > 0) {
+      const areaUsada = larg * comp;
+      const areaTotal = largTotal * compTotal;
+      const custoM2 = precoM2Final != null
+        ? Number(precoM2Final)
+        : (precoUnitarioFinal != null && areaTotal > 0
+            ? Number(precoUnitarioFinal) / areaTotal
+            : null);
+      if (custoM2 != null) {
+        precoM2Final = Math.round(custoM2 * areaUsada * 100000) / 100000;
+      }
+    }
+  }
+
   // Busca ou cria a RelacaoOS adequada.
-  //
-  // Regra (espelha estoque_service):
-  //  • OS numérica  → reutiliza sempre (upsert pelo numeroOS exato).
-  //  • OS textual   → reutiliza se EM_ANDAMENTO (nome exato OU sufixo de data de hoje).
-  //    Se já estiver FECHADA, cria uma nova com sufixo de data para não
-  //    contaminar um período anterior já encerrado.
   const osEhNumerica = /^\d+$/.test(numeroOS);
 
   const _d   = new Date();
-  const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`; // "DD-MM-YYYY"
+  const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`;
 
   let relacao;
   if (osEhNumerica) {
-    // OS numérica: upsert garante uma única relação por chave exata
     relacao = await prisma.relacaoOS.upsert({
       where:  { numeroOS },
       create: { numeroOS, status: 'EM_ANDAMENTO' },
       update: {},
     });
   } else {
-    // OS textual: procura qualquer RelacaoOS EM_ANDAMENTO com o nome exato
-    // OU com sufixo de data de hoje (criada pelo controle de estoque no mesmo dia)
     const relacaoAberta = await prisma.relacaoOS.findFirst({
       where: {
         status: 'EM_ANDAMENTO',
@@ -321,7 +347,6 @@ async function _registrarSaidaControleEstoque(sol) {
     if (relacaoAberta) {
       relacao = relacaoAberta;
     } else {
-      // Nenhuma aberta: cria nova com sufixo de data
       let candidato = `${numeroOS}-${hoje}`;
       let sufixoSeq = 1;
 
@@ -352,8 +377,115 @@ async function _registrarSaidaControleEstoque(sol) {
       observacao,
       precoUnitario: precoUnitarioFinal ?? undefined,
       precoM2:       precoM2Final       ?? undefined,
+      larguraUsada: (larguraUsada != null ? Number(larguraUsada) : null),
+      comprimentoUsado: (comprimentoUsado != null ? Number(comprimentoUsado) : null),
     },
   });
+
+  // ── Retalho (igual ao estoque.service.js) ────────────────────────────────────
+  if (
+    !sol.descricaoItem &&
+    larguraUsada != null && comprimentoUsado != null &&
+    material?.largura != null && material?.comprimento != null
+  ) {
+    const larg      = Number(larguraUsada);
+    const comp      = Number(comprimentoUsado);
+    const largTotal = Number(material.largura);
+    const compTotal = Number(material.comprimento);
+
+    if (larg > 0 && comp > 0 && largTotal > 0 && compTotal > 0) {
+      const areaTotal   = largTotal * compTotal;
+      const areaUsada   = larg * comp;
+      const areaRetalho = Math.round((areaTotal - areaUsada) * 10000) / 10000;
+
+      if (areaRetalho > 0.0001) {
+        const materialData = await prisma.material.findUnique({
+          where: { id: sol.materialId },
+          select: { nome: true, espessura: true, categoria: true, medida: true },
+        });
+
+        let retalhoMat = await prisma.material.findFirst({
+          where: {
+            nome:          { equals: materialData.nome, mode: 'insensitive' },
+            identificador: { equals: 'RETALHO',    mode: 'insensitive' },
+            espessura:     materialData.espessura
+              ? { equals: materialData.espessura, mode: 'insensitive' }
+              : null,
+          },
+        });
+
+        const custoM2Retalho = (() => {
+          if (precoM2Final != null && precoM2Final > 0) {
+            const areaUsada = larg * comp;
+            if (areaUsada > 0) return precoM2Final / areaUsada;
+          }
+          const pu = precoUnitarioFinal != null ? Number(precoUnitarioFinal) : null;
+          const areaT = largTotal * compTotal;
+          if (pu != null && pu > 0 && areaT > 0) return pu / areaT;
+          return material.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null;
+        })();
+
+        if (!retalhoMat) {
+          try {
+            retalhoMat = await prisma.material.create({
+              data: {
+                nome:              materialData.nome,
+                unidade:           'M2',
+                categoria:         materialData.categoria   ?? null,
+                medida:            materialData.medida      ?? null,
+                espessura:         materialData.espessura   ?? null,
+                identificador:     'RETALHO',
+                quantidade:        areaRetalho,
+                estoqueMinimo:     0,
+                status:            _calcularStatus(areaRetalho, 0, true),
+                estoqueConfirmado: false,
+                ativo:             true,
+                especifico:        false,
+                ultimoValorPago:   null,
+                ultimoValorPagoM2: custoM2Retalho,
+              },
+            });
+          } catch (err) {
+            if (err?.code === 'P2002') {
+              retalhoMat = await prisma.material.findFirst({
+                where: {
+                  nome:      { equals: materialData.nome, mode: 'insensitive' },
+                  medida:    materialData.medida
+                    ? { equals: materialData.medida,    mode: 'insensitive' }
+                    : null,
+                  espessura: materialData.espessura
+                    ? { equals: materialData.espessura, mode: 'insensitive' }
+                    : null,
+                },
+              });
+              if (!retalhoMat) throw err;
+              const novaQtd = Number(retalhoMat.quantidade) + areaRetalho;
+              await prisma.material.update({
+                where: { id: retalhoMat.id },
+                data: {
+                  quantidade: novaQtd,
+                  status:     _calcularStatus(novaQtd, Number(retalhoMat.estoqueMinimo), retalhoMat.ativo),
+                },
+              });
+            } else {
+              throw err;
+            }
+          }
+        } else {
+          const novaQtd = Number(retalhoMat.quantidade) + areaRetalho;
+          await prisma.material.update({
+            where: { id: retalhoMat.id },
+            data: {
+              quantidade:        novaQtd,
+              status:            _calcularStatus(novaQtd, Number(retalhoMat.estoqueMinimo), retalhoMat.ativo),
+              ultimoValorPago:   null,
+              ...(custoM2Retalho != null ? { ultimoValorPagoM2: custoM2Retalho } : {}),
+            },
+          });
+        }
+      }
+    }
+  }
 }
 
 // ── Listar solicitações ───────────────────────────────────────────────────────

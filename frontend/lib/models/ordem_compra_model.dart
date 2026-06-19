@@ -2,6 +2,8 @@ class OrdemCompraItemModel {
   final int? id;
   final int materialId;
   final String materialNome;
+  /// Unidade de medida do material no estoque (ex: "UNIDADE", "ML", "M/L", "KG").
+  final String? materialUnidade;
   final String? materialMedida;
   final String? materialEspessura;
   final String? materialIdentificador;
@@ -9,7 +11,12 @@ class OrdemCompraItemModel {
   final String? materialUnidPadrao;
   final String? descricaoItem;
   final String numeroOS;
+  /// Quantidade de embalagens/peças compradas (o que o usuário digita como "qtd").
   final double quantidade;
+  /// Quantidade da unidade de medida por embalagem/peça
+  /// (ex: 50 M/L por lona, 18000 ML por lata de thinner).
+  /// Quando não nulo e > 0, o estoque recebe quantidade × qtdUnidade.
+  final double? qtdUnidade;
   final double precoUnitario;
   final double? precoMetroQuadrado;
   final double precoTotal;
@@ -20,6 +27,7 @@ class OrdemCompraItemModel {
     this.id,
     required this.materialId,
     required this.materialNome,
+    this.materialUnidade,
     this.materialMedida,
     this.materialEspessura,
     this.materialIdentificador,
@@ -28,6 +36,7 @@ class OrdemCompraItemModel {
     this.descricaoItem,
     required this.numeroOS,
     required this.quantidade,
+    this.qtdUnidade,
     required this.precoUnitario,
     this.precoMetroQuadrado,
     required this.precoTotal,
@@ -35,29 +44,31 @@ class OrdemCompraItemModel {
     this.materialEspecifico = false,
   });
 
-  /// Quantidade real que entra/sai do estoque ao finalizar a OC.
+  /// Quantidade real que entra no estoque ao finalizar a OC.
   ///
-  /// Quando o material tem qtdPadrao, o usuário informa quantas embalagens
-  /// comprou e o estoque sobe pela quantidade em unidade menor.
-  /// Exemplo: 2 latas de thinner 18 L (qtdPadrao = 18000 ml) → 36000 ml.
-  ///
-  /// Sem qtdPadrao (ou quando usarM2 está ativo), retorna [quantidade].
+  /// Prioridade:
+  /// 1. Se [qtdUnidade] foi informado na OC (novo fluxo), usa quantidade × qtdUnidade.
+  ///    Exemplo: 2 lonas × 50 M/L cada → 100 M/L no estoque.
+  /// 2. Se o material tem [materialQtdPadrao] (fluxo legado), usa quantidade × qtdPadrao.
+  ///    Exemplo: 2 latas de thinner 18000 ml → 36000 ml no estoque.
+  /// 3. Caso contrário, retorna [quantidade] diretamente.
   double get quantidadeEstoque {
     if (usarM2) return quantidade;
+    // Novo fluxo: qtdUnidade informada explicitamente na OC
+    if (qtdUnidade != null && qtdUnidade! > 0) return quantidade * qtdUnidade!;
+    // Fluxo legado: qtdPadrao do cadastro do material
     final qtd = materialQtdPadrao;
     if (qtd == null || qtd <= 0) return quantidade;
     return quantidade * qtd;
   }
 
-  /// Custo calculado por unidade padrão.
+  /// Custo calculado por unidade de medida (M/L, ML, KG etc.).
   ///
-  /// Exemplo: thinner 18 L (qtdPadrao = 18000 ml), precoUnitario = 250
-  ///   → custoPorUnidPadrao = 250 / 18000 ≈ 0.01388 (por ml)
-  ///
-  /// Retorna null quando qtdPadrao não está definida ou usarM2 está ativo.
+  /// Usa [qtdUnidade] quando disponível (novo fluxo), senão [materialQtdPadrao].
+  /// Retorna null quando nenhum dos dois está definido ou usarM2 está ativo.
   double? get custoPorUnidPadrao {
     if (usarM2) return null;
-    final qtd = materialQtdPadrao;
+    final qtd = qtdUnidade ?? materialQtdPadrao;
     if (qtd == null || qtd <= 0) return null;
     if (precoUnitario <= 0) return null;
     return precoUnitario / qtd;
@@ -67,6 +78,7 @@ class OrdemCompraItemModel {
     id:                     json['id'],
     materialId:             json['materialId'] ?? 0,
     materialNome:           json['material']?['nome'] ?? '',
+    materialUnidade:        json['material']?['unidade'],
     materialMedida:         json['material']?['medida'],
     materialEspessura:      json['material']?['espessura'],
     materialIdentificador:  json['material']?['identificador'],
@@ -77,6 +89,9 @@ class OrdemCompraItemModel {
     descricaoItem:          json['descricaoItem'],
     numeroOS:               json['numeroOS'] ?? '',
     quantidade:             double.tryParse(json['quantidade']?.toString() ?? '0') ?? 0,
+    qtdUnidade:             json['qtdUnidade'] != null
+        ? double.tryParse(json['qtdUnidade'].toString())
+        : null,
     precoUnitario:          double.tryParse(json['precoUnitario']?.toString() ?? '0') ?? 0,
     precoMetroQuadrado:     json['precoMetroQuadrado'] != null
         ? double.tryParse(json['precoMetroQuadrado'].toString())

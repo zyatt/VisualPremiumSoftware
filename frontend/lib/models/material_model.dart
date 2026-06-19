@@ -94,6 +94,10 @@ class FornecedorMaterialModel {
   final double preco;
   final double precoMetroQuadrado;
   final bool ativo;
+  /// Largura do material (m) — preenchido quando o material tem dimensões cadastradas.
+  final double? materialLargura;
+  /// Comprimento do material (m) — preenchido quando o material tem dimensões cadastradas.
+  final double? materialComprimento;
 
   /// True quando o preço de referência é por m²; false quando é por unidade.
   bool get usarM2 => precoMetroQuadrado > 0;
@@ -105,6 +109,8 @@ class FornecedorMaterialModel {
     required this.preco,
     required this.precoMetroQuadrado,
     required this.ativo,
+    this.materialLargura,
+    this.materialComprimento,
   });
 
   factory FornecedorMaterialModel.fromJson(Map<String, dynamic> json) =>
@@ -119,6 +125,12 @@ class FornecedorMaterialModel {
             ? double.tryParse(json['precoMetroQuadrado'].toString()) ?? 0
             : 0,
         ativo:              json['ativo'] ?? true,
+        materialLargura:    json['material']?['largura'] != null
+            ? double.tryParse(json['material']['largura'].toString())
+            : null,
+        materialComprimento: json['material']?['comprimento'] != null
+            ? double.tryParse(json['material']['comprimento'].toString())
+            : null,
       );
 }
 
@@ -195,6 +207,23 @@ class MaterialModel {
   double get quantidadeTotal {
     if (!especifico) return quantidade;
     return filhosEspecificos.fold(0.0, (acc, f) => acc + f.quantidade);
+  }
+
+  /// Retorna a área total em m² para materiais do tipo UNIDADE que possuam
+  /// largura e comprimento cadastrados.
+  /// Fórmula: largura × comprimento × quantidade
+  /// Para materiais sem dimensões ou de outra unidade, retorna null.
+  double? get qtdM2 {
+    if (largura == null || comprimento == null) return null;
+    if (largura! <= 0 || comprimento! <= 0) return null;
+    return largura! * comprimento! * quantidade;
+  }
+
+  /// Área de UMA unidade em m² (largura × comprimento).
+  double? get areaUnitariaM2 {
+    if (largura == null || comprimento == null) return null;
+    if (largura! <= 0 || comprimento! <= 0) return null;
+    return largura! * comprimento!;
   }
 
   factory MaterialModel.fromJson(Map<String, dynamic> json) {

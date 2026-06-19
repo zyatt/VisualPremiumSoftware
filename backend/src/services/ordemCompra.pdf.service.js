@@ -136,6 +136,38 @@ function drawInfoRow(doc, y, label, value) {
      .text(value || '—', MARGIN + 135, y, { width: CONTENT_W - 135 });
 }
 
+function drawAvisoNotaFiscal(doc, y) {
+  const blockH = 52;
+  const padH   = 14;
+
+  // Fundo destacado com borda colorida nas duas laterais
+  fillRect(doc, MARGIN, y, CONTENT_W, blockH, '#FFF1E6');
+  doc.rect(MARGIN, y, CONTENT_W, blockH).strokeColor(C.accent).lineWidth(1.2).stroke();
+  fillRect(doc, MARGIN, y, 5, blockH, C.accent);
+
+  const textX = MARGIN + padH;
+  const textW = CONTENT_W - padH * 2;
+  const halfW = textW / 2 - 10;
+
+  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(C.accent)
+     .text('ATENÇÃO — ENVIO DA NOTA FISCAL', textX, y + 8, { width: textW, lineBreak: false });
+
+  // Coluna esquerda: e-mail
+  doc.font('Helvetica').fontSize(7.5).fillColor(C.black)
+     .text('Enviar a nota fiscal para o e-mail:', textX, y + 23, { width: halfW, lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(10).fillColor(C.black)
+     .text('financeiro@visualpremium.com.br', textX, y + 34, { width: halfW, lineBreak: false });
+
+  // Coluna direita: whatsapp
+  const rightX = textX + halfW + 20;
+  doc.font('Helvetica').fontSize(7.5).fillColor(C.black)
+     .text('e também para o WhatsApp:', rightX, y + 23, { width: halfW, align: 'right', lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(10).fillColor(C.black)
+     .text('(42) 9 9830-0088', rightX, y + 34, { width: halfW, align: 'right', lineBreak: false });
+
+  return y + blockH;
+}
+
 function drawOsBadges(doc, numerosOS, startY) {
   if (!numerosOS || numerosOS.length === 0) return startY;
 
@@ -231,12 +263,23 @@ function drawItensTable(doc, itens, startY) {
     const unidade = item.material?.unidade ?? '—';
     const descricao = item.descricaoItem?.trim() || null;
 
+    // Monta linha de especificações técnicas do material (medida / espessura / identificador)
+    const especParts = [
+      item.material?.medida        ? `${item.material.medida}`             : null,
+      item.material?.espessura     ? `${item.material.espessura}`            : null,
+      item.material?.identificador ? `${item.material.identificador}`        : null,
+    ].filter(Boolean);
+    const especLine = especParts.length > 0 ? especParts.join('  •  ') : null;
+
     doc.font('Helvetica-Bold').fontSize(FONT_SZ);
     const matH  = doc.heightOfString(nome, { width: cols[0].w - cols[0].pad * 2 });
+    const especH = especLine
+      ? doc.font('Helvetica').fontSize(FONT_SZ - 1).heightOfString(especLine, { width: cols[0].w - cols[0].pad * 2 }) + 2
+      : 0;
     const descH = descricao
       ? doc.font('Helvetica').fontSize(FONT_SZ - 0.5).heightOfString(descricao, { width: cols[0].w - cols[0].pad * 2 }) + 3
       : 0;
-    const rowH  = Math.max(20, matH + descH + ROW_PAD_V * 2);
+    const rowH  = Math.max(20, matH + especH + descH + ROW_PAD_V * 2);
 
     if (y + rowH > PAGE_H - FOOTER_RESERVE) {
       drawFooter(doc, doc.bufferedPageRange().count);
@@ -260,10 +303,15 @@ function drawItensTable(doc, itens, startY) {
     doc.save();
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
        .text(nome, C0.x + C0.pad, tyMulti, { width: C0.w - C0.pad * 2, align: 'left', lineBreak: true });
+    let nextLineY = tyMulti + matH;
+    if (especLine) {
+      doc.font('Helvetica').fontSize(FONT_SZ - 1).fillColor(C.gray)
+         .text(especLine, C0.x + C0.pad, nextLineY, { width: C0.w - C0.pad * 2, align: 'left', lineBreak: true });
+      nextLineY += especH;
+    }
     if (descricao) {
-      const descY = tyMulti + matH + 2;
       doc.font('Helvetica').fontSize(FONT_SZ - 0.5).fillColor(C.gray)
-         .text(descricao, C0.x + C0.pad, descY, { width: C0.w - C0.pad * 2, align: 'left', lineBreak: true });
+         .text(descricao, C0.x + C0.pad, nextLineY + 1, { width: C0.w - C0.pad * 2, align: 'left', lineBreak: true });
     }
     doc.restore();
 
@@ -309,26 +357,49 @@ function drawObservacoes(doc, observacoes) {
 
   const footerY = PAGE_H - 44;
   const maxW    = CONTENT_W / 2 - 8;
-  const lineH   = 10;
   const padV    = 7;
   const padH    = 8;
 
-  const linhas  = observacoes.split('\n').filter(Boolean);
-  const blockH  = padV + 10 + 3 + Math.max(linhas.length, 1) * lineH + padV;
+  const textW = maxW - padH * 2;
+
+  // Calcula a altura necessária para o texto
+  doc.font('Helvetica').fontSize(7);
+
+  const textoFormatado = observacoes
+    .split('\n')
+    .filter(Boolean)
+    .map(linha => `• ${linha}`)
+    .join('\n');
+
+  const textoH = doc.heightOfString(textoFormatado, {
+    width: textW,
+    lineGap: 2,
+  });
+
+  const tituloH = 12;
+  const blockH  = padV + tituloH + textoH + padV;
   const blockY  = footerY - blockH - 6;
 
   fillRect(doc, MARGIN, blockY, maxW, blockH, C.bgHeader);
   fillRect(doc, MARGIN, blockY, 3, blockH, C.accent);
 
-  doc.font('Helvetica-Bold').fontSize(7).fillColor(C.black)
-     .text('Observações', MARGIN + padH, blockY + padV, { width: maxW - padH * 2 });
+  doc.font('Helvetica-Bold')
+     .fontSize(7)
+     .fillColor(C.black)
+     .text('Observações', MARGIN + padH, blockY + padV);
 
-  let ty = blockY + padV + 11;
-  for (const linha of linhas) {
-    doc.font('Helvetica').fontSize(7).fillColor(C.black)
-       .text(`• ${linha}`, MARGIN + padH, ty, { width: maxW - padH * 2, lineBreak: true });
-    ty += lineH;
-  }
+  doc.font('Helvetica')
+     .fontSize(7)
+     .fillColor(C.black)
+     .text(
+       textoFormatado,
+       MARGIN + padH,
+       blockY + padV + tituloH,
+       {
+         width: textW,
+         lineGap: 2,
+       }
+     );
 }
 
 function drawInfoFixa(doc) {
@@ -423,8 +494,10 @@ const ordemCompraPdfService = {
         y += 14;
       }
 
+      y += 10;
+      y = drawAvisoNotaFiscal(doc, y);
 
-      y += 6;
+      y += 10;
       hline(doc, y);
       y += 10;
 

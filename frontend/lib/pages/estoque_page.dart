@@ -11,6 +11,8 @@ import '../models/material_model.dart';
 import '../providers/estoque_provider.dart';
 import '../providers/material_provider.dart';
 import '../providers/orcamento_provider.dart';
+import '../providers/produto_provider.dart';
+import '../providers/orcamento_venda_provider.dart';
 import '../providers/alertas_estoque_provider.dart';
 import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
@@ -1179,6 +1181,10 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     if (salvou == true) {
       context.read<MaterialProvider>().carregarCategorias();
       _recarregarSemResetarPagina();
+      if (context.mounted) {
+        context.read<ProdutoProvider>().recarregar();
+        context.read<OrcamentoVendaProvider>().recarregar();
+      }
     }
   }
 
@@ -3933,7 +3939,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
   late final TextEditingController _nome;
   late final TextEditingController _identificador;
-  late final TextEditingController _unidade;
+  String? _unidade;
   late final TextEditingController _categoria;
   late final TextEditingController _medida;
   late final TextEditingController _espessura;
@@ -3948,6 +3954,23 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   late bool _estoqueConfirmado;
   late bool _especifico;
 
+  /// Normaliza valores de unidade salvos com grafia antiga no banco de dados.
+  /// Ex.: "M2" (sem símbolo Unicode) → "M²"
+  static const _unidadesValidas = {
+    'UNIDADE', 'M/L', 'M', 'ML', 'M²', 'KG', 'G',
+  };
+  static const _aliasUnidade = {
+    'M2': 'M²',
+    'M 2': 'M²',
+    'M2 ': 'M²',
+  };
+  static String? _normalizarUnidade(String? v) {
+    if (v == null || v.isEmpty) return null;
+    final norm = v.trim().toUpperCase();
+    if (_unidadesValidas.contains(norm)) return norm;
+    return _aliasUnidade[norm] ?? norm; // preserva desconhecidos sem crash
+  }
+
   @override
   void initState() {
     super.initState();
@@ -3956,7 +3979,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     _especifico        = m?.especifico ?? false;
     _nome          = TextEditingController(text: m?.nome ?? '');
     _identificador = TextEditingController(text: m?.identificador ?? '');
-    _unidade       = TextEditingController(text: m?.unidade ?? '');
+    _unidade       = _normalizarUnidade(m?.unidade);
     _categoria     = TextEditingController(text: m?.categoria ?? '');
     _medida        = TextEditingController(text: m?.medida ?? '');
     _espessura     = TextEditingController(text: m?.espessura ?? '');
@@ -3976,7 +3999,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   @override
   void dispose() {
     for (final c in [
-      _nome, _identificador, _unidade, _categoria, _medida, _espessura,
+      _nome, _identificador, _categoria, _medida, _espessura,
       _largura, _comprimento, _quantidade, _estoqueMinimo,
       _qtdPadrao, _unidPadrao,
     ]) {
@@ -3992,7 +4015,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     final dados = {
       'nome':          _nome.text.trim(),
       'identificador': _identificador.text.trim().isEmpty ? null : _identificador.text.trim(),
-      'unidade':       _unidade.text.trim().isEmpty ? null : _unidade.text.trim(),
+      'unidade':       (_unidade == null || _unidade!.isEmpty) ? null : _unidade,
       'categoria':     _categoria.text.trim().isEmpty ? null : _categoria.text.trim(),
       'medida':        _medida.text.trim().isEmpty ? null : _medida.text.trim(),
       'espessura':     _espessura.text.trim().isEmpty ? null : _espessura.text.trim(),
@@ -4105,11 +4128,20 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: TextFormField(
-                  controller: _unidade,
+                child: DropdownButtonFormField<String>(
+                  initialValue: _unidade,
                   decoration: const InputDecoration(labelText: 'Unidade'),
-                  textCapitalization: TextCapitalization.characters,
-                  inputFormatters: [_UpperCaseFormatter()],
+                  items: const [
+                    DropdownMenuItem(value: null,      child: Text('— Nenhuma —')),
+                    DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE')),
+                    DropdownMenuItem(value: 'M/L',     child: Text('M/L')),
+                    DropdownMenuItem(value: 'M',       child: Text('M')),
+                    DropdownMenuItem(value: 'ML',      child: Text('ML')),
+                    DropdownMenuItem(value: 'M²',      child: Text('M²')),
+                    DropdownMenuItem(value: 'KG',      child: Text('KG')),
+                    DropdownMenuItem(value: 'G',       child: Text('G')),
+                  ],
+                  onChanged: (v) => setState(() => _unidade = v),
                 ),
               ),
             ]),
@@ -4722,6 +4754,10 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
           backgroundColor: AppTheme.success,
         ),
       );
+      if (context.mounted) {
+        context.read<ProdutoProvider>().recarregar();
+        context.read<OrcamentoVendaProvider>().recarregar();
+      }
     }
   }
 
@@ -4830,21 +4866,49 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
     final temCusto   = !ultimoUsarM2 && ultimoCusto   != null && ultimoCusto   > 0;
     final temCustoM2 =  ultimoUsarM2 && ultimoCustoM2 != null && ultimoCustoM2 > 0;
 
-    return AlertDialog(
+    // ⚠️ Usamos Dialog (não AlertDialog) para evitar o bug em release mode onde
+    // o content fica cinza/em branco. Em release, AlertDialog com SizedBox de
+    // altura fixa no content não consegue resolver constraints corretamente.
+    // Com Dialog direto controlamos o layout via Column + Flexible, que funciona
+    // identicamente em debug e release.
+    return Dialog(
       backgroundColor: Theme.of(context).colorScheme.surface,
-      title: Row(
-        children: [
-          const Icon(Icons.history, size: 20, color: Color(0xFFE85D04)),
-          const SizedBox(width: 8),
-          Expanded(child: Text('Histórico de Compras — ${m.nome}')),
-        ],
-      ),
-      content: SizedBox(
-        width: 700,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 740,
+          maxHeight: MediaQuery.of(context).size.height * 0.88,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // ── Título ──────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
+              child: Row(
+                children: [
+                  const Icon(Icons.history, size: 20, color: Color(0xFFE85D04)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Histórico de Compras — ${m.nome}',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            // ── Conteúdo scrollável ─────────────────────────────────────────
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
             if (temCusto || temCustoM2)
               Container(
                 width: double.infinity,
@@ -5026,12 +5090,9 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                 ),
               )
             else
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 360),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: List.generate(_historico.length, (i) {
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: List.generate(_historico.length, (i) {
                       final h = _historico[i];
                       final isUltimo = i == 0;
                       final data = h.dataOrdem ?? h.criadoEm;
@@ -5175,28 +5236,37 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                       );
                     }),
                   ),
-                ),
-              ),
             if (_mostrarFormCusto) _buildFormCusto(),
+                ],
+              ),
+            ),
+            ),
+            // ── Actions ────────────────────────────────────────────────────
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: () => setState(() => _mostrarFormCusto = !_mostrarFormCusto),
+                    icon: Icon(
+                      _mostrarFormCusto ? Icons.close : Icons.edit_outlined,
+                      size: 16,
+                    ),
+                    label: Text(_mostrarFormCusto ? 'Cancelar inserção' : 'Inserir custo manualmente'),
+                    style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Fechar'),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
-      actions: [
-        TextButton.icon(
-          onPressed: () => setState(() => _mostrarFormCusto = !_mostrarFormCusto),
-          icon: Icon(
-            _mostrarFormCusto ? Icons.close : Icons.edit_outlined,
-            size: 16,
-          ),
-          label: Text(_mostrarFormCusto ? 'Cancelar inserção' : 'Inserir custo manualmente'),
-          style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
-        ),
-        const Spacer(),
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Fechar'),
-        ),
-      ],
     );
   }
 }

@@ -1,24 +1,20 @@
-const pdfService = require('../services/relatorioOS.pdf.service');
+const relatorioOSPdfSvc = require('../services/relatorioOS_pdf.service');
 
 const gerarPdf = async (req, res, next) => {
   try {
     const { numeroOS } = req.params;
 
-    const buffer = await pdfService.gerarPdfOS(numeroOS);
+    const pdfBuffer = await relatorioOSPdfSvc.gerarPdfOS(numeroOS);
 
-    // Número limpo para o nome do arquivo (remove sufixo interno #OC…)
-    const numeroLimpo = numeroOS.includes('#OC')
-      ? numeroOS.substring(0, numeroOS.indexOf('#OC'))
-      : numeroOS;
-    const filename = `relatorio_os_${numeroLimpo.replace(/\W/g, '_')}.pdf`;
+    const hoje = new Date().toLocaleDateString('pt-BR').replace(/\//g, '-');
 
     res.set({
       'Content-Type':        'application/pdf',
-      'Content-Disposition': `inline; filename="${filename}"`,
-      'Content-Length':      buffer.length,
+      'Content-Disposition': `inline; filename="OS-${numeroOS}(${hoje}).pdf"`,
+      'Content-Length':      pdfBuffer.length,
     });
 
-    res.end(buffer);
+    res.send(pdfBuffer);
   } catch (e) {
     next(e);
   }

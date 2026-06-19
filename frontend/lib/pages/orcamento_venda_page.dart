@@ -2262,10 +2262,9 @@ class _DialogHeader extends StatelessWidget {
 
   const _DialogHeader({
     required this.titulo,
-    this.subtitulo,
     required this.icon,
     required this.onClose,
-  });
+  }) : subtitulo = null;
 
   @override
   Widget build(BuildContext context) {

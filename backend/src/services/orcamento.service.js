@@ -244,6 +244,33 @@ async function atualizar(id, dados) {
   return prisma.orcamento.update({ where: { id }, data: dados });
 }
 
+/**
+ * Oculta ou reexibe um fornecedor na visualização do orçamento (matriz, totais,
+ * melhor preço e PDF). Não remove o fornecedor nem nenhum item/preço — apenas
+ * grava o id na lista `fornecedoresOcultos` do orçamento, que é compartilhada
+ * entre todos os usuários que abrirem este orçamento.
+ *
+ * `oculto: true`  → adiciona o fornecedorId à lista (se ainda não estiver).
+ * `oculto: false` → remove o fornecedorId da lista.
+ */
+async function definirFornecedorOculto(orcamentoId, fornecedorId, oculto) {
+  const orcamento = await prisma.orcamento.findUnique({
+    where: { id: orcamentoId },
+    select: { fornecedoresOcultos: true },
+  });
+
+  if (!orcamento) throw { status: 404, message: 'Orçamento não encontrado' };
+
+  const atual = new Set(orcamento.fornecedoresOcultos);
+  if (oculto) atual.add(fornecedorId);
+  else atual.delete(fornecedorId);
+
+  return prisma.orcamento.update({
+    where: { id: orcamentoId },
+    data: { fornecedoresOcultos: Array.from(atual) },
+  });
+}
+
 module.exports = {
   listar,
   buscarPorId,
@@ -259,4 +286,5 @@ module.exports = {
   rejeitar,
   validarParaOC,
   reabrir,
+  definirFornecedorOculto,
 };

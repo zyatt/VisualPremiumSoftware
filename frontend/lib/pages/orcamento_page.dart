@@ -353,6 +353,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       );
 
       provider.setServidorIdTab(orcId);
+      provider.setFornecedoresOcultosTab(
+        (orcamentoCompleto['fornecedoresOcultos'] as List? ?? []).map((e) => e as int).toList(),
+      );
       // jaFinalizado=true mantém o orçamento somente-leitura, modoGerarOC=true
       // exibe o botão "Gerar OC" no editor.
       provider.atualizarFlagsTab(jaFinalizado: true, modoGerarOC: true);
@@ -472,6 +475,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       );
 
       provider.setServidorIdTab(orcId);
+      provider.setFornecedoresOcultosTab(
+        (orcamentoCompleto['fornecedoresOcultos'] as List? ?? []).map((e) => e as int).toList(),
+      );
 
       final statusReaberto = orc['status'] as String? ?? '';
       provider.atualizarFlagsTab(

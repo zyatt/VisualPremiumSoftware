@@ -400,11 +400,33 @@ function precoEfetivo(pf, usarM2) {
 }
 
 /**
+ * Remove do payload os preços de fornecedores ocultos, caso o chamador
+ * informe `dados.fornecedoresOcultos` (array de ids). O app Flutter já envia
+ * os itens sem esses preços, mas este filtro fica como segunda camada de
+ * proteção para qualquer outro client que delegue o filtro ao servidor —
+ * um fornecedor oculto nunca deve aparecer no PDF nem entrar nos totais.
+ */
+function aplicarFornecedoresOcultos(itens, fornecedoresOcultos) {
+  if (!Array.isArray(fornecedoresOcultos) || fornecedoresOcultos.length === 0) return itens;
+  const ocultos = new Set(fornecedoresOcultos.map(String));
+  return itens.map((item) => {
+    const precosFiltrados = Object.fromEntries(
+      Object.entries(item.precos ?? {}).filter(([fId]) => !ocultos.has(String(fId)))
+    );
+    const fornecedorSelecionado = ocultos.has(String(item.fornecedorSelecionado))
+      ? null
+      : item.fornecedorSelecionado;
+    return { ...item, precos: precosFiltrados, fornecedorSelecionado };
+  });
+}
+
+/**
  * Desenha a tabela matricial do orçamento (materiais × fornecedores).
  * Orientação landscape: gira para A4 wide quando há muitos fornecedores.
  */
 async function gerarPdfDeItens(dados) {
-  const { titulo = 'Orçamento', itens = [] } = dados;
+  const { titulo = 'Orçamento', fornecedoresOcultos = [] } = dados;
+  const itens = aplicarFornecedoresOcultos(dados.itens ?? [], fornecedoresOcultos);
 
   return new Promise((resolve, reject) => {
     // Decidir orientação: landscape se > 3 fornecedores para ter espaço

@@ -367,6 +367,22 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     }
   }
 
+  /// Garante que a lista de fornecedores ocultos da aba esteja persistida no
+  /// servidor para o orçamento [orcId]. Necessário porque, enquanto o
+  /// orçamento ainda não existe no banco (servidorId nulo), o usuário pode
+  /// ocultar fornecedores só localmente — ao salvar pela primeira vez, essa
+  /// lista precisa ser enviada para já nascer compartilhada com outros
+  /// usuários. Para orçamentos já existentes, as ocultações já são
+  /// persistidas individualmente em `_alternarFornecedorOculto`, então isto
+  /// é apenas uma garantia idempotente (reenviar o mesmo id não tem efeito).
+  Future<void> _sincronizarFornecedoresOcultos(int orcId, OrcamentoTab tab) async {
+    if (tab.fornecedoresOcultos.isEmpty) return;
+    final repo = OrcamentoRepository();
+    for (final fornecedorId in tab.fornecedoresOcultos) {
+      await repo.definirFornecedorOculto(orcId, fornecedorId, true);
+    }
+  }
+
   Future<void> _salvarOrcamento() async {
     final provider = context.read<OrcamentoProvider>();
     final tab = provider.tabAtual;
@@ -424,6 +440,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
         await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
       }
       final tabAtualizado = provider.tabAtual!;
+      await _sincronizarFornecedoresOcultos(orcId, tabAtualizado);
       for (final item in tabAtualizado.itens) {
         if (item.precos.isEmpty) {
           await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false, 'descricaoItem': item.descricao});
@@ -501,6 +518,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
         orcId = criado['id'] as int;
         await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
       }
+      await _sincronizarFornecedoresOcultos(orcId, tab);
       for (final item in tab.itens) {
         if (item.precos.isEmpty) {
           await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false, 'descricaoItem': item.descricao});
@@ -607,6 +625,27 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     }
   }
 
+  /// Monta a lista de itens para envio ao serviço de PDF, removendo os preços
+  /// de fornecedores ocultos. Um fornecedor oculto não deve aparecer na
+  /// matriz do PDF nem entrar em nenhum cálculo de melhor preço/total — sem
+  /// isso, o filtro de "ocultar" feito na tela não se refletiria no PDF
+  /// gerado, já que o serviço de PDF só conhece o que é enviado no payload.
+  List<Map<String, dynamic>> _itensParaPdf(OrcamentoTab tab) {
+    final ocultos = tab.fornecedoresOcultos.toSet();
+    if (ocultos.isEmpty) return tab.itens.map((i) => i.toJson()).toList();
+
+    return tab.itens.map((item) {
+      final json = item.toJson();
+      final precos = Map<String, dynamic>.from(json['precos'] as Map);
+      precos.removeWhere((fIdStr, _) => ocultos.contains(int.parse(fIdStr)));
+      json['precos'] = precos;
+      if (item.fornecedorSelecionado != null && ocultos.contains(item.fornecedorSelecionado)) {
+        json['fornecedorSelecionado'] = null;
+      }
+      return json;
+    }).toList();
+  }
+
   Future<void> _exportarPdf() async {
     final provider = context.read<OrcamentoProvider>();
     final tab = provider.tabAtual;
@@ -616,7 +655,11 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     }
     setState(() => _salvando = true);
     try {
-      final pdfBytes = await OrcamentoRepository().gerarPdf({'titulo': tab.titulo, 'itens': tab.itens.map((i) => i.toJson()).toList()});
+      final pdfBytes = await OrcamentoRepository().gerarPdf({
+        'titulo': tab.titulo,
+        'itens': _itensParaPdf(tab),
+        'fornecedoresOcultos': tab.fornecedoresOcultos,
+      });
       final hoje = DateTime.now();
       final dataStr = '${hoje.day.toString().padLeft(2, '0')}-${hoje.month.toString().padLeft(2, '0')}-${hoje.year}';
       final file = File('${(await getTemporaryDirectory()).path}${Platform.pathSeparator}orcamento($dataStr).pdf');
@@ -676,6 +719,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     try {
       if (tab.servidorId != null) {
         orcId = tab.servidorId!;
+        await _sincronizarFornecedoresOcultos(orcId, tab);
         await repo.limparItens(orcId);
         for (final item in tab.itens) {
           if (item.precos.isEmpty) {
@@ -690,6 +734,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
         final criado = await repo.criar(tab.titulo);
         orcId = criado['id'] as int;
         await repo.atualizarOrcamento(orcId, {'titulo': tab.titulo});
+        await _sincronizarFornecedoresOcultos(orcId, tab);
         for (final item in tab.itens) {
           if (item.precos.isEmpty) {
             await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false, 'descricaoItem': item.descricao});
@@ -735,7 +780,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
 
   bool _podeGerarOC(List<ItemOrcamentoData> itens) {
     if (itens.isEmpty) return false;
-    if (!itens.every((i) => i.fornecedorSelecionado != null)) return false;
+    final ocultos = context.read<OrcamentoProvider>().tabAtual?.fornecedoresOcultos.toSet() ?? const <int>{};
+    if (!itens.every((i) => i.fornecedorSelecionado != null && !ocultos.contains(i.fornecedorSelecionado))) return false;
     for (final item in itens) {
       if (item.materialEspecifico && (item.descricao == null || item.descricao!.trim().isEmpty)) return false;
     }
@@ -745,19 +791,119 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
   int _fornecedoresSelecionados(List<ItemOrcamentoData> itens) =>
       itens.where((i) => i.fornecedorSelecionado != null).map((i) => i.fornecedorSelecionado!).toSet().length;
 
+  /// IDs de fornecedores presentes nos itens, EXCLUINDO os ocultados na aba
+  /// ativa. Usado pela matriz, totais, melhor preço e payload do PDF — ou
+  /// seja, em todo lugar que não deve "ver" um fornecedor oculto.
   Set<int> _todosFornecedoresIds(List<ItemOrcamentoData> itens) {
+    final ocultos = context.read<OrcamentoProvider>().tabAtual?.fornecedoresOcultos.toSet() ?? const <int>{};
     final ids = <int>{};
-    for (final item in itens) { ids.addAll(item.precos.keys); }
+    for (final item in itens) {
+      for (final fId in item.precos.keys) {
+        if (!ocultos.contains(fId)) ids.add(fId);
+      }
+    }
     return ids;
+  }
+
+  /// Oculta ou reexibe um fornecedor na visualização deste orçamento (matriz,
+  /// totais, melhor preço e PDF). Não remove o fornecedor nem nenhum item ou
+  /// preço — é reversível e fica salvo no orçamento, visível para qualquer
+  /// usuário que o abrir depois (inclusive após enviar para aprovação).
+  Future<void> _alternarFornecedorOculto(int fornecedorId, bool oculto) async {
+    final provider = context.read<OrcamentoProvider>();
+    final tab = provider.tabAtual;
+    if (tab == null) return;
+
+    // Atualiza localmente de imediato para resposta instantânea na UI.
+    provider.definirFornecedorOcultoLocal(fornecedorId, oculto);
+
+    // Se ocultando um fornecedor que estava selecionado em algum item, limpa
+    // a seleção desses itens — um fornecedor oculto não pode permanecer
+    // "escolhido" para fins de geração de OC.
+    if (oculto) {
+      for (final item in List.of(tab.itens)) {
+        if (item.fornecedorSelecionado == fornecedorId) {
+          provider.atualizarItemParcial(item.itemId, clearFornecedor: true);
+        }
+      }
+    }
+
+    // Persiste no servidor apenas se o orçamento já existe lá. Se ainda é um
+    // rascunho local (servidorId nulo), a lista será enviada junto ao salvar.
+    if (tab.servidorId != null) {
+      try {
+        await OrcamentoRepository().definirFornecedorOculto(tab.servidorId!, fornecedorId, oculto);
+      } catch (e) {
+        if (!mounted) return;
+        // Reverte o estado local se o servidor não confirmar, para não ficar
+        // dessincronizado entre os usuários.
+        provider.definirFornecedorOcultoLocal(fornecedorId, !oculto);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_mensagemErro(e, acao: oculto ? 'ocultar fornecedor' : 'reexibir fornecedor')),
+          backgroundColor: AppTheme.error,
+        ));
+      }
+    }
+  }
+
+  /// Mostra a lista de fornecedores ocultos do orçamento, com opção de
+  /// reexibir cada um. É o único jeito de reverter uma ocultação, já que a
+  /// coluna do fornecedor desaparece da matriz assim que ele é ocultado.
+  Future<void> _gerenciarFornecedoresOcultos(List<ItemOrcamentoData> itens) async {
+    final provider = context.read<OrcamentoProvider>();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setSt) {
+        final ocultos = provider.tabAtual?.fornecedoresOcultos ?? const <int>[];
+        return AlertDialog(
+          title: const Text('Fornecedores ocultos', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          content: SizedBox(
+            width: 340,
+            child: ocultos.isEmpty
+                ? const Text('Nenhum fornecedor oculto.')
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: ocultos.map((fId) {
+                      final nome = itens
+                              .expand((i) => i.precos.entries)
+                              .where((e) => e.key == fId)
+                              .map((e) => e.value.fornecedorNome)
+                              .firstOrNull ??
+                          'Fornecedor #$fId';
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(nome, style: const TextStyle(fontSize: 13)),
+                        trailing: TextButton.icon(
+                          onPressed: () async {
+                            await _alternarFornecedorOculto(fId, false);
+                            setSt(() {});
+                          },
+                          icon: const Icon(Icons.visibility_outlined, size: 14),
+                          label: const Text('Reexibir', style: TextStyle(fontSize: 12)),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar')),
+          ],
+        );
+      }),
+    );
   }
 
   void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
     final provider = context.read<OrcamentoProvider>();
+    final ocultos = provider.tabAtual?.fornecedoresOcultos.toSet() ?? const <int>{};
     final ordenarPorM2 = _ordemTotais == 'm2';
     for (final item in itens) {
       if (item.precos.isEmpty) continue;
       double? menorValor; int? fornEscolhido; ModoOrcamento? modoEscolhido;
       for (final entry in item.precos.entries) {
+        if (ocultos.contains(entry.key)) continue;
         if (ordenarPorM2) {
           if (entry.value.precoM2 != null && (menorValor == null || entry.value.precoM2! < menorValor)) { menorValor = entry.value.precoM2; fornEscolhido = entry.key; modoEscolhido = ModoOrcamento.metroQuadrado; }
         } else {
@@ -1433,7 +1579,27 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           final nome = itens.expand((i) => i.precos.entries).where((e) => e.key == fId).map((e) => e.value.fornecedorNome).firstOrNull ?? 'Fornecedor';
           final isLast = fId == todosFornIds.last;
           return Row(mainAxisSize: MainAxisSize.min, children: [
-            SizedBox(width: colFornMin, child: Center(child: Padding(padding: EdgeInsets.symmetric(horizontal: 3, vertical: 6), child: Text(nome, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center, softWrap: true)))),
+            SizedBox(
+              width: colFornMin,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(nome, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center, softWrap: true),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: () => _alternarFornecedorOculto(fId, true),
+                    child: Padding(
+                      padding: const EdgeInsets.all(2),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.visibility_off_outlined, size: 11, color: Theme.of(context).colorScheme.outline),
+                        const SizedBox(width: 2),
+                        Text('ocultar', style: TextStyle(fontSize: 9, color: Theme.of(context).colorScheme.outline)),
+                      ]),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
             if (!isLast) Container(width: 1, height: 18, color: Theme.of(context).colorScheme.outlineVariant),
           ]);
         }),
@@ -1441,6 +1607,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
         SizedBox(width: colMelhor, child: Center(child: Padding(padding: EdgeInsets.symmetric(horizontal: 3, vertical: 6), child: Text('Melhor Preço', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.primary), textAlign: TextAlign.center)))),
       ]),
     );
+
 
     // ── Totais fixo ───────────────────────────────────────────────────────────
     Widget totaisFixo() => Container(
@@ -1683,6 +1850,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                 label: const Text('Sugestão', style: TextStyle(fontSize: 10)),
                 style: OutlinedButton.styleFrom(foregroundColor: AppTheme.primary, side: const BorderSide(color: AppTheme.primary), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
               ),
+              if (provider.tabAtual?.fornecedoresOcultos.isNotEmpty ?? false)
+                OutlinedButton.icon(
+                  onPressed: () => _gerenciarFornecedoresOcultos(itens),
+                  icon: const Icon(Icons.visibility_off_outlined, size: 12),
+                  label: Text('Ocultos (${provider.tabAtual!.fornecedoresOcultos.length})', style: const TextStyle(fontSize: 10)),
+                  style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.outline, side: BorderSide(color: Theme.of(context).colorScheme.outline), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
+                ),
             ],
           ),
         ),

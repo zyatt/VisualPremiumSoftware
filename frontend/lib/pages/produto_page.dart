@@ -1281,7 +1281,7 @@ class _ProdutoFormDialogState extends State<_ProdutoFormDialog> {
                         _Campo(
                           label: 'Nome *',
                           ctrl:  _nomeCtrl,
-                          hint:  'Ex: Porta de Vidro 2100×900',
+                          hint:  'Nome do Produto...',
                           validator: (v) =>
                               (v == null || v.trim().isEmpty)
                                   ? 'Nome é obrigatório'
@@ -1293,7 +1293,7 @@ class _ProdutoFormDialogState extends State<_ProdutoFormDialog> {
                         _Campo(
                           label: 'Categoria',
                           ctrl:  _catCtrl,
-                          hint:  'Ex: Vidraçaria, Esquadria…',
+                          hint:  'Categoria do Produto...',
                         ),
                         const SizedBox(height: 12),
 

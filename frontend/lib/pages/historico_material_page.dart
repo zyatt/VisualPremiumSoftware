@@ -93,6 +93,7 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
     ('REATIVACAO',         'Reativação'),
     ('EXCLUSAO',           'Exclusão'),
     ('ESTOQUE_CONFIRMADO', 'Estoque confirmado'),
+    ('CUSTO_MANUAL',       'Custo manual'),
     ('FILHO_EDITADO',      'Variação editada'),
     ('FILHO_EXCLUIDO',     'Variação excluída'),
   ];

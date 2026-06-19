@@ -26,6 +26,8 @@ router.patch('/:id/aprovar',             authMiddleware, roleMiddleware(APROVACA
 router.patch('/:id/rejeitar',            authMiddleware, roleMiddleware(APROVACAO), ctrl.rejeitar);
 router.patch('/:id/reabrir',             authMiddleware, roleMiddleware(APROVACAO), ctrl.reabrir);
 
+router.patch('/:id/fornecedores-ocultos', authMiddleware, roleMiddleware(ESCRITA), ctrl.definirFornecedorOculto);
+
 router.post('/:id/gerar-oc',             authMiddleware, roleMiddleware(ESCRITA),  ctrl.gerarOrdemCompra);
 
 module.exports = router;

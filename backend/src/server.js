@@ -27,6 +27,7 @@ app.use('/api/gastos-categoria',  require('./routes/gastos_categoria_route'));
 app.use('/api/alertas-estoque',   require('./routes/alertas_estoque_route'));
 app.use('/api/veiculos',          require('./routes/veiculo_route'));
 app.use('/api/orcamentos-venda',  require('./routes/orcamento_vendas.routes'));
+app.use('/api/configuracoes',     require('./routes/configuracao.routes'));
 
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 

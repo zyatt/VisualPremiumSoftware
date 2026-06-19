@@ -102,12 +102,16 @@ class ProducaoRepository {
     String? descricaoItem,
     required double quantidadeReservada,
     required String numeroOS,
+    double? larguraUsada,
+    double? comprimentoUsado,
   }) async {
     final data = await ApiClient.post('/producao/solicitacoes', {
       'materialId':          materialId,
       if (descricaoItem != null) 'descricaoItem': descricaoItem,
       'quantidadeReservada': quantidadeReservada,
       'numeroOS':            numeroOS,
+      if (larguraUsada != null)     'larguraUsada':     larguraUsada,
+      if (comprimentoUsado != null) 'comprimentoUsado': comprimentoUsado,
     });
     return SolicitacaoProducaoModel.fromJson(data);
   }

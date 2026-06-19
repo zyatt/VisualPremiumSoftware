@@ -120,6 +120,10 @@ class OrcamentoVendaModel {
   final String? criadorNome;
   final List<OrcamentoVendaItemModel> itens;
 
+  /// Percentual de markup aplicado ao calcular o valorTotal (ex: 400 = 400%).
+  /// Null quando o orçamento ainda não foi salvo ou não há faixas configuradas.
+  final double? percentualMarkup;
+
   OrcamentoVendaModel({
     required this.id,
     required this.numero,
@@ -131,29 +135,33 @@ class OrcamentoVendaModel {
     this.clienteNome,
     this.criadorNome,
     required this.itens,
+    this.percentualMarkup,
   });
 
   factory OrcamentoVendaModel.fromJson(Map<String, dynamic> json) {
     final cliente = json['cliente'] as Map<String, dynamic>?;
     final criador = json['criador'] as Map<String, dynamic>?;
-    
+
     // Prioriza o campo direto clienteNome, depois o nome do relacionamento cliente
     final nomeCliente = json['clienteNome'] as String? ?? cliente?['nome'] as String?;
-    
+
     return OrcamentoVendaModel(
-      id:          (json['id'] as num?)?.toInt() ?? 0,
-      numero:      json['numero'] ?? '',
-      status:      json['status'] ?? 'EM_ANDAMENTO',
-      observacao:  json['observacao'],
-      valorTotal:  double.tryParse(json['valorTotal'].toString()) ?? 0,
-      margemLucro: json['margemLucro'] != null
+      id:               (json['id'] as num?)?.toInt() ?? 0,
+      numero:           json['numero'] ?? '',
+      status:           json['status'] ?? 'EM_ANDAMENTO',
+      observacao:       json['observacao'],
+      valorTotal:       double.tryParse(json['valorTotal'].toString()) ?? 0,
+      margemLucro:      json['margemLucro'] != null
           ? double.tryParse(json['margemLucro'].toString())
           : null,
-      criadoEm:    json['criadoEm'] != null
+      criadoEm:         json['criadoEm'] != null
           ? DateTime.tryParse(json['criadoEm'].toString())?.toLocal()
           : null,
-      clienteNome: nomeCliente,
-      criadorNome: criador?['nome'],
+      clienteNome:      nomeCliente,
+      criadorNome:      criador?['nome'],
+      percentualMarkup: json['percentualMarkup'] != null
+          ? double.tryParse(json['percentualMarkup'].toString())
+          : null,
       itens: (json['itens'] as List? ?? [])
           .map((e) => OrcamentoVendaItemModel.fromJson(
               e as Map<String, dynamic>))

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../repositories/usuario_repository.dart';
+import '../repositories/configuracao_repository.dart';
 import '../theme/app_theme.dart';
 
 String _mensagemErro(Object e) {
@@ -33,7 +35,7 @@ class _AdminPageState extends State<AdminPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 1, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
   }
 
   @override
@@ -98,6 +100,16 @@ class _AdminPageState extends State<AdminPage>
                     ],
                   ),
                 ),
+                Tab(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.tune_rounded, size: 16),
+                      SizedBox(width: 6),
+                      Text('Configurações'),
+                    ],
+                  ),
+                ),
               ],
             ),
             Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
@@ -109,6 +121,7 @@ class _AdminPageState extends State<AdminPage>
                 controller: _tabController,
                 children: const [
                   _UsuariosTab(),
+                  _ConfiguracaoTab(),
                 ],
               ),
             ),
@@ -993,3 +1006,620 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
     );
   }
 }
+// ─── Aba de Configurações ─────────────────────────────────────────────────────
+
+class _ConfiguracaoTab extends StatefulWidget {
+  const _ConfiguracaoTab();
+
+  @override
+  State<_ConfiguracaoTab> createState() => _ConfiguracaoTabState();
+}
+
+class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
+  final _repo = ConfiguracaoRepository();
+
+  // ── Estado das faixas de markup ────────────────────────────────────────────
+  List<MarkupFaixa> _faixas     = [];
+  bool _carregandoFaixas        = true;
+  bool _salvandoFaixas          = false;
+  String? _erroFaixas;
+
+  // ── Estado do imposto sobre sobra ──────────────────────────────────────────
+  final _impostoCtrl = TextEditingController();
+  bool _carregandoConfig        = true;
+  bool _salvandoConfig          = false;
+  String? _erroConfig;
+
+  // ── Controladores das linhas de faixa ─────────────────────────────────────
+  // Cada faixa tem 3 controladores: valorMin, valorMax, percentual
+  final List<TextEditingController> _minCtrls   = [];
+  final List<TextEditingController> _maxCtrls   = [];
+  final List<TextEditingController> _pctCtrls   = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarTudo();
+  }
+
+  @override
+  void dispose() {
+    _impostoCtrl.dispose();
+    for (final c in _minCtrls) {
+      c.dispose();
+    }
+    for (final c in _maxCtrls) {
+      c.dispose();
+    }
+    for (final c in _pctCtrls) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _carregarTudo() async {
+    await Future.wait([_carregarFaixas(), _carregarConfig()]);
+  }
+
+  Future<void> _carregarFaixas() async {
+    setState(() { _carregandoFaixas = true; _erroFaixas = null; });
+    try {
+      final lista = await _repo.listarFaixas();
+      _sincronizarControladores(lista);
+      setState(() { _faixas = lista; _carregandoFaixas = false; });
+    } catch (e) {
+      setState(() { _erroFaixas = _mensagemErro(e); _carregandoFaixas = false; });
+    }
+  }
+
+  Future<void> _carregarConfig() async {
+    setState(() { _carregandoConfig = true; _erroConfig = null; });
+    try {
+      final cfg = await _repo.listarConfiguracoes();
+      final v   = cfg['impostoSobra']?.toString() ?? '0';
+      _impostoCtrl.text = v == '0' ? '' : v;
+      setState(() => _carregandoConfig = false);
+    } catch (e) {
+      setState(() { _erroConfig = _mensagemErro(e); _carregandoConfig = false; });
+    }
+  }
+
+  void _sincronizarControladores(List<MarkupFaixa> faixas) {
+    // Limpa antigos
+    for (final c in _minCtrls) {
+      c.dispose();
+    }
+    for (final c in _maxCtrls) {
+      c.dispose();
+    }
+    for (final c in _pctCtrls) {
+      c.dispose();
+    }
+    _minCtrls.clear();
+    _maxCtrls.clear();
+    _pctCtrls.clear();
+
+    for (final f in faixas) {
+      _minCtrls.add(TextEditingController(text: _fmtNum(f.valorMin)));
+      _maxCtrls.add(TextEditingController(text: f.valorMax != null ? _fmtNum(f.valorMax!) : ''));
+      _pctCtrls.add(TextEditingController(text: _fmtNum(f.percentual)));
+    }
+  }
+
+  void _adicionarFaixa() {
+    final ultima = _faixas.isNotEmpty ? _faixas.last : null;
+    // A nova faixa começa onde a anterior termina
+    final novoMin = (ultima?.valorMax != null) ? ultima!.valorMax! + 0.01 : 0.0;
+    final novaFaixa = MarkupFaixa(valorMin: novoMin, percentual: 0);
+    setState(() {
+      _faixas.add(novaFaixa);
+      _minCtrls.add(TextEditingController(text: _fmtNum(novoMin)));
+      _maxCtrls.add(TextEditingController(text: ''));  // aberta por padrão
+      _pctCtrls.add(TextEditingController(text: ''));
+    });
+  }
+
+  void _removerFaixa(int index) {
+    setState(() {
+      _minCtrls[index].dispose();
+      _maxCtrls[index].dispose();
+      _pctCtrls[index].dispose();
+      _minCtrls.removeAt(index);
+      _maxCtrls.removeAt(index);
+      _pctCtrls.removeAt(index);
+      _faixas.removeAt(index);
+    });
+  }
+
+  Future<void> _salvarFaixas() async {
+    // Constrói lista de faixas a partir dos controladores
+    final List<MarkupFaixa> novas = [];
+    for (int i = 0; i < _faixas.length; i++) {
+      final min = double.tryParse(_minCtrls[i].text.replaceAll(',', '.'));
+      final max = _maxCtrls[i].text.trim().isEmpty
+          ? null
+          : double.tryParse(_maxCtrls[i].text.replaceAll(',', '.'));
+      final pct = double.tryParse(_pctCtrls[i].text.replaceAll(',', '.'));
+
+      if (min == null || pct == null) {
+        _snack('Preencha valorMin e percentual em todas as faixas.', erro: true);
+        return;
+      }
+      if (max != null && max <= min) {
+        _snack('O valor máximo da faixa ${i + 1} deve ser maior que o mínimo.', erro: true);
+        return;
+      }
+      // Somente a última pode ter max nulo
+      if (max == null && i < _faixas.length - 1) {
+        _snack('Somente a última faixa pode ficar sem valor máximo.', erro: true);
+        return;
+      }
+      novas.add(MarkupFaixa(valorMin: min, valorMax: max, percentual: pct));
+    }
+
+    setState(() => _salvandoFaixas = true);
+    try {
+      final salvas = await _repo.salvarFaixas(novas);
+      _sincronizarControladores(salvas);
+      setState(() { _faixas = salvas; _salvandoFaixas = false; });
+      _snack('Faixas de markup salvas com sucesso.', erro: false);
+    } catch (e) {
+      setState(() => _salvandoFaixas = false);
+      _snack(_mensagemErro(e), erro: true);
+    }
+  }
+
+  Future<void> _salvarConfig() async {
+    final txt = _impostoCtrl.text.trim().replaceAll(',', '.');
+    final v   = double.tryParse(txt.isEmpty ? '0' : txt);
+    if (v == null || v < 0 || v > 100) {
+      _snack('O imposto sobre sobra deve ser um número entre 0 e 100.', erro: true);
+      return;
+    }
+    setState(() => _salvandoConfig = true);
+    try {
+      await _repo.salvarConfiguracoes({'impostoSobra': v.toString()});
+      setState(() => _salvandoConfig = false);
+      _snack('Configuração salva com sucesso.', erro: false);
+    } catch (e) {
+      setState(() => _salvandoConfig = false);
+      _snack(_mensagemErro(e), erro: true);
+    }
+  }
+
+  void _snack(String msg, {required bool erro}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: erro ? AppTheme.error : AppTheme.success,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(bottom: 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ─── Seção Markup ────────────────────────────────────────────────
+          _SecaoCard(
+            titulo: 'Markup por faixa de valor',
+            subtitulo:
+                'Define o percentual de markup aplicado ao custo base do orçamento conforme o valor total. '
+                'A última faixa (sem valor máximo) serve como padrão para qualquer valor acima.',
+            icone: Icons.stacked_bar_chart_rounded,
+            child: _carregandoFaixas
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+                  )
+                : _erroFaixas != null
+                    ? _ErroInline(mensagem: _erroFaixas!, onRetry: _carregarFaixas)
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // ── Cabeçalho da tabela ──
+                          if (_faixas.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: Row(
+                                children: [
+                                  _ColLabel('De (R\$)',     flex: 2),
+                                  const SizedBox(width: 8),
+                                  _ColLabel('Até (R\$)',    flex: 2),
+                                  const SizedBox(width: 8),
+                                  _ColLabel('Markup (%)',   flex: 2),
+                                  const SizedBox(width: 40), // espaço do botão excluir
+                                ],
+                              ),
+                            ),
+
+                          // ── Linhas de faixa ──
+                          for (int i = 0; i < _faixas.length; i++)
+                            _FaixaLinha(
+                              key: ValueKey(i),
+                              index:       i,
+                              total:       _faixas.length,
+                              minCtrl:     _minCtrls[i],
+                              maxCtrl:     _maxCtrls[i],
+                              pctCtrl:     _pctCtrls[i],
+                              onRemover:   () => _removerFaixa(i),
+                            ),
+
+                          if (_faixas.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                'Nenhuma faixa cadastrada. Adicione ao menos uma faixa aberta '
+                                '(sem valor máximo) para que o markup padrão seja aplicado.',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 12, color: cs.onSurfaceVariant),
+                              ),
+                            ),
+
+                          const SizedBox(height: 12),
+
+                          // ── Botões ──
+                          Row(
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: _adicionarFaixa,
+                                icon: const Icon(Icons.add_rounded, size: 16),
+                                label: Text('Adicionar faixa',
+                                    style: GoogleFonts.nunito(fontSize: 13)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppTheme.primary,
+                                  side: const BorderSide(color: AppTheme.primary),
+                                ),
+                              ),
+                              const Spacer(),
+                              FilledButton.icon(
+                                onPressed: _salvandoFaixas ? null : _salvarFaixas,
+                                icon: _salvandoFaixas
+                                    ? const SizedBox(
+                                        width: 14, height: 14,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2, color: Colors.white))
+                                    : const Icon(Icons.save_rounded, size: 16),
+                                label: Text('Salvar faixas',
+                                    style: GoogleFonts.nunito(fontSize: 13)),
+                                style: FilledButton.styleFrom(
+                                    backgroundColor: AppTheme.primary),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ─── Seção Imposto sobre Sobra ────────────────────────────────────
+          _SecaoCard(
+            titulo: 'Imposto sobre sobra de material',
+            subtitulo:
+                'Percentual adicional aplicado ao custo de desperdício (sobra de chapas). '
+                'Informe 0 para não aplicar imposto.',
+            icone: Icons.content_cut_rounded,
+            child: _carregandoConfig
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+                  )
+                : _erroConfig != null
+                    ? _ErroInline(mensagem: _erroConfig!, onRetry: _carregarConfig)
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            width: 260,
+                            child: TextField(
+                              controller: _impostoCtrl,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                    RegExp(r'[0-9.,]')),
+                              ],
+                              style: GoogleFonts.nunito(fontSize: 14),
+                              decoration: InputDecoration(
+                                labelText: 'Imposto sobre sobra (%)',
+                                hintText:  'Ex: 15',
+                                suffixText: '%',
+                                isDense:   true,
+                                border:    OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8)),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                      color: AppTheme.primary, width: 1.5),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              const Spacer(),
+                              FilledButton.icon(
+                                onPressed: _salvandoConfig ? null : _salvarConfig,
+                                icon: _salvandoConfig
+                                    ? const SizedBox(
+                                        width: 14, height: 14,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2, color: Colors.white))
+                                    : const Icon(Icons.save_rounded, size: 16),
+                                label: Text('Salvar',
+                                    style: GoogleFonts.nunito(fontSize: 13)),
+                                style: FilledButton.styleFrom(
+                                    backgroundColor: AppTheme.primary),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Widget: linha de faixa de markup ─────────────────────────────────────────
+
+class _FaixaLinha extends StatelessWidget {
+  final int                    index;
+  final int                    total;
+  final TextEditingController  minCtrl;
+  final TextEditingController  maxCtrl;
+  final TextEditingController  pctCtrl;
+  final VoidCallback           onRemover;
+
+  const _FaixaLinha({
+    super.key,
+    required this.index,
+    required this.total,
+    required this.minCtrl,
+    required this.maxCtrl,
+    required this.pctCtrl,
+    required this.onRemover,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs          = Theme.of(context).colorScheme;
+    final isUltima    = index == total - 1;
+
+    Widget campo({
+      required TextEditingController ctrl,
+      required String hint,
+      bool enabled = true,
+      int flex = 2,
+    }) =>
+        Expanded(
+          flex: flex,
+          child: TextField(
+            controller: ctrl,
+            enabled:    enabled,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+            ],
+            style: GoogleFonts.nunito(fontSize: 13),
+            decoration: InputDecoration(
+              hintText:   hint,
+              hintStyle:  GoogleFonts.nunito(
+                  fontSize: 12, color: cs.onSurfaceVariant),
+              isDense:    true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(7),
+                borderSide: BorderSide(
+                    color: cs.outline.withValues(alpha: 0.4)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(7),
+                borderSide: BorderSide(
+                    color: cs.outline.withValues(alpha: 0.4)),
+              ),
+              disabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(7),
+                borderSide: BorderSide(
+                    color: cs.outline.withValues(alpha: 0.2)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(7),
+                borderSide: const BorderSide(
+                    color: AppTheme.primary, width: 1.5),
+              ),
+              filled:     true,
+              fillColor:  enabled
+                  ? cs.surface
+                  : cs.surfaceContainerLow,
+            ),
+          ),
+        );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          campo(ctrl: minCtrl, hint: '0,00'),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 6),
+            child: Text('→', style: TextStyle(color: Colors.grey)),
+          ),
+          isUltima
+              ? Expanded(
+                  flex: 2,
+                  child: Container(
+                    height: 38,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withValues(alpha: 0.07),
+                      borderRadius: BorderRadius.circular(7),
+                      border: Border.all(
+                          color: AppTheme.primary.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      'Em aberto (padrão)',
+                      style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          color: AppTheme.primary,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                )
+              : campo(ctrl: maxCtrl, hint: '9999,99'),
+          const SizedBox(width: 8),
+          campo(ctrl: pctCtrl, hint: '400'),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            color: AppTheme.error,
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Remover faixa',
+            onPressed: onRemover,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Widget: card de seção ────────────────────────────────────────────────────
+
+class _SecaoCard extends StatelessWidget {
+  final String   titulo;
+  final String   subtitulo;
+  final IconData icone;
+  final Widget   child;
+
+  const _SecaoCard({
+    required this.titulo,
+    required this.subtitulo,
+    required this.icone,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      decoration: BoxDecoration(
+        color:        cs.surface,
+        borderRadius: BorderRadius.circular(12),
+        border:       Border.all(
+            color: cs.outline.withValues(alpha: 0.18)),
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color:        AppTheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icone, size: 18, color: AppTheme.primary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(titulo,
+                        style: GoogleFonts.raleway(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: cs.onSurface)),
+                    Text(subtitulo,
+                        style: GoogleFonts.nunito(
+                            fontSize: 11,
+                            color: cs.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          const SizedBox(height: 16),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Widget: label de coluna ──────────────────────────────────────────────────
+
+class _ColLabel extends StatelessWidget {
+  final String texto;
+  final int    flex;
+
+  const _ColLabel(this.texto, {this.flex = 1});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      flex: flex,
+      child: Text(
+        texto,
+        style: GoogleFonts.nunito(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            letterSpacing: 0.5),
+      ),
+    );
+  }
+}
+
+// ─── Widget: erro inline com retry ───────────────────────────────────────────
+
+class _ErroInline extends StatelessWidget {
+  final String       mensagem;
+  final VoidCallback onRetry;
+
+  const _ErroInline({required this.mensagem, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline, color: AppTheme.error, size: 32),
+          const SizedBox(height: 8),
+          Text(mensagem,
+              style: GoogleFonts.nunito(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+              textAlign: TextAlign.center),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('Tentar novamente'),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Helper local ─────────────────────────────────────────────────────────────
+
+String _fmtNum(double v) =>
+    v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(2);

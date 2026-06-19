@@ -130,12 +130,17 @@ const gerarOrdemCompra = async (req, res, next) => {
     
     // Busca o orçamento completo com itens
     const orcamento = await svc.buscarPorId(orcamentoId);
-    
+
+    // Fornecedores ocultos nunca entram na OC, mesmo que estejam selecionados
+    // (a ocultação só é desfeita explicitamente pelo usuário).
+    const ocultos = new Set(orcamento.fornecedoresOcultos || []);
+
     // Agrupa itens por fornecedor (apenas os selecionados)
     const itensPorFornecedor = new Map();
     
     for (const item of orcamento.itens || []) {
       if (!item.selecionado || !item.fornecedorId) continue;
+      if (ocultos.has(item.fornecedorId)) continue;
       
       if (!itensPorFornecedor.has(item.fornecedorId)) {
         itensPorFornecedor.set(item.fornecedorId, {
@@ -226,6 +231,23 @@ const reabrir = async (req, res, next) => {
   }
 };
 
+// PATCH /orcamentos/:id/fornecedores-ocultos
+// Body: { fornecedorId: number, oculto: boolean }
+// Oculta ou reexibe um fornecedor na visualização do orçamento (matriz, totais,
+// melhor preço e PDF). Não exclui nenhum dado — é reversível e visível para
+// qualquer usuário que abrir este orçamento.
+const definirFornecedorOculto = async (req, res, next) => {
+  try {
+    const { fornecedorId, oculto } = req.body;
+    if (fornecedorId == null || typeof oculto !== 'boolean') {
+      return res.status(400).json({ message: 'fornecedorId e oculto (boolean) são obrigatórios.' });
+    }
+    res.json(await svc.definirFornecedorOculto(+req.params.id, +fornecedorId, oculto));
+  } catch (e) {
+    next(e);
+  }
+};
+
 module.exports = {
   listar,
   buscarPorId,
@@ -241,4 +263,5 @@ module.exports = {
   rejeitar,
   gerarOrdemCompra,
   reabrir,
+  definirFornecedorOculto,
 };

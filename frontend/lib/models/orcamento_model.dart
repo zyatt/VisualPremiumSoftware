@@ -43,6 +43,11 @@ class OrcamentoModel {
   final String? motivoRejeicao;
   final DateTime criadoEm;
 
+  /// IDs de fornecedores ocultados da visualização deste orçamento.
+  /// Compartilhado entre todos os usuários: quem ocultar, todos que abrirem
+  /// este orçamento verão oculto também. Não afeta os dados em si.
+  final List<int> fornecedoresOcultos;
+
   OrcamentoModel({
     required this.id,
     required this.titulo,
@@ -53,6 +58,7 @@ class OrcamentoModel {
     this.aprovadoEm,
     this.motivoRejeicao,
     required this.criadoEm,
+    this.fornecedoresOcultos = const [],
   });
 
   factory OrcamentoModel.fromJson(Map<String, dynamic> json) =>
@@ -72,6 +78,9 @@ class OrcamentoModel {
         criadoEm: json['criadoEm'] != null
             ? DateTime.tryParse(json['criadoEm']) ?? DateTime.now()
             : DateTime.now(),
+        fornecedoresOcultos: (json['fornecedoresOcultos'] as List? ?? [])
+            .map((e) => e as int)
+            .toList(),
       );
 
   /// Label legível para o status

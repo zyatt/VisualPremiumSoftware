@@ -128,6 +128,13 @@ class OrcamentoTab {
   /// Enquanto for null, o orçamento ainda não existe no banco.
   int? servidorId;
 
+  /// IDs de fornecedores ocultados da visualização (matriz, totais, melhor
+  /// preço e PDF) deste orçamento. Persistido no servidor junto com o
+  /// orçamento, então é visto por qualquer usuário que abrir o mesmo
+  /// orçamento — não é uma preferência só local. Não afeta os dados em si:
+  /// o fornecedor, os itens e os preços continuam intactos.
+  List<int> fornecedoresOcultos;
+
   /// Flags de estado da aba (mantidas aqui para sobreviver a rebuilds da page).
   bool aguardandoAprovacao;
   bool jaFinalizado;
@@ -141,17 +148,20 @@ class OrcamentoTab {
     required this.titulo,
     List<ItemOrcamentoData>? itens,
     this.servidorId,
+    List<int>? fornecedoresOcultos,
     this.aguardandoAprovacao = false,
     this.jaFinalizado = false,
     this.modoGerarOC = false,
     this.modoEdicao = false,
-  }) : itens = itens ?? [];
+  }) : itens = itens ?? [],
+       fornecedoresOcultos = fornecedoresOcultos ?? [];
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'titulo': titulo,
         'itens': itens.map((i) => i.toJson()).toList(),
         'servidorId': servidorId,
+        'fornecedoresOcultos': fornecedoresOcultos,
         'aguardandoAprovacao': aguardandoAprovacao,
         'jaFinalizado': jaFinalizado,
         'modoGerarOC': modoGerarOC,
@@ -162,6 +172,9 @@ class OrcamentoTab {
         id: j['id'] as String,
         titulo: j['titulo'] as String,
         servidorId: j['servidorId'] as int?,
+        fornecedoresOcultos: (j['fornecedoresOcultos'] as List? ?? [])
+            .map((e) => e as int)
+            .toList(),
         aguardandoAprovacao: j['aguardandoAprovacao'] as bool? ?? false,
         jaFinalizado: j['jaFinalizado'] as bool? ?? false,
         modoGerarOC: j['modoGerarOC'] as bool? ?? false,
@@ -281,6 +294,30 @@ class OrcamentoProvider extends ChangeNotifier {
   void setServidorIdTab(int? id) {
     if (tabAtual == null) return;
     tabAtual!.servidorId = id;
+    _salvarAbas();
+    notifyListeners();
+  }
+
+  /// Define a lista completa de fornecedores ocultos da aba ativa (usado ao
+  /// carregar/recarregar um orçamento do servidor, que é a fonte da verdade).
+  void setFornecedoresOcultosTab(List<int> ids) {
+    if (tabAtual == null) return;
+    tabAtual!.fornecedoresOcultos = List.of(ids);
+    _salvarAbas();
+    notifyListeners();
+  }
+
+  /// Oculta ou reexibe um fornecedor na aba ativa (apenas o estado local —
+  /// a chamada ao servidor para persistir é feita pela page/editor, que então
+  /// deve atualizar o provider com o resultado confirmado).
+  void definirFornecedorOcultoLocal(int fornecedorId, bool oculto) {
+    if (tabAtual == null) return;
+    final lista = tabAtual!.fornecedoresOcultos;
+    if (oculto) {
+      if (!lista.contains(fornecedorId)) lista.add(fornecedorId);
+    } else {
+      lista.remove(fornecedorId);
+    }
     _salvarAbas();
     notifyListeners();
   }
@@ -489,11 +526,13 @@ class OrcamentoProvider extends ChangeNotifier {
 
   bool get podeGerarOrdem {
     if (tabAtual == null || tabAtual!.itens.isEmpty) return false;
+    final ocultos = tabAtual!.fornecedoresOcultos.toSet();
     final fornecedores = tabAtual!.itens
-        .where((i) => i.fornecedorSelecionado != null)
+        .where((i) => i.fornecedorSelecionado != null && !ocultos.contains(i.fornecedorSelecionado))
         .map((i) => i.fornecedorSelecionado!)
         .toSet();
     return fornecedores.isNotEmpty &&
-        tabAtual!.itens.every((i) => i.fornecedorSelecionado != null);
+        tabAtual!.itens.every((i) =>
+            i.fornecedorSelecionado != null && !ocultos.contains(i.fornecedorSelecionado));
   }
 }

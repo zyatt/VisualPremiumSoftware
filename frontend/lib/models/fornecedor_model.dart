@@ -11,6 +11,12 @@ class FornecedorMaterialVinculoModel {
   final bool ativo;
   /// Quando true, o material exige descrição personalizada na OC.
   final bool materialEspecifico;
+  /// Unidade de medida do material no estoque (ex: "UNIDADE", "ML", "M/L", "KG").
+  final String? materialUnidade;
+  /// Largura da chapa/material (m) — usado para calcular preço/m² automaticamente.
+  final double? materialLargura;
+  /// Comprimento da chapa/material (m) — usado para calcular preço/m² automaticamente.
+  final double? materialComprimento;
 
   FornecedorMaterialVinculoModel({
     required this.id,
@@ -24,6 +30,9 @@ class FornecedorMaterialVinculoModel {
     required this.precoMetroQuadrado,
     required this.ativo,
     this.materialEspecifico = false,
+    this.materialUnidade,
+    this.materialLargura,
+    this.materialComprimento,
   });
 
   String get descricaoCompleta {
@@ -65,6 +74,13 @@ class FornecedorMaterialVinculoModel {
         precoMetroQuadrado:   double.tryParse(json['precoMetroQuadrado'].toString()) ?? 0,
         ativo:                json['ativo'] ?? true,
         materialEspecifico:   json['material']?['especifico'] ?? false,
+        materialUnidade:      json['material']?['unidade'],
+        materialLargura:      json['material']?['largura'] != null
+            ? double.tryParse(json['material']['largura'].toString())
+            : null,
+        materialComprimento:  json['material']?['comprimento'] != null
+            ? double.tryParse(json['material']['comprimento'].toString())
+            : null,
       );
 }
 

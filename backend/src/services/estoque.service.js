@@ -40,6 +40,10 @@ async function buscarPorNumeroOS(numeroOS) {
 async function registrarMovimentacao({
   materialId, tipo, quantidade, numeroOS,
   precoUnitario, precoM2, observacao, ordemCompraId, descricaoItem,
+  // Dimensões usadas na saída (apenas para materiais UNIDADE com largura/comprimento)
+  larguraUsada, comprimentoUsado,
+  // Nome do usuário autenticado que registrou a movimentação
+  usuarioNome,
 }) {
   const material = await prisma.material.findUnique({ where: { id: materialId } });
   if (!material) throw { status: 404, message: 'Material não encontrado' };
@@ -164,6 +168,57 @@ async function registrarMovimentacao({
   // que a OC já gravou como custo/unidade — logo não é necessário dividir novamente.
   const precoUnitarioFinal = precoUnitario ?? null;
 
+  // ── Custo proporcional por dimensão usada ─────────────────────────────────
+  // Apenas para materiais UNIDADE (chapa/peça) com dimensões cadastradas,
+  // quando o usuário informa larguraUsada × comprimentoUsado.
+  //
+  // Materiais metro linear (m, m/l…) NÃO passam por aqui: o front já envia
+  // precoM2 = custoM2 × largura (custo por metro linear), e o relatório calcula
+  // custo total = quantidade(metros) × precoM2. Não há segunda multiplicação.
+  //
+  // Para chapas, a fórmula é:
+  //   areaUsada     = larguraUsada × comprimentoUsado
+  //   custoM2       = precoM2 do material (R$/m²)
+  //   precoM2Final  = custoM2 × areaUsada   (custo total desta saída)
+  //
+  // Como a quantidade é sempre 1 UNIDADE, salvar o custo total como precoM2
+  // garante que quantidade(1) × precoM2Final = custo real no relatório.
+  const _unidadeMat = (material.unidade ?? '').toLowerCase().trim();
+  const _eMetroLinear = ['m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'].includes(_unidadeMat);
+
+  let precoM2Final = precoM2 ?? null;
+  if (
+    tipo === 'SAIDA' &&
+    !_eMetroLinear &&
+    larguraUsada != null && comprimentoUsado != null &&
+    material.largura != null && material.comprimento != null
+  ) {
+    const larg      = Number(larguraUsada);
+    const comp      = Number(comprimentoUsado);
+    const largTotal = Number(material.largura);
+    const compTotal = Number(material.comprimento);
+
+    if (larg > 0 && comp > 0 && largTotal > 0 && compTotal > 0) {
+      const areaUsada = larg * comp;
+      const areaTotal = largTotal * compTotal;
+      // Custo por m²: usa precoM2 enviado, senão deriva do precoUnitario ÷ areaTotal
+      const custoM2 = precoM2 != null
+        ? Number(precoM2)
+        : (precoUnitario != null && areaTotal > 0
+            ? Number(precoUnitario) / areaTotal
+            : null);
+      if (custoM2 != null) {
+        // Arredonda para 5 casas decimais (precisão do campo Decimal(15,5))
+        precoM2Final = Math.round(custoM2 * areaUsada * 100000) / 100000;
+      }
+    }
+  }
+
+  // Monta observação: usa a que veio do front, ou gera automaticamente com o nome do usuário
+  const obsFinal = (observacao && observacao.trim())
+    ? observacao.trim()
+    : `${tipo === 'SAIDA' ? 'Saída' : 'Entrada'} via controle de estoque – ${usuarioNome ?? 'Usuário'}`;
+
   // Cria a movimentação
   const [movimentacao] = await prisma.$transaction([
     prisma.movimentacaoEstoque.create({
@@ -172,12 +227,14 @@ async function registrarMovimentacao({
         tipo,
         quantidade,
         numeroOS,
-        relacaoOSId:   relacao.id,
-        precoUnitario: precoUnitarioFinal,
-        precoM2:       precoM2 ?? null,
-        observacao:    observacao    ?? null,
-        ordemCompraId: ordemCompraId ?? null,
-        descricaoItem: descricaoItem ?? null,
+        relacaoOSId:      relacao.id,
+        precoUnitario:    precoUnitarioFinal,
+        precoM2:          precoM2Final,
+        observacao:       obsFinal,
+        ordemCompraId:    ordemCompraId ?? null,
+        descricaoItem:    descricaoItem ?? null,
+        larguraUsada:     (larguraUsada    != null ? Number(larguraUsada)    : null),
+        comprimentoUsado: (comprimentoUsado != null ? Number(comprimentoUsado) : null),
       },
     }),
     // Para material normal: atualiza quantidade direta; para específico: será feito abaixo
@@ -224,10 +281,132 @@ async function registrarMovimentacao({
     await prisma.material.update({ where: { id: materialId }, data: { status: novoStatus } });
   }
 
+  // ── Retalho ───────────────────────────────────────────────────────────────
+  // Quando o usuário informa dimensão usada numa saída de material UNIDADE,
+  // a área restante (areaTotal − areaUsada) é creditada diretamente no
+  // cadastro do material retalho — sem criar movimentação de estoque.
+  // O retalho é identificado por: mesmo nome + identificador 'RETALHO' + espessura.
+  if (
+    tipo === 'SAIDA' &&
+    !material.especifico &&
+    larguraUsada != null && comprimentoUsado != null &&
+    material.largura != null && material.comprimento != null
+  ) {
+    const larg      = Number(larguraUsada);
+    const comp      = Number(comprimentoUsado);
+    const largTotal = Number(material.largura);
+    const compTotal = Number(material.comprimento);
+
+    if (larg > 0 && comp > 0 && largTotal > 0 && compTotal > 0) {
+      const areaTotal   = largTotal * compTotal;
+      const areaUsada   = larg * comp;
+      const areaRetalho = Math.round((areaTotal - areaUsada) * 10000) / 10000;
+
+      if (areaRetalho > 0.0001) {
+        // Busca material retalho existente: mesmo nome + 'RETALHO' + espessura
+        let retalhoMat = await prisma.material.findFirst({
+          where: {
+            nome:          { equals: material.nome, mode: 'insensitive' },
+            identificador: { equals: 'RETALHO',    mode: 'insensitive' },
+            espessura:     material.espessura
+              ? { equals: material.espessura, mode: 'insensitive' }
+              : null,
+          },
+        });
+
+        // Custo por m² do retalho:
+        // Se o material tem precoM2 enviado na movimentação → usa direto.
+        // Caso contrário, deriva do preço unitário ÷ área total da chapa.
+        // O retalho é sempre em M2, portanto NÃO copia ultimoValorPago (unitário).
+        const custoM2Retalho = (() => {
+          // precoM2 no escopo desta saída (calculado acima)
+          if (precoM2Final != null && precoM2Final > 0) {
+            // precoM2Final já é o custo proporcional da área usada —
+            // precisamos do custo *por m²*, não do total da saída.
+            // Como precoM2Final = custoM2 × areaUsada, revertemos:
+            const areaUsada = Number(larguraUsada) * Number(comprimentoUsado);
+            if (areaUsada > 0) return precoM2Final / areaUsada;
+          }
+          // Tenta derivar do precoUnitario ÷ areaTotal
+          const pu = precoUnitario != null ? Number(precoUnitario) : null;
+          const areaT = Number(material.largura) * Number(material.comprimento);
+          if (pu != null && pu > 0 && areaT > 0) return pu / areaT;
+          // Último recurso: valor já gravado no material
+          return material.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null;
+        })();
+
+        if (!retalhoMat) {
+          // Cria o material retalho — a quantidade já nasce com areaRetalho
+          try {
+            retalhoMat = await prisma.material.create({
+              data: {
+                nome:              material.nome,
+                unidade:           'M2',
+                categoria:         material.categoria   ?? null,
+                medida:            material.medida      ?? null,
+                espessura:         material.espessura   ?? null,
+                identificador:     'RETALHO',
+                quantidade:        areaRetalho,
+                estoqueMinimo:     0,
+                status:            _calcularStatus(areaRetalho, 0, true),
+                estoqueConfirmado: false,
+                ativo:             true,
+                especifico:        false,
+                // Retalho é medido em M2: apenas custo/m² faz sentido
+                ultimoValorPago:   null,
+                ultimoValorPagoM2: custoM2Retalho,
+              },
+            });
+          } catch (err) {
+            // Unique constraint [nome, medida, espessura]: já existe material com
+            // esse nome/medida/espessura mas identificador diferente de 'RETALHO'.
+            // Recupera e incrementa a quantidade nele.
+            if (err?.code === 'P2002') {
+              retalhoMat = await prisma.material.findFirst({
+                where: {
+                  nome:      { equals: material.nome, mode: 'insensitive' },
+                  medida:    material.medida
+                    ? { equals: material.medida,    mode: 'insensitive' }
+                    : null,
+                  espessura: material.espessura
+                    ? { equals: material.espessura, mode: 'insensitive' }
+                    : null,
+                },
+              });
+              if (!retalhoMat) throw err;
+              const novaQtd = Number(retalhoMat.quantidade) + areaRetalho;
+              await prisma.material.update({
+                where: { id: retalhoMat.id },
+                data: {
+                  quantidade: novaQtd,
+                  status:     _calcularStatus(novaQtd, Number(retalhoMat.estoqueMinimo), retalhoMat.ativo),
+                },
+              });
+            } else {
+              throw err;
+            }
+          }
+        } else {
+          // Retalho já existe — incrementa quantidade, recalcula status
+          // e atualiza custo/m² se temos um valor calculado
+          const novaQtd = Number(retalhoMat.quantidade) + areaRetalho;
+          await prisma.material.update({
+            where: { id: retalhoMat.id },
+            data: {
+              quantidade:        novaQtd,
+              status:            _calcularStatus(novaQtd, Number(retalhoMat.estoqueMinimo), retalhoMat.ativo),
+              ultimoValorPago:   null, // retalho é M2, não tem custo unitário
+              ...(custoM2Retalho != null ? { ultimoValorPagoM2: custoM2Retalho } : {}),
+            },
+          });
+        }
+      }
+    }
+  }
+
   return movimentacao;
 }
 
-// ── Remover movimentação ──────────────────────────────────────────────────────
 async function removerMovimentacao(movimentacaoId) {
   const mov = await prisma.movimentacaoEstoque.findUnique({ where: { id: movimentacaoId } });
   if (!mov) throw { status: 404, message: 'Movimentação não encontrada' };
@@ -380,7 +559,9 @@ async function listarTodas(busca) {
 // ── Atualizar preço de uma movimentação existente ─────────────────────────────
 // Permite corrigir o custo de uma movimentação sem precisar removê-la e
 // recriá-la. A OS deve estar EM_ANDAMENTO.
-async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, precoM2 }) {
+// Registra um AuditLogMaterial com acao='CUSTO_MANUAL' para cada campo alterado,
+// incluindo quem fez a alteração (usuario.id / usuario.nome) e a data (automática).
+async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, precoM2 }, usuario) {
   const mov = await prisma.movimentacaoEstoque.findUnique({
     where:   { id: movimentacaoId },
     include: { relacaoOS: true },
@@ -398,19 +579,54 @@ async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, preco
     throw { status: 400, message: 'Nenhum campo de preço informado' };
   }
 
-  return prisma.movimentacaoEstoque.update({
-    where: { id: movimentacaoId },
-    data,
-    include: {
-      material: {
-        select: {
-          id: true, nome: true, unidade: true,
-          identificador: true, medida: true, espessura: true,
-          especifico: true,
+  // ── Monta entradas de audit (captura valorAntes antes de atualizar) ──────────
+  const _fmt = (v) => v != null ? `R$ ${Number(v).toFixed(5)}` : null;
+
+  const auditEntries = [];
+
+  if ('precoUnitario' in data) {
+    auditEntries.push({
+      materialId:  mov.materialId,
+      acao:        'CUSTO_MANUAL',
+      campo:       'Custo unit. (mov.)',
+      valorAntes:  _fmt(mov.precoUnitario),
+      valorDepois: _fmt(data.precoUnitario),
+      usuarioId:   usuario?.id   ?? null,
+      usuarioNome: usuario?.nome ?? null,
+    });
+  }
+
+  if ('precoM2' in data) {
+    auditEntries.push({
+      materialId:  mov.materialId,
+      acao:        'CUSTO_MANUAL',
+      campo:       'Custo m² (mov.)',
+      valorAntes:  _fmt(mov.precoM2),
+      valorDepois: _fmt(data.precoM2),
+      usuarioId:   usuario?.id   ?? null,
+      usuarioNome: usuario?.nome ?? null,
+    });
+  }
+
+  // ── Persiste atualização + audit logs em uma única transação ─────────────────
+  const [movimentacaoAtualizada] = await prisma.$transaction([
+    prisma.movimentacaoEstoque.update({
+      where: { id: movimentacaoId },
+      data,
+      include: {
+        material: {
+          select: {
+            id: true, nome: true, unidade: true,
+            identificador: true, medida: true, espessura: true,
+            especifico: true,
+          },
         },
       },
-    },
-  });
+    }),
+    ...auditEntries.map((entry) => prisma.auditLogMaterial.create({ data: entry })),
+  ]);
+
+  return movimentacaoAtualizada;
 }
 
 // ── Renomear OS ───────────────────────────────────────────────────────────────

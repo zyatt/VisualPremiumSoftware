@@ -148,7 +148,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${osTextuaisEmAndamento.length} OS textual(is) fechada(s) automaticamente.',
+            '${osTextuaisEmAndamento.length} OS fechada(s) automaticamente.',
           ),
           backgroundColor: _corFechada,
           duration: const Duration(seconds: 5),
@@ -1519,6 +1519,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
           tipo:                 tipo,
           materialId:           _primeira.materialId,
           materialNome:         _primeira.materialNome,
+          unidade:              _primeira.materialUnidade,
           numeroOS:             widget.numeroOS,
           descricaoItem:        descricaoItem,
           precoUnitario:        ultimaEntrada?.precoUnitario ?? _primeira.precoUnitario,
@@ -1546,6 +1547,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
             tipo:               tipo,
             materialId:         _primeira.materialId,
             materialNome:       _primeira.materialNome,
+            unidade:            _primeira.materialUnidade,
             numeroOS:           widget.numeroOS,
             descricaoItem:      null,
             precoUnitario:      ultimaMovOS.precoUnitario,
@@ -1563,6 +1565,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
               tipo:               tipo,
               materialId:         _primeira.materialId,
               materialNome:       _primeira.materialNome,
+              unidade:            _primeira.materialUnidade,
               numeroOS:           widget.numeroOS,
               descricaoItem:      null,
               precoUnitario:      mat?.ultimoValorPago   ?? _primeira.precoUnitario,
@@ -1578,8 +1581,19 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
 
   Future<void> _confirmarRemoverMovimentacao(
       BuildContext context, MovimentacaoModel mov) async {
+    // Captura tudo que será necessário ANTES do await que dispara
+    // notifyListeners(). O `context` recebido aqui é o do _MaterialGridCard
+    // que disparou a ação (vindo do painel de detalhe do material); se essa
+    // for a última movimentação do material, o rebuild causado por
+    // removerMovimentacao() remove esse card da árvore (e fecha o painel)
+    // ENQUANTO ainda estamos no meio deste método. Qualquer uso de
+    // `context`/`messenger` depois do await pode então operar sobre um
+    // widget já desativado, daí os erros de "deactivated widget" e
+    // "setState() called during build".
     final provider  = context.read<EstoqueProvider>();
-    final messenger = ScaffoldMessenger.of(context);
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final rootContext =
+        Navigator.of(context, rootNavigator: true).context;
 
     final confirmar = await showDialog<bool>(
       context: context,
@@ -1612,12 +1626,18 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       numeroOS: widget.numeroOS,
     );
 
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(ok ? 'Movimentação removida' : (provider.erro ?? 'Erro')),
-        backgroundColor: ok ? AppTheme.success : AppTheme.error,
-      ),
+    // Não usa mais o `context` original (pode ter sido desativado pelo
+    // rebuild acima). Usa o messenger já capturado e, como fallback, exibe
+    // via o context raiz do app — que nunca é desmontado por esse fluxo.
+    final feedback = SnackBar(
+      content: Text(ok ? 'Movimentação removida' : (provider.erro ?? 'Erro')),
+      backgroundColor: ok ? AppTheme.success : AppTheme.error,
     );
+    if (messenger != null) {
+      messenger.showSnackBar(feedback);
+    } else if (rootContext.mounted) {
+      ScaffoldMessenger.maybeOf(rootContext)?.showSnackBar(feedback);
+    }
   }
 
 
@@ -1692,22 +1712,44 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                         fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 4),
-                  if (temPrecoUnit)
-                    Text(
-                      'Unit.: ${brl(mat.ultimoValorPago!)}',
-                      style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.primary),
-                    ),
-                  if (temPrecoM2)
-                    Text(
-                      'M²: ${brl(mat.ultimoValorPagoM2!)}',
-                      style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.primary),
-                    ),
+                  Builder(builder: (_) {
+                    const mlU = {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'};
+                    final eML = mlU.contains(mat.unidade?.toLowerCase().trim() ?? '');
+                    if (eML) {
+                      final valML = mat.ultimoValorPago ?? mat.ultimoValorPagoM2;
+                      if (valML != null && valML > 0) {
+                        return Text(
+                          'M/L: ${brl(valML)}',
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.primary),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (temPrecoUnit)
+                          Text(
+                            'Unit.: ${brl(mat.ultimoValorPago!)}',
+                            style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.primary),
+                          ),
+                        if (temPrecoM2)
+                          Text(
+                            'M²: ${brl(mat.ultimoValorPagoM2!)}',
+                            style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.primary),
+                          ),
+                      ],
+                    );
+                  }),
                 ],
               ),
             ),
@@ -1828,7 +1870,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                 ],
               ),
               Spacer(),
-              _UltimoPrecoRow(movimentacoes: widget.movimentacoes),
+              _UltimoPrecoRow(movimentacoes: widget.movimentacoes, unidade: unidade),
               SizedBox(height: 6),
               _TotaisResumoMini(totais: totais, unidade: unidade),
               SizedBox(height: 4),
@@ -1879,10 +1921,18 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                 }).toList()
             ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
 
-          // Se todas as movimentações foram removidas, fecha o dialog
+          // Se todas as movimentações foram removidas, fecha o dialog.
+          // Verifica ctx.mounted (não apenas canPop()) porque, quando esta
+          // era a última movimentação do material, o MESMO notifyListeners()
+          // que zerou `movsAtuais` também remove o _MaterialGridCard (pai)
+          // da árvore no GridView. Os dois rebuilds (deste Consumer e o do
+          // pai) podem ser processados no mesmo frame; sem essa checagem,
+          // o Navigator.of(ctx) pode operar sobre um elemento já desativado.
           if (movsAtuais.isEmpty && rel != null) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+              if (!ctx.mounted) return;
+              final navigator = Navigator.of(ctx);
+              if (navigator.canPop()) navigator.pop();
             });
           }
 
@@ -1956,6 +2006,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
 
                     _UltimoPrecoRow(
                       movimentacoes: movsAtuais,
+                      unidade: unidade,
                       expanded: true,
                     ),
                     const SizedBox(height: 10),
@@ -2110,16 +2161,27 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
 
 class _UltimoPrecoRow extends StatelessWidget {
   final List<MovimentacaoModel> movimentacoes;
+  /// Unidade do material (ex: 'M/L', 'm', 'UNIDADE', 'M2'…).
+  /// Usado para escolher o label correto nos badges de custo.
+  final String? unidade;
   /// [expanded] = true no painel popup (layout horizontal mais largo).
   final bool expanded;
 
   const _UltimoPrecoRow({
     required this.movimentacoes,
+    this.unidade,
     this.expanded = false,
   });
 
   static String _brl(double v) =>
       'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
+
+  static const _unidadesMetroLinear = {
+    'm', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares',
+  };
+
+  bool get _eMetroLinear =>
+      _unidadesMetroLinear.contains(unidade?.toLowerCase().trim() ?? '');
 
   @override
   Widget build(BuildContext context) {
@@ -2141,13 +2203,30 @@ class _UltimoPrecoRow extends StatelessWidget {
 
     if (pu == null && pm2 == null) return const SizedBox.shrink();
 
+    // Para metro linear:
+    //   • precoUnitario = custo por metro linear (R$/m) → badge "M/L"
+    //   • precoM2 gravado = custo por metro linear também (mesmo valor)
+    //     → não exibir separado; mostrar o verdadeiro custo/m² do material
+    //       que é precoM2 / largura — mas como não temos largura aqui,
+    //       exibimos apenas o badge M/L e omitimos o badge M² redundante.
+    // Para materiais UNIDADE (chapa):
+    //   • precoUnitario → badge "Unit."
+    //   • precoM2 → badge "M²"
     final chips = <Widget>[];
-    if (pu != null) {
-      chips.add(_PrecoBadge(label: 'Unit.', valor: _brl(pu)));
-    }
-    if (pm2 != null) {
-      if (chips.isNotEmpty) chips.add(const SizedBox(width: 4));
-      chips.add(_PrecoBadge(label: 'M²', valor: _brl(pm2)));
+    if (_eMetroLinear) {
+      // Prefere precoUnitario (custo/metro linear); fallback para precoM2
+      final valorML = pu ?? pm2;
+      if (valorML != null) {
+        chips.add(_PrecoBadge(label: 'M/L', valor: _brl(valorML)));
+      }
+    } else {
+      if (pu != null) {
+        chips.add(_PrecoBadge(label: 'Unit.', valor: _brl(pu)));
+      }
+      if (pm2 != null) {
+        if (chips.isNotEmpty) chips.add(const SizedBox(width: 4));
+        chips.add(_PrecoBadge(label: 'M²', valor: _brl(pm2)));
+      }
     }
 
     return Row(children: chips);
@@ -2225,11 +2304,35 @@ class _TotaisMovimentacao {
 
   static _TotaisMovimentacao calcular(List<MovimentacaoModel> movs) {
     double qtdE = 0, qtdS = 0, valE = 0, valS = 0;
+    const mlUnits = {
+      'm', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares',
+    };
     for (final m in movs) {
-      final pm2 = m.precoM2;
-      final pu  = m.precoUnitario;
-      // Usa preço m² quando disponível, senão unitário
-      final preco = (pm2 != null && pm2 > 0) ? pm2 : (pu ?? 0.0);
+      final pm2  = m.precoM2;
+      final pu   = m.precoUnitario;
+      final unid = (m.materialUnidade ?? '').toLowerCase().trim();
+      // Metro linear: a quantidade está em metros, então o fator correto é
+      // precoUnitario (custo por metro linear). precoM2, quando presente,
+      // é apenas referência de custo/m² do material e NÃO deve ser
+      // multiplicado pela quantidade em metros — fazer isso gera o valor
+      // errado (qtd × custo/m² em vez de qtd × custo/metro).
+      final eMetroLinear = mlUnits.contains(unid);
+      // M²: a quantidade já está em área, então precoM2 é o fator correto.
+      final eM2 = unid == 'm²' || unid == 'm2';
+      // UNIDADE (chapa, peça…): a quantidade é em unidades; o custo por unidade
+      // é precoUnitario. precoM2 é apenas referência (custo/m²) e NÃO deve ser
+      // multiplicado pela quantidade de unidades.
+      // Modo dimensional (chapa com largura×comprimento usados): precoM2 já é
+      // o custo proporcional TOTAL da área consumida (não custo/m² do
+      // material), e quantidade é sempre 1. Usar precoUnitario aqui contaria
+      // o valor da chapa inteira em vez do retalho realmente usado.
+      final preco = m.usouModoDimensional
+          ? (pm2 ?? 0.0)
+          : (eMetroLinear
+              ? ((pu  != null && pu  > 0) ? pu  : (pm2 ?? 0.0))
+              : (eM2
+                  ? ((pm2 != null && pm2 > 0) ? pm2 : (pu ?? 0.0))
+                  : ((pu  != null && pu  > 0) ? pu  : (pm2 ?? 0.0))));
       if (m.tipo == 'ENTRADA') {
         qtdE += m.quantidade;
         valE += m.quantidade * preco;
@@ -2469,9 +2572,25 @@ class _MovimentacaoRow extends StatelessWidget {
                     Builder(builder: (_) {
                       final pu  = mov.precoUnitario;
                       final pm2 = mov.precoM2;
+                      const mlUnits = {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'};
+                      final eML = mlUnits.contains(unidade?.toLowerCase().trim() ?? '');
                       final partes = <String>[];
-                      if (pu  != null && pu  > 0) partes.add('R\$ ${pu.toStringAsFixed(2).replaceAll('.', ',')}');
-                      if (pm2 != null && pm2 > 0) partes.add('R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')} /m²');
+                      if (mov.usouModoDimensional) {
+                        // Modo dimensional: precoM2 é o custo TOTAL proporcional
+                        // ao retalho usado (não custo por m²), então exibe sem
+                        // sufixo "/m²" — e ignora precoUnitario (preço da chapa
+                        // inteira), que não corresponde ao valor desta saída.
+                        if (pm2 != null && pm2 > 0) {
+                          partes.add('R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}');
+                        }
+                      } else if (eML) {
+                        // Metro linear: mostra apenas um valor (custo/m linear) com label M/L
+                        final val = (pu != null && pu > 0) ? pu : (pm2 != null && pm2 > 0 ? pm2 : null);
+                        if (val != null) partes.add('R\$ ${val.toStringAsFixed(2).replaceAll('.', ',')} /m/l');
+                      } else {
+                        if (pu  != null && pu  > 0) partes.add('R\$ ${pu.toStringAsFixed(2).replaceAll('.', ',')}');
+                        if (pm2 != null && pm2 > 0) partes.add('R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')} /m²');
+                      }
                       if (partes.isEmpty) return const SizedBox.shrink();
                       return Padding(
                         padding: const EdgeInsets.only(left: 8),
@@ -2555,6 +2674,7 @@ class _MovimentacaoItemDialog extends StatefulWidget {
   final String tipo;
   final int materialId;
   final String materialNome;
+  final String? unidade;
   final String numeroOS;
   final String? descricaoItem;
   final double? precoUnitario;
@@ -2567,6 +2687,7 @@ class _MovimentacaoItemDialog extends StatefulWidget {
     required this.materialId,
     required this.materialNome,
     required this.numeroOS,
+    this.unidade,
     this.descricaoItem,
     this.precoUnitario,
     this.precoM2,
@@ -2718,17 +2839,24 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
                 return s;
               }
 
+              const mlUD = {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'};
+              final eMLDlg = mlUD.contains(widget.unidade?.toLowerCase().trim() ?? '');
               final partes = <String>[];
-              if (pu != null && pu > 0) {
-                if (temQtdPad) {
-                  partes.add('Custo: R\$ ${fmtPreco(pu)}/${unidPadrao.toLowerCase()}');
-                  partes.add('≈ R\$ ${fmtPreco(pu * qtdPadrao)}/embalagem');
-                } else {
-                  partes.add('Unit.: R\$ ${pu.toStringAsFixed(2).replaceAll('.', ',')}');
+              if (eMLDlg) {
+                final valML = (pu != null && pu > 0) ? pu : (pm2 != null && pm2 > 0 ? pm2 : null);
+                if (valML != null) partes.add('M/L: R\$ ${valML.toStringAsFixed(2).replaceAll('.', ',')}');
+              } else {
+                if (pu != null && pu > 0) {
+                  if (temQtdPad) {
+                    partes.add('Custo: R\$ ${fmtPreco(pu)}/${unidPadrao.toLowerCase()}');
+                    partes.add('≈ R\$ ${fmtPreco(pu * qtdPadrao)}/embalagem');
+                  } else {
+                    partes.add('Unidade: R\$ ${pu.toStringAsFixed(2).replaceAll('.', ',')}');
+                  }
                 }
-              }
-              if (pm2 != null && pm2 > 0) {
-                partes.add('M²: R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}');
+                if (pm2 != null && pm2 > 0) {
+                  partes.add('M²: R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}');
+                }
               }
               if (partes.isEmpty) return SizedBox.shrink();
               return Padding(
@@ -2954,7 +3082,7 @@ class _MovimentacaoGlobalDialogState
     });
   }
 
-  Future<void> _confirmar() async {
+ Future<void> _confirmar() async {
     if (!_formKey.currentState!.validate()) return;
     if (_itensSelecionados.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2963,12 +3091,8 @@ class _MovimentacaoGlobalDialogState
       return;
     }
 
-    // Se há uma OS fixada (context detalhe), usa o valor real com sufixo
     String numeroOS = widget.numeroOSFixo ?? _numeroOSCtrl.text.trim();
 
-    // Sufixo único para OS textuais — apenas quando a OS foi digitada agora
-    // (numeroOSFixo == null). OS vindas de detalhe já têm o numeroOS correto
-    // do banco e não devem ser modificadas, senão cria uma RelacaoOS nova.
     if (widget.numeroOSFixo == null) {
       numeroOS = numeroOS.trim();
     }
@@ -2980,22 +3104,37 @@ class _MovimentacaoGlobalDialogState
     setState(() => _enviando = true);
     bool todosOk = true;
 
-    // Usa registrarMovimentacaoSilencioso para não recarregar a cada iteração
     for (final item in _itensSelecionados) {
       final quant = double.parse(item.quantCtrl.text.replaceAll(',', '.'));
       final obs = item.obsCtrl.text.trim().isEmpty
           ? null
           : item.obsCtrl.text.trim();
 
+      // Captura dimensões usadas quando o modo dimensional está ativo em saídas
+      // de material UNIDADE com largura/comprimento cadastrados. Os valores são
+      // enviados ao backend para calcular o custo proporcional à área consumida.
+      double? largUsada;
+      double? compUsado;
+      if (widget.tipo == 'SAIDA' && item.usarModoDimensional && item.podeInformarDimensao) {
+        final l = double.tryParse(item.larguraUsadaCtrl.text.replaceAll(',', '.'));
+        final c = double.tryParse(item.alturaUsadaCtrl.text.replaceAll(',', '.'));
+        if (l != null && l > 0 && c != null && c > 0) {
+          largUsada = l;
+          compUsado = c;
+        }
+      }
+
       final ok = await provider.registrarMovimentacaoSilencioso(
-        materialId:    item.material.id,
-        tipo:          widget.tipo,
-        quantidade:    quant,
-        numeroOS:      numeroOS,  // ← Agora usa o mesmo numeroOS com sufixo
-        precoUnitario: item.precoUnitarioSugerido,
-        precoM2:       item.precoM2Sugerido,
-        observacao:    obs,
-        descricaoItem: item.descricaoItem,
+        materialId:       item.material.id,
+        tipo:             widget.tipo,
+        quantidade:       quant,
+        numeroOS:         numeroOS,
+        precoUnitario:    item.precoUnitarioSugerido,
+        precoM2:          item.precoM2Sugerido,
+        observacao:       obs,
+        descricaoItem:    item.descricaoItem,
+        larguraUsada:     largUsada,
+        comprimentoUsado: compUsado,
       );
       
       if (!ok) {
@@ -3012,7 +3151,6 @@ class _MovimentacaoGlobalDialogState
       }
     }
 
-    // Recarrega apenas uma vez ao final
     if (todosOk) {
       await provider.carregarRelacoesOS();
     }
@@ -3021,8 +3159,8 @@ class _MovimentacaoGlobalDialogState
     setState(() => _enviando = false);
 
     if (todosOk) {
-      // Remove o sufixo para exibir ao usuário (se foi adicionado)
-      final numeroOSDisplay = numeroOS;      navigator.pop();
+      final numeroOSDisplay = numeroOS;
+      navigator.pop();
       messenger.showSnackBar(SnackBar(
         content: Text(
             '${widget.tipo == 'ENTRADA' ? 'Entrada' : 'Saída'} '
@@ -3478,6 +3616,7 @@ class _MovimentacaoGlobalDialogState
                                         return _ItemSelecionadoCard(
                                           key: ValueKey(item.chaveUnica),
                                           item: item,
+                                          tipo: widget.tipo,
                                           onRemover: () => _removerItem(i),
                                         );
                                       },
@@ -3541,8 +3680,43 @@ class _ItemMovimentacao {
   bool usarModoDimensional = false;
   String? erroEstoque;
 
-  /// Preço unitário sugerido: vem do filho específico selecionado (ultimoValorPago)
-  /// ou, para materiais normais, do ultimoValorPago do material pai.
+  /// True se a unidade do material é metro linear (m, m/l, ml, etc.).
+  bool get _eMetroLinear {
+    final u = material.unidade?.toLowerCase().trim() ?? '';
+    return const {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'}.contains(u);
+  }
+
+  /// True se o material é UNIDADE (chapa/peça) e tem largura + comprimento
+  /// cadastrados. Materiais metro linear NÃO entram neste modo — eles não
+  /// precisam de dois campos de dimensão; a largura é fixa e o comprimento
+  /// cortado já é a própria quantidade informada pelo usuário.
+  bool get podeInformarDimensao {
+    final m = material;
+    if (_eMetroLinear) return false;
+    return (m.unidade?.toUpperCase() == 'UNIDADE') &&
+        m.largura != null && m.largura! > 0 &&
+        m.comprimento != null && m.comprimento! > 0;
+  }
+
+  /// Área usada em m² (larguraUsadaCtrl × alturaUsadaCtrl), quando ativo.
+  double? get areaUsadaM2 {
+    if (!usarModoDimensional) return null;
+    final l = double.tryParse(larguraUsadaCtrl.text.replaceAll(',', '.'));
+    final c = double.tryParse(alturaUsadaCtrl.text.replaceAll(',', '.'));
+    if (l == null || c == null || l <= 0 || c <= 0) return null;
+    return l * c;
+  }
+
+  /// Custo proporcional desta saída = custoM2 × areaUsada.
+  /// É salvo como precoM2 na movimentação para que o relatório exiba o valor
+  /// real consumido (não o preço por m² do material).
+  double? get precoM2Proporcional {
+    final area    = areaUsadaM2;
+    final custoM2 = precoM2Sugerido;
+    if (area == null || custoM2 == null || custoM2 <= 0) return null;
+    return custoM2 * area;
+  }
+
   double? get precoUnitarioSugerido {
     if (descricaoItem != null) {
       final filho = material.filhosEspecificos
@@ -3553,15 +3727,65 @@ class _ItemMovimentacao {
     return material.ultimoValorPago;
   }
 
-  /// Preço m² sugerido: mesma lógica acima mas para m².
+  /// Preço m² sugerido: retorna o custo que será gravado como [precoM2] na
+  /// movimentação de saída. A semântica depende do tipo de material:
+  ///
+  /// • Metro linear (m, m/l…): retorna custo **por metro linear** =
+  ///   custoM2 × largura. Assim, quantidade(metros) × precoM2 = custo total.
+  ///   Exemplo: lona 3,20 m de largura, custoM2 = 6,25 → precoM2 = 20,00.
+  ///   Saída de 25 m → 25 × 20 = R$500 no relatório. ✔
+  ///
+  /// • UNIDADE (chapa): retorna custo **por m²** puro. O backend multiplica
+  ///   depois por areaUsada ao receber larguraUsada × comprimentoUsado.
   double? get precoM2Sugerido {
+    // Tenta pegar o custo/m² já gravado (do material ou do filho específico)
+    double? custoM2Gravado;
     if (descricaoItem != null) {
       final filho = material.filhosEspecificos
           .where((f) => f.descricao == descricaoItem)
           .firstOrNull;
-      return filho?.ultimoValorPagoM2 ?? material.ultimoValorPagoM2;
+      custoM2Gravado = filho?.ultimoValorPagoM2 ?? material.ultimoValorPagoM2;
+    } else {
+      custoM2Gravado = material.ultimoValorPagoM2;
     }
-    return material.ultimoValorPagoM2;
+
+    // ── Metro linear: custoM2 precisa ser conhecido ──────────────────────────
+    // Para metro linear, a largura da bobina/rolo é fixa. O custo por metro
+    // linear = custoM2 × largura. É esse valor que vai em precoM2 para que
+    // quantidade(metros) × precoM2 = custo total no relatório.
+    final unidadeLinear = _eMetroLinear;
+    if (unidadeLinear) {
+      final larg = material.largura;
+      if (larg != null && larg > 0) {
+        // Prioridade: custo/m² já gravado → deriva custo/m linear
+        if (custoM2Gravado != null && custoM2Gravado > 0) {
+          return custoM2Gravado * larg;
+        }
+        // Fallback: deriva custo/m² do preço por metro linear gravado
+        final pu = precoUnitarioSugerido;
+        if (pu != null && pu > 0) {
+          // precoUnitario é por metro linear → custo/m² = pu / largura
+          // custo por metro linear = (pu / larg) × larg = pu (circular, correto)
+          return pu; // precoUnitario já é R$/metro linear
+        }
+      }
+      return null;
+    }
+
+    // ── Chapa/peça: retorna custo/m² para o backend multiplicar pela área ────
+    if (custoM2Gravado != null && custoM2Gravado > 0) return custoM2Gravado;
+
+    // Se não tiver custo/m² gravado mas o material tem dimensões e custo
+    // unitário, deriva: custo/m² = precoUnitario / (largura × comprimento)
+    final larg = material.largura;
+    final comp = material.comprimento;
+    if (larg != null && comp != null && larg > 0 && comp > 0) {
+      final pu = precoUnitarioSugerido;
+      if (pu != null && pu > 0) {
+        return pu / (larg * comp);
+      }
+    }
+    return null;
   }
 
   _ItemMovimentacao({required this.material, this.descricaoItem});
@@ -3583,11 +3807,14 @@ class _ItemMovimentacao {
 class _ItemSelecionadoCard extends StatefulWidget {
   final _ItemMovimentacao item;
   final VoidCallback onRemover;
+  /// 'ENTRADA' ou 'SAIDA' — controla se o modo retalho é exibido.
+  final String tipo;
 
   const _ItemSelecionadoCard({
     super.key,
     required this.item,
     required this.onRemover,
+    required this.tipo,
   });
 
   @override
@@ -3598,7 +3825,13 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
   _ItemMovimentacao get item => widget.item;
 
   // ── Detecta medida no formato "LxA" ou "LxAM" (ex: "2X1", "1.20X0.80M") ──
+  // Materiais metro linear (M/L, m, ml…) NUNCA entram no modo dimensional,
+  // mesmo que a medida esteja no formato LxC — a largura deles é fixa e o
+  // comprimento cortado já é a quantidade informada pelo usuário.
   bool get _temMedidaDimensional {
+    final unidade = item.material.unidade?.toLowerCase().trim() ?? '';
+    const unidadesMetroLinear = {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'};
+    if (unidadesMetroLinear.contains(unidade)) return false;
     final medida = item.material.medida;
     if (medida == null || medida.isEmpty) return false;
     // Aceita sufixo opcional "M" no final (ex: 1.20X0.80M, 2X1M)
@@ -3619,27 +3852,6 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
     final a = double.tryParse(partes[1].replaceAll(',', '.'));
     if (l == null || l <= 0 || a == null || a <= 0) return null;
     return (l, a);
-  }
-
-  void _recalcularQtd() {
-    final chapa = _medidaChapa;
-    if (chapa == null) return;
-    final largStr = item.larguraUsadaCtrl.text.replaceAll(',', '.');
-    final altStr  = item.alturaUsadaCtrl.text.replaceAll(',', '.');
-    final larg = double.tryParse(largStr);
-    final alt  = double.tryParse(altStr);
-    if (larg == null || alt == null || larg <= 0 || alt <= 0) {
-      setState(() {}); // ainda atualiza o preview
-      return;
-    }
-    // Arredonda para 4 casas antes de formatar para evitar ruído de ponto flutuante
-    // (ex: 0.6 * 0.4 pode virar 0.23999... ou 0.24000...2 em double)
-    final fracaoBruta = (larg * alt) / (chapa.$1 * chapa.$2);
-    final fracao = double.parse(fracaoBruta.toStringAsFixed(4));
-    final qtdStr = fracao.toStringAsFixed(4).replaceAll(RegExp(r'0+$'), '');
-    item.quantCtrl.text =
-        qtdStr.endsWith('.') ? '${qtdStr}0' : qtdStr;
-    setState(() {});
   }
 
   String _fmt(double v) =>
@@ -3666,10 +3878,15 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
       final alt     = double.tryParse(altStr);
 
       if (larg != null && larg > 0 && alt != null && alt > 0) {
-        final areaUsada = larg * alt;
-        final areaTotal = chapa.$1 * chapa.$2;
-        final fracao    = areaUsada / areaTotal;
-        final pct       = (fracao * 100).toStringAsFixed(1);
+        final areaUsada   = larg * alt;
+        final areaTotal   = chapa.$1 * chapa.$2;
+        final areaRetalho = double.parse((areaTotal - areaUsada).toStringAsFixed(4));
+        final temRetalho  = areaRetalho > 0.0001;
+
+        // Custo proporcional (só para SAÍDA)
+        final custoProporcional = widget.tipo == 'SAIDA'
+            ? item.precoM2Proporcional
+            : null;
 
         previewDimensional = Container(
           margin: const EdgeInsets.only(top: 8),
@@ -3690,26 +3907,31 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                     style: TextStyle(
                         fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     children: [
-                      TextSpan(
-                          text: '${_fmt(larg)} × ${_fmt(alt)} m  =  '),
+                      TextSpan(text: 'Área usada: '),
                       TextSpan(
                         text: '${_fmt(areaUsada)} m²',
                         style: TextStyle(
                             fontWeight: FontWeight.w700,
                             color: Theme.of(context).colorScheme.onSurface),
                       ),
-                      const TextSpan(text: '  →  '),
-                      TextSpan(
-                        text: item.quantCtrl.text,
-                        style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.primary),
-                      ),
-                      TextSpan(
-                        text: ' ${m.unidade ?? 'UN'}  ($pct% da chapa)',
-                        style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      ),
+                      if (temRetalho) ...[
+                        TextSpan(text: '  ·  Retalho: '),
+                        TextSpan(
+                          text: '${_fmt(areaRetalho)} m²',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.success),
+                        ),
+                      ],
+                      if (custoProporcional != null) ...[
+                        TextSpan(text: '  ·  Custo: '),
+                        TextSpan(
+                          text: 'R\$ ${custoProporcional.toStringAsFixed(2).replaceAll('.', ',')}',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.error),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -3788,8 +4010,16 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
           // ── Toggle modo dimensional (só chapas com medida LxA) ───────────
           if (podeDimensao) ...[
             InkWell(
-              onTap: () => setState(
-                  () => item.usarModoDimensional = !item.usarModoDimensional),
+              onTap: () => setState(() {
+                item.usarModoDimensional = !item.usarModoDimensional;
+                // Ao ativar o modo dimensional, a quantidade é sempre 1
+                // (uma chapa/peça inteira é "usada", a área que sai do
+                // estoque é controlada pela largura × comprimento usados).
+                // O campo fica bloqueado para edição manual.
+                if (item.usarModoDimensional) {
+                  item.quantCtrl.text = '1';
+                }
+              }),
               borderRadius: BorderRadius.circular(6),
               child: Padding(
                 padding:
@@ -3808,7 +4038,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                     ),
                     SizedBox(width: 6),
                     Text(
-                      'Informar por dimensão usada',
+                      'Informar dimensão usada',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -3856,7 +4086,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                       suffixStyle: TextStyle(
                           fontSize: 11, color: Theme.of(context).colorScheme.outline),
                     ),
-                    onChanged: (_) => _recalcularQtd(),
+                    onChanged: (_) => setState(() {}),
                   ),
                 ),
                 Padding(
@@ -3879,7 +4109,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                       suffixStyle: TextStyle(
                           fontSize: 11, color: Theme.of(context).colorScheme.outline),
                     ),
-                    onChanged: (_) => _recalcularQtd(),
+                    onChanged: (_) => setState(() {}),
                   ),
                 ),
               ],
@@ -3887,7 +4117,6 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
             if (previewDimensional != null) previewDimensional,
             const SizedBox(height: 10),
           ],
-
           // ── Campos de quantidade e observação ─────────────────────────────
           Row(
             children: [
@@ -3895,19 +4124,14 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                 width: 130,
                 child: TextFormField(
                   controller: item.quantCtrl,
+                  enabled: !item.usarModoDimensional,
                   keyboardType:
                       TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                     labelText: 'Quantidade *',
                     isDense: true,
                     suffixText: m.unidade,
-                    helperText: item.usarModoDimensional
-                        ? 'Calculado automaticamente'
-                        : null,
-                    helperStyle: TextStyle(
-                        fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
-                  readOnly: item.usarModoDimensional,
                   validator: (v) {
                     if (item.erroEstoque != null) return item.erroEstoque;
                     final quant =
@@ -3935,6 +4159,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
             ],
           ),
 
+
           // ── Preço sugerido ────────────────────────────────────────────────
           Builder(builder: (_) {
             final pu  = item.precoUnitarioSugerido;
@@ -3960,7 +4185,17 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
 
             final partesBrl = <String>[];
 
-            if (pu != null && pu > 0) {
+            const mlUnitsCard = {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'};
+            final eMLCard = mlUnitsCard.contains(m.unidade?.toLowerCase().trim() ?? '');
+
+            if (eMLCard) {
+              // Metro linear: precoM2Sugerido já é custo/metro linear (custoM2 × largura)
+              // Exibe como "M/L: R$ X,XX" e omite o badge M² (seria o mesmo valor)
+              final valML = pm2 ?? pu;
+              if (valML != null && valML > 0) {
+                partesBrl.add('M/L: R\$ ${valML.toStringAsFixed(2).replaceAll('.', ',')}');
+              }
+            } else if (pu != null && pu > 0) {
               if (temQtdPad) {
                 // Custo por unidade menor (ex: R$ 0,0147/ml)
                 partesBrl.add('Custo: R\$ ${fmtPreco(pu)}/${unidPadrao.toLowerCase()}');
@@ -3971,7 +4206,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                 partesBrl.add('Unit.: R\$ ${pu.toStringAsFixed(2).replaceAll('.', ',')}');
               }
             }
-            if (pm2 != null && pm2 > 0) {
+            if (!eMLCard && pm2 != null && pm2 > 0) {
               partesBrl.add('M²: R\$ ${pm2.toStringAsFixed(2).replaceAll('.', ',')}');
             }
             if (partesBrl.isEmpty) return SizedBox.shrink();

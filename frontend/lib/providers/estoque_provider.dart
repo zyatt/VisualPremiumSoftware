@@ -89,18 +89,22 @@ class EstoqueProvider extends ChangeNotifier {
     String? observacao,
     int? ordemCompraId,
     String? descricaoItem,
+    double? larguraUsada,
+    double? comprimentoUsado,
   }) async {
     try {
       await _repo.registrarMovimentacao(
-        materialId:    materialId,
-        tipo:          tipo,
-        quantidade:    quantidade,
-        numeroOS:      numeroOS,
-        precoUnitario: precoUnitario,
-        precoM2:       precoM2,
-        observacao:    observacao,
-        ordemCompraId: ordemCompraId,
-        descricaoItem: descricaoItem,
+        materialId:       materialId,
+        tipo:             tipo,
+        quantidade:       quantidade,
+        numeroOS:         numeroOS,
+        precoUnitario:    precoUnitario,
+        precoM2:          precoM2,
+        observacao:       observacao,
+        ordemCompraId:    ordemCompraId,
+        descricaoItem:    descricaoItem,
+        larguraUsada:     larguraUsada,
+        comprimentoUsado: comprimentoUsado,
       );
       await carregarRelacoesOS();
       return true;
@@ -125,18 +129,22 @@ class EstoqueProvider extends ChangeNotifier {
     String? observacao,
     int? ordemCompraId,
     String? descricaoItem,
+    double? larguraUsada,
+    double? comprimentoUsado,
   }) async {
     try {
       await _repo.registrarMovimentacao(
-        materialId:    materialId,
-        tipo:          tipo,
-        quantidade:    quantidade,
-        numeroOS:      numeroOS,
-        precoUnitario: precoUnitario,
-        precoM2:       precoM2,
-        observacao:    observacao,
-        ordemCompraId: ordemCompraId,
-        descricaoItem: descricaoItem,
+        materialId:       materialId,
+        tipo:             tipo,
+        quantidade:       quantidade,
+        numeroOS:         numeroOS,
+        precoUnitario:    precoUnitario,
+        precoM2:          precoM2,
+        observacao:       observacao,
+        ordemCompraId:    ordemCompraId,
+        descricaoItem:    descricaoItem,
+        larguraUsada:     larguraUsada,
+        comprimentoUsado: comprimentoUsado,
       );
       return true;
     } catch (e) {
@@ -152,12 +160,28 @@ class EstoqueProvider extends ChangeNotifier {
   }) async {
     try {
       await _repo.removerMovimentacao(movimentacaoId);
+
+      // Busca os dados atualizados ANTES de tocar no estado/notificar,
+      // para que a troca de _relacaoSelecionada e _relacoesOS aconteça
+      // em um único ponto, com uma única notifyListeners() ao final.
+      // Encadear vários notifyListeners() em sequência (como fazia antes,
+      // via carregarRelacoesOS() + notify explícito) pode disparar um
+      // rebuild enquanto o Flutter ainda está processando o rebuild
+      // anterior — e se esse rebuild remover da árvore o card cuja
+      // última movimentação acabou de ser excluída (ex.: ao remover a
+      // saída restante de um material), o widget é desativado nesse
+      // meio-tempo, causando "setState()/markNeedsBuild() called during
+      // build" e "Looking up a deactivated widget's ancestor is unsafe".
+      RelacaoOSModel? novaSelecao;
       try {
-        _relacaoSelecionada = await _repo.buscarRelacaoOS(numeroOS);
+        novaSelecao = await _repo.buscarRelacaoOS(numeroOS);
       } catch (_) {
-        _relacaoSelecionada = null;
+        novaSelecao = null;
       }
-      await carregarRelacoesOS();
+      final novasRelacoes = await _repo.listarTodasRelacoesOS();
+
+      _relacaoSelecionada = novaSelecao;
+      _relacoesOS = novasRelacoes;
       notifyListeners();
       return true;
     } catch (e) {

@@ -126,6 +126,12 @@ class FornecedorRepository {
         'identificador': item['identificador'],
         'medida':       item['medida'],
         'espessura':    item['espessura'],
+        'unidade':      item['unidade'],
+        'especifico':   item['especifico'],
+        'largura':      item['largura'],
+        'comprimento':  item['comprimento'],
+        'qtdPadrao':    item['qtdPadrao'],
+        'unidPadrao':   item['unidPadrao'],
       };
     }).toList();
   }

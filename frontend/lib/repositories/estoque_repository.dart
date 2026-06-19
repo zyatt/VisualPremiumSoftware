@@ -80,17 +80,21 @@ class EstoqueRepository {
     String? observacao,
     int? ordemCompraId,
     String? descricaoItem,
+    double? larguraUsada,
+    double? comprimentoUsado,
   }) async {
     final data = await ApiClient.post('/estoque/movimentacoes', {
       'materialId': materialId,
       'tipo':       tipo,
       'quantidade': quantidade,
       'numeroOS':   numeroOS,
-      if (precoUnitario != null)  'precoUnitario': precoUnitario,
-      if (precoM2 != null)        'precoM2':       precoM2,
-      if (observacao != null)     'observacao':    observacao,
-      if (ordemCompraId != null)  'ordemCompraId': ordemCompraId,
-      if (descricaoItem != null)  'descricaoItem': descricaoItem,
+      if (precoUnitario != null)    'precoUnitario':    precoUnitario,
+      if (precoM2 != null)          'precoM2':          precoM2,
+      if (observacao != null)       'observacao':       observacao,
+      if (ordemCompraId != null)    'ordemCompraId':    ordemCompraId,
+      if (descricaoItem != null)    'descricaoItem':    descricaoItem,
+      if (larguraUsada != null)     'larguraUsada':     larguraUsada,
+      if (comprimentoUsado != null) 'comprimentoUsado': comprimentoUsado,
     });
     return MovimentacaoModel.fromJson(data);
   }

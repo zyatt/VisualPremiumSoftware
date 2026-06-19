@@ -65,8 +65,18 @@ class OrdemCompraPage extends StatefulWidget {
 class _OrdemCompraPageState extends State<OrdemCompraPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final _buscaNumeroCtrl = TextEditingController();
-  String _filtroBuscaNumero = '';
+  final _buscaNumeroCtrl      = TextEditingController();
+  final _buscaNomeCtrl        = TextEditingController();
+  final _buscaMedidaCtrl      = TextEditingController();
+  final _buscaEspessuraCtrl   = TextEditingController();
+  final _buscaIdentificadorCtrl = TextEditingController();
+  final _buscaIdCtrl          = TextEditingController();
+  String _filtroBuscaNumero      = '';
+  String _filtroBuscaNome        = '';
+  String _filtroBuscaMedida      = '';
+  String _filtroBuscaEspessura   = '';
+  String _filtroBuscaIdentificador = '';
+  String _filtroBuscaId          = '';
 
   @override
   void initState() {
@@ -103,15 +113,46 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
   void dispose() {
     _tabController.dispose();
     _buscaNumeroCtrl.dispose();
+    _buscaNomeCtrl.dispose();
+    _buscaMedidaCtrl.dispose();
+    _buscaEspessuraCtrl.dispose();
+    _buscaIdentificadorCtrl.dispose();
+    _buscaIdCtrl.dispose();
     super.dispose();
   }
 
   List<dynamic> _filtrar(List<dynamic> lista) {
-    final q = _filtroBuscaNumero.trim();
-    if (q.isEmpty) return lista;
+    final qNum  = _filtroBuscaNumero.trim();
+    final qNome = _filtroBuscaNome.trim().toLowerCase();
+    final qMed  = _filtroBuscaMedida.trim().toLowerCase();
+    final qEsp  = _filtroBuscaEspessura.trim().toLowerCase();
+    final qId   = _filtroBuscaIdentificador.trim().toUpperCase();
+    final qMid  = _filtroBuscaId.trim();
+    if (qNum.isEmpty && qNome.isEmpty && qMed.isEmpty && qEsp.isEmpty && qId.isEmpty && qMid.isEmpty) return lista;
     return lista.where((o) {
       final raw = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
-      return raw.id.toString().contains(q);
+      if (qNum.isNotEmpty && !raw.id.toString().contains(qNum)) return false;
+      if (qNome.isNotEmpty) {
+        final tem = raw.itens.any((item) => item.materialNome.toLowerCase().contains(qNome));
+        if (!tem) return false;
+      }
+      if (qMed.isNotEmpty) {
+        final tem = raw.itens.any((item) => item.materialMedida?.toLowerCase().contains(qMed) ?? false);
+        if (!tem) return false;
+      }
+      if (qEsp.isNotEmpty) {
+        final tem = raw.itens.any((item) => item.materialEspessura?.toLowerCase().contains(qEsp) ?? false);
+        if (!tem) return false;
+      }
+      if (qId.isNotEmpty) {
+        final tem = raw.itens.any((item) => (item.materialIdentificador ?? '').toUpperCase().contains(qId));
+        if (!tem) return false;
+      }
+      if (qMid.isNotEmpty) {
+        final tem = raw.itens.any((item) => item.materialId.toString().contains(qMid));
+        if (!tem) return false;
+      }
+      return true;
     }).toList();
   }
 
@@ -188,26 +229,178 @@ class _OrdemCompraPageState extends State<OrdemCompraPage>
             ),
             SizedBox(height: 20),
 
-            // ── Busca por número da OC ──────────────────────────────────────
-            TextField(
-              controller: _buscaNumeroCtrl,
-              decoration: InputDecoration(
-                hintText: 'Buscar pelo número da OC...',
-                prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
-                isDense: true,
-                suffixIcon: _filtroBuscaNumero.isNotEmpty
-                    ? IconButton(
-                        icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
-                        onPressed: () {
+            // ── Filtros ────────────────────────────────────────────────────
+            Row(
+              children: [
+                SizedBox(
+                  width: 160,
+                  child: TextField(
+                    controller: _buscaNumeroCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Nº da OC...',
+                      prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                      suffixIcon: _filtroBuscaNumero.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
+                              onPressed: () {
+                                _buscaNumeroCtrl.clear();
+                                setState(() => _filtroBuscaNumero = '');
+                              },
+                            )
+                          : null,
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    onChanged: (v) => setState(() => _filtroBuscaNumero = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 3,
+                  child: TextField(
+                    controller: _buscaNomeCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Nome do material...',
+                      prefixIcon: Icon(Icons.inventory_2_outlined, color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                      suffixIcon: _filtroBuscaNome.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
+                              onPressed: () {
+                                _buscaNomeCtrl.clear();
+                                setState(() => _filtroBuscaNome = '');
+                              },
+                            )
+                          : null,
+                    ),
+                    onChanged: (v) => setState(() => _filtroBuscaNome = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _buscaIdentificadorCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Identificador...',
+                      prefixIcon: Icon(Icons.qr_code, color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                      suffixIcon: _filtroBuscaIdentificador.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
+                              onPressed: () {
+                                _buscaIdentificadorCtrl.clear();
+                                setState(() => _filtroBuscaIdentificador = '');
+                              },
+                            )
+                          : null,
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    onChanged: (v) => setState(() => _filtroBuscaIdentificador = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _buscaMedidaCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Medida...',
+                      prefixIcon: Icon(Icons.straighten_outlined, color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                      suffixIcon: _filtroBuscaMedida.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
+                              onPressed: () {
+                                _buscaMedidaCtrl.clear();
+                                setState(() => _filtroBuscaMedida = '');
+                              },
+                            )
+                          : null,
+                    ),
+                    onChanged: (v) => setState(() => _filtroBuscaMedida = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _buscaEspessuraCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Espessura...',
+                      prefixIcon: Icon(Icons.layers_outlined, color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                      suffixIcon: _filtroBuscaEspessura.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
+                              onPressed: () {
+                                _buscaEspessuraCtrl.clear();
+                                setState(() => _filtroBuscaEspessura = '');
+                              },
+                            )
+                          : null,
+                    ),
+                    onChanged: (v) => setState(() => _filtroBuscaEspessura = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 1,
+                  child: TextField(
+                    controller: _buscaIdCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'ID...',
+                      prefixIcon: Icon(Icons.numbers, color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                      suffixIcon: _filtroBuscaId.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
+                              onPressed: () {
+                                _buscaIdCtrl.clear();
+                                setState(() => _filtroBuscaId = '');
+                              },
+                            )
+                          : null,
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    onChanged: (v) => setState(() => _filtroBuscaId = v),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: (_filtroBuscaNumero.isNotEmpty || _filtroBuscaNome.isNotEmpty || _filtroBuscaMedida.isNotEmpty || _filtroBuscaEspessura.isNotEmpty || _filtroBuscaIdentificador.isNotEmpty || _filtroBuscaId.isNotEmpty)
+                      ? () {
                           _buscaNumeroCtrl.clear();
-                          setState(() => _filtroBuscaNumero = '');
-                        },
-                      )
-                    : null,
-              ),
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              onChanged: (v) => setState(() => _filtroBuscaNumero = v),
+                          _buscaNomeCtrl.clear();
+                          _buscaMedidaCtrl.clear();
+                          _buscaEspessuraCtrl.clear();
+                          _buscaIdentificadorCtrl.clear();
+                          _buscaIdCtrl.clear();
+                          setState(() {
+                            _filtroBuscaNumero = '';
+                            _filtroBuscaNome = '';
+                            _filtroBuscaMedida = '';
+                            _filtroBuscaEspessura = '';
+                            _filtroBuscaIdentificador = '';
+                            _filtroBuscaId = '';
+                          });
+                        }
+                      : null,
+                  icon: Icon(
+                    Icons.filter_alt_off,
+                    size: 18,
+                    color: (_filtroBuscaNumero.isNotEmpty || _filtroBuscaNome.isNotEmpty || _filtroBuscaMedida.isNotEmpty || _filtroBuscaEspessura.isNotEmpty || _filtroBuscaIdentificador.isNotEmpty || _filtroBuscaId.isNotEmpty)
+                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                        : Theme.of(context).colorScheme.outline,
+                  ),
+                  tooltip: 'Limpar filtros',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
             ),
             SizedBox(height: 16),
 
@@ -1314,11 +1507,9 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                     _itemChip(Icons.assignment_outlined, 'OS: ${item.numeroOS}'),
                     _itemChip(
                       Icons.format_list_numbered,
-                      item.usarM2
-                          ? 'Qtd (m²): ${item.quantidade}'
-                          : 'Qtd: ${item.quantidade}',
+                      'Qtd: ${item.quantidade}',
                     ),
-                    if (!item.usarM2 && item.materialQtdPadrao != null && item.materialQtdPadrao! > 0)
+                    if (item.materialQtdPadrao != null && item.materialQtdPadrao! > 0)
                       _itemChip(
                         Icons.warehouse_outlined,
                         () {
@@ -1332,17 +1523,15 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                       ),
                    _itemChipDestaque(
                       Icons.attach_money,
-                      item.precoUnitario > 0
-                          ? 'Unitário: R\$ ${item.precoUnitario.toStringAsFixed(2).replaceAll('.', ',')}'
-                          : 'Unitário: —',
-                      ativo: !item.usarM2,
-                    ),
-                    _itemChipDestaque(
-                      Icons.square_foot,
-                      item.precoMetroQuadrado != null && item.precoMetroQuadrado! > 0
-                          ? 'm²: R\$ ${item.precoMetroQuadrado!.toStringAsFixed(2).replaceAll('.', ',')}'
-                          : 'm²: —',
-                      ativo: item.usarM2,
+                      () {
+                        if (item.qtdUnidade != null && item.qtdUnidade! > 0) {
+                          return 'R\$ ${item.precoUnitario.toStringAsFixed(6).replaceAll('.', ',')}/${item.materialUnidade ?? 'unid.'}';
+                        }
+                        return item.precoUnitario > 0
+                            ? 'Unitário: R\$ ${item.precoUnitario.toStringAsFixed(6).replaceAll('.', ',')}'
+                            : 'Unitário: —';
+                      }(),
+                      ativo: true,
                     ),
                   ],
                 ),
@@ -1571,7 +1760,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     final grupos = <String, _ItemRascunho>{};
     for (final i in itens) {
       // Chave: material + preço + modo + descrição
-      final chave = '${i.materialId}|${i.usarM2}|${i.precoUnitario}|${i.precoMetroQuadrado}|${i.descricaoItem ?? ''}';
+      final chave = '${i.materialId}|${i.precoUnitario}|${i.descricaoItem ?? ''}';
       if (grupos.containsKey(chave)) {
         // Adiciona linha de distribuição ao rascunho existente
         final r = grupos[chave]!;
@@ -1582,6 +1771,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         grupos[chave] = _ItemRascunho(
           materialId:            i.materialId,
           materialNome:          i.materialNome,
+          materialUnidade:       i.materialUnidade,
           materialMedida:        i.materialMedida,
           materialEspessura:     i.materialEspessura,
           materialIdentificador: i.materialIdentificador,
@@ -1589,9 +1779,9 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           materialEspecifico:    i.materialEspecifico,
           numeroOS:              i.numeroOS,
           quantidade:            i.quantidade,
+          qtdUnidade:            i.qtdUnidade,
           precoUnitario:         i.precoUnitario,
           precoMetroQuadrado:    i.precoMetroQuadrado,
-          usarM2:                i.usarM2,
           distribuicao: [_DistribuicaoLinha(os: i.numeroOS, quantidade: i.quantidade)],
         );
       }
@@ -1614,6 +1804,9 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
             );
             if (vinculo != null) {
               item.materialEspecifico = vinculo.materialEspecifico;
+              // Preenche dimensões para cálculo automático do preço m²
+              item.materialLargura     = vinculo.materialLargura;
+              item.materialComprimento = vinculo.materialComprimento;
             }
           }
         }
@@ -1640,9 +1833,28 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       final completo = await provider.buscarPorId(selected.id);
       if (mounted) {
         setState(() {
-        _fornecedor = completo ?? selected;
-        _itens.clear();
-      });
+          _fornecedor = completo ?? selected;
+          // Itens são mantidos ao trocar fornecedor.
+          // Para cada item, atualiza preço e materialEspecifico se houver
+          // vínculo já cadastrado no novo fornecedor. Caso contrário, mantém
+          // os valores atuais — o backend cria o vínculo automaticamente ao salvar.
+          final novosFornecedorMateriais = _fornecedor?.materiais ?? [];
+          for (final item in _itens) {
+            final vinculo = novosFornecedorMateriais
+                .cast<FornecedorMaterialVinculoModel?>()
+                .firstWhere(
+                  (m) => m?.materialId == item.materialId,
+                  orElse: () => null,
+                );
+            if (vinculo != null) {
+              // Atualiza preço com o do novo fornecedor se disponível
+              if (vinculo.preco > 0) {
+                item.precoUnitario = vinculo.preco;
+              }
+              item.materialEspecifico = vinculo.materialEspecifico;
+            }
+          }
+        });
       }
     }
   }
@@ -1663,16 +1875,19 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       _itens.add(_ItemRascunho(
         materialId:             vinculo.materialId,
         materialNome:           vinculo.descricaoCompleta,
+        materialUnidade:        vinculo.materialUnidade,
         materialMedida:         vinculo.materialMedida,
         materialEspessura:      vinculo.materialEspessura,
         materialIdentificador:  vinculo.materialIdentificador,
+        // Dimensões do material (necessárias para calcular preço/m² automático).
+        materialLargura:        vinculo.materialLargura,
+        materialComprimento:    vinculo.materialComprimento,
         materialEspecifico:     vinculo.materialEspecifico,
         numeroOS:               osAuto,
         quantidade:             1,
         precoUnitario:          vinculo.preco,
         precoMetroQuadrado:
             vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
-        usarM2:                 false,
       ));
     });
   }
@@ -1738,17 +1953,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       }
     }
     for (final item in _itens) {
-      if (item.usarM2) {
-        if (item.precoMetroQuadrado == null || item.precoMetroQuadrado! <= 0) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Preencha o preço m² de todos os itens.'),
-              backgroundColor: AppTheme.error,
-            ),
-          );
-          return;
-        }
-      } else {
+      {
         if (item.precoUnitario <= 0) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -1776,9 +1981,10 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           'descricaoItem': i.descricaoItem,
           'numeroOS': i.distribuicao.firstWhere((l) => l.os.isNotEmpty, orElse: () => _DistribuicaoLinha()).os,
           'quantidade': i.quantidade,
-          'precoUnitario': i.usarM2 ? null : i.precoUnitario,
-          'precoMetroQuadrado': i.usarM2 ? i.precoMetroQuadrado : null,
-          'usarM2': i.usarM2,
+          'qtdUnidade': i.qtdUnidade,           // ← LINHA ADICIONADA
+          'precoUnitario': i.precoUnitario,
+          'precoMetroQuadrado': i.precoM2Calculado,
+          'usarM2': false,
           'distribuicao': i.distribuicao.where((l) => l.os.isNotEmpty && l.quantidade > 0).map((l) => {'os': l.os, 'quantidade': l.quantidade}).toList(),
         }).toList(),
       });
@@ -2121,7 +2327,6 @@ class ItemPreCarregadoOC {
   final double precoUnitario;
   final bool materialEspecifico;
   final double? precoMetroQuadrado;
-  final bool usarM2;
   final String? descricao;
 
   ItemPreCarregadoOC({
@@ -2130,7 +2335,6 @@ class ItemPreCarregadoOC {
     required this.quantidade,
     required this.precoUnitario,
     this.precoMetroQuadrado,
-    this.usarM2 = false,
     this.descricao,
     this.materialEspecifico = false,
   });
@@ -2189,7 +2393,6 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         quantidade:         item.quantidade,
         precoUnitario:      item.precoUnitario,
         precoMetroQuadrado: item.precoMetroQuadrado,
-        usarM2:             item.usarM2,
         descricaoItem:      item.descricao,
       ));
     }
@@ -2260,12 +2463,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       }
     }
     for (final item in _itens) {
-      if (item.usarM2) {
-        if (item.precoMetroQuadrado == null || item.precoMetroQuadrado! <= 0) {
-          _showErro('Preencha o preço m² de todos os itens.');
-          return;
-        }
-      } else {
+      {
         if (item.precoUnitario <= 0) {
           _showErro('Preencha o preço unitário de todos os itens.');
           return;
@@ -2296,9 +2494,10 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                   'descricaoItem': i.descricaoItem,
                   'numeroOS': i.distribuicao.firstWhere((l) => l.os.isNotEmpty, orElse: () => _DistribuicaoLinha()).os,
                   'quantidade': i.quantidade,
-                  'precoUnitario': i.usarM2 ? null : i.precoUnitario,
-                  'precoMetroQuadrado': i.usarM2 ? i.precoMetroQuadrado : null,
-                  'usarM2': i.usarM2,
+                  'qtdUnidade': i.qtdUnidade,
+                  'precoUnitario': i.precoUnitario,
+                  'precoMetroQuadrado': i.precoM2Calculado,
+                  'usarM2': false,
                   'distribuicao': i.distribuicao.where((l) => l.os.isNotEmpty && l.quantidade > 0).map((l) => {'os': l.os, 'quantidade': l.quantidade}).toList(),
                 })
             .toList(),
@@ -2363,16 +2562,18 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       _itens.add(_ItemRascunho(
         materialId:             vinculo.materialId,
         materialNome:           vinculo.descricaoCompleta,
+        materialUnidade:        vinculo.materialUnidade,
         materialMedida:         vinculo.materialMedida,
         materialEspessura:      vinculo.materialEspessura,
         materialIdentificador:  vinculo.materialIdentificador,
+        materialLargura:        vinculo.materialLargura,
+        materialComprimento:    vinculo.materialComprimento,
         materialEspecifico:     vinculo.materialEspecifico,
         numeroOS:               osAuto,
         quantidade:             1,
         precoUnitario:          vinculo.preco,
         precoMetroQuadrado:
             vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
-        usarM2:                 false,
       ));
     });
   }
@@ -3147,42 +3348,97 @@ class _DistribuicaoLinha {
 class _ItemRascunho {
   int materialId;
   String materialNome;
+  /// Unidade de medida do material no estoque (ex: "UNIDADE", "ML", "M/L", "KG").
+  String? materialUnidade;
   String? materialMedida;
   String? materialEspessura;
   String? materialIdentificador;
+  /// Largura do material em metros (ex: 2.0 para chapa 2×1).
+  double? materialLargura;
+  /// Comprimento do material em metros (ex: 1.0 para chapa 2×1).
+  double? materialComprimento;
   /// Indica se o material é específico (exige descrição personalizada na OC).
   bool? materialEspecifico;
   /// Descrição personalizada na OC (ex: "Tinta Branca Fosca 18L").
   String? descricaoItem;
   String numeroOS;
+  /// Quantidade de embalagens/peças (o número que o usuário digita como "Qtd").
   double quantidade;
+  /// Quantidade da unidade de medida por embalagem/peça.
+  /// Ex: 50 para uma lona de 50 M/L; 18000 para uma lata de 18000 ML.
+  /// Quando preenchido, o estoque recebe quantidade × qtdUnidade.
+  double? qtdUnidade;
   double precoUnitario;
   double? precoMetroQuadrado;
-  /// Se true, o total é calculado como quantidade × precoMetroQuadrado;
-  /// caso contrário, quantidade × precoUnitario.
-  bool usarM2;
   /// Distribuição da quantidade por OS.
   List<_DistribuicaoLinha> distribuicao;
 
   _ItemRascunho({
     required this.materialId,
     required this.materialNome,
+    this.materialUnidade,
     this.materialMedida,
     this.materialEspessura,
     this.materialIdentificador,
+    this.materialLargura,
+    this.materialComprimento,
     this.materialEspecifico,
     this.descricaoItem,
     required this.numeroOS,
     required this.quantidade,
+    this.qtdUnidade,
     this.precoUnitario = 0,
     this.precoMetroQuadrado,
-    this.usarM2 = false,
     List<_DistribuicaoLinha>? distribuicao,
   }) : distribuicao = distribuicao ?? [_DistribuicaoLinha(os: numeroOS, quantidade: quantidade)];
 
+  /// True quando o material tem dimensões cadastradas e o modo não é m².
+  /// Nesses casos o preço m² é calculado automaticamente — não editável.
+  bool get temDimensoes =>
+      materialLargura != null && materialLargura! > 0 &&
+      materialComprimento != null && materialComprimento! > 0;
+
+  /// Custo/m² automático: precoUnitario / (largura × comprimento).
+  double? get precoM2Calculado {
+    if (!temDimensoes || precoUnitario <= 0) return null;
+    return precoUnitario / (materialLargura! * materialComprimento!);
+  }
+
+  /// True quando a unidade exige campo de quantidade por embalagem/peça.
+  /// Materiais UNIDADE simples não precisam desse campo.
+  bool get precisaQtdUnidade {
+    final u = (materialUnidade ?? '').toUpperCase().trim();
+    return u.isNotEmpty && u != 'UNIDADE';
+  }
+
+  /// Rótulo dinâmico para o campo de quantidade por unidade.
+  /// Ex: "M/L por peça", "ML por embalagem", "KG por embalagem".
+  String get labelQtdUnidade {
+    final u = (materialUnidade ?? '').toUpperCase().trim();
+    switch (u) {
+      case 'M/L':    return 'M/L por peça';
+      case 'ML':     return 'ML por embalagem';
+      case 'KG':     return 'KG por embalagem';
+      case 'G':      return 'g por embalagem';
+      case 'L':      return 'L por embalagem';
+      case 'M':      return 'M por peça';
+      case 'M2':
+      case 'M²':     return 'M² por peça';
+      default:       return '$u por unidade';
+    }
+  }
+
+  /// Quantidade real que irá para o estoque: quantidade × qtdUnidade (quando aplicável).
+  double get quantidadeEstoque {
+    if (qtdUnidade != null && qtdUnidade! > 0) return quantidade * qtdUnidade!;
+    return quantidade;
+  }
+
+  /// Preço total: quantidade × qtdUnidade × precoUnitario quando qtdUnidade está preenchido.
+  /// Sem qtdUnidade: quantidade × precoUnitario (comportamento legado).
   double get precoTotal {
-    if (usarM2 && precoMetroQuadrado != null && precoMetroQuadrado! > 0) {
-      return quantidade * precoMetroQuadrado!;
+    if (precisaQtdUnidade && qtdUnidade != null && qtdUnidade! > 0) {
+      return quantidade * qtdUnidade! * precoUnitario;
     }
     return quantidade * precoUnitario;
   }
@@ -3212,9 +3468,16 @@ class _ItemFormCard extends StatefulWidget {
 
 class _ItemFormCardState extends State<_ItemFormCard> {
   late TextEditingController _qtdCtrl;
+  late TextEditingController _qtdUnidadeCtrl;
   late TextEditingController _precoCtrl;
-  late TextEditingController _precoM2Ctrl;
+  late TextEditingController _precoTotalCtrl;
   late TextEditingController _descricaoCtrl;
+  
+  bool _ignorarCalculo = false;
+  // ← NOVO: rastreia qual campo tem prioridade
+  // 'unitario' = mantém o preço unitário fixo e recalcula o total
+  // 'total' = mantém o total fixo e recalcula o preço unitário
+  String _campoEditado = 'unitario';
 
   @override
   void initState() {
@@ -3225,67 +3488,148 @@ class _ItemFormCardState extends State<_ItemFormCard> {
             : widget.item.quantidade % 1 == 0
                 ? widget.item.quantidade.toInt().toString()
                 : widget.item.quantidade.toString());
+    _qtdUnidadeCtrl = TextEditingController(
+        text: widget.item.qtdUnidade == null || widget.item.qtdUnidade == 0
+            ? ''
+            : widget.item.qtdUnidade! % 1 == 0
+                ? widget.item.qtdUnidade!.toInt().toString()
+                : widget.item.qtdUnidade.toString());
     _precoCtrl = TextEditingController(
         text: widget.item.precoUnitario == 0 ? '' : widget.item.precoUnitario.toString());
-    _precoM2Ctrl = TextEditingController(
-        text: widget.item.precoMetroQuadrado != null && widget.item.precoMetroQuadrado! > 0
-            ? widget.item.precoMetroQuadrado!.toString()
-            : '');
+    
+    _precoTotalCtrl = TextEditingController(
+        text: _calcularPrecoTotal() == 0 ? '' : _calcularPrecoTotal().toStringAsFixed(2));
+    
     _descricaoCtrl = TextEditingController(
         text: widget.item.descricaoItem ?? '');
-  }
-
-  @override
-  void didUpdateWidget(covariant _ItemFormCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Limpa linhas com OS que foram removidas da lista (ex: usuario apagou o campo)
-    bool changed = false;
-    for (final linha in widget.item.distribuicao) {
-      if (linha.os.isNotEmpty && !widget.numerosOS.contains(linha.os)) {
-        linha.os = '';
-        changed = true;
-      }
-    }
-    // Se agora há exatamente 1 OS, preenche a linha 0 automaticamente
-    if (widget.numerosOS.length == 1) {
-      final dist = widget.item.distribuicao;
-      while (dist.length > 1) {
-        dist.removeLast();
-        changed = true;
-      }
-      if (dist.isEmpty) {
-        dist.add(_DistribuicaoLinha(
-            os: widget.numerosOS.first,
-            quantidade: widget.item.quantidade));
-        changed = true;
-      } else {
-        if (dist[0].os != widget.numerosOS.first) {
-          dist[0].os = widget.numerosOS.first;
-          changed = true;
-        }
-        if ((dist[0].quantidade - widget.item.quantidade).abs() > 0.0001) {
-          dist[0].quantidade = widget.item.quantidade;
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      widget.item.numeroOS = widget.item.distribuicao
-          .firstWhere((l) => l.os.isNotEmpty, orElse: () => _DistribuicaoLinha())
-          .os;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) widget.onChanged();
-      });
-    }
+    
+    _precoCtrl.addListener(_onPrecoUnitarioChanged);
+    _precoTotalCtrl.addListener(_onPrecoTotalChanged);
   }
 
   @override
   void dispose() {
+    _precoCtrl.removeListener(_onPrecoUnitarioChanged);
+    _precoTotalCtrl.removeListener(_onPrecoTotalChanged);
     _qtdCtrl.dispose();
+    _qtdUnidadeCtrl.dispose();
     _precoCtrl.dispose();
-    _precoM2Ctrl.dispose();
+    _precoTotalCtrl.dispose();
     _descricaoCtrl.dispose();
     super.dispose();
+  }
+
+  double _calcularPrecoTotal() {
+    final qtd = double.tryParse(_qtdCtrl.text) ?? 0;
+    final qtdUnit = double.tryParse(_qtdUnidadeCtrl.text);
+    final preco = double.tryParse(_precoCtrl.text) ?? 0;
+    
+    if (qtd <= 0 || preco <= 0) return 0;
+    
+    if (qtdUnit != null && qtdUnit > 0) {
+      return qtd * qtdUnit * preco;
+    }
+    return qtd * preco;
+  }
+  
+  // ← MODIFICADO: marca que o usuário editou o preço unitário
+  void _onPrecoUnitarioChanged() {
+    if (_ignorarCalculo) return;
+    
+    final preco = double.tryParse(_precoCtrl.text);
+    if (preco == null || preco <= 0) {
+      if (_precoTotalCtrl.text.isNotEmpty) {
+        _ignorarCalculo = true;
+        _precoTotalCtrl.clear();
+        _ignorarCalculo = false;
+      }
+      return;
+    }
+    
+    // ← NOVO: marca que o unitário foi editado
+    _campoEditado = 'unitario';
+    
+    final total = _calcularPrecoTotal();
+    if (total > 0) {
+      final novoTexto = total.toStringAsFixed(2);
+      if (_precoTotalCtrl.text != novoTexto) {
+        _ignorarCalculo = true;
+        _precoTotalCtrl.text = novoTexto;
+        _ignorarCalculo = false;
+      }
+    }
+  }
+
+  // ← MODIFICADO: marca que o usuário editou o total
+  void _onPrecoTotalChanged() {
+    if (_ignorarCalculo) return;
+    
+    final total = double.tryParse(_precoTotalCtrl.text);
+    if (total == null || total <= 0) {
+      return;
+    }
+    
+    // ← NOVO: marca que o total foi editado
+    _campoEditado = 'total';
+    
+    final qtd = double.tryParse(_qtdCtrl.text) ?? 0;
+    final qtdUnit = double.tryParse(_qtdUnidadeCtrl.text);
+    
+    if (qtd <= 0) return;
+    
+    double precoUnitario;
+    if (qtdUnit != null && qtdUnit > 0) {
+      precoUnitario = total / (qtd * qtdUnit);
+    } else {
+      precoUnitario = total / qtd;
+    }
+    
+    final novoTexto = precoUnitario.toStringAsFixed(6);
+    if (_precoCtrl.text != novoTexto) {
+      _ignorarCalculo = true;
+      _precoCtrl.text = novoTexto;
+      widget.item.precoUnitario = precoUnitario;
+      _ignorarCalculo = false;
+      widget.onChanged();
+      setState(() {});
+    }
+  }
+  
+  // ← NOVO: método chamado quando quantidade ou qtdUnidade muda
+  void _recalcularComBaseNaPrioridade() {
+    if (_campoEditado == 'total') {
+      // Total tem prioridade: recalcula o unitário mantendo o total fixo
+      final total = double.tryParse(_precoTotalCtrl.text);
+      if (total != null && total > 0) {
+        final qtd = double.tryParse(_qtdCtrl.text) ?? 0;
+        final qtdUnit = double.tryParse(_qtdUnidadeCtrl.text);
+        
+        if (qtd > 0) {
+          double precoUnitario;
+          if (qtdUnit != null && qtdUnit > 0) {
+            precoUnitario = total / (qtd * qtdUnit);
+          } else {
+            precoUnitario = total / qtd;
+          }
+          
+          _ignorarCalculo = true;
+          _precoCtrl.text = precoUnitario.toStringAsFixed(6);
+          widget.item.precoUnitario = precoUnitario;
+          _ignorarCalculo = false;
+        }
+      }
+    } else {
+      // Unitário tem prioridade: recalcula o total mantendo o unitário fixo
+      final preco = double.tryParse(_precoCtrl.text);
+      if (preco != null && preco > 0) {
+        final total = _calcularPrecoTotal();
+        if (total > 0) {
+          _ignorarCalculo = true;
+          _precoTotalCtrl.text = total.toStringAsFixed(2);
+          _ignorarCalculo = false;
+        }
+      }
+    }
   }
 
   InputDecoration _deco(String hint) => InputDecoration(
@@ -3313,7 +3657,13 @@ class _ItemFormCardState extends State<_ItemFormCard> {
 
   @override
   Widget build(BuildContext context) {
-    final total = widget.item.precoTotal;
+    final item = widget.item;
+    final total = item.precoTotal;
+    final unidade = (item.materialUnidade ?? '').toUpperCase().trim();
+    final labelQtd = unidade.isNotEmpty && unidade != 'UNIDADE'
+        ? 'Qtd (peças/emb.)'
+        : 'Quantidade';
+
     return Container(
       margin: EdgeInsets.only(bottom: 10),
       padding: EdgeInsets.all(12),
@@ -3331,16 +3681,17 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(widget.item.materialNome,
+                    Text(item.materialNome,
                         style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
                             color: Theme.of(context).colorScheme.onSurface)),
                     Builder(builder: (_) {
                       final sub = [
-                        if (widget.item.materialMedida != null && widget.item.materialMedida!.isNotEmpty) widget.item.materialMedida!,
-                        if (widget.item.materialEspessura != null && widget.item.materialEspessura!.isNotEmpty) widget.item.materialEspessura!,
-                        if (widget.item.materialIdentificador != null && widget.item.materialIdentificador!.isNotEmpty) widget.item.materialIdentificador!,
+                        if (item.materialMedida != null && item.materialMedida!.isNotEmpty) item.materialMedida!,
+                        if (item.materialEspessura != null && item.materialEspessura!.isNotEmpty) item.materialEspessura!,
+                        if (item.materialIdentificador != null && item.materialIdentificador!.isNotEmpty) item.materialIdentificador!,
+                        if (unidade.isNotEmpty) unidade,
                       ].join(' · ');
                       if (sub.isEmpty) return SizedBox.shrink();
                       return Padding(
@@ -3361,8 +3712,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
             ],
           ),
           SizedBox(height: 8),
-          // ── Descrição adicional (somente para materiais específicos) ──────────
-          if (widget.item.materialEspecifico == true) ...[
+          if (item.materialEspecifico == true) ...[
             Text(
               'Descrição adicional',
               style: TextStyle(
@@ -3375,194 +3725,258 @@ class _ItemFormCardState extends State<_ItemFormCard> {
               controller: _descricaoCtrl,
               decoration: _deco('Descrição do material...'),
               onChanged: (v) {
-                widget.item.descricaoItem = v.trim().isEmpty ? null : v.trim();
+                item.descricaoItem = v.trim().isEmpty ? null : v.trim();
                 widget.onChanged();
               },
             ),
             const SizedBox(height: 8),
           ],
-          // ── Distribuição por OS (sempre expandida) ───────────────────────
           _DistribuicaoSection(
-            item: widget.item,
+            item: item,
             numerosOS: widget.numerosOS,
             onChanged: () {
-              // Sincroniza numeroOS com a primeira linha que tiver OS preenchida
-              final primeira = widget.item.distribuicao
+              final primeira = item.distribuicao
                   .firstWhere((l) => l.os.isNotEmpty, orElse: () => _DistribuicaoLinha());
-              widget.item.numeroOS = primeira.os;
+              item.numeroOS = primeira.os;
               widget.onChanged();
               setState(() {});
             },
           ),
           SizedBox(height: 8),
-          // ── Seletor de modo de cálculo ───────────────────────────────────
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          if (item.precisaQtdUnidade) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  'Modo de cálculo',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(labelQtd,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      const SizedBox(height: 4),
+                      TextFormField(
+                        controller: _qtdCtrl,
+                        decoration: _deco('0'),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))],
+                        onChanged: (v) {
+                          item.quantidade = double.tryParse(v) ?? 0;
+                          if (widget.numerosOS.length == 1 && item.distribuicao.length == 1) {
+                            item.distribuicao[0].os = widget.numerosOS.first;
+                            item.distribuicao[0].quantidade = item.quantidade;
+                          }
+                          // ← MODIFICADO: usa o novo método de recálculo baseado em prioridade
+                          _recalcularComBaseNaPrioridade();
+                          widget.onChanged();
+                          setState(() {});
+                        },
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _ModoCalculo(
-                        label: 'Qtd × Preço Unitário.',
-                        ativo: !widget.item.usarM2,
-                        onTap: () {
-                          setState(() => widget.item.usarM2 = false);
+                SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(item.labelQtdUnidade,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      const SizedBox(height: 4),
+                      TextFormField(
+                        controller: _qtdUnidadeCtrl,
+                        decoration: _deco('0.000'),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,6}'))
+                        ],
+                        onChanged: (v) {
+                          item.qtdUnidade = double.tryParse(v);
+                          // ← MODIFICADO: usa o novo método de recálculo baseado em prioridade
+                          _recalcularComBaseNaPrioridade();
                           widget.onChanged();
+                          setState(() {});
                         },
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _ModoCalculo(
-                        label: 'Qtd × m²',
-                        ativo: widget.item.usarM2,
-                        onTap: () {
-                          setState(() => widget.item.usarM2 = true);
+                    ],
+                  ),
+                ),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Valor/${unidade.isNotEmpty ? unidade : 'unid.'}',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      const SizedBox(height: 4),
+                      TextFormField(
+                        controller: _precoCtrl,
+                        decoration: _deco('0.000000'),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,6}'))
+                        ],
+                        onChanged: (v) {
+                          item.precoUnitario = double.tryParse(v.trim().isEmpty ? '0' : v) ?? 0;
                           widget.onChanged();
+                          setState(() {});
                         },
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+                ),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Valor total (R\$)',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      const SizedBox(height: 4),
+                      TextFormField(
+                        controller: _precoTotalCtrl,
+                        decoration: _deco('0.00').copyWith(
+                          prefixText: 'R\$ ',
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))
+                        ],
+                        onChanged: (_) {
+                          widget.onChanged();
+                          setState(() {});
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                        widget.item.usarM2 ? 'Quantidade (m²)' : 'Quantidade',
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                    const SizedBox(height: 4),
-                    TextFormField(
-                      controller: _qtdCtrl,
-                      decoration: _deco('0'),
-                      keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))
-                      ],
-                      onChanged: (v) {
-                        widget.item.quantidade =
-                            double.tryParse(v) ?? 0;
-                        // Com 1 OS: atualiza automaticamente a distribuição
-                        if (widget.numerosOS.length == 1 &&
-                            widget.item.distribuicao.length == 1) {
-                          widget.item.distribuicao[0].os =
-                              widget.numerosOS.first;
-                          widget.item.distribuicao[0].quantidade =
-                              widget.item.quantidade;
-                        }
-                        widget.onChanged();
-                        setState(() {});
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text('Preço Unitário.',
-                            style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                        if (!widget.item.usarM2) ...[
-                          SizedBox(width: 4),
-                          _BadgeAtivo(),
-                        ],
-                      ],
-                    ),
-                    SizedBox(height: 4),
-                    TextFormField(
-                      controller: _precoCtrl,
-                      enabled: !widget.item.usarM2,  // ← adicionar
-                      decoration: _deco('0.00').copyWith(
-                        fillColor: widget.item.usarM2 ? Theme.of(context).colorScheme.outlineVariant : Theme.of(context).colorScheme.surface,  // ← adicionar
+            if (item.qtdUnidade != null && item.qtdUnidade! > 0 && item.quantidade > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.07),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.inventory_2_outlined, size: 13, color: AppTheme.primary),
+                      SizedBox(width: 5),
+                      Text(
+                        'Entrará no estoque: ${item.quantidadeEstoque % 1 == 0 ? item.quantidadeEstoque.toInt() : item.quantidadeEstoque.toStringAsFixed(2)} $unidade',
+                        style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w600),
                       ),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))
-                      ],
-                      onChanged: (v) {
-                        final valor = v.trim().isEmpty ? 0.0 : (double.tryParse(v) ?? 0.0);
-                        widget.item.precoUnitario = valor;
-                        widget.onChanged();
-                        setState(() {});
-                      },
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-              SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text('Preço m²',
-                            style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                        if (widget.item.usarM2) ...[
-                          SizedBox(width: 4),
-                          _BadgeAtivo(),
-                        ],
-                      ],
-                    ),
-                    SizedBox(height: 4),
-                    TextFormField(
-                      controller: _precoM2Ctrl,
-                      enabled: widget.item.usarM2,  // ← adicionar
-                      decoration: _deco('0.00').copyWith(
-                        fillColor: !widget.item.usarM2 ? Theme.of(context).colorScheme.outlineVariant : Theme.of(context).colorScheme.surface,  // ← adicionar
+          ] else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Quantidade',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      const SizedBox(height: 4),
+                      TextFormField(
+                        controller: _qtdCtrl,
+                        decoration: _deco('0'),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))],
+                        onChanged: (v) {
+                          item.quantidade = double.tryParse(v) ?? 0;
+                          if (widget.numerosOS.length == 1 && item.distribuicao.length == 1) {
+                            item.distribuicao[0].os = widget.numerosOS.first;
+                            item.distribuicao[0].quantidade = item.quantidade;
+                          }
+                          // ← MODIFICADO: usa o novo método
+                          _recalcularComBaseNaPrioridade();
+                          widget.onChanged();
+                          setState(() {});
+                        },
                       ),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))
-                      ],
-                      onChanged: (v) {
-                        final valor = v.trim().isEmpty ? null : double.tryParse(v);
-                        widget.item.precoMetroQuadrado = valor;
-                        widget.onChanged();
-                        setState(() {});
-                      },
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text('Preço Unitário',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        ],
+                      ),
+                      SizedBox(height: 4),
+                      TextFormField(
+                        controller: _precoCtrl,
+                        decoration: _deco('0.00'),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))],
+                        onChanged: (v) {
+                          item.precoUnitario = double.tryParse(v.trim().isEmpty ? '0' : v) ?? 0;
+                          widget.onChanged();
+                          setState(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Valor total (R\$)',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      SizedBox(height: 4),
+                      TextFormField(
+                        controller: _precoTotalCtrl,
+                        decoration: _deco('0.00').copyWith(
+                          prefixText: 'R\$ ',
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))
+                        ],
+                        onChanged: (_) {
+                          widget.onChanged();
+                          setState(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerRight,
@@ -3580,93 +3994,9 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   }
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS DO ITEM FORM CARD
 // ─────────────────────────────────────────────────────────────────────────────
-
-class _ModoCalculo extends StatelessWidget {
-  final String label;
-  final bool ativo;
-  final VoidCallback onTap;
-
-  const _ModoCalculo({required this.label, required this.ativo, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(6),
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: Duration(milliseconds: 150),
-        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-        decoration: BoxDecoration(
-          color: ativo ? AppTheme.primary.withValues(alpha: 0.10) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: ativo ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
-            width: ativo ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: Checkbox(
-                value: ativo,
-                onChanged: (_) => onTap(),
-                activeColor: AppTheme.primary,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                visualDensity: VisualDensity.compact,
-                shape: CircleBorder(),
-                side: BorderSide(
-                  color: ativo ? AppTheme.primary : Theme.of(context).colorScheme.outline,
-                  width: 1.5,
-                ),
-              ),
-            ),
-            SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: ativo ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BadgeAtivo extends StatelessWidget {
-  const _BadgeAtivo();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-      decoration: BoxDecoration(
-        color: AppTheme.primary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: const Text(
-        'ativo',
-        style: TextStyle(
-          fontSize: 9,
-          color: AppTheme.primary,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.3,
-        ),
-      ),
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DISTRIBUIÇÃO POR OS (sempre expandida)
@@ -4287,6 +4617,14 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
           precoMetroQuadrado:   0,
           ativo:                true,
           materialEspecifico:   m['especifico'] == true,
+          materialUnidade:      m['unidade'] as String?,
+          // Dimensões para cálculo automático de preço/m²
+          materialLargura:      m['largura'] != null
+              ? double.tryParse(m['largura'].toString())
+              : null,
+          materialComprimento:  m['comprimento'] != null
+              ? double.tryParse(m['comprimento'].toString())
+              : null,
         );
         for (var i = 0; i < qty; i++) {
           escolhidos.add(vinculo);

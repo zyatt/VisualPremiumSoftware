@@ -105,6 +105,16 @@ class OrcamentoRepository {
     return ApiClient.postBytes('/orcamentos/pdf', dadosOrcamento);
   }
 
+  // ── Ocultar/reexibir fornecedor na visualização (sem excluir nada) ───────────
+
+  Future<Map<String, dynamic>> definirFornecedorOculto(
+      int orcamentoId, int fornecedorId, bool oculto) async {
+    return ApiClient.patch('/orcamentos/$orcamentoId/fornecedores-ocultos', {
+      'fornecedorId': fornecedorId,
+      'oculto': oculto,
+    });
+  }
+
   Future<Map<String, dynamic>> atualizarOrcamento(
       int id, Map<String, dynamic> dados) async {
     return ApiClient.patch('/orcamentos/$id', dados);

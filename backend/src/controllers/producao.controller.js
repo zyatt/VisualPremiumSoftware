@@ -44,14 +44,20 @@ const buscarSolicitacao = async (req, res, next) => {
 // POST /producao/solicitacoes
 const criarSolicitacao = async (req, res, next) => {
   try {
-    const { materialId, descricaoItem, quantidadeReservada, numeroOS } = req.body;
+    const { materialId, descricaoItem, quantidadeReservada, numeroOS, larguraUsada, comprimentoUsado } = req.body;
     const sol = await svc.criarSolicitacao({
       materialId:          Number(materialId),
       descricaoItem,
       quantidadeReservada: Number(quantidadeReservada),
       numeroOS,
       usuarioId:           req.usuario.id,
+      // ✅ CORRIGIDO: req.usuario.nome vem do payload do JWT.
+      //    Para funcionar, o campo 'nome' deve estar incluído ao assinar
+      //    o token (jwt.sign). Após adicionar 'nome' ao jwt.sign, os
+      //    usuários precisam fazer logout/login para obter o novo token.
       usuarioNome:         req.usuario.nome ?? req.usuario.username,
+      larguraUsada:        larguraUsada != null ? Number(larguraUsada) : undefined,
+      comprimentoUsado:    comprimentoUsado != null ? Number(comprimentoUsado) : undefined,
     });
     res.status(201).json(sol);
   } catch (e) { next(e); }
