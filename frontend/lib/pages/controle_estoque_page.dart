@@ -7,8 +7,16 @@ import '../models/material_model.dart';
 import '../providers/estoque_provider.dart';
 import '../providers/material_provider.dart';
 import '../theme/app_theme.dart';
+import 'historico_movimentacoes_page.dart';
 
 // ── Formatação de preço: até 6 casas decimais, sem zeros à direita ────────────
+
+String _fmtData(DateTime? dt) {
+  if (dt == null) return '—';
+  return '${dt.day.toString().padLeft(2, '0')}/'
+      '${dt.month.toString().padLeft(2, '0')}/'
+      '${dt.year}';
+}
 
 /// Formata um valor monetário com até 6 casas decimais, removendo zeros
 /// à direita desnecessários (mínimo 2 casas). Ex.: 1.5 → "R$ 1,50";
@@ -78,6 +86,24 @@ class _DecimalInputFormatter extends TextInputFormatter {
   }
 }
 
+// ── Ordenação da listagem de OS ────────────────────────────────────────────────
+
+enum _OrdenacaoOS { recente, criacao, numero }
+
+extension on _OrdenacaoOS {
+  String get label => switch (this) {
+        _OrdenacaoOS.recente => 'Última alteração',
+        _OrdenacaoOS.criacao => 'Data de criação',
+        _OrdenacaoOS.numero  => 'Número da OS',
+      };
+
+  IconData get icon => switch (this) {
+        _OrdenacaoOS.recente => Icons.update,
+        _OrdenacaoOS.criacao => Icons.event,
+        _OrdenacaoOS.numero  => Icons.tag,
+      };
+}
+
 // ── Cores do status da OS ──────────────────────────────────────────────────────
 
 const _corEmAndamento = Color(0xFF2196F3); // azul
@@ -111,6 +137,12 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
   late TabController _tabController;
   Timer? _timerFechamentoAutomatico;
   Timer? _debounceTimer;
+
+  // ── Ordenação e filtro de período ───────────────────────────────────────
+  _OrdenacaoOS _ordenacao = _OrdenacaoOS.recente;
+  bool _decrescente = true;
+  DateTime? _dataInicio;
+  DateTime? _dataFim;
 
   Duration get _duracaoAteMeiaNoite {
     final agora = DateTime.now();
@@ -146,7 +178,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${atrasadas.length} OS textual(is) de dia(s) anterior(es) fechada(s) automaticamente.',
+            '${atrasadas.length} OS de dia(s) anterior(es) fechada(s) automaticamente.',
           ),
           backgroundColor: _corFechada,
           duration: const Duration(seconds: 5),
@@ -245,6 +277,57 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     }
   }
 
+  bool get _temFiltroData => _dataInicio != null || _dataFim != null;
+
+  /// Filtra pela data de criação da OS, igual ao filtro de período usado
+  /// na página de Relatórios.
+  List<RelacaoOSModel> _filtrarPorData(List<RelacaoOSModel> lista) {
+    if (!_temFiltroData) return lista;
+    return lista.where((r) {
+      final criacao = r.criadoEm;
+      if (criacao == null) return false;
+      final dia = DateTime(criacao.year, criacao.month, criacao.day);
+      if (_dataInicio != null) {
+        final ini = DateTime(_dataInicio!.year, _dataInicio!.month, _dataInicio!.day);
+        if (dia.isBefore(ini)) return false;
+      }
+      if (_dataFim != null) {
+        final fim = DateTime(_dataFim!.year, _dataFim!.month, _dataFim!.day);
+        if (dia.isAfter(fim)) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  /// Ordena a lista conforme a opção selecionada. "Última alteração" usa
+  /// atualizadoEm (com fallback para criadoEm), para que uma OS criada há
+  /// dias mas com uma saída registrada agora apareça no topo — evitando
+  /// esquecer qual foi a movimentação mais recente.
+  List<RelacaoOSModel> _ordenarRelacoes(List<RelacaoOSModel> lista) {
+    final ordenada = [...lista];
+    int cmp(RelacaoOSModel a, RelacaoOSModel b) {
+      switch (_ordenacao) {
+        case _OrdenacaoOS.recente:
+          final da = a.atualizadoEm ?? a.criadoEm ?? DateTime(1970);
+          final db = b.atualizadoEm ?? b.criadoEm ?? DateTime(1970);
+          return da.compareTo(db);
+        case _OrdenacaoOS.criacao:
+          final da = a.criadoEm ?? DateTime(1970);
+          final db = b.criadoEm ?? DateTime(1970);
+          return da.compareTo(db);
+        case _OrdenacaoOS.numero:
+          final na = int.tryParse(a.numeroOS.trim());
+          final nb = int.tryParse(b.numeroOS.trim());
+          if (na != null && nb != null) return na.compareTo(nb);
+          if (na != null) return -1;
+          if (nb != null) return 1;
+          return a.numeroOS.toLowerCase().compareTo(b.numeroOS.toLowerCase());
+      }
+    }
+    ordenada.sort(_decrescente ? (a, b) => cmp(b, a) : cmp);
+    return ordenada;
+  }
+
   List<RelacaoOSModel> _filtrarPorMaterial(List<RelacaoOSModel> lista) {
     final nome          = _buscaNomeCtrl.text.trim().toLowerCase();
     final idTexto       = _buscaIdCtrl.text.trim();
@@ -291,12 +374,12 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
   Widget build(BuildContext context) {
     final provider = context.watch<EstoqueProvider>();
 
-    final emAndamento = _filtrarPorMaterial(
+    final emAndamento = _ordenarRelacoes(_filtrarPorData(_filtrarPorMaterial(
       provider.relacoesOS.where((r) => r.status == 'EM_ANDAMENTO').toList(),
-    );
-    final fechadas = _filtrarPorMaterial(
+    )));
+    final fechadas = _ordenarRelacoes(_filtrarPorData(_filtrarPorMaterial(
       provider.relacoesOS.where((r) => r.status == 'FECHADA').toList(),
-    );
+    )));
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -364,6 +447,17 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   ),
                 ),
                 SizedBox(width: 10),
+                OutlinedButton.icon(
+                  onPressed: _abrirHistoricoMovimentacoes,
+                  icon: const Icon(Icons.history, size: 18),
+                  label: const Text('Histórico'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.onSurface,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                  ),
+                ),
+                const SizedBox(width: 10),
                 IconButton(
                   onPressed: () => context.read<EstoqueProvider>().carregarRelacoesOS(),
                   icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
@@ -417,7 +511,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   ),
                 ),
                 SizedBox(width: 10),
-                IconButton(
+                IconButton.outlined(
                   tooltip: 'Limpar filtros',
                   icon: Icon(Icons.filter_alt_off,
                       color: Theme.of(context).colorScheme.onSurfaceVariant),
@@ -428,14 +522,16 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                     _identificadorCtrl.clear();
                     _medidaCtrl.clear();
                     _espessuraCtrl.clear();
-                    setState(() {});
+                    setState(() {
+                      _dataInicio = null;
+                      _dataFim    = null;
+                      _ordenacao  = _OrdenacaoOS.recente;
+                      _decrescente = true;
+                    });
                     context.read<EstoqueProvider>().carregarRelacoesOS();
                   },
                   style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outline),
                   ),
                 ),
               ],
@@ -529,6 +625,38 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       );
                     },
                   ),
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+
+            // ── Filtro por período de criação + ordenação ────────────────────
+            Row(
+              children: [
+                _DatePickerField(
+                  label: 'Criado de',
+                  value: _dataInicio,
+                  firstDate: DateTime(2020),
+                  lastDate: _dataFim ?? DateTime.now(),
+                  onPicked: (d) => setState(() => _dataInicio = d),
+                  onCleared: () => setState(() => _dataInicio = null),
+                ),
+                const SizedBox(width: 12),
+                _DatePickerField(
+                  label: 'até',
+                  value: _dataFim,
+                  firstDate: _dataInicio ?? DateTime(2020),
+                  lastDate: DateTime.now(),
+                  onPicked: (d) => setState(() => _dataFim = d),
+                  onCleared: () => setState(() => _dataFim = null),
+                ),
+                const Spacer(),
+                _OrdenacaoControl(
+                  ordenacao: _ordenacao,
+                  decrescente: _decrescente,
+                  onOrdenacaoChanged: (o) => setState(() => _ordenacao = o),
+                  onDirecaoToggled: () =>
+                      setState(() => _decrescente = !_decrescente),
                 ),
               ],
             ),
@@ -640,6 +768,178 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
         builder: (_) =>
             _RelacaoDetalhe(relacaoOSId: rel.id, numeroOS: rel.numeroOS),
       ),
+    );
+  }
+
+  /// Abre a página de histórico geral de movimentações (todas as OS, em
+  /// ordem cronológica). Se o usuário tocar no número de uma OS dentro do
+  /// histórico, a página retorna esse numeroOS e abrimos o detalhe dela aqui.
+  Future<void> _abrirHistoricoMovimentacoes() async {
+    final numeroOS = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const HistoricoMovimentacoesPage()),
+    );
+    if (numeroOS == null || !mounted) return;
+    final rel = context.read<EstoqueProvider>().relacoesOS.firstWhere(
+          (r) => r.numeroOS == numeroOS,
+          orElse: () => RelacaoOSModel(id: 0, numeroOS: '', movimentacoes: const []),
+        );
+    if (rel.id != 0) _abrirDetalhe(rel);
+  }
+}
+
+// ─── Seletor de período (mesmo padrão usado em Relatórios) ───────────────────
+
+class _DatePickerField extends StatelessWidget {
+  final String    label;
+  final DateTime? value;
+  final DateTime  firstDate;
+  final DateTime  lastDate;
+  final ValueChanged<DateTime> onPicked;
+  final VoidCallback           onCleared;
+
+  const _DatePickerField({
+    required this.label,
+    required this.value,
+    required this.firstDate,
+    required this.lastDate,
+    required this.onPicked,
+    required this.onCleared,
+  });
+
+  Future<void> _pick(BuildContext context) async {
+    final now     = DateTime.now();
+    final initial = value != null
+        ? (value!.isAfter(lastDate) ? lastDate : value!)
+        : (now.isBefore(lastDate) ? now : lastDate);
+    final picked = await showDatePicker(
+      context:     context,
+      initialDate: initial,
+      firstDate:   firstDate,
+      lastDate:    lastDate,
+    );
+    if (picked != null) onPicked(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasValue = value != null;
+    return InkWell(
+      onTap: () => _pick(context),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color:  Theme.of(context).colorScheme.surface,
+          border: Border.all(
+            color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.calendar_today,
+              size:  16,
+              color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              hasValue ? '$label: ${_fmtData(value)}' : label,
+              style: TextStyle(
+                fontSize:   13,
+                color:      hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
+                fontWeight: hasValue ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+            if (hasValue) ...[
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: onCleared,
+                child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Controle de ordenação (dropdown + toggle asc/desc) ──────────────────────
+
+class _OrdenacaoControl extends StatelessWidget {
+  final _OrdenacaoOS ordenacao;
+  final bool decrescente;
+  final ValueChanged<_OrdenacaoOS> onOrdenacaoChanged;
+  final VoidCallback onDirecaoToggled;
+
+  const _OrdenacaoControl({
+    required this.ordenacao,
+    required this.decrescente,
+    required this.onOrdenacaoChanged,
+    required this.onDirecaoToggled,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<_OrdenacaoOS>(
+              value: ordenacao,
+              isDense: true,
+              icon: Icon(Icons.arrow_drop_down,
+                  size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+              items: _OrdenacaoOS.values
+                  .map((o) => DropdownMenuItem(
+                        value: o,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(o.icon, size: 15, color: AppTheme.primary),
+                            const SizedBox(width: 8),
+                            Text('Ordenar: ${o.label}'),
+                          ],
+                        ),
+                      ))
+                  .toList(),
+              onChanged: (o) {
+                if (o != null) onOrdenacaoChanged(o);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          tooltip: decrescente ? 'Decrescente' : 'Crescente',
+          onPressed: onDirecaoToggled,
+          icon: Icon(
+            decrescente ? Icons.arrow_downward : Icons.arrow_upward,
+            size: 18,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          style: IconButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -771,12 +1071,11 @@ class _RelacaoOSCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final foiAlterada = relacao.atualizadoEm != null &&
+        relacao.criadoEm != null &&
+        relacao.atualizadoEm!.difference(relacao.criadoEm!).inMinutes.abs() > 1;
     final data = relacao.atualizadoEm ?? relacao.criadoEm;
-    final dataStr = data != null
-        ? '${data.day.toString().padLeft(2, '0')}/'
-            '${data.month.toString().padLeft(2, '0')}/'
-            '${data.year}'
-        : '—';
+    final dataStr = _fmtData(data);
 
     // Remove sufixo interno "#OCx" / "#Sx" / "#Ex" de OS textuais antes de exibir
     final numeroOSRaw = relacao.numeroOS;
@@ -863,10 +1162,25 @@ class _RelacaoOSCard extends StatelessWidget {
                     style: TextStyle(
                         fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
-                  Text(
-                    dataStr,
-                    style: TextStyle(
-                        fontSize: 11, color: Theme.of(context).colorScheme.outline),
+                  Row(
+                    children: [
+                      if (foiAlterada)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 3),
+                          child: Icon(Icons.update, size: 11, color: AppTheme.primary),
+                        ),
+                      Text(
+                        foiAlterada ? 'Alterada em $dataStr' : dataStr,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: foiAlterada
+                              ? AppTheme.primary
+                              : Theme.of(context).colorScheme.outline,
+                          fontWeight: foiAlterada ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -3247,16 +3561,13 @@ class _MovimentacaoGlobalDialogState
                                   ),
                                 ),
                                 SizedBox(width: 4),
-                                IconButton(
+                                IconButton.outlined(
                                   tooltip: 'Limpar filtros',
                                   icon: Icon(Icons.filter_alt_off,
                                       color: Theme.of(context).colorScheme.onSurfaceVariant, size: 18),
                                   onPressed: _limparFiltros,
                                   style: IconButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    minimumSize: const Size(32, 32),
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
+                                    side: BorderSide(color: Theme.of(context).colorScheme.outline),
                                   ),
                                 ),
                               ],
@@ -3509,6 +3820,11 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
   bool _salvando = false;
   String? _erroDialog;
 
+  // ── Detecção de possível material duplicado ───────────────────────────
+  Timer? _debounceDuplicata;
+  bool _verificandoDuplicata = false;
+  List<_PossivelDuplicataCE> _possiveisDuplicatas = [];
+
   late final TextEditingController _nome;
   late final TextEditingController _identificador;
   String? _unidade;
@@ -3532,10 +3848,18 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     _comprimento   = TextEditingController();
     _estoqueMinimo = TextEditingController(text: '0');
     _custoCtrl     = TextEditingController();
+
+    // Campos que entram na comparação de duplicidade: qualquer alteração
+    // reagenda a verificação (debounced).
+    for (final c in [_nome, _identificador, _medida, _espessura]) {
+      c.addListener(_agendarVerificacaoDuplicata);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _agendarVerificacaoDuplicata());
   }
 
   @override
   void dispose() {
+    _debounceDuplicata?.cancel();
     for (final c in [
       _nome, _identificador, _categoria, _medida, _espessura,
       _largura, _comprimento, _estoqueMinimo, _custoCtrl,
@@ -3543,6 +3867,75 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  void _agendarVerificacaoDuplicata() {
+    _debounceDuplicata?.cancel();
+    _debounceDuplicata = Timer(const Duration(milliseconds: 450), _verificarDuplicatas);
+  }
+
+  Future<void> _verificarDuplicatas() async {
+    if (!mounted) return;
+    final nomeNorm = _normalizarTextoComparacaoCE(_nome.text);
+
+    if (nomeNorm.length < 3) {
+      if (_possiveisDuplicatas.isNotEmpty || _verificandoDuplicata) {
+        setState(() {
+          _possiveisDuplicatas = [];
+          _verificandoDuplicata = false;
+        });
+      }
+      return;
+    }
+
+    setState(() => _verificandoDuplicata = true);
+
+    final provider = context.read<MaterialProvider>();
+    final candidatos = await provider.buscarSugestoes(_nome.text.trim(), limite: 30);
+    if (!mounted) return;
+
+    final identificadorNorm = _normalizarTextoComparacaoCE(_identificador.text);
+    final medidaNorm        = _normalizarTextoComparacaoCE(_medida.text);
+    final espessuraNorm     = _normalizarTextoComparacaoCE(_espessura.text);
+
+    final encontrados = <_PossivelDuplicataCE>[];
+    for (final m in candidatos) {
+      final mNomeNorm          = _normalizarTextoComparacaoCE(m.nome);
+      final mIdentificadorNorm = _normalizarTextoComparacaoCE(m.identificador);
+      final mMedidaNorm        = _normalizarTextoComparacaoCE(m.medida);
+      final mEspessuraNorm     = _normalizarTextoComparacaoCE(m.espessura);
+
+      final exata = mNomeNorm == nomeNorm &&
+          mIdentificadorNorm == identificadorNorm &&
+          mMedidaNorm == medidaNorm &&
+          mEspessuraNorm == espessuraNorm;
+
+      final similaridadeNome = _similaridadeTextoCE(nomeNorm, mNomeNorm);
+      final mesmoIdentificador =
+          identificadorNorm.isNotEmpty && identificadorNorm == mIdentificadorNorm;
+
+      final similar = !exata &&
+          (similaridadeNome >= 0.72 || (mesmoIdentificador && similaridadeNome >= 0.4));
+
+      if (exata || similar) {
+        encontrados.add(_PossivelDuplicataCE(
+          material: m,
+          exata: exata,
+          similaridade: similaridadeNome,
+        ));
+      }
+    }
+
+    encontrados.sort((a, b) {
+      if (a.exata != b.exata) return a.exata ? -1 : 1;
+      return b.similaridade.compareTo(a.similaridade);
+    });
+
+    if (!mounted) return;
+    setState(() {
+      _possiveisDuplicatas = encontrados.take(5).toList();
+      _verificandoDuplicata = false;
+    });
   }
 
   Future<void> _salvar() async {
@@ -3586,14 +3979,11 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     return Dialog(
       backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth:  560,
-          maxHeight: (MediaQuery.of(context).size.height * 0.95)
-              .clamp(0.0, 760.0),
-        ),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+      child: SizedBox(
+        width: 560,
+        height: 680,
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
               padding: EdgeInsets.fromLTRB(24, 20, 16, 0),
@@ -3615,7 +4005,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
             const SizedBox(height: 8),
             const Divider(height: 0),
 
-            Flexible(
+            Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
                 child: Form(
@@ -3724,6 +4114,13 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                           ),
                         ),
                       ]),
+                      if (_verificandoDuplicata || _possiveisDuplicatas.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _AvisoPossivelDuplicataCE(
+                          carregando: _verificandoDuplicata,
+                          duplicatas: _possiveisDuplicatas,
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       Row(children: [
                         Expanded(
@@ -4481,6 +4878,195 @@ class _StatusBadgeMini extends StatelessWidget {
           fontWeight: FontWeight.w700,
           color: color,
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS — Detecção de materiais semelhantes (Cadastro de Material)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Normaliza texto para comparação: remove acentos, converte para maiúsculas
+/// e colapsa espaços múltiplos.
+String _normalizarTextoComparacaoCE(String? v) {
+  if (v == null) return '';
+  final upper = _UpperCaseFormatter._removerAcentos(v.trim().toUpperCase());
+  return upper.replaceAll(RegExp(r'\s+'), ' ');
+}
+
+/// Distância de Levenshtein clássica (número mínimo de inserções, remoções
+/// e substituições para transformar [a] em [b]).
+int _levenshteinDistanceCE(String a, String b) {
+  if (a == b) return 0;
+  if (a.isEmpty) return b.length;
+  if (b.isEmpty) return a.length;
+
+  List<int> anterior = List<int>.generate(b.length + 1, (j) => j);
+  List<int> atual    = List<int>.filled(b.length + 1, 0);
+
+  for (var i = 1; i <= a.length; i++) {
+    atual[0] = i;
+    for (var j = 1; j <= b.length; j++) {
+      final custo      = a[i - 1] == b[j - 1] ? 0 : 1;
+      final remocao    = anterior[j] + 1;
+      final insercao   = atual[j - 1] + 1;
+      final substituicao = anterior[j - 1] + custo;
+      atual[j] = [remocao, insercao, substituicao].reduce((x, y) => x < y ? x : y);
+    }
+    final troca = anterior;
+    anterior = atual;
+    atual = troca;
+  }
+  return anterior[b.length];
+}
+
+/// Similaridade entre 0 (totalmente diferentes) e 1 (idênticos), baseada na
+/// distância de Levenshtein normalizada pelo tamanho do maior texto.
+double _similaridadeTextoCE(String a, String b) {
+  if (a.isEmpty && b.isEmpty) return 1;
+  if (a.isEmpty || b.isEmpty) return 0;
+  final distancia    = _levenshteinDistanceCE(a, b);
+  final maiorTamanho = a.length > b.length ? a.length : b.length;
+  return 1 - (distancia / maiorTamanho);
+}
+
+/// Resultado de uma possível duplicata encontrada ao comparar os campos do
+/// formulário com materiais já cadastrados.
+class _PossivelDuplicataCE {
+  final MaterialModel material;
+
+  /// true quando nome + identificador + medida + espessura (normalizados)
+  /// coincidem exatamente — o backend rejeitaria esse cadastro com 409.
+  final bool exata;
+  final double similaridade;
+
+  _PossivelDuplicataCE({
+    required this.material,
+    required this.exata,
+    required this.similaridade,
+  });
+}
+
+/// Banner exibido no formulário de cadastro de material quando o algoritmo
+/// de comparação encontra materiais já cadastrados com nome, identificador,
+/// medida ou espessura parecidos com os campos digitados.
+class _AvisoPossivelDuplicataCE extends StatelessWidget {
+  final bool carregando;
+  final List<_PossivelDuplicataCE> duplicatas;
+  const _AvisoPossivelDuplicataCE({required this.carregando, required this.duplicatas});
+
+  @override
+  Widget build(BuildContext context) {
+    if (carregando && duplicatas.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.6),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Verificando materiais semelhantes...',
+              style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.outline),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (duplicatas.isEmpty) return const SizedBox.shrink();
+
+    final temExata = duplicatas.any((d) => d.exata);
+    final cor      = temExata ? AppTheme.error : AppTheme.warning;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cor.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 16, color: cor),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  temExata
+                      ? 'Já existe um material idêntico cadastrado'
+                      : 'Pode já existir um material parecido cadastrado',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: cor),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...duplicatas.map((d) {
+            final m = d.material;
+            final detalhes = [
+              if (m.identificador != null && m.identificador!.trim().isNotEmpty) m.identificador!.trim(),
+              if (m.medida      != null && m.medida!.trim().isNotEmpty)      m.medida!.trim(),
+              if (m.espessura   != null && m.espessura!.trim().isNotEmpty)   m.espessura!.trim(),
+            ].join(' • ');
+
+            final qtdTxt = m.quantidade % 1 == 0
+                ? m.quantidade.toStringAsFixed(0)
+                : m.quantidade.toStringAsFixed(2);
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(top: 5),
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: d.exata ? AppTheme.error : AppTheme.warning,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: RichText(
+                      text: TextSpan(
+                        style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface),
+                        children: [
+                          TextSpan(text: m.nome, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          if (detalhes.isNotEmpty)
+                            TextSpan(
+                              text: '  ($detalhes)',
+                              style: TextStyle(color: Theme.of(context).colorScheme.outline),
+                            ),
+                          TextSpan(
+                            text: !m.ativo ? '  • inativo' : '  • estoque: $qtdTxt',
+                            style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+          const SizedBox(height: 4),
+          Text(
+            temExata
+                ? 'Esse cadastro será bloqueado pelo sistema. Ajuste a medida/espessura ou edite o material existente.'
+                : 'Confira se não é o mesmo material antes de continuar, para evitar estoques duplicados.',
+            style: TextStyle(fontSize: 10.5, color: Theme.of(context).colorScheme.outline),
+          ),
+        ],
       ),
     );
   }

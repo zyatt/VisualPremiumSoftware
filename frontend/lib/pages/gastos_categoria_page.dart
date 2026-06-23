@@ -23,9 +23,10 @@ String _fmtData(DateTime? dt) {
 String _fmtQtd(double q) =>
     q % 1 == 0 ? q.toStringAsFixed(0) : q.toStringAsFixed(2);
 
-const _corEntrada = Color(0xFF1E88E5);
-const _corSaida   = Color(0xFFE53935);
-const _corVeiculo = Color(0xFFF4511E);
+const _corGasto    = Color(0xFFE53935);
+const _corEstoque  = Color(0xFF1E88E5);
+const _corVeiculo  = Color(0xFFF4511E);
+const _corPositivo = Color(0xFF43A047);
 
 const _coresCat = [
   Color(0xFF5E35B1), Color(0xFF1E88E5), Color(0xFF00897B),
@@ -49,13 +50,10 @@ class GastosCategoriaPage extends StatefulWidget {
 
 class _GastosCategoriaPageState extends State<GastosCategoriaPage>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabCtrl =
-      TabController(length: 2, vsync: this);
+  late final TabController _tabCtrl = TabController(length: 3, vsync: this);
 
   DateTime? _dataInicio;
   DateTime? _dataFim;
-
-  // Para o resumo anual de veículos
   int _anoSelecionado = DateTime.now().year;
 
   @override
@@ -81,14 +79,16 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
             .toUpperCase() ??
         '';
     if (role != 'ADMIN') return;
-    context.read<GastosCategoriaProvider>().carregar();
-    context.read<GastosCategoriaProvider>().carregarMensal();
+    final prov = context.read<GastosCategoriaProvider>();
+    prov.carregarEstoque();
+    prov.carregarGastos();
+    prov.carregarMensal();
     context.read<VeiculoProvider>().carregarGastos();
     context.read<VeiculoProvider>().carregarResumoAnual(ano: _anoSelecionado);
   }
 
   void _aplicarFiltros() {
-    context.read<GastosCategoriaProvider>().carregar(
+    context.read<GastosCategoriaProvider>().carregarGastos(
           dataInicio: _dataInicio,
           dataFim:    _dataFim,
         );
@@ -125,19 +125,18 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.lock_outline, size: 64, color: Theme.of(context).colorScheme.outline),
-              SizedBox(height: 16),
+              Icon(Icons.lock_outline,
+                  size: 64,
+                  color: Theme.of(context).colorScheme.outline),
+              const SizedBox(height: 16),
               Text('Acesso restrito',
-                  style: Theme.of(context)
-                      .textTheme
-                      .headlineSmall
-                      ?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
-              SizedBox(height: 8),
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurface)),
+              const SizedBox(height: 8),
               Text('Apenas administradores podem visualizar esta página.',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color:
+                          Theme.of(context).colorScheme.onSurfaceVariant)),
             ],
           ),
         ),
@@ -164,38 +163,48 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
                         style: Theme.of(context)
                             .textTheme
                             .headlineMedium
-                            ?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
-                    SizedBox(height: 2),
-                    Text('Materiais e veículos — visão geral de gastos',
+                            ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface)),
+                    const SizedBox(height: 2),
+                    Text('Estoque atual, gastos e veículos',
                         style: Theme.of(context)
                             .textTheme
                             .bodyMedium
-                            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                            ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant)),
                   ],
                 ),
                 const Spacer(),
                 IconButton(
                   onPressed: () {
-                    matProvider.recarregar();
+                    matProvider.carregarEstoque();
+                    matProvider.recarregarGastos();
                     veiProvider.carregarGastos(
                         dataInicio: _dataInicio, dataFim: _dataFim);
                     veiProvider.carregarResumoAnual(ano: _anoSelecionado);
                   },
                   icon: Icon(Icons.refresh,
-                      size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      size: 18,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    side: BorderSide(
+                        color:
+                            Theme.of(context).colorScheme.outlineVariant),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 20),
 
-            // ── Filtro de período ──────────────────────────────────────────
+            // ── Filtro de período (só afeta Gastos e Veículos) ────────────
             Row(
               children: [
                 _DatePickerField(
@@ -228,13 +237,14 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
                   },
                 ),
                 if (_temFiltro) ...[
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   TextButton.icon(
                     onPressed: _limparFiltros,
-                    icon:  Icon(Icons.filter_alt_off, size: 16),
-                    label: Text('Limpar filtro'),
+                    icon:  const Icon(Icons.filter_alt_off, size: 16),
+                    label: const Text('Limpar filtro'),
                     style: TextButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant),
+                        foregroundColor:
+                            Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ],
                 const Spacer(),
@@ -242,40 +252,42 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
             ),
             const SizedBox(height: 16),
 
-            // ── Resumo geral (totais de ambas abas) ───────────────────────
-            if (!matProvider.carregando &&
-                !veiProvider.carregandoGastos &&
-                (matProvider.categorias.isNotEmpty ||
-                    veiProvider.gastos.isNotEmpty))
+            // ── Resumo global (3 números compactos no topo) ───────────────
+            if (!matProvider.carregandoEstoque &&
+                !matProvider.carregandoGastos &&
+                !veiProvider.carregandoGastos)
               _ResumoGeralGlobal(
-                totalMateriais: matProvider.totalEntradaGeral,
+                totalEstoque:  matProvider.totalValorEstoque,
+                totalGastos:   matProvider.totalGastos,
                 totalVeiculos: veiProvider.totalGastosGeral,
               ),
 
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
 
             // ── Abas ──────────────────────────────────────────────────────
             Container(
               decoration: BoxDecoration(
                 color:        Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(10),
-                border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                border: Border.all(
+                    color: Theme.of(context).colorScheme.outlineVariant),
               ),
               child: TabBar(
-                controller:        _tabCtrl,
-                indicatorSize:     TabBarIndicatorSize.tab,
-                indicatorColor:    AppTheme.primary,
-                labelColor:        AppTheme.primary,
-                unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                dividerColor:      Colors.transparent,
-                tabs: [
+                controller:           _tabCtrl,
+                indicatorSize:        TabBarIndicatorSize.tab,
+                indicatorColor:       AppTheme.primary,
+                labelColor:           AppTheme.primary,
+                unselectedLabelColor:
+                    Theme.of(context).colorScheme.onSurfaceVariant,
+                dividerColor: Colors.transparent,
+                tabs: const [
                   Tab(
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.category_rounded, size: 16),
-                        const SizedBox(width: 6),
-                        const Text('Materiais'),
+                        Icon(Icons.inventory_2_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('Estoque'),
                       ],
                     ),
                   ),
@@ -283,9 +295,19 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.directions_car_rounded, size: 16),
-                        const SizedBox(width: 6),
-                        const Text('Veículos'),
+                        Icon(Icons.category_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('Gastos'),
+                      ],
+                    ),
+                  ),
+                  Tab(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.directions_car_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('Veículos'),
                       ],
                     ),
                   ),
@@ -299,16 +321,19 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
               child: TabBarView(
                 controller: _tabCtrl,
                 children: [
-                  // ─── ABA MATERIAIS ──────────────────────────────────────
-                  _AbaMateirais(
-                    provider: matProvider,
+                  // ─── ABA ESTOQUE ─────────────────────────────────────
+                  _AbaEstoque(provider: matProvider),
+
+                  // ─── ABA GASTOS ──────────────────────────────────────
+                  _AbaGastos(
+                    provider:  matProvider,
                     temFiltro: _temFiltro,
                   ),
 
-                  // ─── ABA VEÍCULOS ───────────────────────────────────────
+                  // ─── ABA VEÍCULOS ────────────────────────────────────
                   _AbaVeiculos(
-                    provider:         veiProvider,
-                    anoSelecionado:    _anoSelecionado,
+                    provider:      veiProvider,
+                    anoSelecionado: _anoSelecionado,
                     onAnoChanged: (ano) {
                       setState(() => _anoSelecionado = ano);
                       veiProvider.carregarResumoAnual(ano: ano);
@@ -325,47 +350,57 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Resumo global (cards compactos no topo)
+// Resumo global (3 cards compactos no topo)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ResumoGeralGlobal extends StatelessWidget {
-  final double totalMateriais;
+  final double totalEstoque;
+  final double totalGastos;
   final double totalVeiculos;
 
   const _ResumoGeralGlobal({
-    required this.totalMateriais,
+    required this.totalEstoque,
+    required this.totalGastos,
     required this.totalVeiculos,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
         color:        Theme.of(context).colorScheme.surface,
-        border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
           Icon(Icons.bar_chart_rounded,
-              size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
-          SizedBox(width: 10),
-          Text('Totais gerais',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              size: 20,
+              color: Theme.of(context).colorScheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Text('Resumo',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color:
+                      Theme.of(context).colorScheme.onSurfaceVariant)),
           const Spacer(),
           _TotalBadge(
-            label: 'Materiais',
-            valor: totalMateriais,
-            cor:   _corEntrada,
+            label: 'Valor em estoque',
+            valor: totalEstoque,
+            cor:   _corEstoque,
+            icone: Icons.inventory_2_rounded,
+          ),
+          const SizedBox(width: 24),
+          _TotalBadge(
+            label: 'Gastos (materiais)',
+            valor: totalGastos,
+            cor:   _corGasto,
             icone: Icons.category_rounded,
           ),
           const SizedBox(width: 24),
           _TotalBadge(
-            label: 'Veículos',
+            label: 'Gastos (veículos)',
             valor: totalVeiculos,
             cor:   _corVeiculo,
             icone: Icons.directions_car_rounded,
@@ -373,8 +408,8 @@ class _ResumoGeralGlobal extends StatelessWidget {
           const SizedBox(width: 24),
           _TotalBadge(
             label: 'Total geral',
-            valor: totalMateriais + totalVeiculos,
-            cor:   const Color(0xFF43A047),
+            valor: totalGastos + totalVeiculos,
+            cor:   _corPositivo,
             icone: Icons.attach_money_rounded,
           ),
         ],
@@ -402,14 +437,16 @@ class _TotalBadge extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icone, size: 14, color: cor),
-        SizedBox(width: 4),
+        const SizedBox(width: 4),
         Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(label,
                 style: TextStyle(
-                    fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                    fontSize: 11,
+                    color:
+                        Theme.of(context).colorScheme.onSurfaceVariant)),
             Text(_brl(valor),
                 style: TextStyle(
                     fontSize:   15,
@@ -423,20 +460,18 @@ class _TotalBadge extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Aba Materiais
+// ABA 1 — ESTOQUE ATUAL
 // ═════════════════════════════════════════════════════════════════════════════
 
-class _AbaMateirais extends StatefulWidget {
+class _AbaEstoque extends StatefulWidget {
   final GastosCategoriaProvider provider;
-  final bool                    temFiltro;
-
-  const _AbaMateirais({required this.provider, required this.temFiltro});
+  const _AbaEstoque({required this.provider});
 
   @override
-  State<_AbaMateirais> createState() => _AbaMateiraisState();
+  State<_AbaEstoque> createState() => _AbaEstoqueState();
 }
 
-class _AbaMateiraisState extends State<_AbaMateirais> {
+class _AbaEstoqueState extends State<_AbaEstoque> {
   final _buscaCtrl = TextEditingController();
   String _busca = '';
 
@@ -448,161 +483,162 @@ class _AbaMateiraisState extends State<_AbaMateirais> {
 
   @override
   Widget build(BuildContext context) {
-    final provider = widget.provider;
-    final temFiltro = widget.temFiltro;
-    if (provider.carregando) {
+    final prov = widget.provider;
+
+    if (prov.carregandoEstoque) {
       return const Center(
           child: CircularProgressIndicator(color: AppTheme.primary));
     }
-    if (provider.erro != null) {
+
+    if (prov.erroEstoque != null) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.cloud_off_outlined,
-                size: 48, color: AppTheme.error),
-            SizedBox(height: 12),
-            Text(
-              'Erro ao carregar gastos',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface,
-                fontWeight: FontWeight.w600,
-                fontSize: 15,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: 4),
-            Text(
-              provider.erro!.contains(': ')
-                  ? provider.erro!.substring(provider.erro!.indexOf(': ') + 2)
-                  : provider.erro!,
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-              textAlign: TextAlign.center,
-            ),
+            Icon(Icons.cloud_off_outlined, size: 48, color: AppTheme.error),
+            const SizedBox(height: 12),
+            Text('Erro ao carregar estoque',
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15)),
+            const SizedBox(height: 4),
+            Text(prov.erroEstoque!,
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+                textAlign: TextAlign.center),
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: () => provider.recarregar(),
-              icon: const Icon(Icons.refresh, size: 18),
+              onPressed: prov.carregarEstoque,
+              icon:  const Icon(Icons.refresh, size: 18),
               label: const Text('Tentar novamente'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primary),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
             ),
           ],
         ),
       );
     }
-    if (provider.categorias.isEmpty) {
+
+    if (prov.estoque.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.category_outlined,
-                size: 56, color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.4)),
-            SizedBox(height: 12),
-            Text('Nenhum dado encontrado',
+            Icon(Icons.inventory_2_outlined,
+                size: 56,
+                color: Theme.of(context)
+                    .colorScheme
+                    .outline
+                    .withValues(alpha: 0.4)),
+            const SizedBox(height: 12),
+            Text('Nenhum material ativo encontrado',
                 style: Theme.of(context)
                     .textTheme
                     .bodyLarge
-                    ?.copyWith(color: Theme.of(context).colorScheme.outline)),
-            SizedBox(height: 4),
-            Text(
-              temFiltro
-                  ? 'Tente ajustar o período'
-                  : 'Ainda não há OS fechadas com movimentações',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.7)),
-            ),
+                    ?.copyWith(
+                        color: Theme.of(context).colorScheme.outline)),
           ],
         ),
       );
     }
 
-    // Filtra as categorias pelo texto buscado
     final busca = _busca.trim().toLowerCase();
-    final categoriasComIndice = provider.categorias
-        .asMap()
-        .entries
-        .toList();
+    final comIndice = prov.estoque.asMap().entries.toList();
     final filtradas = busca.isEmpty
-        ? categoriasComIndice
-        : categoriasComIndice
+        ? comIndice
+        : comIndice
             .where((e) =>
-                e.value.categoriaLabel.toLowerCase().contains(busca))
+                e.value.categoriaLabel.toLowerCase().contains(busca) ||
+                e.value.materiais.any((m) =>
+                    m.nome.toLowerCase().contains(busca)))
             .toList();
 
-    // Totalizadores da aba
+    // Total de materiais sem custo cadastrado
+    final semCusto = prov.estoque
+        .expand((c) => c.materiais)
+        .where((m) => m.semCusto)
+        .length;
+
     return CustomScrollView(
       slivers: [
-        // Resumo
+        // Card de resumo
         SliverToBoxAdapter(
-          child: _ResumoMateirais(
-            totalEntrada: provider.totalEntradaGeral,
-            totalSaida:   provider.totalSaidaGeral,
+          child: _ResumoEstoque(
+            totalValor: prov.totalValorEstoque,
+            semCusto:   semCusto,
           ),
-        ),
-        const SliverToBoxAdapter(child: SizedBox(height: 12)),
-
-        // Gráfico mensal
-        SliverToBoxAdapter(
-          child: _GraficoMensal(provider: provider),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
-        // Título da seção + filtro por categoria
+        // Título + busca
         SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.only(bottom: 10),
             child: Row(
               children: [
-                Text(
-                  'Gastos por categoria',
-                  style: TextStyle(
-                    fontSize:   13,
-                    fontWeight: FontWeight.w600,
-                    color:      Theme.of(context).colorScheme.onSurfaceVariant,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-                Spacer(),
+                Text('Valor por categoria',
+                    style: TextStyle(
+                      fontSize:   13,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      letterSpacing: 0.2,
+                    )),
+                const Spacer(),
                 SizedBox(
                   width: 240,
                   height: 36,
                   child: TextField(
                     controller: _buscaCtrl,
-                    onChanged: (v) => setState(() => _busca = v),
-                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    onChanged:  (v) => setState(() => _busca = v),
+                    style: TextStyle(
+                        fontSize: 13,
+                        color:
+                            Theme.of(context).colorScheme.onSurface),
                     decoration: InputDecoration(
-                      isDense: true,
-                      hintText: 'Filtrar por categoria...',
-                      hintStyle: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
-                      prefixIcon: Icon(Icons.search, size: 16, color: Theme.of(context).colorScheme.outline),
-                      prefixIconConstraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                      isDense:  true,
+                      hintText: 'Filtrar por categoria ou material...',
+                      hintStyle: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.outline),
+                      prefixIcon: Icon(Icons.search,
+                          size: 16,
+                          color: Theme.of(context).colorScheme.outline),
+                      prefixIconConstraints: const BoxConstraints(
+                          minWidth: 32, minHeight: 32),
                       suffixIcon: _busca.isNotEmpty
                           ? IconButton(
-                              icon: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
+                              icon: Icon(Icons.close,
+                                  size: 14,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outline),
                               onPressed: () {
                                 _buscaCtrl.clear();
                                 setState(() => _busca = '');
                               },
                             )
                           : null,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      filled: true,
-                      fillColor: Theme.of(context).colorScheme.surface,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      filled:     true,
+                      fillColor:
+                          Theme.of(context).colorScheme.surface,
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                      ),
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .outlineVariant)),
                       enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                      ),
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .outlineVariant)),
                       focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: AppTheme.primary, width: 1.5),
-                      ),
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                              color: AppTheme.primary, width: 1.5)),
                     ),
                   ),
                 ),
@@ -611,39 +647,618 @@ class _AbaMateiraisState extends State<_AbaMateirais> {
           ),
         ),
 
-        // Estado vazio do filtro
         if (filtradas.isEmpty)
           SliverToBoxAdapter(
             child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 32),
+              padding: const EdgeInsets.symmetric(vertical: 32),
               child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.search_off_rounded,
-                        size: 40, color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.4)),
-                    SizedBox(height: 8),
-                    Text('Nenhuma categoria encontrada para "$_busca"',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                  ],
-                ),
+                child: Text(
+                    'Nenhuma categoria encontrada para "$_busca"',
+                    style: TextStyle(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant)),
               ),
             ),
           )
         else
-          // Lista de categorias
           SliverList(
             delegate: SliverChildBuilderDelegate(
               (ctx, i) {
                 final entry = filtradas[i];
                 return Padding(
                   padding: EdgeInsets.only(
-                    bottom: i < filtradas.length - 1 ? 12 : 0,
+                      bottom: i < filtradas.length - 1 ? 12 : 0),
+                  child: _EstoqueCategoriaCard(
+                    categoria: entry.value,
+                    cor:       _corCategoria(entry.key),
+                    busca:     busca,
                   ),
-                  child: _CategoriaCard(
+                );
+              },
+              childCount: filtradas.length,
+            ),
+          ),
+        const SliverToBoxAdapter(child: SizedBox(height: 16)),
+      ],
+    );
+  }
+}
+
+class _ResumoEstoque extends StatelessWidget {
+  final double totalValor;
+  final int    semCusto;
+
+  const _ResumoEstoque(
+      {required this.totalValor, required this.semCusto});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.inventory_2_rounded,
+              size: 16, color: _corEstoque),
+          const SizedBox(width: 8),
+          Text('Total em estoque',
+              style: TextStyle(
+                  fontSize: 13,
+                  color:
+                      Theme.of(context).colorScheme.onSurfaceVariant)),
+          const Spacer(),
+          if (semCusto > 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 20),
+              child: Tooltip(
+                message:
+                    '$semCusto ${semCusto == 1 ? 'material sem' : 'materiais sem'} custo cadastrado — valor subestimado',
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        size: 14, color: Colors.orange.shade600),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$semCusto sem custo',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.orange.shade600),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          Text(_brl(totalValor),
+              style: TextStyle(
+                fontSize:   20,
+                fontWeight: FontWeight.w800,
+                color:      _corEstoque,
+              )),
+        ],
+      ),
+    );
+  }
+}
+
+class _EstoqueCategoriaCard extends StatefulWidget {
+  final EstoqueCategoriaModel categoria;
+  final Color                 cor;
+  final String                busca;
+
+  const _EstoqueCategoriaCard({
+    required this.categoria,
+    required this.cor,
+    required this.busca,
+  });
+
+  @override
+  State<_EstoqueCategoriaCard> createState() =>
+      _EstoqueCategoriaCardState();
+}
+
+class _EstoqueCategoriaCardState extends State<_EstoqueCategoriaCard> {
+  bool _expandido = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final cat      = widget.categoria;
+    final cor      = widget.cor;
+    final materiais = widget.busca.isNotEmpty
+        ? cat.materiais
+            .where((m) =>
+                m.nome.toLowerCase().contains(widget.busca) ||
+                (m.identificador ?? '')
+                    .toLowerCase()
+                    .contains(widget.busca))
+            .toList()
+        : cat.materiais;
+
+    return Container(
+      decoration: BoxDecoration(
+        color:        Theme.of(context).colorScheme.surface,
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          // ── Cabeçalho da categoria ──────────────────────────────────
+          InkWell(
+            onTap: () => setState(() => _expandido = !_expandido),
+            borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(12),
+                bottom: Radius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                        color: cor, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      cat.categoriaLabel,
+                      style: TextStyle(
+                        fontSize:   14,
+                        fontWeight: FontWeight.w600,
+                        color:
+                            Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${cat.qtdMateriais} ${cat.qtdMateriais == 1 ? 'material' : 'materiais'}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant),
+                  ),
+                  const SizedBox(width: 16),
+                  Text(
+                    _brl(cat.totalValor),
+                    style: TextStyle(
+                        fontSize:   15,
+                        fontWeight: FontWeight.w700,
+                        color:      _corEstoque),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    _expandido
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 20,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Materiais (expandido) ───────────────────────────────────
+          if (_expandido) ...[
+            Divider(
+                height: 1,
+                color: Theme.of(context).colorScheme.outlineVariant),
+            // Cabeçalho da tabela
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Expanded(flex: 3, child: _HeaderCol('Material')),
+                  const _HeaderCol('Qtd', align: TextAlign.right),
+                  const SizedBox(width: 8),
+                  const _HeaderCol('Custo unit.',
+                      align: TextAlign.right),
+                  const SizedBox(width: 8),
+                  const _HeaderColWide('Valor total',
+                      align: TextAlign.right),
+                ],
+              ),
+            ),
+            Divider(
+                height: 1,
+                color: Theme.of(context)
+                    .colorScheme
+                    .outlineVariant
+                    .withValues(alpha: 0.5)),
+            ...materiais.asMap().entries.map((e) {
+              return _LinhaEstoque(
+                material: e.value,
+                ultimo:   e.key == materiais.length - 1,
+              );
+            }),
+            const SizedBox(height: 4),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LinhaEstoque extends StatelessWidget {
+  final EstoqueMaterialModel material;
+  final bool                 ultimo;
+
+  const _LinhaEstoque(
+      {required this.material, required this.ultimo});
+
+  @override
+  Widget build(BuildContext context) {
+    final m = material;
+    final detalhes = [
+      if (m.identificador != null && m.identificador!.isNotEmpty)
+        m.identificador!,
+      if (m.medida    != null && m.medida!.isNotEmpty)    m.medida!,
+      if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
+    ].join(' · ');
+
+    final temCustoM2 =
+        m.ultimoValorPagoM2 != null && m.ultimoValorPagoM2! > 0;
+    final temCustoUnit =
+        m.ultimoValorPago != null && m.ultimoValorPago! > 0;
+    final custo = temCustoUnit
+        ? m.ultimoValorPago!
+        : temCustoM2
+            ? m.ultimoValorPagoM2!
+            : null;
+    final sufixoCusto =
+        (!temCustoUnit && temCustoM2) ? '/m²' : '';
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: 16, vertical: 9),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                flex: 3,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(m.nome,
+                        style: TextStyle(
+                          fontSize:   13,
+                          fontWeight: FontWeight.w500,
+                          color:
+                              Theme.of(context).colorScheme.onSurface,
+                        )),
+                    if (detalhes.isNotEmpty)
+                      Text(detalhes,
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: 70,
+                child: Text(
+                  '${_fmtQtd(m.quantidade)} ${m.unidade ?? ''}',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurface),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 90,
+                child: Text(
+                  custo != null
+                      ? 'R\$ ${custo.toStringAsFixed(2).replaceAll('.', ',')}$sufixoCusto'
+                      : '—',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: custo != null
+                        ? Theme.of(context).colorScheme.onSurface
+                        : Theme.of(context)
+                            .colorScheme
+                            .outline
+                            .withValues(alpha: 0.6),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 110,
+                child: m.semCusto
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Icon(Icons.warning_amber_rounded,
+                              size: 13,
+                              color: Colors.orange.shade500),
+                          const SizedBox(width: 3),
+                          Text('sem custo',
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.orange.shade600)),
+                        ],
+                      )
+                    : Text(
+                        _brl(m.valorTotal),
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize:   13,
+                          fontWeight: FontWeight.w600,
+                          color:      _corEstoque,
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+        if (!ultimo)
+          Divider(
+              height: 1,
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: 0.4)),
+      ],
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ABA 2 — GASTOS (OS FECHADAS, ORIGEM OC)
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _AbaGastos extends StatefulWidget {
+  final GastosCategoriaProvider provider;
+  final bool                    temFiltro;
+
+  const _AbaGastos(
+      {required this.provider, required this.temFiltro});
+
+  @override
+  State<_AbaGastos> createState() => _AbaGastosState();
+}
+
+class _AbaGastosState extends State<_AbaGastos> {
+  final _buscaCtrl = TextEditingController();
+  String _busca = '';
+
+  @override
+  void dispose() {
+    _buscaCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final prov = widget.provider;
+
+    if (prov.carregandoGastos) {
+      return const Center(
+          child: CircularProgressIndicator(color: AppTheme.primary));
+    }
+    if (prov.erroGastos != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off_outlined,
+                size: 48, color: AppTheme.error),
+            const SizedBox(height: 12),
+            Text('Erro ao carregar gastos',
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15)),
+            const SizedBox(height: 4),
+            Text(prov.erroGastos!,
+                style: TextStyle(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: prov.recarregarGastos,
+              icon:  const Icon(Icons.refresh, size: 18),
+              label: const Text('Tentar novamente'),
+              style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primary),
+            ),
+          ],
+        ),
+      );
+    }
+    if (prov.gastos.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.category_outlined,
+                size: 56,
+                color: Theme.of(context)
+                    .colorScheme
+                    .outline
+                    .withValues(alpha: 0.4)),
+            const SizedBox(height: 12),
+            Text('Nenhum gasto encontrado',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.outline)),
+            const SizedBox(height: 4),
+            Text(
+              widget.temFiltro
+                  ? 'Tente ajustar o período'
+                  : 'Ainda não há OS fechadas com saídas originadas em OC',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .outline
+                      .withValues(alpha: 0.7)),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    final busca = _busca.trim().toLowerCase();
+    final comIndice = prov.gastos.asMap().entries.toList();
+    final filtradas = busca.isEmpty
+        ? comIndice
+        : comIndice
+            .where((e) =>
+                e.value.categoriaLabel.toLowerCase().contains(busca))
+            .toList();
+
+    return CustomScrollView(
+      slivers: [
+        // Resumo
+        SliverToBoxAdapter(
+          child: _ResumoGastos(totalGasto: prov.totalGastos),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+
+        // Gráfico mensal
+        SliverToBoxAdapter(
+          child: _GraficoMensal(provider: prov),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 16)),
+
+        // Título + busca
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                Text('Gastos por categoria',
+                    style: TextStyle(
+                      fontSize:   13,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurfaceVariant,
+                      letterSpacing: 0.2,
+                    )),
+                const Spacer(),
+                SizedBox(
+                  width: 240,
+                  height: 36,
+                  child: TextField(
+                    controller: _buscaCtrl,
+                    onChanged:  (v) => setState(() => _busca = v),
+                    style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface),
+                    decoration: InputDecoration(
+                      isDense:  true,
+                      hintText: 'Filtrar por categoria...',
+                      hintStyle: TextStyle(
+                          fontSize: 12,
+                          color:
+                              Theme.of(context).colorScheme.outline),
+                      prefixIcon: Icon(Icons.search,
+                          size: 16,
+                          color:
+                              Theme.of(context).colorScheme.outline),
+                      prefixIconConstraints: const BoxConstraints(
+                          minWidth: 32, minHeight: 32),
+                      suffixIcon: _busca.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.close,
+                                  size: 14,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outline),
+                              onPressed: () {
+                                _buscaCtrl.clear();
+                                setState(() => _busca = '');
+                              },
+                            )
+                          : null,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      filled:    true,
+                      fillColor:
+                          Theme.of(context).colorScheme.surface,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .outlineVariant)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .outlineVariant)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                              color: AppTheme.primary, width: 1.5)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        if (filtradas.isEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 32),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.search_off_rounded,
+                        size: 40,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .outline
+                            .withValues(alpha: 0.4)),
+                    const SizedBox(height: 8),
+                    Text(
+                        'Nenhuma categoria encontrada para "$_busca"',
+                        style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant)),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (ctx, i) {
+                final entry = filtradas[i];
+                return Padding(
+                  padding: EdgeInsets.only(
+                      bottom: i < filtradas.length - 1 ? 12 : 0),
+                  child: _GastoCategoriaCard(
                     gasto: entry.value,
                     cor:   _corCategoria(entry.key),
-                    index: entry.key,
                   ),
                 );
               },
@@ -652,6 +1267,274 @@ class _AbaMateiraisState extends State<_AbaMateirais> {
           ),
 
         const SliverToBoxAdapter(child: SizedBox(height: 16)),
+      ],
+    );
+  }
+}
+
+class _ResumoGastos extends StatelessWidget {
+  final double totalGasto;
+
+  const _ResumoGastos({required this.totalGasto});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding:
+          const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.category_rounded, size: 16, color: _corGasto),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Total gasto em materiais (OS fechadas)',
+                    style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant)),
+                const SizedBox(height: 2),
+                Text(
+                  'Apenas saídas cuja quantidade foi coberta por entrada via Ordem de Compra',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .outline
+                          .withValues(alpha: 0.8)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Text(_brl(totalGasto),
+              style: TextStyle(
+                  fontSize:   20,
+                  fontWeight: FontWeight.w800,
+                  color:      _corGasto)),
+        ],
+      ),
+    );
+  }
+}
+
+class _GastoCategoriaCard extends StatefulWidget {
+  final GastoCategoriaModel gasto;
+  final Color               cor;
+
+  const _GastoCategoriaCard(
+      {required this.gasto, required this.cor});
+
+  @override
+  State<_GastoCategoriaCard> createState() =>
+      _GastoCategoriaCardState();
+}
+
+class _GastoCategoriaCardState extends State<_GastoCategoriaCard> {
+  bool _expandido = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final gasto = widget.gasto;
+    final cor   = widget.cor;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: () =>
+                setState(() => _expandido = !_expandido),
+            borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(12),
+                bottom: Radius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                          color: cor, shape: BoxShape.circle)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(gasto.categoriaLabel,
+                        style: TextStyle(
+                          fontSize:   14,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface,
+                        )),
+                  ),
+                  Text(
+                    '${gasto.materiais.length} ${gasto.materiais.length == 1 ? 'material' : 'materiais'}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant),
+                  ),
+                  const SizedBox(width: 16),
+                  Text(_brl(gasto.totalGasto),
+                      style: TextStyle(
+                          fontSize:   15,
+                          fontWeight: FontWeight.w700,
+                          color:      _corGasto)),
+                  const SizedBox(width: 8),
+                  Icon(
+                    _expandido
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 20,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expandido) ...[
+            Divider(
+                height: 1,
+                color: Theme.of(context)
+                    .colorScheme
+                    .outlineVariant),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 8),
+              child: Row(
+                children: const [
+                  Expanded(
+                      flex: 3,
+                      child: _HeaderCol('Material')),
+                  _HeaderCol('Qtd gasta',
+                      align: TextAlign.right),
+                  SizedBox(width: 8),
+                  _HeaderColWide('Gasto total',
+                      align: TextAlign.right),
+                ],
+              ),
+            ),
+            Divider(
+                height: 1,
+                color: Theme.of(context)
+                    .colorScheme
+                    .outlineVariant
+                    .withValues(alpha: 0.5)),
+            ...gasto.materiais.asMap().entries.map((e) {
+              return _LinhaGasto(
+                material: e.value,
+                ultimo:   e.key == gasto.materiais.length - 1,
+              );
+            }),
+            const SizedBox(height: 4),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LinhaGasto extends StatelessWidget {
+  final GastoMaterialModel material;
+  final bool               ultimo;
+
+  const _LinhaGasto(
+      {required this.material, required this.ultimo});
+
+  @override
+  Widget build(BuildContext context) {
+    final m = material;
+    final detalhes = [
+      if (m.identificador != null && m.identificador!.isNotEmpty)
+        m.identificador!,
+      if (m.medida    != null && m.medida!.isNotEmpty)    m.medida!,
+      if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
+    ].join(' · ');
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: 16, vertical: 9),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                flex: 3,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(m.nome,
+                        style: TextStyle(
+                          fontSize:   13,
+                          fontWeight: FontWeight.w500,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface,
+                        )),
+                    if (detalhes.isNotEmpty)
+                      Text(detalhes,
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: 70,
+                child: Text(
+                  m.qtdGasta > 0
+                      ? '${_fmtQtd(m.qtdGasta)} ${m.unidade ?? ''}'
+                      : '—',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 110,
+                child: Text(_brl(m.totalGasto),
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize:   13,
+                      fontWeight: FontWeight.w600,
+                      color:      _corGasto,
+                    )),
+              ),
+            ],
+          ),
+        ),
+        if (!ultimo)
+          Divider(
+              height: 1,
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: 0.4)),
       ],
     );
   }
@@ -679,17 +1562,18 @@ class _GraficoMensalState extends State<_GraficoMensal>
   void initState() {
     super.initState();
     _animCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-    _animacao = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic);
+        vsync: this,
+        duration: const Duration(milliseconds: 700));
+    _animacao =
+        CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic);
     if (widget.provider.mensal.isNotEmpty) _animCtrl.forward();
   }
 
   @override
   void didUpdateWidget(_GraficoMensal old) {
     super.didUpdateWidget(old);
-    if (widget.provider.mensal.isNotEmpty && old.provider.mensal.isEmpty) {
+    if (widget.provider.mensal.isNotEmpty &&
+        old.provider.mensal.isEmpty) {
       _animCtrl.forward(from: 0);
     }
   }
@@ -702,7 +1586,8 @@ class _GraficoMensalState extends State<_GraficoMensal>
 
   void _trocarAno(int delta) {
     _animCtrl.forward(from: 0);
-    widget.provider.carregarMensal(ano: widget.provider.anoMensal + delta);
+    widget.provider
+        .carregarMensal(ano: widget.provider.anoMensal + delta);
   }
 
   @override
@@ -711,10 +1596,11 @@ class _GraficoMensalState extends State<_GraficoMensal>
     final mensal = prov.mensal;
 
     return Container(
-      padding: EdgeInsets.all(20),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color:        Theme.of(context).colorScheme.surface,
-        border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -724,34 +1610,47 @@ class _GraficoMensalState extends State<_GraficoMensal>
             children: [
               Icon(Icons.bar_chart_rounded,
                   size: 18, color: AppTheme.primary),
-              SizedBox(width: 8),
+              const SizedBox(width: 8),
               Text('Gastos por mês',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurface,
-                        fontWeight: FontWeight.w600,
-                      )),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyLarge
+                      ?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurface,
+                          fontWeight: FontWeight.w600)),
               const Spacer(),
               _AnoSelector(
                 ano:        prov.anoMensal,
                 onAnterior: () => _trocarAno(-1),
-                onProximo:  prov.anoMensal < DateTime.now().year
+                onProximo: prov.anoMensal < DateTime.now().year
                     ? () => _trocarAno(1)
                     : null,
               ),
             ],
           ),
           const SizedBox(height: 4),
-          const Row(children: [
-            _LegendaDot(cor: _corEntrada, label: 'Entrada'),
-            SizedBox(width: 16),
-            _LegendaDot(cor: _corSaida,   label: 'Saída'),
+          Row(children: [
+            Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                    color: _corGasto, shape: BoxShape.circle)),
+            const SizedBox(width: 4),
+            Text('Gasto real (saídas via OC)',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant)),
           ]),
           const SizedBox(height: 16),
           if (prov.carregandoMensal)
             const SizedBox(
-              height: 160,
-              child: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
-            )
+                height: 160,
+                child: Center(
+                    child: CircularProgressIndicator(
+                        color: AppTheme.primary)))
           else if (prov.erroMensal != null)
             SizedBox(
               height: 160,
@@ -761,31 +1660,20 @@ class _GraficoMensalState extends State<_GraficoMensal>
                   children: [
                     Icon(Icons.cloud_off_outlined,
                         size: 36, color: AppTheme.error),
-                    SizedBox(height: 8),
-                    Text(
-                      'Erro ao carregar gráfico',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      prov.erroMensal!.contains(': ')
-                          ? prov.erroMensal!.substring(
-                              prov.erroMensal!.indexOf(': ') + 2)
-                          : prov.erroMensal!,
-                      style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
-                      textAlign: TextAlign.center,
-                    ),
+                    const SizedBox(height: 8),
+                    Text('Erro ao carregar gráfico',
+                        style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13),
+                        textAlign: TextAlign.center),
                     const SizedBox(height: 12),
                     FilledButton.icon(
                       onPressed: () =>
                           prov.carregarMensal(ano: prov.anoMensal),
-                      icon: const Icon(Icons.refresh, size: 16),
+                      icon:  const Icon(Icons.refresh, size: 16),
                       label: const Text('Tentar novamente',
                           style: TextStyle(fontSize: 13)),
                       style: FilledButton.styleFrom(
@@ -797,12 +1685,16 @@ class _GraficoMensalState extends State<_GraficoMensal>
                 ),
               ),
             )
-          else if (mensal.isEmpty)
+          else if (mensal.isEmpty ||
+              mensal.every((m) => m.totalGasto == 0))
             SizedBox(
               height: 160,
               child: Center(
                   child: Text('Sem dados para este ano',
-                      style: TextStyle(color: Theme.of(context).colorScheme.outline))),
+                      style: TextStyle(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .outline))),
             )
           else
             AnimatedBuilder(
@@ -824,6 +1716,7 @@ class _AnoSelector extends StatelessWidget {
   final int           ano;
   final VoidCallback  onAnterior;
   final VoidCallback? onProximo;
+
   const _AnoSelector({
     required this.ano,
     required this.onAnterior,
@@ -835,12 +1728,14 @@ class _AnoSelector extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _NavBtn(icon: Icons.chevron_left,  onTap: onAnterior),
-        SizedBox(width: 4),
+        _NavBtn(icon: Icons.chevron_left, onTap: onAnterior),
+        const SizedBox(width: 4),
         Text('$ano',
             style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w700,
-                color: Theme.of(context).colorScheme.onSurface)),
+                fontSize:   14,
+                fontWeight: FontWeight.w700,
+                color:
+                    Theme.of(context).colorScheme.onSurface)),
         const SizedBox(width: 4),
         _NavBtn(icon: Icons.chevron_right, onTap: onProximo),
       ],
@@ -859,27 +1754,11 @@ class _NavBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         child: Opacity(
           opacity: onTap != null ? 1.0 : 0.3,
-          child:   Icon(icon, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          child: Icon(icon,
+              size: 20,
+              color:
+                  Theme.of(context).colorScheme.onSurfaceVariant),
         ),
-      );
-}
-
-class _LegendaDot extends StatelessWidget {
-  final Color  cor;
-  final String label;
-  const _LegendaDot({required this.cor, required this.label});
-
-  @override
-  Widget build(BuildContext context) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-              width: 10, height: 10,
-              decoration: BoxDecoration(color: cor, shape: BoxShape.circle)),
-          SizedBox(width: 4),
-          Text(label,
-              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-        ],
       );
 }
 
@@ -898,9 +1777,9 @@ class _BarChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxVal = dados.fold(0.0, (mx, d) => d.total > mx ? d.total : mx);
+    final maxVal = dados.fold(
+        0.0, (mx, d) => d.totalGasto > mx ? d.totalGasto : mx);
 
-    // Alturas fixas das regiões para evitar overflow
     const double chartHeight = 160.0;
     const double labelHeight = 24.0;
     const double totalHeight = chartHeight + labelHeight;
@@ -915,20 +1794,19 @@ class _BarChart extends StatelessWidget {
           child: Stack(
             clipBehavior: Clip.hardEdge,
             children: [
-              // ── Barras ────────────────────────────────────────────────
+              // Barras
               Positioned(
                 top: 0, left: 0, right: 0,
                 height: chartHeight,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: List.generate(dados.length, (i) {
-                    final d         = dados[i];
-                    final frac      = maxVal > 0 ? d.total / maxVal : 0.0;
-                    final hovered   = hoveredIndex == i;
-                    final altTotal  = chartHeight * frac * progresso;
-                    final fracSaida = d.total > 0 ? d.totalSaida / d.total : 0.0;
-                    final altSaida   = altTotal * fracSaida;
-                    final altEntrada = altTotal * (1 - fracSaida);
+                    final d       = dados[i];
+                    final frac    = maxVal > 0
+                        ? d.totalGasto / maxVal
+                        : 0.0;
+                    final hovered = hoveredIndex == i;
+                    final altBar  = chartHeight * frac * progresso;
 
                     return Expanded(
                       child: MouseRegion(
@@ -941,46 +1819,38 @@ class _BarChart extends StatelessWidget {
                             child: Stack(
                               clipBehavior: Clip.hardEdge,
                               children: [
-                                // Barra de saída (na base)
-                                if (altSaida > 0)
+                                if (altBar > 0)
                                   Positioned(
                                     bottom: 0,
                                     left: 2, right: 2,
-                                    height: altSaida,
+                                    height: altBar,
                                     child: DecoratedBox(
                                       decoration: BoxDecoration(
-                                        color: _corSaida.withValues(alpha: hovered ? 1.0 : 0.8),
-                                        borderRadius: altEntrada > 0
-                                            ? BorderRadius.zero
-                                            : const BorderRadius.vertical(
-                                                top: Radius.circular(4)),
+                                        color: _corGasto.withValues(
+                                            alpha: hovered
+                                                ? 1.0
+                                                : 0.8),
+                                        borderRadius:
+                                            const BorderRadius
+                                                .vertical(
+                                                top: Radius
+                                                    .circular(4)),
                                       ),
                                     ),
                                   ),
-                                // Barra de entrada (acima da saída)
-                                if (altEntrada > 0)
-                                  Positioned(
-                                    bottom: altSaida,
-                                    left: 2, right: 2,
-                                    height: altEntrada,
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        color: _corEntrada.withValues(alpha: hovered ? 1.0 : 0.8),
-                                        borderRadius: const BorderRadius.vertical(
-                                            top: Radius.circular(4)),
-                                      ),
-                                    ),
-                                  ),
-                                // Marcador quando sem dados
-                                if (altTotal == 0)
+                                if (altBar == 0)
                                   Positioned(
                                     bottom: 0,
                                     left: 2, right: 2,
                                     height: 3,
                                     child: DecoratedBox(
                                       decoration: BoxDecoration(
-                                        color: Theme.of(context).colorScheme.outlineVariant,
-                                        borderRadius: BorderRadius.circular(2),
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .outlineVariant,
+                                        borderRadius:
+                                            BorderRadius.circular(
+                                                2),
                                       ),
                                     ),
                                   ),
@@ -994,7 +1864,7 @@ class _BarChart extends StatelessWidget {
                 ),
               ),
 
-              // ── Rótulos dos meses ─────────────────────────────────────
+              // Rótulos dos meses
               Positioned(
                 bottom: 0, left: 0, right: 0,
                 height: labelHeight,
@@ -1004,36 +1874,43 @@ class _BarChart extends StatelessWidget {
                     final hovered = hoveredIndex == i;
                     return Expanded(
                       child: Center(
-                        child: Text(
-                          d.label,
-                          style: TextStyle(
-                            fontSize:   10,
-                            fontWeight: hovered ? FontWeight.w700 : FontWeight.normal,
-                            color: hovered
-                                ? Theme.of(context).colorScheme.onSurface
-                                : Theme.of(context).colorScheme.outline,
-                          ),
-                        ),
+                        child: Text(d.label,
+                            style: TextStyle(
+                              fontSize:   10,
+                              fontWeight: hovered
+                                  ? FontWeight.w700
+                                  : FontWeight.normal,
+                              color: hovered
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .outline,
+                            )),
                       ),
                     );
                   }),
                 ),
               ),
 
-              // ── Tooltip flutuante ─────────────────────────────────────
+              // Tooltip
               if (hoveredIndex != null)
                 Builder(builder: (context) {
                   final i    = hoveredIndex!;
                   final d    = dados[i];
-                  const tipW = 165.0;
-                  double left = barWidth * i + barWidth / 2 - tipW / 2;
-                  left = left.clamp(0.0, (totalWidth - tipW).clamp(0.0, double.infinity));
+                  const tipW = 160.0;
+                  double left =
+                      barWidth * i + barWidth / 2 - tipW / 2;
+                  left = left.clamp(
+                      0.0,
+                      (totalWidth - tipW)
+                          .clamp(0.0, double.infinity));
                   return Positioned(
                     top:  0,
                     left: left,
                     child: IgnorePointer(
-                      child: _TooltipBar(dado: d),
-                    ),
+                        child: _TooltipBar(dado: d)),
                   );
                 }),
             ],
@@ -1051,17 +1928,18 @@ class _TooltipBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 165,
-      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      width: 160,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color:        Theme.of(context).colorScheme.surface,
-        border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(8),
         boxShadow: [
           BoxShadow(
               color:      Colors.black.withValues(alpha: 0.18),
               blurRadius: 10,
-              offset:     Offset(0, 4)),
+              offset:     const Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -1070,99 +1948,32 @@ class _TooltipBar extends StatelessWidget {
         children: [
           Text('${dado.label} ${dado.ano}',
               style: TextStyle(
-                  fontSize: 11, fontWeight: FontWeight.w700,
-                  color: Theme.of(context).colorScheme.onSurface)),
-          SizedBox(height: 4),
-          _TipLinha(cor: _corEntrada, label: 'Entrada', valor: dado.totalEntrada),
-          SizedBox(height: 2),
-          _TipLinha(cor: _corSaida,   label: 'Saída',   valor: dado.totalSaida),
-          Padding(
-            padding: EdgeInsets.symmetric(vertical: 4),
-            child: Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-          ),
-          _TipLinha(
-              cor:   const Color(0xFF43A047),
-              label: 'Total entradas',
-              valor: dado.totalEntrada,
-              bold:  true),
-        ],
-      ),
-    );
-  }
-}
-
-class _TipLinha extends StatelessWidget {
-  final Color  cor;
-  final String label;
-  final double valor;
-  final bool   bold;
-  const _TipLinha({
-    required this.cor,
-    required this.label,
-    required this.valor,
-    this.bold = false,
-  });
-
-  @override
-  Widget build(BuildContext context) => Row(
-        children: [
-          Container(
-              width: 6, height: 6,
-              decoration: BoxDecoration(color: cor, shape: BoxShape.circle)),
-          SizedBox(width: 4),
-          Expanded(
-            child: Text(
-              '$label: ${_brl(valor)}',
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize:   10,
-                color:      Theme.of(context).colorScheme.onSurfaceVariant,
-                fontWeight: bold ? FontWeight.w700 : FontWeight.normal,
+                  fontSize:   11,
+                  fontWeight: FontWeight.w700,
+                  color:
+                      Theme.of(context).colorScheme.onSurface)),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                      color: _corGasto,
+                      shape: BoxShape.circle)),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  'Gasto: ${_brl(dado.totalGasto)}',
+                  style: TextStyle(
+                    fontSize:   11,
+                    fontWeight: FontWeight.w600,
+                    color:      _corGasto,
+                    overflow:   TextOverflow.ellipsis,
+                  ),
+                ),
               ),
-            ),
-          ),
-        ],
-      );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Resumo de materiais
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ResumoMateirais extends StatelessWidget {
-  final double totalEntrada;
-  final double totalSaida;
-
-  const _ResumoMateirais(
-      {required this.totalEntrada, required this.totalSaida});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: BoxDecoration(
-        color:        Theme.of(context).colorScheme.surface,
-        border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        children: [
-          Text('Subtotais materiais',
-              style: TextStyle(
-                  fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          const Spacer(),
-          _TotalBadge(
-            label: 'Entradas',
-            valor: totalEntrada,
-            cor:   _corEntrada,
-            icone: Icons.arrow_downward_rounded,
-          ),
-          const SizedBox(width: 20),
-          _TotalBadge(
-            label: 'Saídas',
-            valor: totalSaida,
-            cor:   _corSaida,
-            icone: Icons.arrow_upward_rounded,
+            ],
           ),
         ],
       ),
@@ -1171,12 +1982,12 @@ class _ResumoMateirais extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Aba Veículos
+// ABA 3 — VEÍCULOS (mantida igual à versão anterior)
 // ═════════════════════════════════════════════════════════════════════════════
 
 class _AbaVeiculos extends StatelessWidget {
-  final VeiculoProvider provider;
-  final int             anoSelecionado;
+  final VeiculoProvider   provider;
+  final int               anoSelecionado;
   final ValueChanged<int> onAnoChanged;
 
   const _AbaVeiculos({
@@ -1196,31 +2007,34 @@ class _AbaVeiculos extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Resumo anual ───────────────────────────────────────────────
           _ResumoAnualCard(
             provider:       provider,
             anoSelecionado: anoSelecionado,
             onAnoChanged:   onAnoChanged,
           ),
           const SizedBox(height: 20),
-
-          // ── Lista por veículo ──────────────────────────────────────────
           if (provider.gastos.isEmpty)
             Padding(
-              padding: EdgeInsets.only(top: 40),
+              padding: const EdgeInsets.only(top: 40),
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.directions_car_outlined,
                         size: 56,
-                        color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.4)),
-                    SizedBox(height: 12),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .outline
+                            .withValues(alpha: 0.4)),
+                    const SizedBox(height: 12),
                     Text('Nenhum gasto com veículos encontrado',
                         style: Theme.of(context)
                             .textTheme
                             .bodyLarge
-                            ?.copyWith(color: Theme.of(context).colorScheme.outline)),
+                            ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .outline)),
                   ],
                 ),
               ),
@@ -1230,16 +2044,17 @@ class _AbaVeiculos extends StatelessWidget {
                 style: Theme.of(context)
                     .textTheme
                     .titleSmall
-                    ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                    ?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant)),
             const SizedBox(height: 12),
             ...provider.gastos.asMap().entries.map((e) {
-              final i = e.key;
-              final g = e.value;
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: _GastoVeiculoCard(
-                  gasto: g,
-                  cor:   _corCategoria(i),
+                  gasto: e.value,
+                  cor:   _corCategoria(e.key),
                 ),
               );
             }),
@@ -1249,8 +2064,6 @@ class _AbaVeiculos extends StatelessWidget {
     );
   }
 }
-
-// ── Resumo anual com gráfico de barras mensal ─────────────────────────────────
 
 class _ResumoAnualCard extends StatelessWidget {
   final VeiculoProvider   provider;
@@ -1268,54 +2081,60 @@ class _ResumoAnualCard extends StatelessWidget {
     final resumo = provider.resumoAnual;
 
     return Container(
-      padding: EdgeInsets.all(20),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color:        Theme.of(context).colorScheme.surface,
-        border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Cabeçalho com seletor de ano
           Row(
             children: [
               Icon(Icons.bar_chart_rounded,
                   size: 18, color: _corVeiculo),
-              SizedBox(width: 8),
+              const SizedBox(width: 8),
               Text('Gastos anuais com veículos',
                   style: TextStyle(
                     fontSize:   14,
                     fontWeight: FontWeight.w700,
-                    color:      Theme.of(context).colorScheme.onSurface,
+                    color:
+                        Theme.of(context).colorScheme.onSurface,
                   )),
-              Spacer(),
-              // Seletor de ano
+              const Spacer(),
               Row(
                 children: [
                   IconButton(
-                    onPressed: () => onAnoChanged(anoSelecionado - 1),
-                    icon: Icon(Icons.chevron_left, size: 20),
-                    color:   Theme.of(context).colorScheme.onSurfaceVariant,
-                    padding: EdgeInsets.zero,
-                    constraints: BoxConstraints(
+                    onPressed: () =>
+                        onAnoChanged(anoSelecionado - 1),
+                    icon: const Icon(Icons.chevron_left, size: 20),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant,
+                    padding:     EdgeInsets.zero,
+                    constraints: const BoxConstraints(
                         minWidth: 28, minHeight: 28),
                   ),
-                  Text(
-                    '$anoSelecionado',
-                    style: TextStyle(
-                      fontSize:   14,
-                      fontWeight: FontWeight.w700,
-                      color:      Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
+                  Text('$anoSelecionado',
+                      style: TextStyle(
+                        fontSize:   14,
+                        fontWeight: FontWeight.w700,
+                        color:
+                            Theme.of(context).colorScheme.onSurface,
+                      )),
                   IconButton(
-                    onPressed: anoSelecionado < DateTime.now().year
-                        ? () => onAnoChanged(anoSelecionado + 1)
-                        : null,
-                    icon: Icon(Icons.chevron_right, size: 20),
-                    color:   Theme.of(context).colorScheme.onSurfaceVariant,
-                    padding: EdgeInsets.zero,
+                    onPressed:
+                        anoSelecionado < DateTime.now().year
+                            ? () =>
+                                onAnoChanged(anoSelecionado + 1)
+                            : null,
+                    icon: const Icon(Icons.chevron_right, size: 20),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant,
+                    padding:     EdgeInsets.zero,
                     constraints: const BoxConstraints(
                         minWidth: 28, minHeight: 28),
                   ),
@@ -1324,32 +2143,34 @@ class _ResumoAnualCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-
           if (provider.carregandoResumo)
             const SizedBox(
-              height: 80,
-              child: Center(
-                  child: CircularProgressIndicator(
-                      color: AppTheme.primary, strokeWidth: 2)),
-            )
+                height: 80,
+                child: Center(
+                    child: CircularProgressIndicator(
+                        color: AppTheme.primary,
+                        strokeWidth: 2)))
           else if (resumo == null || resumo.totalAnual == 0)
             SizedBox(
               height: 80,
               child: Center(
-                child: Text(
-                  'Sem gastos em $anoSelecionado',
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.outline, fontSize: 13),
-                ),
+                child: Text('Sem gastos em $anoSelecionado',
+                    style: TextStyle(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .outline,
+                        fontSize: 13)),
               ),
             )
           else ...[
-            // Total do ano
             Row(
               children: [
                 Text('Total em $anoSelecionado:',
                     style: TextStyle(
-                        fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        fontSize: 13,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant)),
                 const SizedBox(width: 8),
                 Text(_brl(resumo.totalAnual),
                     style: TextStyle(
@@ -1360,8 +2181,6 @@ class _ResumoAnualCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-
-            // Gráfico de barras mensal
             _GraficoMensalVeiculo(porMes: resumo.porMes),
           ],
         ],
@@ -1372,7 +2191,6 @@ class _ResumoAnualCard extends StatelessWidget {
 
 class _GraficoMensalVeiculo extends StatelessWidget {
   final List<ResumoMensalVeiculoModel> porMes;
-
   const _GraficoMensalVeiculo({required this.porMes});
 
   @override
@@ -1390,35 +2208,43 @@ class _GraficoMensalVeiculo extends StatelessWidget {
           final frac = maxVal > 0 ? m.totalGasto / maxVal : 0.0;
           return Expanded(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 2),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   if (m.totalGasto > 0)
                     Text(
-                      'R\$${(m.totalGasto / 1000 >= 1 ? '${(m.totalGasto / 1000).toStringAsFixed(1)}k' : m.totalGasto.toStringAsFixed(0))}',
+                      'R\$${m.totalGasto / 1000 >= 1 ? '${(m.totalGasto / 1000).toStringAsFixed(1)}k' : m.totalGasto.toStringAsFixed(0)}',
                       style: TextStyle(
-                          fontSize: 9,
-                          color:    _corVeiculo.withValues(alpha: 0.8)),
-                      textAlign: TextAlign.center,
+                        fontSize: 8,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant,
+                      ),
                     ),
-                  SizedBox(height: 2),
+                  const SizedBox(height: 2),
                   AnimatedContainer(
-                    duration: Duration(milliseconds: 400),
-                    height:   (frac * 72).clamp(2.0, 72.0),
+                    duration:
+                        const Duration(milliseconds: 600),
+                    height: 90 * frac,
                     decoration: BoxDecoration(
-                      color:        m.totalGasto > 0
-                          ? _corVeiculo
-                          : Theme.of(context).colorScheme.outlineVariant,
-                      borderRadius: BorderRadius.vertical(
-                          top: Radius.circular(4)),
+                      color: _corVeiculo.withValues(
+                          alpha: 0.85),
+                      borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(3)),
                     ),
                   ),
-                  SizedBox(height: 4),
-                  Text(m.label,
-                      style: TextStyle(
-                          fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      textAlign: TextAlign.center),
+                  const SizedBox(height: 4),
+                  Text(
+                    m.label,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .outline,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1429,16 +2255,16 @@ class _GraficoMensalVeiculo extends StatelessWidget {
   }
 }
 
-// ── Card de gasto por veículo (expansível) ────────────────────────────────────
-
 class _GastoVeiculoCard extends StatefulWidget {
   final GastoVeiculoModel gasto;
   final Color             cor;
 
-  const _GastoVeiculoCard({required this.gasto, required this.cor});
+  const _GastoVeiculoCard(
+      {required this.gasto, required this.cor});
 
   @override
-  State<_GastoVeiculoCard> createState() => _GastoVeiculoCardState();
+  State<_GastoVeiculoCard> createState() =>
+      _GastoVeiculoCardState();
 }
 
 class _GastoVeiculoCardState extends State<_GastoVeiculoCard> {
@@ -1449,345 +2275,146 @@ class _GastoVeiculoCardState extends State<_GastoVeiculoCard> {
     final g   = widget.gasto;
     final cor = widget.cor;
 
-    return AnimatedContainer(
-      duration: Duration(milliseconds: 200),
+    return Container(
       decoration: BoxDecoration(
-        color:        Theme.of(context).colorScheme.surface,
-        border:       Border.all(
-          color: _expandido ? cor.withValues(alpha: 0.4) : Theme.of(context).colorScheme.outlineVariant,
-          width: _expandido ? 1.5 : 1,
-        ),
-        borderRadius: BorderRadius.circular(14),
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         children: [
           InkWell(
-            onTap: () => setState(() => _expandido = !_expandido),
-            borderRadius: BorderRadius.only(
-              topLeft:     const Radius.circular(14),
-              topRight:    const Radius.circular(14),
-              bottomLeft:  Radius.circular(_expandido ? 0 : 14),
-              bottomRight: Radius.circular(_expandido ? 0 : 14),
-            ),
+            onTap: () =>
+                setState(() => _expandido = !_expandido),
+            borderRadius: const BorderRadius.vertical(
+                top:    Radius.circular(12),
+                bottom: Radius.circular(12)),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 14),
               child: Row(
                 children: [
                   Container(
-                    width: 44, height: 44,
-                    decoration: BoxDecoration(
-                      color:        cor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(Icons.directions_car_rounded,
-                        color: cor, size: 22),
-                  ),
-                  const SizedBox(width: 14),
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                          color: cor,
+                          shape: BoxShape.circle)),
+                  const SizedBox(width: 10),
+                  Icon(Icons.directions_car_rounded,
+                      size: 16,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurfaceVariant),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(g.nome,
                             style: TextStyle(
-                              fontSize:   15,
-                              fontWeight: FontWeight.w700,
-                              color:      Theme.of(context).colorScheme.onSurface,
+                              fontSize:   14,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface,
                             )),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 1),
-                              decoration: BoxDecoration(
-                                color:        cor.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                    color: cor.withValues(alpha: 0.2)),
-                              ),
-                              child: Text(g.placa,
-                                  style: TextStyle(
-                                    fontSize:   11,
-                                    fontWeight: FontWeight.w700,
-                                    color:      cor,
-                                    letterSpacing: 1,
-                                  )),
-                            ),
-                            SizedBox(width: 8),
-                            Text(
-                              '${g.qtdServicos} ${g.qtdServicos == 1 ? 'serviço' : 'serviços'}',
-                              style: TextStyle(
-                                  fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color:        _corVeiculo.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                          color: _corVeiculo.withValues(alpha: 0.25)),
-                    ),
-                    child: Text(_brl(g.totalGasto),
-                        style: const TextStyle(
-                          fontSize:   14,
-                          fontWeight: FontWeight.w700,
-                          color:      _corVeiculo,
-                        )),
-                  ),
-                  SizedBox(width: 8),
-                  AnimatedRotation(
-                    turns:    _expandido ? 0.5 : 0,
-                    duration: Duration(milliseconds: 200),
-                    child: Icon(Icons.keyboard_arrow_down_rounded,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_expandido) ...[
-            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-            _TabelaServicos(servicos: g.servicos, cor: cor),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _TabelaServicos extends StatelessWidget {
-  final List<GastoServicoModel> servicos;
-  final Color                   cor;
-
-  const _TabelaServicos({required this.servicos, required this.cor});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ...servicos.asMap().entries.map((e) {
-            final i = e.key;
-            final s = e.value;
-            return Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 32, height: 32,
-                        decoration: BoxDecoration(
-                          color:        cor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Icon(
-                          _iconeTipo(s.tipo),
-                          color: cor,
-                          size:  16,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(labelTipo(s.tipo),
-                                style: TextStyle(
-                                  fontSize:   13,
-                                  fontWeight: FontWeight.w600,
-                                  color:      Theme.of(context).colorScheme.onSurface,
-                                )),
-                            if (s.descricao != null &&
-                                s.descricao!.isNotEmpty)
-                              Text(s.descricao!,
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                            Text(
-                              s.dataRetirada != null
-                                  ? '${_fmtData(s.dataEnvio)} → ${_fmtData(s.dataRetirada)}'
-                                  : 'Envio: ${_fmtData(s.dataEnvio)}',
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Text(_brl(s.valor),
-                          style: TextStyle(
-                            fontSize:   13,
-                            fontWeight: FontWeight.w700,
-                            color:      _corVeiculo,
-                          )),
-                    ],
-                  ),
-                ),
-                if (i < servicos.length - 1)
-                  Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-              ],
-            );
-          }),
-          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-          SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Text('Total do veículo:',
-                  style: TextStyle(
-                      fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-              const SizedBox(width: 8),
-              Text(
-                _brl(servicos.fold(0.0, (s, m) => s + m.valor)),
-                style: const TextStyle(
-                  fontSize:   14,
-                  fontWeight: FontWeight.w800,
-                  color:      _corVeiculo,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-IconData _iconeTipo(String tipo) {
-  switch (tipo) {
-    case 'MANUTENCAO': return Icons.build_rounded;
-    case 'LIMPEZA':    return Icons.cleaning_services_rounded;
-    case 'REVISAO':    return Icons.fact_check_rounded;
-    case 'PNEU':       return Icons.tire_repair_rounded;
-    default:           return Icons.miscellaneous_services_rounded;
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Card de categoria de material (reutilizado da versão anterior)
-// ═════════════════════════════════════════════════════════════════════════════
-
-class _CategoriaCard extends StatefulWidget {
-  final GastoCategoriaModel gasto;
-  final Color               cor;
-  final int                 index;
-
-  const _CategoriaCard({
-    required this.gasto,
-    required this.cor,
-    required this.index,
-  });
-
-  @override
-  State<_CategoriaCard> createState() => _CategoriaCardState();
-}
-
-class _CategoriaCardState extends State<_CategoriaCard> {
-  bool _expandido = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final g   = widget.gasto;
-    final cor = widget.cor;
-
-    return AnimatedContainer(
-      duration: Duration(milliseconds: 200),
-      decoration: BoxDecoration(
-        color:        Theme.of(context).colorScheme.surface,
-        border:       Border.all(
-          color: _expandido ? cor.withValues(alpha: 0.4) : Theme.of(context).colorScheme.outlineVariant,
-          width: _expandido ? 1.5 : 1,
-        ),
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: _expandido
-            ? [
-                BoxShadow(
-                  color:      cor.withValues(alpha: 0.08),
-                  blurRadius: 12,
-                  offset:     const Offset(0, 4),
-                )
-              ]
-            : [],
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: () => setState(() => _expandido = !_expandido),
-            borderRadius: BorderRadius.only(
-              topLeft:     const Radius.circular(14),
-              topRight:    const Radius.circular(14),
-              bottomLeft:  Radius.circular(_expandido ? 0 : 14),
-              bottomRight: Radius.circular(_expandido ? 0 : 14),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44, height: 44,
-                    decoration: BoxDecoration(
-                      color:        cor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(Icons.category_rounded, color: cor, size: 22),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(g.categoriaLabel,
+                        Text(g.placa,
                             style: TextStyle(
-                              fontSize:   15,
-                              fontWeight: FontWeight.w700,
-                              color:      Theme.of(context).colorScheme.onSurface,
+                              fontSize: 11,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                             )),
-                        SizedBox(height: 2),
-                        Text(
-                          '${g.materiais.length} '
-                          '${g.materiais.length == 1 ? 'material' : 'materiais'}',
-                          style: TextStyle(
-                              fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        ),
                       ],
                     ),
                   ),
-                  _PillValor(
-                    label: 'Entrada',
-                    valor: g.totalEntrada,
-                    cor:   _corEntrada,
-                    icone: Icons.arrow_downward_rounded,
-                  ),
-                  const SizedBox(width: 12),
-                  _PillValor(
-                    label: 'Saída',
-                    valor: g.totalSaida,
-                    cor:   _corSaida,
-                    icone: Icons.arrow_upward_rounded,
-                  ),
-                  SizedBox(width: 12),
-                  AnimatedRotation(
-                    turns:    _expandido ? 0.5 : 0,
-                    duration: Duration(milliseconds: 200),
-                    child: Icon(Icons.keyboard_arrow_down_rounded,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  Text(_brl(g.totalGasto),
+                      style: TextStyle(
+                          fontSize:   15,
+                          fontWeight: FontWeight.w700,
+                          color:      _corVeiculo)),
+                  const SizedBox(width: 8),
+                  Icon(
+                    _expandido
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 20,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .outline,
                   ),
                 ],
               ),
             ),
           ),
-          if (_expandido) ...[
-            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-            _TabelaMateriais(materiais: g.materiais, cor: cor),
+          if (_expandido && g.servicos.isNotEmpty) ...[
+            Divider(
+                height: 1,
+                color: Theme.of(context)
+                    .colorScheme
+                    .outlineVariant),
+            ...g.servicos.asMap().entries.map((e) {
+              final item = e.value;
+              final titulo = item.descricao != null && item.descricao!.isNotEmpty
+                  ? item.descricao!
+                  : labelTipo(item.tipo);
+              return Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(titulo,
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurface)),
+                              Text(labelTipo(item.tipo),
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant)),
+                            ],
+                          ),
+                        ),
+                        Text(_fmtData(item.dataEnvio),
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant)),
+                        const SizedBox(width: 16),
+                        Text(_brl(item.valor),
+                            style: TextStyle(
+                              fontSize:   13,
+                              fontWeight: FontWeight.w600,
+                              color:      _corVeiculo,
+                            )),
+                      ],
+                    ),
+                  ),
+                  if (e.key < g.servicos.length - 1)
+                    Divider(
+                        height: 1,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .outlineVariant
+                            .withValues(alpha: 0.5)),
+                ],
+              );
+            }),
+            const SizedBox(height: 4),
           ],
         ],
       ),
@@ -1795,293 +2422,48 @@ class _CategoriaCardState extends State<_CategoriaCard> {
   }
 }
 
-class _PillValor extends StatelessWidget {
-  final String   label;
-  final double   valor;
-  final Color    cor;
-  final IconData icone;
-
-  const _PillValor({
-    required this.label,
-    required this.valor,
-    required this.cor,
-    required this.icone,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color:        cor.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-        border:       Border.all(color: cor.withValues(alpha: 0.2)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icone, size: 12, color: cor),
-          const SizedBox(width: 4),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(label,
-                  style: TextStyle(
-                      fontSize: 10, color: cor.withValues(alpha: 0.8))),
-              Text(_brl(valor),
-                  style: TextStyle(
-                    fontSize:   13,
-                    fontWeight: FontWeight.w700,
-                    color:      cor,
-                  )),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TabelaMateriais extends StatelessWidget {
-  final List<GastoMaterialModel> materiais;
-  final Color                    cor;
-
-  const _TabelaMateriais({required this.materiais, required this.cor});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: EdgeInsets.only(bottom: 8),
-            child: Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Text('Material',
-                      style: TextStyle(
-                        fontSize:   11,
-                        fontWeight: FontWeight.w600,
-                        color:      Theme.of(context).colorScheme.onSurfaceVariant,
-                      )),
-                ),
-                _HeaderCol('Qtd. Entrada', align: TextAlign.right),
-                const SizedBox(width: 8),
-                _HeaderCol('Valor Entrada',
-                    cor: _corEntrada, align: TextAlign.right),
-                SizedBox(width: 16),
-                _HeaderCol('Qtd. Saída', align: TextAlign.right),
-                SizedBox(width: 8),
-                _HeaderCol('Valor Saído',
-                    cor: _corSaida, align: TextAlign.right),
-              ],
-            ),
-          ),
-          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-          const SizedBox(height: 4),
-          ...materiais.asMap().entries.map((e) {
-            final i = e.key;
-            final m = e.value;
-            return _LinhaMateria(
-              material: m,
-              cor:      cor,
-              ultimo:   i == materiais.length - 1,
-            );
-          }),
-          SizedBox(height: 4),
-          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-          SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                flex: 3,
-                child: Text('Subtotal',
-                    style: TextStyle(
-                      fontSize:   12,
-                      fontWeight: FontWeight.w600,
-                      color:      Theme.of(context).colorScheme.onSurfaceVariant,
-                    )),
-              ),
-              const SizedBox(width: 70),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 100,
-                child: Text(
-                  _brl(materiais.fold(
-                      0.0, (s, m) => s + m.totalEntrada)),
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    fontSize:   13,
-                    fontWeight: FontWeight.w700,
-                    color:      _corEntrada,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              const SizedBox(width: 70),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 100,
-                child: Text(
-                  _brl(materiais.fold(0.0, (s, m) => s + m.totalSaida)),
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    fontSize:   13,
-                    fontWeight: FontWeight.w700,
-                    color:      _corSaida,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Widgets auxiliares compartilhados
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _HeaderCol extends StatelessWidget {
   final String    text;
-  final Color?    cor;
   final TextAlign align;
-
-  const _HeaderCol(this.text, {this.cor, this.align = TextAlign.left});
+  const _HeaderCol(this.text,
+      {this.align = TextAlign.left});
 
   @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: cor != null ? 100 : 70,
-      child: Text(text,
-          textAlign: align,
-          style: TextStyle(
-            fontSize:   11,
-            fontWeight: FontWeight.w600,
-            color:      cor ?? Theme.of(context).colorScheme.onSurfaceVariant,
-          )),
-    );
-  }
+  Widget build(BuildContext context) => SizedBox(
+        width: 70,
+        child: Text(text,
+            textAlign: align,
+            style: TextStyle(
+              fontSize:   11,
+              fontWeight: FontWeight.w600,
+              color:
+                  Theme.of(context).colorScheme.onSurfaceVariant,
+            )),
+      );
 }
 
-class _LinhaMateria extends StatelessWidget {
-  final GastoMaterialModel material;
-  final Color              cor;
-  final bool               ultimo;
-
-  const _LinhaMateria({
-    required this.material,
-    required this.cor,
-    required this.ultimo,
-  });
+class _HeaderColWide extends StatelessWidget {
+  final String    text;
+  final TextAlign align;
+  const _HeaderColWide(this.text,
+      {this.align = TextAlign.left});
 
   @override
-  Widget build(BuildContext context) {
-    final m        = material;
-    final detalhes = [
-      if (m.identificador != null && m.identificador!.isNotEmpty)
-        m.identificador!,
-      if (m.medida    != null && m.medida!.isNotEmpty)    m.medida!,
-      if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
-    ].join(' · ');
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                flex: 3,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(m.nome,
-                        style: TextStyle(
-                          fontSize:   13,
-                          fontWeight: FontWeight.w500,
-                          color:      Theme.of(context).colorScheme.onSurface,
-                        )),
-                    if (detalhes.isNotEmpty)
-                      Text(detalhes,
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                  ],
-                ),
-              ),
-              SizedBox(
-                width: 70,
-                child: Text(
-                  m.qtdEntrada > 0
-                      ? '${_fmtQtd(m.qtdEntrada)} ${m.unidade ?? ''}'
-                      : '—',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: m.qtdEntrada > 0
-                        ? Theme.of(context).colorScheme.onSurface
-                        : Theme.of(context).colorScheme.outline,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 100,
-                child: Text(_brl(m.totalEntrada),
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontSize:   13,
-                      fontWeight: m.totalEntrada > 0
-                          ? FontWeight.w600
-                          : FontWeight.normal,
-                      color: m.totalEntrada > 0
-                          ? _corEntrada
-                          : Theme.of(context).colorScheme.outline,
-                    )),
-              ),
-              const SizedBox(width: 16),
-              SizedBox(
-                width: 70,
-                child: Text(
-                  m.qtdSaida > 0
-                      ? '${_fmtQtd(m.qtdSaida)} ${m.unidade ?? ''}'
-                      : '—',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: m.qtdSaida > 0
-                        ? Theme.of(context).colorScheme.onSurface
-                        : Theme.of(context).colorScheme.outline,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 100,
-                child: Text(_brl(m.totalSaida),
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontSize:   13,
-                      fontWeight: m.totalSaida > 0
-                          ? FontWeight.w600
-                          : FontWeight.normal,
-                      color: m.totalSaida > 0
-                          ? _corSaida
-                          : Theme.of(context).colorScheme.outline,
-                    )),
-              ),
-            ],
-          ),
-        ),
-        if (!ultimo)
-          Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => SizedBox(
+        width: 110,
+        child: Text(text,
+            textAlign: align,
+            style: TextStyle(
+              fontSize:   11,
+              fontWeight: FontWeight.w600,
+              color:
+                  Theme.of(context).colorScheme.onSurfaceVariant,
+            )),
+      );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2089,10 +2471,10 @@ class _LinhaMateria extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DatePickerField extends StatelessWidget {
-  final String             label;
-  final DateTime?          value;
-  final DateTime           firstDate;
-  final DateTime           lastDate;
+  final String                 label;
+  final DateTime?              value;
+  final DateTime               firstDate;
+  final DateTime               lastDate;
   final ValueChanged<DateTime> onPicked;
   final VoidCallback           onCleared;
 
@@ -2123,14 +2505,17 @@ class _DatePickerField extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasValue = value != null;
     return InkWell(
-      onTap: () => _pick(context),
+      onTap:        () => _pick(context),
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(
+            horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color:        Theme.of(context).colorScheme.surface,
-          border:       Border.all(
-            color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+          color: Theme.of(context).colorScheme.surface,
+          border: Border.all(
+            color: hasValue
+                ? AppTheme.primary
+                : Theme.of(context).colorScheme.outlineVariant,
           ),
           borderRadius: BorderRadius.circular(8),
         ),
@@ -2139,24 +2524,33 @@ class _DatePickerField extends StatelessWidget {
           children: [
             Icon(Icons.calendar_today,
                 size:  16,
-                color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline),
-            SizedBox(width: 6),
+                color: hasValue
+                    ? AppTheme.primary
+                    : Theme.of(context).colorScheme.outline),
+            const SizedBox(width: 6),
             Text(
               hasValue
                   ? '$label: ${_fmtData(value)}'
                   : label,
               style: TextStyle(
                 fontSize:   13,
-                color:      hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
-                fontWeight: hasValue ? FontWeight.w600 : FontWeight.normal,
+                color:      hasValue
+                    ? AppTheme.primary
+                    : Theme.of(context).colorScheme.outline,
+                fontWeight: hasValue
+                    ? FontWeight.w600
+                    : FontWeight.normal,
               ),
             ),
             if (hasValue) ...[
-              SizedBox(width: 6),
+              const SizedBox(width: 6),
               GestureDetector(
                 onTap: onCleared,
                 child: Icon(Icons.close,
-                    size: 14, color: Theme.of(context).colorScheme.outline),
+                    size: 14,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .outline),
               ),
             ],
           ],

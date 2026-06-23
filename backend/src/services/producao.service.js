@@ -80,6 +80,10 @@ async function criarSolicitacao({ materialId, descricaoItem, quantidadeReservada
   const material = await prisma.material.findUnique({ where: { id: materialId } });
   if (!material || !material.ativo) throw { status: 404, message: 'Material não encontrado ou inativo' };
 
+  // Busca o nome real do usuário no banco para garantir que nunca use o username
+  const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId }, select: { nome: true } });
+  const nomeReal = usuario?.nome ?? usuarioNome;
+
   // Normaliza o número da OS: sem espaços extras, maiúsculas
   const numeroOSNorm = (numeroOS ?? '').trim().toUpperCase();
 
@@ -114,7 +118,7 @@ async function criarSolicitacao({ materialId, descricaoItem, quantidadeReservada
       status: 'FINALIZADA',
       finalizadoEm: new Date(),
       usuarioId,
-      usuarioNome,
+      usuarioNome: nomeReal,
     },
     include: _includeSolicitacao,
   });

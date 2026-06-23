@@ -26,6 +26,7 @@ const renomearOS = async (req, res, next) => {
     res.json(await svc.renomearOS(Number(req.params.id), req.body.novoNumeroOS));
   } catch (e) { next(e); }
 };
+
 const atualizarPrecoMovimentacao = async (req, res, next) => {
   try {
     res.json(await svc.atualizarPrecoMovimentacao(+req.params.movimentacaoId, req.body, req.usuario));

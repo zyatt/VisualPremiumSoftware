@@ -51,11 +51,6 @@ const criarSolicitacao = async (req, res, next) => {
       quantidadeReservada: Number(quantidadeReservada),
       numeroOS,
       usuarioId:           req.usuario.id,
-      // ✅ CORRIGIDO: req.usuario.nome vem do payload do JWT.
-      //    Para funcionar, o campo 'nome' deve estar incluído ao assinar
-      //    o token (jwt.sign). Após adicionar 'nome' ao jwt.sign, os
-      //    usuários precisam fazer logout/login para obter o novo token.
-      usuarioNome:         req.usuario.nome ?? req.usuario.username,
       larguraUsada:        larguraUsada != null ? Number(larguraUsada) : undefined,
       comprimentoUsado:    comprimentoUsado != null ? Number(comprimentoUsado) : undefined,
     });

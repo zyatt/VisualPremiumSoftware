@@ -39,6 +39,27 @@ class OrdemCompraProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
+  /// ID da OC que deve ser aberta automaticamente ao entrar na página de OC.
+  /// Setado pelo orçamento ao gerar uma OC; consumido pela página de OC
+  /// imediatamente após abrir os detalhes, evitando re-abertura.
+  int? _ocPendente;
+  int? get ocPendente => _ocPendente;
+
+  /// Sinaliza que a página de OC deve abrir automaticamente a OC [id]
+  /// assim que estiver montada e com os dados carregados.
+  void sinalizarOcParaAbrir(int id) {
+    _ocPendente = id;
+    // Não notifica listeners aqui: a página vai consumir no próximo frame
+    // após o carregar() que ela mesma dispara no initState / didChangeDependencies.
+  }
+
+  /// Consome e retorna o ID pendente, limpando-o para evitar re-abertura.
+  int? consumirOcPendente() {
+    final id = _ocPendente;
+    _ocPendente = null;
+    return id;
+  }
+
   Future<void> carregar() async {
     _carregando = true;
     _erro = null;

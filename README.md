@@ -16,3 +16,11 @@ UPDATE materiais
 SET
     "ultimoValorPago" = 0.11996
 WHERE id = 365;
+
+
+BEGIN;
+
+DELETE FROM materiais
+WHERE id = 577;
+
+COMMIT;

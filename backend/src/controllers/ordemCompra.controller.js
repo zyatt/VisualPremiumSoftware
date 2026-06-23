@@ -1,4 +1,5 @@
 const svc = require('../services/ordemCompra.service');
+const prisma = require('../utils/prisma');
 
 const listar      = async (req, res, next) => { try { res.json(await svc.listar(req.query.status)); } catch(e){next(e);} };
 const buscarPorId = async (req, res, next) => { try { res.json(await svc.buscarPorId(+req.params.id)); } catch(e){next(e);} };
@@ -48,7 +49,12 @@ const atualizarItem = async (req, res, next) => {
 
 const finalizar = async (req, res, next) => {
   try {
-    res.json(await svc.finalizar(+req.params.id));
+    const usuario = await prisma.usuario.findUnique({
+      where: { id: req.usuario.id },
+      select: { nome: true },
+    });
+    const usuarioNome = usuario?.nome ?? req.usuario?.username ?? 'Usuário';
+    res.json(await svc.finalizar(+req.params.id, usuarioNome));
   } catch(e){next(e);}
 };
 

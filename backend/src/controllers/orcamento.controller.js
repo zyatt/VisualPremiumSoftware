@@ -188,7 +188,7 @@ const gerarOrdemCompra = async (req, res, next) => {
       // Cria a OC
       const oc = await ocService.criar({
         fornecedorId,
-        requisitante: req.usuario?.nome || 'Sistema',
+        requisitante: req.usuario.nome,
         formaPagamento: null,
         prazoPagamento: null,
         observacoes: `Gerada a partir do orçamento #${orcamentoId}`,

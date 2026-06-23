@@ -2119,13 +2119,7 @@ class _HistoricoCard extends StatelessWidget {
   final SolicitacaoProducaoModel solicitacao;
   const _HistoricoCard({required this.solicitacao});
 
-  static DateTime _toBrasilia(DateTime dt) {
-    final emUtc = dt.isUtc ? dt : DateTime.utc(
-      dt.year, dt.month, dt.day,
-      dt.hour, dt.minute, dt.second, dt.millisecond,
-    );
-    return emUtc.subtract(const Duration(hours: 3));
-  }
+  // Datas já chegam convertidas para fuso local via .toLocal() no model.
 
   Future<void> _confirmarExclusao(BuildContext context) async {
     final confirmar = await showDialog<bool>(
@@ -2172,7 +2166,7 @@ class _HistoricoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s      = solicitacao;
-    final data   = _toBrasilia(s.finalizadoEm ?? s.atualizadoEm);
+    final data   = s.finalizadoEm ?? s.atualizadoEm;
     final dataStr = '${data.day.toString().padLeft(2, '0')}/'
         '${data.month.toString().padLeft(2, '0')}/'
         '${data.year} '

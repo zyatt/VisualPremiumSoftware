@@ -1,6 +1,7 @@
-const jwt = require('jsonwebtoken');
+const jwt    = require('jsonwebtoken');
+const prisma = require('../utils/prisma');
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   const authHeader = req.headers['authorization'];
   if (!authHeader) return res.status(401).json({ error: 'Token não fornecido' });
 
@@ -9,7 +10,23 @@ function authMiddleware(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.usuario = decoded;
+
+    // Busca o nome atualizado do banco (o payload do JWT pode não conter o campo nome)
+    const usuario = await prisma.usuario.findUnique({
+      where:  { id: decoded.id },
+      select: { id: true, nome: true, role: true, ativo: true },
+    });
+
+    if (!usuario || !usuario.ativo) {
+      return res.status(401).json({ error: 'Usuário inativo ou não encontrado' });
+    }
+
+    req.usuario = {
+      id:   usuario.id,
+      nome: usuario.nome,
+      role: usuario.role,
+    };
+
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Token inválido ou expirado' });

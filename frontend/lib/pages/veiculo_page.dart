@@ -1219,6 +1219,7 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
                     return ChoiceChip(
                       label: Text(labelTipo(t)),
                       selected: sel,
+                      showCheckmark: false,
                       onSelected: (_) => setState(() => _tipo = t),
                       selectedColor: AppTheme.primary.withValues(alpha: 0.2),
                       labelStyle: TextStyle(

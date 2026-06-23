@@ -208,6 +208,14 @@ async function registrarMovimentacao({
       where: { id: materialId },
       data:  { quantidade: { increment: delta } },
     }),
+    // Toca explicitamente atualizadoEm da RelacaoOS: o upsert/findFirst acima
+    // não conta como "update" da relação para fins de @updatedAt, então sem
+    // isso a OS continuava ordenada pela data de criação mesmo após receber
+    // novas movimentações (ex.: saída registrada dias depois da OS criada).
+    prisma.relacaoOS.update({
+      where: { id: relacao.id },
+      data:  { atualizadoEm: new Date() },
+    }),
   ]);
 
   // Recalcula status do material
@@ -373,6 +381,13 @@ async function removerMovimentacao(movimentacaoId) {
     return { relacaoExcluida: true };
   }
 
+  // Remoção também é uma alteração da OS — sem isso a remoção da última
+  // saída de um material, por exemplo, não refletiria em atualizadoEm.
+  await prisma.relacaoOS.update({
+    where: { id: relacao.id },
+    data:  { atualizadoEm: new Date() },
+  });
+
   return { relacaoExcluida: false };
 }
 
@@ -510,6 +525,11 @@ async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, preco
       },
     }),
     ...auditEntries.map((entry) => prisma.auditLogMaterial.create({ data: entry })),
+    // Correção de custo também é uma alteração da OS.
+    prisma.relacaoOS.update({
+      where: { id: mov.relacaoOSId },
+      data:  { atualizadoEm: new Date() },
+    }),
   ]);
 
   return movimentacaoAtualizada;

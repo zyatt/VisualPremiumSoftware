@@ -18,87 +18,112 @@ String _mensagemErro(Object e) {
 }
 
 class GastosCategoriaProvider extends ChangeNotifier {
-  List<GastoCategoriaModel> _categorias = [];
-  List<GastoCategoriaModel> get categorias => _categorias;
 
-  bool _carregando = false;
-  bool get carregando => _carregando;
+  // ── SEÇÃO 1: Valor em estoque ─────────────────────────────────────────────
 
-  String? _erro;
-  String? get erro => _erro;
+  List<EstoqueCategoriaModel> _estoque = [];
+  List<EstoqueCategoriaModel> get estoque => _estoque;
 
-  // ── Gráfico mensal ────────────────────────────────────────────────────────
+  bool   _carregandoEstoque = false;
+  bool   get carregandoEstoque => _carregandoEstoque;
+
+  String? _erroEstoque;
+  String? get erroEstoque => _erroEstoque;
+
+  double get totalValorEstoque =>
+      _estoque.fold(0, (s, c) => s + c.totalValor);
+
+  Future<void> carregarEstoque() async {
+    _carregandoEstoque = true;
+    _erroEstoque = null;
+    notifyListeners();
+    try {
+      final list = await ApiClient.getList('/gastos-categoria/estoque');
+      _estoque = list
+          .map((e) => EstoqueCategoriaModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      _erroEstoque = _mensagemErro(e);
+    } finally {
+      _carregandoEstoque = false;
+      notifyListeners();
+    }
+  }
+
+  // ── SEÇÃO 2: Gastos (OS fechadas, saídas com origem em OC) ───────────────
+
+  List<GastoCategoriaModel> _gastos = [];
+  List<GastoCategoriaModel> get gastos => _gastos;
+
+  bool    _carregandoGastos = false;
+  bool    get carregandoGastos => _carregandoGastos;
+
+  String? _erroGastos;
+  String? get erroGastos => _erroGastos;
+
+  DateTime? _dataInicioAtiva;
+  DateTime? _dataFimAtiva;
+  DateTime? get dataInicioAtiva => _dataInicioAtiva;
+  DateTime? get dataFimAtiva    => _dataFimAtiva;
+
+  double get totalGastos =>
+      _gastos.fold(0, (s, c) => s + c.totalGasto);
+
+  Future<void> carregarGastos({DateTime? dataInicio, DateTime? dataFim}) async {
+    _dataInicioAtiva = dataInicio;
+    _dataFimAtiva    = dataFim;
+    _carregandoGastos = true;
+    _erroGastos = null;
+    notifyListeners();
+    try {
+      final params = <String>[];
+      if (dataInicio != null) {
+        params.add('dataInicio=${dataInicio.year}-'
+            '${dataInicio.month.toString().padLeft(2, '0')}-'
+            '${dataInicio.day.toString().padLeft(2, '0')}');
+      }
+      if (dataFim != null) {
+        params.add('dataFim=${dataFim.year}-'
+            '${dataFim.month.toString().padLeft(2, '0')}-'
+            '${dataFim.day.toString().padLeft(2, '0')}');
+      }
+      final path = params.isEmpty
+          ? '/gastos-categoria'
+          : '/gastos-categoria?${params.join('&')}';
+      final list = await ApiClient.getList(path);
+      _gastos = list
+          .map((e) => GastoCategoriaModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      _erroGastos = _mensagemErro(e);
+    } finally {
+      _carregandoGastos = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> recarregarGastos() =>
+      carregarGastos(dataInicio: _dataInicioAtiva, dataFim: _dataFimAtiva);
+
+  // ── SEÇÃO 3: Gráfico mensal ───────────────────────────────────────────────
+
   List<GastoMensalModel> _mensal = [];
   List<GastoMensalModel> get mensal => _mensal;
 
-  bool _carregandoMensal = false;
-  bool get carregandoMensal => _carregandoMensal;
+  bool    _carregandoMensal = false;
+  bool    get carregandoMensal => _carregandoMensal;
 
   String? _erroMensal;
   String? get erroMensal => _erroMensal;
 
   int _anoMensal = DateTime.now().year;
   int get anoMensal => _anoMensal;
-  // ─────────────────────────────────────────────────────────────────────────
 
-  DateTime? _dataInicioAtiva;
-  DateTime? _dataFimAtiva;
-
-  DateTime? get dataInicioAtiva => _dataInicioAtiva;
-  DateTime? get dataFimAtiva    => _dataFimAtiva;
-
-  double get totalEntradaGeral =>
-      _categorias.fold(0, (s, c) => s + c.totalEntrada);
-
-  double get totalSaidaGeral =>
-      _categorias.fold(0, (s, c) => s + c.totalSaida);
-
-  Future<void> carregar({DateTime? dataInicio, DateTime? dataFim}) async {
-    _dataInicioAtiva = dataInicio;
-    _dataFimAtiva    = dataFim;
-    _carregando = true;
-    _erro = null;
-    notifyListeners();
-
-    try {
-      final params = <String>[];
-      if (dataInicio != null) {
-        params.add(
-          'dataInicio=${dataInicio.year}-'
-          '${dataInicio.month.toString().padLeft(2, '0')}-'
-          '${dataInicio.day.toString().padLeft(2, '0')}',
-        );
-      }
-      if (dataFim != null) {
-        params.add(
-          'dataFim=${dataFim.year}-'
-          '${dataFim.month.toString().padLeft(2, '0')}-'
-          '${dataFim.day.toString().padLeft(2, '0')}',
-        );
-      }
-      final path = params.isEmpty
-          ? '/gastos-categoria'
-          : '/gastos-categoria?${params.join('&')}';
-
-      final list = await ApiClient.getList(path);
-      _categorias = list
-          .map((e) => GastoCategoriaModel.fromJson(e as Map<String, dynamic>))
-          .toList();
-    } catch (e) {
-      _erro = _mensagemErro(e);
-    } finally {
-      _carregando = false;
-      notifyListeners();
-    }
-  }
-
-  /// Carrega o gráfico de barras mensais para o [ano] informado.
   Future<void> carregarMensal({int? ano}) async {
     _anoMensal = ano ?? DateTime.now().year;
     _carregandoMensal = true;
     _erroMensal = null;
     notifyListeners();
-
     try {
       final list = await ApiClient.getList(
         '/gastos-categoria/mensal?ano=$_anoMensal',
@@ -114,6 +139,12 @@ class GastosCategoriaProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> recarregar() =>
-      carregar(dataInicio: _dataInicioAtiva, dataFim: _dataFimAtiva);
+  // ── Ação unificada: carrega tudo ──────────────────────────────────────────
+
+  Future<void> carregarTudo({DateTime? dataInicio, DateTime? dataFim}) async {
+    await Future.wait([
+      carregarEstoque(),
+      carregarGastos(dataInicio: dataInicio, dataFim: dataFim),
+    ]);
+  }
 }

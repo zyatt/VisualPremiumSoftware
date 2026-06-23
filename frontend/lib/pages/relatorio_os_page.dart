@@ -283,10 +283,12 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                 ),
               ],
             ),
+            const SizedBox(height: 20),
+            // ── Filtro linha 1: busca OS + nome material + botão limpar
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  flex: 3,
                   child: TextField(
                     controller: _buscaOSCtrl,
                     onChanged: _onChanged,
@@ -299,17 +301,49 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _materialNomeCtrl,
+                    onChanged: _onChanged,
+                    onSubmitted: (_) => _aplicarFiltros(),
+                    decoration: InputDecoration(
+                      hintText: 'Nome do material...',
+                      prefixIcon: Icon(Icons.filter_alt_outlined,
+                          color: Theme.of(context).colorScheme.outline, size: 20),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                IconButton.outlined(
+                  tooltip: 'Limpar filtros',
+                  icon: Icon(
+                    Icons.filter_alt_off,
+                    color: _temFiltroMaterial
+                        ? AppTheme.primary
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  onPressed: _temFiltroMaterial ? _limparFiltrosMaterial : null,
+                  style: IconButton.styleFrom(
+                    side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // ── Filtro linha 2: ID + identificador + medida + espessura
+            Row(
+              children: [
                 SizedBox(
-                  width: 120,
+                  width: 110,
                   child: TextField(
                     controller: _materialIdCtrl,
                     onChanged: _onChanged,
                     onSubmitted: (_) => _aplicarFiltros(),
                     keyboardType: TextInputType.number,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly
-                    ],
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     decoration: InputDecoration(
                       hintText: 'ID mat...',
                       prefixIcon: Icon(Icons.tag,
@@ -318,55 +352,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                // Botão limpar filtros de material
-                StatefulBuilder(
-                  builder: (_, setBtn) {
-                    // Reconstrói o botão quando qualquer controller muda
-                    void listener() => setBtn(() {});
-                    _materialIdCtrl.addListener(listener);
-                    _materialNomeCtrl.addListener(listener);
-                    _identificadorCtrl.addListener(listener);
-                    _medidaCtrl.addListener(listener);
-                    _espessuraCtrl.addListener(listener);
-                    return IconButton.outlined(
-                      tooltip: 'Limpar filtros de material',
-                      icon: Icon(
-                        Icons.filter_alt_off,
-                        color: _temFiltroMaterial
-                            ? AppTheme.primary
-                            : Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
-                      ),
-                      onPressed: _temFiltroMaterial
-                          ? _limparFiltrosMaterial
-                          : null,
-                    );
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-
-            // ── Filtro linha 2: nome, identificador, medida, espessura
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: TextField(
-                    controller: _materialNomeCtrl,
-                    onChanged: _onChanged,
-                    onSubmitted: (_) => _aplicarFiltros(),
-                    decoration: InputDecoration(
-                      hintText: 'Nome do material...',
-                      prefixIcon: Icon(Icons.search,
-                          color: Theme.of(context).colorScheme.outline, size: 18),
-                      isDense: true,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: TextField(
                     controller: _identificadorCtrl,
@@ -382,7 +368,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: TextField(
                     controller: _medidaCtrl,
@@ -398,7 +384,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: TextField(
                     controller: _espessuraCtrl,

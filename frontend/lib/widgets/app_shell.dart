@@ -25,7 +25,7 @@ class AppShell extends StatefulWidget {
     _NavItem(icon: Icons.sell_rounded,                    label: 'Orç. Vendas',      route: '/orcamento-venda'), // ← NOVO
     _NavItem(icon: Icons.shopping_cart_rounded,           label: 'Ordem de Compra',  route: '/ordem-compra'),
     _NavItem(icon: Icons.sync_alt_rounded,                label: 'Controle Estoque', route: '/controle-estoque'),
-    _NavItem(icon: Icons.history_rounded,                 label: 'Histórico',        route: '/historico'),
+    _NavItem(icon: Icons.history_rounded,                 label: 'Histórico de OC',  route: '/historico'),
     _NavItem(icon: Icons.description_rounded,             label: 'Relatório OS',     route: '/relatorio-os'),
     _NavItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção',         route: '/producao'),
     _NavItem(icon: Icons.pie_chart_rounded,               label: 'Gastos',           route: '/gastos-categoria'),

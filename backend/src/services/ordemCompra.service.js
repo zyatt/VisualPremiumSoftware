@@ -387,7 +387,7 @@ async function recalcularTotal(ordemCompraId) {
 // ─────────────────────────────────────────────────────────────────────────────
 // FINALIZAR
 // ─────────────────────────────────────────────────────────────────────────────
-async function finalizar(id) {
+async function finalizar(id, usuarioNome) {
  const ordem = await prisma.ordemCompra.findUnique({
     where: { id },
     include: {
@@ -571,7 +571,7 @@ async function finalizar(id) {
         // o estoque_service possa derivá-lo ao criar o retalho na saída.
         precoM2:       item.usarM2 ? precoM2Final : novoUltimoValorPagoM2,
         descricaoItem: item.descricaoItem ?? null,
-        observacao:    `Entrada via OC #${id}`,
+        observacao:    `Entrada via OC #${id} – ${usuarioNome ?? 'Usuário'}`,
       },
     });
 

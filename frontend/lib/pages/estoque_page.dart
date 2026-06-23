@@ -2769,6 +2769,14 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   bool _salvando = false;
   String? _erroDialog;
 
+  // ── Detecção de possível material duplicado ───────────────────────────
+  // Compara nome/identificador/medida/espessura digitados contra os
+  // materiais já cadastrados (via busca no backend), avisando o usuário
+  // antes de submeter — não bloqueia o salvamento, apenas alerta.
+  Timer? _debounceDuplicata;
+  bool _verificandoDuplicata = false;
+  List<_PossivelDuplicata> _possiveisDuplicatas = [];
+
   late final TextEditingController _nome;
   late final TextEditingController _identificador;
   String? _unidade;
@@ -2823,10 +2831,20 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         text: m != null ? m.quantidade.toString() : '0');
     _estoqueMinimo = TextEditingController(
         text: m != null ? m.estoqueMinimo.toString() : '0');
+
+    // Campos que entram na comparação de duplicidade: qualquer alteração
+    // reagenda a verificação (debounced).
+    for (final c in [_nome, _identificador, _medida, _espessura]) {
+      c.addListener(_agendarVerificacaoDuplicata);
+    }
+    // Roda uma verificação inicial (ex.: ao editar um material que já
+    // tenha sido cadastrado em duplicidade por alguma falha anterior).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _agendarVerificacaoDuplicata());
   }
 
   @override
   void dispose() {
+    _debounceDuplicata?.cancel();
     for (final c in [
       _nome, _identificador, _categoria, _medida, _espessura,
       _largura, _comprimento, _quantidade, _estoqueMinimo,
@@ -2834,6 +2852,89 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  void _agendarVerificacaoDuplicata() {
+    _debounceDuplicata?.cancel();
+    _debounceDuplicata = Timer(const Duration(milliseconds: 450), _verificarDuplicatas);
+  }
+
+  /// Busca materiais com nome parecido no backend e classifica os
+  /// resultados como "exato" (mesma combinação nome+identificador+medida+
+  /// espessura — o backend bloquearia com 409) ou "similar" (nome muito
+  /// parecido, ou mesmo identificador com nome diferente — possível erro
+  /// de digitação ou duplicidade não intencional).
+  Future<void> _verificarDuplicatas() async {
+    if (!mounted) return;
+    final nomeNorm = _normalizarTextoComparacao(_nome.text);
+
+    if (nomeNorm.length < 3) {
+      if (_possiveisDuplicatas.isNotEmpty || _verificandoDuplicata) {
+        setState(() {
+          _possiveisDuplicatas = [];
+          _verificandoDuplicata = false;
+        });
+      }
+      return;
+    }
+
+    setState(() => _verificandoDuplicata = true);
+
+    final provider = context.read<MaterialProvider>();
+    final candidatos = await provider.buscarSugestoes(_nome.text.trim(), limite: 30);
+    if (!mounted) return;
+
+    final identificadorNorm = _normalizarTextoComparacao(_identificador.text);
+    final medidaNorm        = _normalizarTextoComparacao(_medida.text);
+    final espessuraNorm     = _normalizarTextoComparacao(_espessura.text);
+
+    final encontrados = <_PossivelDuplicata>[];
+    for (final m in candidatos) {
+      // Ignora o próprio material ao editar.
+      if (_editando && m.id == widget.material!.id) continue;
+
+      final mNomeNorm          = _normalizarTextoComparacao(m.nome);
+      final mIdentificadorNorm = _normalizarTextoComparacao(m.identificador);
+      final mMedidaNorm        = _normalizarTextoComparacao(m.medida);
+      final mEspessuraNorm     = _normalizarTextoComparacao(m.espessura);
+
+      // Mesma regra de unicidade usada no backend (nome + identificador +
+      // medida + espessura, normalizados): se bater, o cadastro será
+      // rejeitado com 409 ao salvar.
+      final exata = mNomeNorm == nomeNorm &&
+          mIdentificadorNorm == identificadorNorm &&
+          mMedidaNorm == medidaNorm &&
+          mEspessuraNorm == espessuraNorm;
+
+      final similaridadeNome = _similaridadeTexto(nomeNorm, mNomeNorm);
+      final mesmoIdentificador =
+          identificadorNorm.isNotEmpty && identificadorNorm == mIdentificadorNorm;
+
+      // "Similar": nome muito parecido (>=72%), ou mesmo identificador com
+      // nome com alguma semelhança (evita falso-positivo de identificadores
+      // genéricos reutilizados em materiais bem diferentes).
+      final similar = !exata &&
+          (similaridadeNome >= 0.72 || (mesmoIdentificador && similaridadeNome >= 0.4));
+
+      if (exata || similar) {
+        encontrados.add(_PossivelDuplicata(
+          material: m,
+          exata: exata,
+          similaridade: similaridadeNome,
+        ));
+      }
+    }
+
+    encontrados.sort((a, b) {
+      if (a.exata != b.exata) return a.exata ? -1 : 1;
+      return b.similaridade.compareTo(a.similaridade);
+    });
+
+    if (!mounted) return;
+    setState(() {
+      _possiveisDuplicatas = encontrados.take(5).toList();
+      _verificandoDuplicata = false;
+    });
   }
 
   Future<void> _salvar() async {
@@ -2990,6 +3091,13 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 ),
               ),
             ]),
+            if (_verificandoDuplicata || _possiveisDuplicatas.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _AvisoPossivelDuplicata(
+                carregando: _verificandoDuplicata,
+                duplicatas: _possiveisDuplicatas,
+              ),
+            ],
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
@@ -3248,14 +3356,11 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     return Dialog(
       backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth:  temFornecedor ? 840 : 560,
-          maxHeight: (MediaQuery.of(context).size.height * 0.95)
-              .clamp(0.0, 760.0),
-        ),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+      child: SizedBox(
+        width: temFornecedor ? 840 : 560,
+        height: 680,
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
             // ── Título ────────────────────────────────────────────────────
             Padding(
@@ -3279,7 +3384,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             const Divider(height: 0),
 
             // ── Corpo: formulário + painel lateral ────────────────────────
-            Flexible(
+            Expanded(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -3363,6 +3468,191 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Normaliza texto para comparação de duplicidade: maiúsculas, sem acentos,
+/// espaços colapsados. Espelha a normalização usada no backend (nome,
+/// identificador, medida, espessura comparados case-insensitive).
+String _normalizarTextoComparacao(String? v) {
+  if (v == null) return '';
+  final upper = _UpperCaseFormatter._removerAcentos(v.trim().toUpperCase());
+  return upper.replaceAll(RegExp(r'\s+'), ' ');
+}
+
+/// Distância de Levenshtein clássica (número mínimo de inserções, remoções
+/// e substituições para transformar [a] em [b]).
+int _levenshteinDistance(String a, String b) {
+  if (a == b) return 0;
+  if (a.isEmpty) return b.length;
+  if (b.isEmpty) return a.length;
+
+  List<int> anterior = List<int>.generate(b.length + 1, (j) => j);
+  List<int> atual = List<int>.filled(b.length + 1, 0);
+
+  for (var i = 1; i <= a.length; i++) {
+    atual[0] = i;
+    for (var j = 1; j <= b.length; j++) {
+      final custoSubstituicao = a[i - 1] == b[j - 1] ? 0 : 1;
+      final remocao = anterior[j] + 1;
+      final insercao = atual[j - 1] + 1;
+      final substituicao = anterior[j - 1] + custoSubstituicao;
+      atual[j] = [remocao, insercao, substituicao].reduce((x, y) => x < y ? x : y);
+    }
+    final troca = anterior;
+    anterior = atual;
+    atual = troca;
+  }
+  return anterior[b.length];
+}
+
+/// Similaridade entre 0 (totalmente diferentes) e 1 (idênticos), baseada na
+/// distância de Levenshtein normalizada pelo tamanho do maior texto.
+double _similaridadeTexto(String a, String b) {
+  if (a.isEmpty && b.isEmpty) return 1;
+  if (a.isEmpty || b.isEmpty) return 0;
+  final distancia = _levenshteinDistance(a, b);
+  final maiorTamanho = a.length > b.length ? a.length : b.length;
+  return 1 - (distancia / maiorTamanho);
+}
+
+/// Resultado de uma possível duplicata encontrada ao comparar os campos do
+/// formulário com materiais já cadastrados.
+class _PossivelDuplicata {
+  final MaterialModel material;
+  /// true quando nome + identificador + medida + espessura (normalizados)
+  /// coincidem exatamente — o backend rejeitaria esse cadastro com 409.
+  final bool exata;
+  final double similaridade;
+
+  _PossivelDuplicata({
+    required this.material,
+    required this.exata,
+    required this.similaridade,
+  });
+}
+
+/// Banner exibido no formulário de cadastro/edição de material quando o
+/// algoritmo de comparação encontra materiais já cadastrados com nome,
+/// identificador, medida ou espessura parecidos com os campos digitados.
+class _AvisoPossivelDuplicata extends StatelessWidget {
+  final bool carregando;
+  final List<_PossivelDuplicata> duplicatas;
+  const _AvisoPossivelDuplicata({required this.carregando, required this.duplicatas});
+
+  @override
+  Widget build(BuildContext context) {
+    if (carregando && duplicatas.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.6),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Verificando materiais semelhantes...',
+              style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.outline),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (duplicatas.isEmpty) return const SizedBox.shrink();
+
+    final temExata = duplicatas.any((d) => d.exata);
+    final cor = temExata ? AppTheme.error : AppTheme.warning;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cor.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 16, color: cor),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  temExata
+                      ? 'Já existe um material idêntico cadastrado'
+                      : 'Pode já existir um material parecido cadastrado',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: cor),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...duplicatas.map((d) {
+            final m = d.material;
+            final detalhes = [
+              if (m.identificador != null && m.identificador!.trim().isNotEmpty) m.identificador!.trim(),
+              if (m.medida != null && m.medida!.trim().isNotEmpty) m.medida!.trim(),
+              if (m.espessura != null && m.espessura!.trim().isNotEmpty) m.espessura!.trim(),
+            ].join(' • ');
+
+            final qtdTxt = m.quantidade % 1 == 0
+                ? m.quantidade.toStringAsFixed(0)
+                : m.quantidade.toStringAsFixed(2);
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(top: 5),
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: d.exata ? AppTheme.error : AppTheme.warning,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: RichText(
+                      text: TextSpan(
+                        style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface),
+                        children: [
+                          TextSpan(text: m.nome, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          if (detalhes.isNotEmpty)
+                            TextSpan(
+                              text: '  ($detalhes)',
+                              style: TextStyle(color: Theme.of(context).colorScheme.outline),
+                            ),
+                          TextSpan(
+                            text: !m.ativo ? '  • inativo' : '  • estoque: $qtdTxt',
+                            style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+          const SizedBox(height: 4),
+          Text(
+            temExata
+                ? 'Esse cadastro será bloqueado pelo sistema. Ajuste a medida/espessura ou edite o material existente.'
+                : 'Confira se não é o mesmo material antes de continuar, para evitar estoques duplicados.',
+            style: TextStyle(fontSize: 10.5, color: Theme.of(context).colorScheme.outline),
+          ),
+        ],
       ),
     );
   }

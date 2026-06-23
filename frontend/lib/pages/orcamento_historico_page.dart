@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/orcamento_provider.dart';
@@ -243,6 +246,98 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
         );
         setState(() => _carregando = false);
       }
+    }
+  }
+
+
+  // ── PDF para orçamento convertido ────────────────────────────────────────
+  Future<void> _exportarPdfConvertido(Map<String, dynamic> orc) async {
+    setState(() => _carregando = true);
+    try {
+      final repo = OrcamentoRepository();
+      final completo = await repo.buscarPorId(orc['id'] as int);
+
+      // Monta payload idêntico ao do editor
+      final itens = (completo['itens'] as List? ?? []).map((raw) {
+        final item = raw as Map<String, dynamic>;
+        final fornecedorId = item['fornecedorId'];
+        final precoUnitario = item['precoUnitario'] != null
+            ? double.tryParse(item['precoUnitario'].toString())
+            : null;
+        final precoM2 = item['precoM2'] != null
+            ? double.tryParse(item['precoM2'].toString())
+            : null;
+        final fornecedorNome =
+            (item['fornecedor'] as Map<String, dynamic>?)?['nomeFantasia']
+                as String? ??
+                '';
+        return {
+          'materialId': item['materialId'],
+          'materialNome': item['material']?['nome'] ?? '',
+          'materialUnidade': item['material']?['unidade'],
+          'materialCategoria': item['material']?['categoria'],
+          'materialMedida': item['material']?['medida'],
+          'materialEspessura': item['material']?['espessura'],
+          'materialIdentificador': item['material']?['identificador'],
+          'quantidade': double.tryParse(item['quantidade'].toString()) ?? 1,
+          'modoOrcamento':
+              (item['usarM2'] as bool? ?? false) ? 'metroQuadrado' : 'unitario',
+          'fornecedorSelecionado':
+              (item['selecionado'] as bool? ?? false) ? fornecedorId : null,
+          'precos': fornecedorId != null
+              ? {
+                  '$fornecedorId': {
+                    'fornecedorNome': fornecedorNome,
+                    'preco': precoUnitario,
+                    'precoM2': precoM2,
+                  }
+                }
+              : <String, dynamic>{},
+        };
+      }).toList();
+
+      final titulo = completo['titulo'] as String? ?? 'Orçamento';
+      final fornecedoresOcultos =
+          (completo['fornecedoresOcultos'] as List? ?? [])
+              .map((e) => e as int)
+              .toList();
+
+      final pdfBytes = await repo.gerarPdf({
+        'titulo': titulo,
+        'itens': itens,
+        'fornecedoresOcultos': fornecedoresOcultos,
+      });
+
+      final hoje = DateTime.now();
+      final dataStr =
+          '${hoje.day.toString().padLeft(2, '0')}-${hoje.month.toString().padLeft(2, '0')}-${hoje.year}';
+      final file = File(
+          '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}orcamento($dataStr).pdf');
+      await file.writeAsBytes(pdfBytes, flush: true);
+
+      if (Platform.isWindows) {
+        await Process.run('explorer', [file.path]);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', [file.path]);
+      } else {
+        await Process.run('xdg-open', [file.path]);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('PDF exportado com sucesso!'),
+          backgroundColor: AppTheme.success,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_mensagemErro(e, acao: 'exportar PDF')),
+          backgroundColor: AppTheme.error,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _carregando = false);
     }
   }
 
@@ -497,6 +592,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                                   _OrcamentoHistoricoCard(
                                 orcamento: orc,
                                 buscaMaterial: _buscaMaterial,
+                                onVerPdf: () => _exportarPdfConvertido(orc),
                               ),
                             ),
                           ],
@@ -588,11 +684,13 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
 class _OrcamentoHistoricoCard extends StatefulWidget {
   final Map<String, dynamic> orcamento;
   final VoidCallback? onReabrir;
+  final VoidCallback? onVerPdf;
   final String buscaMaterial;
 
   const _OrcamentoHistoricoCard({
     required this.orcamento,
     this.onReabrir,
+    this.onVerPdf,
     this.buscaMaterial = '',
   });
 
@@ -799,6 +897,22 @@ class _OrcamentoHistoricoCardState
                           style: TextStyle(fontSize: 12)),
                       style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.primary,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  // Botão PDF (só para convertidos)
+                  if (widget.onVerPdf != null) ...[
+                    OutlinedButton.icon(
+                      onPressed: widget.onVerPdf,
+                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 14),
+                      label: const Text('PDF',
+                          style: TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF0288D1),
+                        side: const BorderSide(color: Color(0xFF0288D1)),
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 8),
                       ),

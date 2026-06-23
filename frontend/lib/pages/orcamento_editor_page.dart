@@ -12,6 +12,7 @@ import '../models/fornecedor_model.dart';
 import '../providers/material_provider.dart';
 import '../providers/fornecedor_provider.dart';
 import '../providers/orcamento_provider.dart';
+import '../providers/ordem_compra_provider.dart';
 import '../repositories/fornecedor_repository.dart';
 import '../repositories/orcamento_repository.dart';
 
@@ -774,12 +775,14 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
       if (!mounted) return;
 
       if (result['pronto'] == true) {
-        provider.fecharAbaAposOperacao();
-        if (!mounted) return;
-
         final ocsCriadas = result['ocsCriadas'] as List?;
         final qtdOCs = ocsCriadas?.length ?? porFornecedor.length;
         final primeiraOcId = ocsCriadas?.isNotEmpty == true ? (ocsCriadas!.first['id'] as int?) : null;
+
+        // Fecha a aba antes de navegar para que, ao voltar para /orcamento-compras,
+        // o usuário veja o painel de aprovação/lista — não o editor sem abas.
+        provider.fecharAbaAposOperacao();
+        if (!mounted) return;
 
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('$qtdOCs ${qtdOCs == 1 ? "OC gerada" : "OCs geradas"} com sucesso!'),
@@ -787,7 +790,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           duration: const Duration(seconds: 3),
         ));
 
-        context.go('/ordem-compra', extra: primeiraOcId);
+        // Sinaliza DEPOIS do go() para que didChangeDependencies da OrdemCompraPage
+        // só receba o id após a navegação estar completa — evitando consumo prematuro
+        // antes do carregar() trazer a OC recém-criada.
+        context.go('/ordem-compra');
+        if (primeiraOcId != null && mounted) {
+          context.read<OrdemCompraProvider>().sinalizarOcParaAbrir(primeiraOcId);
+        }
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_mensagemErro(e, acao: 'gerar OC')), backgroundColor: AppTheme.error));
@@ -1391,13 +1400,12 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
 
               const SizedBox(width: 4),
 
-              IconButton(
-                tooltip: 'Limpar',
-                icon: const Icon(
+              IconButton.outlined(
+                tooltip: 'Limpar filtros',
+                icon: Icon(
                   Icons.filter_alt_off,
-                  size: 16,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                visualDensity: VisualDensity.compact,
                 onPressed: () {
                   _searchIdCtrl.clear();
                   _searchNomeCtrl.clear();
@@ -1410,6 +1418,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                     _mostrarResultados = false;
                   });
                 },
+                style: IconButton.styleFrom(
+                  side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                ),
               ),
             ],
           ),

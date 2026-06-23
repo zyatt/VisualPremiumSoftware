@@ -91,8 +91,11 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
       }
       if (!mounted) return;
 
-      // Se veio do orçamento com um ID de OC, abre os detalhes automaticamente
-      final idAlvo = widget.ocIdParaAbrir;
+      // Prioridade 1: OC pendente setada pelo orçamento antes de navegar
+      // (funciona mesmo em StatefulShellRoute, onde initState pode não re-executar).
+      final ocPendente = provider.consumirOcPendente();
+      final idAlvo = ocPendente ?? widget.ocIdParaAbrir;
+
       if (idAlvo != null) {
         final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
         final raw = todas.cast<dynamic>().firstWhere(
@@ -130,6 +133,20 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
     }
   }
 
+  /// Verifica se há uma OC pendente no provider (setada pelo orçamento após
+  /// gerar OC) e, em caso positivo, recarrega a lista e abre os detalhes.
+  /// Chamado em [didChangeDependencies] para capturar o caso onde a página de
+  /// OC já estava montada no StatefulShellRoute quando o usuário navegou até ela.
+  Future<void> _verificarOcPendente() async {
+    if (!mounted) return;
+    final provider = context.read<OrdemCompraProvider>();
+    // Verifica sem consumir ainda — o consumo acontece dentro de abrirOcPorId,
+    // após o carregar() trazer a OC recém-criada da API.
+    if (provider.ocPendente == null) return;
+    final id = provider.consumirOcPendente()!;
+    await abrirOcPorId(id);
+  }
+
   @override
   void dispose() {
     _tabController.dispose();
@@ -140,6 +157,20 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
     _buscaIdentificadorCtrl.dispose();
     _buscaIdCtrl.dispose();
     super.dispose();
+  }
+
+  bool _dependenciasInicializadas = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Na primeira chamada, o initState cuida da abertura via postFrameCallback.
+    // Nas chamadas subsequentes (ex: usuário navega de volta para esta rota no
+    // StatefulShellRoute), verifica se há uma OC pendente para abrir.
+    if (_dependenciasInicializadas) {
+      _verificarOcPendente();
+    }
+    _dependenciasInicializadas = true;
   }
 
   List<dynamic> _filtrar(List<dynamic> lista) {
@@ -391,7 +422,12 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                   ),
                 ),
                 const SizedBox(width: 4),
-                IconButton(
+                IconButton.outlined(
+                  tooltip: 'Limpar filtros',
+                  icon: Icon(
+                    Icons.filter_alt_off,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                   onPressed: (_filtroBuscaNumero.isNotEmpty || _filtroBuscaNome.isNotEmpty || _filtroBuscaMedida.isNotEmpty || _filtroBuscaEspessura.isNotEmpty || _filtroBuscaIdentificador.isNotEmpty || _filtroBuscaId.isNotEmpty)
                       ? () {
                           _buscaNumeroCtrl.clear();
@@ -410,16 +446,9 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                           });
                         }
                       : null,
-                  icon: Icon(
-                    Icons.filter_alt_off,
-                    size: 18,
-                    color: (_filtroBuscaNumero.isNotEmpty || _filtroBuscaNome.isNotEmpty || _filtroBuscaMedida.isNotEmpty || _filtroBuscaEspessura.isNotEmpty || _filtroBuscaIdentificador.isNotEmpty || _filtroBuscaId.isNotEmpty)
-                        ? Theme.of(context).colorScheme.onSurfaceVariant
-                        : Theme.of(context).colorScheme.outline,
+                  style: IconButton.styleFrom(
+                    side: BorderSide(color: Theme.of(context).colorScheme.outline),
                   ),
-                  tooltip: 'Limpar filtros',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
                 ),
               ],
             ),
@@ -1012,6 +1041,32 @@ class _OcCardState extends State<_OcCard> {
                                   fontWeight: FontWeight.w600)),
                         ))
                     .toList(),
+              ),
+            ],
+            if (ordem.itens.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: ordem.itens.map((item) {
+                  final partes = <String>[
+                    if ((item.materialMedida ?? '').isNotEmpty) item.materialMedida!,
+                    if ((item.materialEspessura ?? '').isNotEmpty) item.materialEspessura!,
+                    if ((item.materialIdentificador ?? '').isNotEmpty) item.materialIdentificador!,
+                  ];
+                  final desc = partes.isEmpty
+                      ? item.materialNome
+                      : '${item.materialNome} · ${partes.join(' · ')}';
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      desc,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ],
             if (widget.mostrarAcoes) ...[
