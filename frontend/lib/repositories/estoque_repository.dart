@@ -81,6 +81,7 @@ class EstoqueRepository {
     int? ordemCompraId,
     double? larguraUsada,
     double? comprimentoUsado,
+    int? materialOrigemId,
   }) async {
     final data = await ApiClient.post('/estoque/movimentacoes', {
       'materialId': materialId,
@@ -93,6 +94,7 @@ class EstoqueRepository {
       if (ordemCompraId != null)    'ordemCompraId':    ordemCompraId,
       if (larguraUsada != null)     'larguraUsada':     larguraUsada,
       if (comprimentoUsado != null) 'comprimentoUsado': comprimentoUsado,
+      if (materialOrigemId != null) 'materialOrigemId': materialOrigemId,
     });
     return MovimentacaoModel.fromJson(data);
   }

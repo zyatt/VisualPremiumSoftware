@@ -114,6 +114,10 @@ class MaterialModel {
   final String status;
   final bool estoqueConfirmado;
   final bool ativo;
+  // true quando este material foi criado como temporário (via Estoque Temporário).
+  // Usado apenas para exibição visual no dialog de movimentação — não altera
+  // nenhuma lógica de negócio do lado do Flutter.
+  final bool temporario;
 
   final double? ultimoValorPago;
   final double? ultimoValorPagoM2;
@@ -140,6 +144,7 @@ class MaterialModel {
     required this.status,
     required this.estoqueConfirmado,
     required this.ativo,
+    this.temporario = false,
     this.ultimoValorPago,
     this.ultimoValorPagoM2,
     this.precoMediano,
@@ -194,6 +199,7 @@ class MaterialModel {
       status:             json['status'] ?? 'OK',
       estoqueConfirmado:  json['estoqueConfirmado'] ?? false,
       ativo:              json['ativo'] ?? true,
+      temporario:         json['temporario'] as bool? ?? false,
       ultimoValorPago:    parseDoubleOrNull(json['custoUltimaCompra']),
       ultimoValorPagoM2:  parseDoubleOrNull(json['custoM2UltimaCompra']),
       precoMediano:       parseDoubleOrNull(json['precoMediano']),

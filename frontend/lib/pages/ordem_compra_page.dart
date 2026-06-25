@@ -10,6 +10,7 @@ import '../providers/estoque_provider.dart';
 import '../providers/fornecedor_provider.dart';
 import '../repositories/ordem_compra_repository.dart';
 import '../repositories/fornecedor_repository.dart';
+import '../repositories/estoque_temporario_repository.dart';
 import '../theme/app_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,8 +116,21 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
   /// Chamado externamente (via GlobalKey) quando a branch já está montada
   /// e o initState não será re-executado (StatefulShellRoute preserva estado).
   /// Recarrega as OCs e abre os detalhes da OC com o [id] informado.
+  ///
+  /// Caso a página já esteja exibindo os detalhes de OUTRA OC (rota empilhada
+  /// no Navigator desta branch), essa rota é fechada antes de abrir a nova —
+  /// caso contrário a nova ficaria empilhada por baixo/por cima da antiga, ou
+  /// simplesmente não seria exibida.
   Future<void> abrirOcPorId(int id) async {
     if (!mounted) return;
+
+    // Volta para a lista (raiz da pilha desta branch) antes de tudo, para
+    // garantir que não há detalhes de outra OC abertos por cima.
+    final nav = Navigator.of(context);
+    if (nav.canPop()) {
+      nav.popUntil((r) => r.isFirst);
+    }
+
     final provider = context.read<OrdemCompraProvider>();
     await provider.carregar();
     if (!mounted) return;
@@ -201,7 +215,7 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
         if (!tem) return false;
       }
       if (qMid.isNotEmpty) {
-        final tem = raw.itens.any((item) => item.materialId.toString().contains(qMid));
+        final tem = raw.itens.any((item) => (item.materialId?.toString() ?? '').contains(qMid));
         if (!tem) return false;
       }
       return true;
@@ -1599,8 +1613,8 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                           return 'R\$ ${item.precoUnitario.toStringAsFixed(6).replaceAll('.', ',')}/${item.materialUnidade ?? 'unid.'}';
                         }
                         return item.precoUnitario > 0
-                            ? 'Unitário: R\$ ${item.precoUnitario.toStringAsFixed(6).replaceAll('.', ',')}'
-                            : 'Unitário: —';
+                            ? 'Preço: R\$ ${item.precoUnitario.toStringAsFixed(6).replaceAll('.', ',')}'
+                            : 'Preço: —';
                       }(),
                       ativo: true,
                     ),
@@ -1830,8 +1844,11 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
   List<_ItemRascunho> _agruparItensEmRascunhos(List<OrdemCompraItemModel> itens) {
     final grupos = <String, _ItemRascunho>{};
     for (final i in itens) {
+      // Itens fantasma (material excluído) não podem ser editados — pula.
+      final materialId = i.materialId;
+      if (materialId == null) continue;
       // Chave: material + preço + modo + descrição
-      final chave = '${i.materialId}|${i.precoUnitario}|${i.descricaoItem ?? ''}';
+      final chave = '$materialId|${i.precoUnitario}|${i.descricaoItem ?? ''}';
       if (grupos.containsKey(chave)) {
         // Adiciona linha de distribuição ao rascunho existente
         final r = grupos[chave]!;
@@ -1840,7 +1857,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         r.numeroOS = r.distribuicao.first.os;
       } else {
         grupos[chave] = _ItemRascunho(
-          materialId:            i.materialId,
+          materialId:            materialId,
           materialNome:          i.materialNome,
           materialUnidade:       i.materialUnidade,
           materialMedida:        i.materialMedida,
@@ -2300,6 +2317,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
                       builder: (_) => _AdicionarItemDialog(
                         materiais: _materiaisDoFornecedor,
                         fornecedorId: _fornecedor!.id,
+                        materiaisJaAdicionados: _itens.map((i) => i.materialId).toSet(),
                         onConfirmar: (lista) {
                           for (final v in lista) {
                             _adicionarItem(v);
@@ -2950,6 +2968,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                           builder: (_) => _AdicionarItemDialog(
                             materiais: _materiaisDoFornecedor,
                             fornecedorId: _fornecedor!.id,
+                            materiaisJaAdicionados: _itens.map((i) => i.materialId).toSet(),
                             onConfirmar: (lista) {
                               for (final v in lista) {
                                 _adicionarItem(v);
@@ -4474,11 +4493,14 @@ class _AdicionarItemDialog extends StatefulWidget {
   final List<FornecedorMaterialVinculoModel> materiais;
   final int fornecedorId;
   final void Function(List<FornecedorMaterialVinculoModel>) onConfirmar;
+  /// IDs dos materiais que já estão na OC — impede adicionar duplicatas.
+  final Set<int> materiaisJaAdicionados;
 
   const _AdicionarItemDialog({
     required this.materiais,
     required this.fornecedorId,
     required this.onConfirmar,
+    this.materiaisJaAdicionados = const {},
   });
 
   @override
@@ -4577,7 +4599,30 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
     try {
       final repo = FornecedorRepository();
       final todos = await repo.buscarMateriais();
-      if (mounted) setState(() { _todosOsMateriais = todos; });
+
+      // Inclui materiais temporários ativos na lista, marcados para distinção
+      final tempRepo = EstoqueTemporarioRepository();
+      final temporarios = await tempRepo.listar();
+      final tempComoMap = temporarios.map((t) => <String, dynamic>{
+        'id':          t.id,
+        'nome':        t.nome,
+        'unidade':     t.unidade,
+        'categoria':   null,
+        'identificador': null,
+        'medida':      null,
+        'espessura':   null,
+        'largura':     null,
+        'comprimento': null,
+        'temporario':  true,
+      }).toList();
+
+      // Evita duplicatas: se o material temporário já está na lista normal, não duplica
+      final idsNormais = todos.map((m) => m['id'] as int).toSet();
+      final tempSemDuplicata = tempComoMap
+          .where((t) => !idsNormais.contains(t['id'] as int))
+          .toList();
+
+      if (mounted) setState(() { _todosOsMateriais = [...todos, ...tempSemDuplicata]; });
     } catch (_) {
       // silencia — a lista fica vazia e o usuário vê o aviso
     } finally {
@@ -4585,7 +4630,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
     }
   }
 
-  int get _totalItens => _quantidades.values.fold(0, (s, v) => s + v);
+  int get _totalItens => _quantidades.length;
 
   bool get _temFiltro =>
       _idCtrl.text.isNotEmpty ||
@@ -4608,22 +4653,18 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
     final escolhidos = <FornecedorMaterialVinculoModel>[];
 
     if (!_verTodoEstoque) {
-      // modo vinculados — igual ao original
+      // modo vinculados — um item por material selecionado
       for (final m in widget.materiais) {
-        final qty = _quantidades[m.materialId] ?? 0;
-        for (var i = 0; i < qty; i++) {
+        if (_quantidades.containsKey(m.materialId)) {
           escolhidos.add(m);
         }
       }
     } else {
       // modo todo o estoque
-      // Itens já vinculados: usa o FornecedorMaterialVinculoModel existente
-      // Itens não vinculados: cria um sintético com preço 0 (o usuário preenche no card)
       final vinculadosPorId = { for (final m in widget.materiais) m.materialId: m };
       for (final m in _todosOsMateriais) {
         final mid = m['id'] as int;
-        final qty = _quantidades[mid] ?? 0;
-        if (qty == 0) continue;
+        if (!_quantidades.containsKey(mid)) continue;
         final vinculo = vinculadosPorId[mid] ?? FornecedorMaterialVinculoModel(
           id:                   0,
           fornecedorId:         widget.fornecedorId,
@@ -4636,7 +4677,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
           precoMetroQuadrado:   0,
           ativo:                true,
           materialUnidade:      m['unidade'] as String?,
-          // Dimensões para cálculo automático de preço/m²
           materialLargura:      m['largura'] != null
               ? double.tryParse(m['largura'].toString())
               : null,
@@ -4644,9 +4684,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
               ? double.tryParse(m['comprimento'].toString())
               : null,
         );
-        for (var i = 0; i < qty; i++) {
-          escolhidos.add(vinculo);
-        }
+        escolhidos.add(vinculo);
       }
     }
 
@@ -4678,8 +4716,10 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
     required String descricao,
     required String preco,
     required bool eNovo,
+    bool eTemporario = false,
   }) {
-    final qty = _quantidades[materialId] ?? 0;
+    final jaNaOC      = widget.materiaisJaAdicionados.contains(materialId);
+    final selecionado = _quantidades.containsKey(materialId);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
       child: Row(
@@ -4696,13 +4736,28 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
                           fontSize: 13,
-                          color: qty > 0
+                          color: selecionado
                               ? AppTheme.primary
-                              : Theme.of(context).colorScheme.onSurface,
+                              : jaNaOC
+                                  ? Theme.of(context).colorScheme.outline
+                                  : Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
                     ),
-                    if (eNovo) ...[
+                    if (jaNaOC) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'Já adicionado',
+                          style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.outline, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ] else if (eNovo) ...[
                       const SizedBox(width: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -4716,6 +4771,20 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                         ),
                       ),
                     ],
+                    if (eTemporario) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Color(0xFFD97706).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'Temporário',
+                          style: TextStyle(fontSize: 10, color: Color(0xFFD97706), fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 2),
@@ -4726,43 +4795,29 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
               ],
             ),
           ),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                onPressed: qty == 0
-                    ? null
-                    : () => setState(() {
-                          final novo = qty - 1;
-                          if (novo == 0) { _quantidades.remove(materialId); }
-                          else { _quantidades[materialId] = novo; }
-                        }),
-                icon: const Icon(Icons.remove_circle_outline, size: 22),
-                color: qty == 0 ? Theme.of(context).colorScheme.outline : AppTheme.error,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+          if (jaNaOC)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Icon(Icons.check_circle, size: 22, color: Theme.of(context).colorScheme.outline),
+            )
+          else
+            IconButton(
+              onPressed: () => setState(() {
+                if (selecionado) {
+                  _quantidades.remove(materialId);
+                } else {
+                  _quantidades[materialId] = 1;
+                }
+              }),
+              icon: Icon(
+                selecionado ? Icons.remove_circle_outline : Icons.add_circle_outline,
+                size: 22,
               ),
-              SizedBox(
-                width: 30,
-                child: Text(
-                  '$qty',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: qty > 0 ? AppTheme.primary : Theme.of(context).colorScheme.outline,
-                  ),
-                ),
-              ),
-              IconButton(
-                onPressed: () => setState(() { _quantidades[materialId] = qty + 1; }),
-                icon: const Icon(Icons.add_circle_outline, size: 22),
-                color: AppTheme.primary,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-            ],
-          ),
+              color: selecionado ? AppTheme.error : AppTheme.primary,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              tooltip: selecionado ? 'Remover' : 'Adicionar',
+            ),
         ],
       ),
     );
@@ -4939,6 +4994,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                 final m = filtradosTodos[i];
                                 final mid = m['id'] as int;
                                 final eNovo = !vinculadosIds.contains(mid);
+                                final eTemporario = m['temporario'] == true;
                                 final partes = <String>[
                                   if ((m['medida'] ?? '').toString().isNotEmpty) m['medida'].toString(),
                                   if ((m['espessura'] ?? '').toString().isNotEmpty) m['espessura'].toString(),
@@ -4964,6 +5020,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                   descricao: desc,
                                   preco: precoStr,
                                   eNovo: eNovo,
+                                  eTemporario: eTemporario,
                                 );
                               },
                             )

@@ -22,6 +22,9 @@ import 'providers/alertas_estoque_provider.dart';
 import 'providers/veiculo_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/orcamento_venda_provider.dart';
+import 'providers/solicitacao_material_provider.dart';
+import 'providers/estoque_temporario_provider.dart';
+import 'providers/chat_provider.dart';
 
 import 'widgets/update_checker_widget.dart';
 
@@ -29,26 +32,31 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
 
-  final usuarioProvider   = UsuarioProvider();
-  final orcamentoProvider = OrcamentoProvider();
+  final usuarioProvider             = UsuarioProvider();
+  final orcamentoProvider           = OrcamentoProvider();
+  final solicitacaoMaterialProvider = SolicitacaoMaterialProvider();
   usuarioProvider.setOrcamentoProvider(orcamentoProvider);
+  usuarioProvider.setSolicitacaoMaterialProvider(solicitacaoMaterialProvider);
 
   await usuarioProvider.restaurarSessao();
 
   runApp(VisualPremiumApp(
-    usuarioProvider:   usuarioProvider,
-    orcamentoProvider: orcamentoProvider,
+    usuarioProvider:             usuarioProvider,
+    orcamentoProvider:           orcamentoProvider,
+    solicitacaoMaterialProvider: solicitacaoMaterialProvider,
   ));
 }
 
 class VisualPremiumApp extends StatelessWidget {
-  final UsuarioProvider   usuarioProvider;
-  final OrcamentoProvider orcamentoProvider;
+  final UsuarioProvider             usuarioProvider;
+  final OrcamentoProvider           orcamentoProvider;
+  final SolicitacaoMaterialProvider solicitacaoMaterialProvider;
 
   const VisualPremiumApp({
     super.key,
     required this.usuarioProvider,
     required this.orcamentoProvider,
+    required this.solicitacaoMaterialProvider,
   });
 
   @override
@@ -71,6 +79,9 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => VeiculoProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => OrcamentoVendaProvider()),
+        ChangeNotifierProvider.value(value: solicitacaoMaterialProvider),
+        ChangeNotifierProvider(create: (_) => EstoqueTemporarioProvider()),
+        ChangeNotifierProvider(create: (_) => ChatProvider()),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, _) {

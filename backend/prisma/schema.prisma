@@ -7,59 +7,88 @@ datasource db {
 }
 
 model Usuario {
-  id                   Int                   @id @default(autoincrement())
-  nome                 String
-  username             String                @unique
-  senha                String
-  role                 Role                  @default(COMPRAS)
-  ativo                Boolean               @default(true)
-  criadoEm             DateTime              @default(now())
-  atualizadoEm         DateTime              @updatedAt
-  orcamentosAprovados  Orcamento[]           @relation("AprovadorOrcamento")
-  orcamentosCriados    Orcamento[]           @relation("OrcamentoCriador")
-  ordens_compra        OrdemCompra[]
-  solicitacoesProducao SolicitacaoProducao[]
-  orcamentosVendaCriados OrcamentoVenda[]    @relation("OrcamentoVendaCriador")
-
+  id                     Int                   @id @default(autoincrement())
+  nome                   String
+  username               String                @unique
+  senha                  String
+  role                   Role                  @default(COMPRAS)
+  ativo                  Boolean               @default(true)
+  criadoEm               DateTime              @default(now())
+  atualizadoEm           DateTime              @updatedAt
+  orcamentosAprovados    Orcamento[]           @relation("AprovadorOrcamento")
+  orcamentosCriados      Orcamento[]           @relation("OrcamentoCriador")
+  ordens_compra          OrdemCompra[]
+  solicitacoesProducao   SolicitacaoProducao[]
+  orcamentosVendaCriados OrcamentoVenda[]      @relation("OrcamentoVendaCriador")
+  solicitacoesMaterial   SolicitacaoMaterial[] @relation("SolicitacoesMaterial")
+  logsEdicaoSolicitacao  LogEdicaoSolicitacao[] @relation("LogEdicaoEditor")
+  mensagensEnviadas      MensagemChat[] @relation("MensagemRemetente")
+  mensagensRecebidas     MensagemChat[] @relation("MensagemDestinatario")
+  visualizacoesSolicitacao VisualizacaoSolicitacao[]
+  
   @@map("usuarios")
 }
 
-model Material {
-  id                   Int                      @id @default(autoincrement())
-  nome                 String
-  unidade              String?
-  categoria            String?
-  medida               String?
-  espessura            String?
-  largura              Decimal?                 @db.Decimal(10, 4)
-  comprimento          Decimal?                 @db.Decimal(10, 4)
-  identificador        String?
-  valor                Decimal?                 @db.Decimal(15, 6)
-  valorMetroQuadrado   Decimal?                 @db.Decimal(15, 6)
-  quantidade           Decimal                  @default(0) @db.Decimal(10, 3)
-  estoqueMinimo        Decimal                  @default(0) @db.Decimal(10, 3)
-  status               StatusEstoque            @default(OK)
-  estoqueConfirmado    Boolean                  @default(false)
-  ativo                Boolean                  @default(true)
-  ultimoValorPago      Decimal?                 @db.Decimal(15, 6)
-  ultimoValorPagoM2    Decimal?                 @db.Decimal(15, 6)
-  criadoEm             DateTime                 @default(now())
-  atualizadoEm         DateTime                 @updatedAt
-  fornecedorMateriais  FornecedorMaterial[]
-  historicoPrecos      HistoricoPrecoMaterial[]
-  movimentacoes        MovimentacaoEstoque[]
-  orcamentoItens       OrcamentoItem[]
-  ordemItens           OrdemCompraItem[]
-  SolicitacoesProducao SolicitacaoProducao[]
-  auditLogs            AuditLogMaterial[]
-  produtoMateriais     ProdutoMaterial[]
-  orcamentoVendaItemMateriais OrcamentoVendaItemMaterial[]
+model MensagemChat {
+  id             Int      @id @default(autoincrement())
+  remetenteId    Int
+  destinatarioId Int
+  conteudo       String   @db.Text
+  lida           Boolean  @default(false)
+  criadoEm       DateTime @default(now())
+  remetente      Usuario  @relation("MensagemRemetente",    fields: [remetenteId],    references: [id])
+  destinatario   Usuario  @relation("MensagemDestinatario", fields: [destinatarioId], references: [id])
 
-  @@unique([nome, identificador, medida, espessura])
-
-  @@map("materiais")
+  @@index([remetenteId, destinatarioId])
+  @@index([destinatarioId, lida])
+  @@map("mensagens_chat")
 }
 
+model Material {
+  id                          Int                        @id @default(autoincrement())
+  nome                        String
+  unidade                     String?
+  categoria                   String?
+  medida                      String?
+  espessura                   String?
+  largura                     Decimal?                   @db.Decimal(10, 4)
+  comprimento                 Decimal?                   @db.Decimal(10, 4)
+  identificador               String?
+  valor                       Decimal?                   @db.Decimal(15, 6)
+  valorMetroQuadrado          Decimal?                   @db.Decimal(15, 6)
+  quantidade                  Decimal                    @default(0) @db.Decimal(10, 3)
+  estoqueMinimo               Decimal                    @default(0) @db.Decimal(10, 3)
+  status                      StatusEstoque              @default(OK)
+  estoqueConfirmado           Boolean                    @default(false)
+  ativo                       Boolean                    @default(true)
+  ultimoValorPago             Decimal?                   @db.Decimal(15, 6)
+  ultimoValorPagoM2           Decimal?                   @db.Decimal(15, 6)
+  /// Indica que o material foi cadastrado como temporário.
+  /// Quando true, o backend desativa (ativo = false) automaticamente após desativaEm.
+  temporario                  Boolean                    @default(false)
+  /// Data em que o material temporário será desativado automaticamente. Null para permanentes.
+  desativaEm                  DateTime?
+  /// Observação livre — usada especialmente por materiais temporários.
+  observacaoTemporario        String?
+  /// Nome do usuário que cadastrou como temporário (snapshot).
+  criadoPorNome               String?
+  criadoEm                    DateTime                   @default(now())
+  atualizadoEm                DateTime                   @updatedAt
+  fornecedorMateriais         FornecedorMaterial[]
+  historicoPrecos             HistoricoPrecoMaterial[]
+  movimentacoes               MovimentacaoEstoque[]      @relation("MovimentacaoMaterial")
+  movimentacoesOrigem         MovimentacaoEstoque[]      @relation("MovimentacaoMaterialOrigem")
+  orcamentoItens              OrcamentoItem[]
+  ordemItens                  OrdemCompraItem[]
+  SolicitacoesProducao        SolicitacaoProducao[]
+  auditLogs                   AuditLogMaterial[]
+  produtoMateriais            ProdutoMaterial[]
+  orcamentoVendaItemMateriais OrcamentoVendaItemMaterial[]
+  solicitacoesMaterial        SolicitacaoMaterial[]
+
+  @@unique([nome, identificador, medida, espessura])
+  @@map("materiais")
+}
 
 model HistoricoPrecoMaterial {
   id            Int         @id @default(autoincrement())
@@ -114,24 +143,20 @@ model FornecedorMaterial {
 }
 
 model Orcamento {
-  id             Int             @id @default(autoincrement())
-  titulo         String          @default("Orçamento")
-  status         StatusOrcamento @default(ABERTO)
-  criadorId      Int?
-  aprovadorId    Int?
-  aprovadoEm     DateTime?
-  motivoRejeicao String?
-  criadoEm       DateTime        @default(now())
-  atualizadoEm   DateTime        @updatedAt
-  // IDs de fornecedores ocultados da visualização deste orçamento (matriz, totais,
-  // melhor preço e PDF). Apenas oculta — o fornecedor e os itens/preços permanecem
-  // intactos no banco; ocultar/reexibir é reversível e visível para qualquer usuário
-  // que abrir o orçamento.
-  fornecedoresOcultos Int[]      @default([])
-  itens          OrcamentoItem[]
-  aprovador      Usuario?        @relation("AprovadorOrcamento", fields: [aprovadorId], references: [id])
-  criador        Usuario?        @relation("OrcamentoCriador", fields: [criadorId], references: [id])
-  ordens         OrdemCompra[]
+  id                  Int             @id @default(autoincrement())
+  titulo              String          @default("Orçamento")
+  status              StatusOrcamento @default(ABERTO)
+  criadorId           Int?
+  aprovadorId         Int?
+  aprovadoEm          DateTime?
+  motivoRejeicao      String?
+  criadoEm            DateTime        @default(now())
+  atualizadoEm        DateTime        @updatedAt
+  fornecedoresOcultos Int[]           @default([])
+  itens               OrcamentoItem[]
+  aprovador           Usuario?        @relation("AprovadorOrcamento", fields: [aprovadorId], references: [id])
+  criador             Usuario?        @relation("OrcamentoCriador", fields: [criadorId], references: [id])
+  ordens              OrdemCompra[]
 
   @@map("orcamentos")
 }
@@ -147,6 +172,7 @@ model OrcamentoItem {
   usarM2        Boolean     @default(false)
   selecionado   Boolean     @default(false)
   descricaoItem String?
+  observacao    String?
   criadoEm      DateTime    @default(now())
   fornecedor    Fornecedor? @relation(fields: [fornecedorId], references: [id])
   material      Material    @relation(fields: [materialId], references: [id])
@@ -194,7 +220,7 @@ model OrdemCompraOS {
 model OrdemCompraItem {
   id                 Int         @id @default(autoincrement())
   ordemCompraId      Int
-  materialId         Int
+  materialId         Int?
   descricaoItem      String?
   numeroOS           String
   quantidade         Decimal     @db.Decimal(10, 3)
@@ -204,7 +230,7 @@ model OrdemCompraItem {
   usarM2             Boolean     @default(false)
   precoTotal         Decimal     @db.Decimal(15, 6)
   criadoEm           DateTime    @default(now())
-  material           Material    @relation(fields: [materialId], references: [id])
+  material           Material?   @relation(fields: [materialId], references: [id])
   ordemCompra        OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
 
   @@map("ordem_compra_itens")
@@ -223,24 +249,29 @@ model RelacaoOS {
 }
 
 model MovimentacaoEstoque {
-  id                Int          @id @default(autoincrement())
-  materialId        Int
-  tipo              String
-  quantidade        Decimal      @db.Decimal(10, 3)
-  numeroOS          String
-  relacaoOSId       Int
-  ordemCompraId     Int?
-  precoUnitario     Decimal?     @db.Decimal(15, 6)
-  precoM2           Decimal?     @db.Decimal(15, 6)
-  observacao        String?
-  descricaoItem     String?
-  larguraUsada      Decimal?     @db.Decimal(15, 6)
-  comprimentoUsado  Decimal?     @db.Decimal(15, 6)
-  criadoEm          DateTime     @default(now())
-  material          Material     @relation(fields: [materialId], references: [id])
-  ordemCompra       OrdemCompra? @relation(fields: [ordemCompraId], references: [id])
-  relacaoOS         RelacaoOS    @relation(fields: [relacaoOSId], references: [id])
+  id               Int          @id @default(autoincrement())
+  materialId       Int
+  tipo             String
+  quantidade       Decimal      @db.Decimal(10, 3)
+  numeroOS         String
+  relacaoOSId      Int
+  ordemCompraId    Int?
+  precoUnitario    Decimal?     @db.Decimal(15, 6)
+  precoM2          Decimal?     @db.Decimal(15, 6)
+  observacao       String?
+  descricaoItem    String?
+  larguraUsada     Decimal?     @db.Decimal(15, 6)
+  comprimentoUsado Decimal?     @db.Decimal(15, 6)
+  /// Quando esta movimentação é uma ENTRADA de retalho (sobra de uma saída),
+  /// aponta para o materialId que foi consumido na saída original.
+  materialOrigemId Int?
+  criadoEm         DateTime     @default(now())
+  material         Material     @relation("MovimentacaoMaterial", fields: [materialId], references: [id])
+  materialOrigem   Material?    @relation("MovimentacaoMaterialOrigem", fields: [materialOrigemId], references: [id])
+  ordemCompra      OrdemCompra? @relation(fields: [ordemCompraId], references: [id])
+  relacaoOS        RelacaoOS    @relation(fields: [relacaoOSId], references: [id])
 
+  @@index([materialOrigemId])
   @@map("movimentacoes_estoque")
 }
 
@@ -277,16 +308,16 @@ model BaixaProducao {
 }
 
 model AuditLogMaterial {
-  id           Int      @id @default(autoincrement())
-  materialId   Int
-  acao         String
-  campo        String?
-  valorAntes   String?
-  valorDepois  String?
-  usuarioId    Int?
-  usuarioNome  String?
-  criadoEm     DateTime @default(now())
-  material     Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  id          Int      @id @default(autoincrement())
+  materialId  Int
+  acao        String
+  campo       String?
+  valorAntes  String?
+  valorDepois String?
+  usuarioId   Int?
+  usuarioNome String?
+  criadoEm    DateTime @default(now())
+  material    Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
   @@index([materialId])
   @@index([criadoEm])
@@ -294,12 +325,12 @@ model AuditLogMaterial {
 }
 
 model Veiculo {
-  id           Int                  @id @default(autoincrement())
+  id           Int               @id @default(autoincrement())
   nome         String
-  placa        String               @unique
-  ativo        Boolean              @default(true)
-  criadoEm     DateTime             @default(now())
-  atualizadoEm DateTime             @updatedAt
+  placa        String            @unique
+  ativo        Boolean           @default(true)
+  criadoEm     DateTime          @default(now())
+  atualizadoEm DateTime          @updatedAt
   manutencoes  ManutencaoVeiculo[]
 
   @@map("veiculos")
@@ -319,8 +350,6 @@ model ManutencaoVeiculo {
   @@map("manutencoes_veiculo")
 }
 
-// ─── NOVAS ENTIDADES ──────────────────────────────────────────────────────────
-
 model Cliente {
   id              Int              @id @default(autoincrement())
   nome            String
@@ -334,6 +363,62 @@ model Cliente {
   orcamentosVenda OrcamentoVenda[]
 
   @@map("clientes")
+}
+
+model SolicitacaoMaterial {
+  id               Int                       @id @default(autoincrement())
+  materialId       Int
+  quantidade       Decimal                   @db.Decimal(10, 3)
+  numeroOS         String
+  nomeCliente      String
+  dataSolicitacao  DateTime                  @default(now())
+  dataNecessidade  DateTime
+  andamento        String                    @default("EM_ANDAMENTO")
+  observacao       String?
+  imagemUrl        String?
+  usuarioId        Int
+  usuarioNome      String
+  criadoEm         DateTime                  @default(now())
+  atualizadoEm     DateTime                  @updatedAt
+  material         Material                  @relation(fields: [materialId], references: [id])
+  usuario          Usuario                   @relation("SolicitacoesMaterial", fields: [usuarioId], references: [id])
+  logs             LogEdicaoSolicitacao[]
+  visualizacoes    VisualizacaoSolicitacao[]
+
+  @@index([andamento])
+  @@index([dataNecessidade])
+  @@map("solicitacoes_material")
+}
+
+model VisualizacaoSolicitacao {
+  id             Int                 @id @default(autoincrement())
+  usuarioId      Int
+  solicitacaoId  Int
+  visualizadoEm  DateTime            @default(now())
+  usuario        Usuario             @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  solicitacao    SolicitacaoMaterial @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, solicitacaoId])
+  @@index([usuarioId])
+  @@index([solicitacaoId])
+  @@map("visualizacoes_solicitacao")
+}
+
+model LogEdicaoSolicitacao {
+  id              Int                 @id @default(autoincrement())
+  solicitacaoId   Int
+  editorId        Int
+  editorNome      String
+  /// Snapshot JSON dos campos ANTES da edição.
+  antes           Json
+  /// Snapshot JSON dos campos DEPOIS da edição.
+  depois          Json
+  editadoEm       DateTime            @default(now())
+  solicitacao     SolicitacaoMaterial @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+  editor          Usuario             @relation("LogEdicaoEditor", fields: [editorId], references: [id])
+
+  @@index([solicitacaoId])
+  @@map("logs_edicao_solicitacao")
 }
 
 model Produto {
@@ -388,21 +473,20 @@ model OrcamentoVenda {
 
 /// Produto selecionado dentro de um orçamento de venda.
 model OrcamentoVendaItem {
-  id               Int                         @id @default(autoincrement())
+  id               Int                        @id @default(autoincrement())
   orcamentoVendaId Int
   produtoId        Int
-  quantidade       Decimal                     @default(1) @db.Decimal(10, 3)
+  quantidade       Decimal                    @default(1) @db.Decimal(10, 3)
   observacao       String?
-  criadoEm         DateTime                    @default(now())
-  orcamentoVenda   OrcamentoVenda              @relation(fields: [orcamentoVendaId], references: [id], onDelete: Cascade)
-  produto          Produto                     @relation(fields: [produtoId], references: [id])
+  criadoEm         DateTime                   @default(now())
+  orcamentoVenda   OrcamentoVenda             @relation(fields: [orcamentoVendaId], references: [id], onDelete: Cascade)
+  produto          Produto                    @relation(fields: [produtoId], references: [id])
   materiais        OrcamentoVendaItemMaterial[]
 
   @@map("orcamento_venda_itens")
 }
 
 /// Detalhe de material dentro de um item do orçamento de venda.
-/// Permite ajuste de quantidade e registra snapshot do preço médio.
 model OrcamentoVendaItemMaterial {
   id                   Int                @id @default(autoincrement())
   orcamentoVendaItemId Int
@@ -427,7 +511,6 @@ model OrcamentoVendaItemMaterial {
 }
 
 /// Faixas de markup: para valorTotal entre valorMin e valorMax aplica-se percentual.
-/// valorMax null = faixa aberta (>= valorMin sem limite superior).
 model MarkupFaixa {
   id           Int      @id @default(autoincrement())
   ordem        Int

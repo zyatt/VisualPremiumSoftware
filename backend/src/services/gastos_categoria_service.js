@@ -141,14 +141,39 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
           unidade: true, identificador: true, medida: true, espessura: true,
         },
       },
+      materialOrigem: { select: { id: true } },
     },
     orderBy: { criadoEm: 'asc' },
   });
 
+  // ── Devoluções de retalho ──────────────────────────────────────────────────
+  // Entradas com materialOrigemId vinculado são devoluções de retalho: a
+  // sobra de uma saída foi registrada como entrada de OUTRO material (ex.:
+  // saiu "CHAPA" em UNIDADE, voltou "CHAPA - RETALHO" em M²). Como o valor
+  // não pode ser abatido por quantidade (unidades diferentes), é abatido em
+  // R$ direto do gasto do material de origem, por OS. Essas movimentações são
+  // retiradas do fluxo normal de agrupamento por material para não aparecerem
+  // como gasto (zerado) do próprio material retalho.
+  const valorRetalhoPorOSMaterial = {}; // `${osId}-${materialOrigemId}` → valor R$
+  const movimentacoesSemRetalho = [];
+
+  for (const mov of movimentacoes) {
+    if (mov.tipo === 'ENTRADA' && mov.materialOrigemId != null) {
+      const pu    = Number(mov.precoUnitario || 0);
+      const pm2   = Number(mov.precoM2       || 0);
+      const preco = pu > 0 ? pu : pm2;
+      const chave = `${mov.relacaoOSId}-${mov.materialOrigemId}`;
+      valorRetalhoPorOSMaterial[chave] =
+        (valorRetalhoPorOSMaterial[chave] || 0) + preco * Number(mov.quantidade);
+      continue;
+    }
+    movimentacoesSemRetalho.push(mov);
+  }
+
   // Agrupa por OS → material para calcular o saldo correto por escopo
   const porOS = {};
 
-  for (const mov of movimentacoes) {
+  for (const mov of movimentacoesSemRetalho) {
     const osId  = mov.relacaoOSId;
     const matId = mov.materialId;
     if (!porOS[osId]) porOS[osId] = {};
@@ -158,7 +183,7 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
 
   const porCategoria = {};
 
-  for (const [, materiaisDaOS] of Object.entries(porOS)) {
+  for (const [osId, materiaisDaOS] of Object.entries(porOS)) {
     for (const [, { movs, material }] of Object.entries(materiaisDaOS)) {
       const cat   = material.categoria || '__SEM_CATEGORIA__';
       const matId = material.id;
@@ -228,7 +253,12 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
       }
 
       const qtdLiquida = Math.max(0, qtdSaida - qtdDevolucao);
-      const gasto      = precoRef * qtdLiquida;
+      const valorBruto = precoRef * qtdLiquida;
+
+      // Abate o valor de retalho devolvido (em outro material) para este
+      // material de origem, nesta mesma OS.
+      const valorRetalho = valorRetalhoPorOSMaterial[`${osId}-${matId}`] || 0;
+      const gasto        = Math.max(0, valorBruto - valorRetalho);
 
       if (gasto > 0) {
         porCategoria[cat].totalGasto                  += gasto;
@@ -264,16 +294,17 @@ async function gastosMensais({ ano } = {}) {
       criadoEm:  { gte: inicio, lte: fim },
     },
     select: {
-      relacaoOSId:   true,
-      materialId:    true,
-      tipo:          true,
-      quantidade:    true,
-      precoUnitario: true,
-      precoM2:       true,
-      criadoEm:      true,
-      ordemCompraId: true,
-      observacao:    true,
-      descricaoItem: true,
+      relacaoOSId:      true,
+      materialId:       true,
+      materialOrigemId: true,
+      tipo:             true,
+      quantidade:       true,
+      precoUnitario:    true,
+      precoM2:          true,
+      criadoEm:         true,
+      ordemCompraId:    true,
+      observacao:       true,
+      descricaoItem:    true,
     },
     orderBy: { criadoEm: 'asc' },
   });
@@ -285,13 +316,27 @@ async function gastosMensais({ ano } = {}) {
     porMes[key] = { mesAno: key, totalGasto: 0 };
   }
 
-  // Agrupa por (osId, materialId) para calcular saldo líquido por mês da saída
+  // Agrupa por (osId, materialId) para calcular saldo líquido por mês da saída.
+  // Entradas de retalho (materialOrigemId preenchido) são desviadas: não entram
+  // no grupo do material retalho — em vez disso, seu valor é acumulado como
+  // abatimento (valorRetalho) do grupo do material que efetivamente saiu.
   const grupos = {};
 
+  const _grupo = (osId, matId) => {
+    const chave = `${osId}-${matId}`;
+    if (!grupos[chave]) grupos[chave] = { movs: [], valorRetalho: 0 };
+    return grupos[chave];
+  };
+
   for (const mov of movimentacoes) {
-    const chave = `${mov.relacaoOSId}-${mov.materialId}`;
-    if (!grupos[chave]) grupos[chave] = { movs: [] };
-    grupos[chave].movs.push(mov);
+    if (mov.tipo === 'ENTRADA' && mov.materialOrigemId != null) {
+      const pu    = Number(mov.precoUnitario || 0);
+      const pm2   = Number(mov.precoM2       || 0);
+      const preco = pu > 0 ? pu : pm2;
+      _grupo(mov.relacaoOSId, mov.materialOrigemId).valorRetalho += preco * Number(mov.quantidade);
+      continue;
+    }
+    _grupo(mov.relacaoOSId, mov.materialId).movs.push(mov);
   }
 
   const _ehEntradaOC = (m) =>
@@ -299,7 +344,7 @@ async function gastosMensais({ ano } = {}) {
     (m.observacao    && m.observacao.includes('via OC')) ||
     (m.descricaoItem && m.descricaoItem.includes('via OC'));
 
-  for (const { movs } of Object.values(grupos)) {
+  for (const { movs, valorRetalho } of Object.values(grupos)) {
     // Mesma lógica de saldo líquido, mas precisamos distribuir por mês de saída
     // Estratégia: calcula qtdLiquida total e debita proporcionalmente das saídas
     // em ordem cronológica (mais simples: atribui o gasto ao mês da última saída
@@ -308,7 +353,7 @@ async function gastosMensais({ ano } = {}) {
     let primeiroSaidaVisto = false;
     let qtdDevolucaoRestante = 0;
 
-    // Primeiro pass: conta devoluções totais
+    // Primeiro pass: conta devoluções totais (por quantidade, mesmo material)
     for (const mov of movs) {
       if (mov.tipo === 'ENTRADA' && !_ehEntradaOC(mov) && primeiroSaidaVisto) {
         qtdDevolucaoRestante += Number(mov.quantidade);
@@ -316,15 +361,12 @@ async function gastosMensais({ ano } = {}) {
       if (mov.tipo === 'SAIDA') primeiroSaidaVisto = true;
     }
 
-    // Segundo pass: distribui saídas líquidas por mês
+    // Monta a lista de saídas líquidas (após devolução por quantidade) com
+    // mês e valor bruto, na ordem cronológica original.
     primeiroSaidaVisto = false;
+    const saidasLiquidas = []; // { mes, valor }
     for (const mov of movs) {
-      if (mov.tipo === 'ENTRADA') {
-        if (!_ehEntradaOC(mov) && primeiroSaidaVisto) {
-          // devolução já contada acima
-        }
-        continue;
-      }
+      if (mov.tipo === 'ENTRADA') continue;
       if (mov.tipo !== 'SAIDA') continue;
 
       primeiroSaidaVisto = true;
@@ -341,9 +383,24 @@ async function gastosMensais({ ano } = {}) {
         const pm2   = Number(mov.precoM2       || 0);
         const preco = pu > 0 ? pu : pm2;
         const mes   = mov.criadoEm.getMonth() + 1;
-        const key   = `${anoAlvo}-${String(mes).padStart(2, '0')}`;
-        if (porMes[key]) porMes[key].totalGasto += preco * qtdLiquida;
+        saidasLiquidas.push({ mes, valor: preco * qtdLiquida });
       }
+    }
+
+    // Abate o valor de retalho devolvido (R$) das saídas líquidas, a partir
+    // da mais recente — mesmo critério de prioridade usado nas devoluções
+    // por quantidade acima.
+    let valorRetalhoRestante = valorRetalho || 0;
+    for (let i = saidasLiquidas.length - 1; i >= 0 && valorRetalhoRestante > 0; i--) {
+      const desconto = Math.min(saidasLiquidas[i].valor, valorRetalhoRestante);
+      saidasLiquidas[i].valor -= desconto;
+      valorRetalhoRestante    -= desconto;
+    }
+
+    for (const { mes, valor } of saidasLiquidas) {
+      if (valor <= 0) continue;
+      const key = `${anoAlvo}-${String(mes).padStart(2, '0')}`;
+      if (porMes[key]) porMes[key].totalGasto += valor;
     }
   }
 

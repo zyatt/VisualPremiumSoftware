@@ -15,6 +15,7 @@ router.get('/:id',                       authMiddleware, roleMiddleware(LEITURA)
 router.post('/',                         authMiddleware, roleMiddleware(ESCRITA),  ctrl.criar);
 router.patch('/:id',                     authMiddleware, roleMiddleware(ESCRITA),  ctrl.atualizar);      // ← aqui, antes das subrotas
 router.patch('/:id/cancelar',            authMiddleware, roleMiddleware(EXCLUSAO), ctrl.cancelar);
+router.delete('/:id',                    authMiddleware, roleMiddleware(EXCLUSAO), ctrl.excluir);
 
 router.post('/:id/itens',                authMiddleware, roleMiddleware(ESCRITA),  ctrl.adicionarItem);
 router.delete('/:id/itens',              authMiddleware, roleMiddleware(ESCRITA),  ctrl.limparItens);   // ← limpa todos de uma vez

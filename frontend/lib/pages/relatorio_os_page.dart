@@ -59,8 +59,15 @@ const _corFechada = Color(0xFF4CAF50);
 /// Entradas geradas por Ordem de Compra (observacao ou descricaoItem contendo
 /// "via OC") são reposição de estoque — NÃO são devoluções — e por isso são
 /// ignoradas no cálculo do custo líquido.
+///
+/// Entradas de RETALHO (ehRetalhoDeOrigem) são um caso especial: a sobra de
+/// uma saída é registrada como entrada de OUTRO material (ex.: saiu "CHAPA"
+/// em UNIDADE, voltou "CHAPA - RETALHO" em M²). Como as quantidades estão em
+/// unidades diferentes, o valor (R$) dessa entrada é abatido diretamente do
+/// total do material de origem (materialOrigemId), em vez de comparar
+/// quantidades.
 double _totalLiquido(List<MovimentacaoModel> movimentacoes) {
-  // materialId → { preco, qtdSaida, qtdEntrada }
+  // materialId → { preco, qtdSaida, qtdEntrada, valorRetalho }
   final porMaterial = <int, Map<String, double>>{};
 
   // Ordena por criadoEm ascendente (mais antiga primeiro)
@@ -77,12 +84,22 @@ double _totalLiquido(List<MovimentacaoModel> movimentacoes) {
     if (m.tipo == 'SAIDA') {
       porMaterial.putIfAbsent(
         m.materialId,
-        () => {'preco': p, 'qtdSaida': 0.0, 'qtdEntrada': 0.0},
+        () => {'preco': p, 'qtdSaida': 0.0, 'qtdEntrada': 0.0, 'valorRetalho': 0.0},
       );
       final entry = porMaterial[m.materialId]!;
       if (p > entry['preco']!) entry['preco'] = p;
       entry['qtdSaida'] = entry['qtdSaida']! + m.quantidade;
     } else if (m.tipo == 'ENTRADA') {
+      // Entrada de retalho vinculada a um material de origem: abate o VALOR
+      // (não a quantidade, pois unidade/material são diferentes) do total
+      // da saída original, desde que essa saída exista nesta OS.
+      if (m.materialOrigemId != null &&
+          porMaterial.containsKey(m.materialOrigemId)) {
+        final entry = porMaterial[m.materialOrigemId]!;
+        entry['valorRetalho'] = entry['valorRetalho']! + p * m.quantidade;
+        continue;
+      }
+
       // Entradas via OC são reposição de estoque, não devoluções — ignorar.
       final isEntradaOC =
           (m.observacao?.contains('via OC') ?? false);
@@ -97,8 +114,10 @@ double _totalLiquido(List<MovimentacaoModel> movimentacoes) {
   }
 
   return porMaterial.values.fold(0.0, (acc, e) {
-    final qtdLiquida = (e['qtdSaida']! - e['qtdEntrada']!).clamp(0.0, double.infinity);
-    return acc + e['preco']! * qtdLiquida;
+    final qtdLiquida   = (e['qtdSaida']! - e['qtdEntrada']!).clamp(0.0, double.infinity);
+    final valorBruto   = e['preco']! * qtdLiquida;
+    final valorLiquido = (valorBruto - e['valorRetalho']!).clamp(0.0, double.infinity);
+    return acc + valorLiquido;
   });
 }
 
@@ -1357,21 +1376,9 @@ class _MovimentacaoSection extends StatelessWidget {
                   ),
                   if (mostrarPreco) ...[
                     SizedBox(
-                      width: 90,
+                      width: 110,
                       child: Text(
-                        'Unit.',
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 90,
-                      child: Text(
-                        'M²',
+                        'Preço',
                         textAlign: TextAlign.right,
                         style: TextStyle(
                           fontSize: 11,
@@ -1410,148 +1417,186 @@ class _MovimentacaoSection extends StatelessWidget {
             ),
             Divider(height: 12, color: Theme.of(context).colorScheme.outlineVariant),
 
-            // Linhas
-            ...List.generate(movimentacoes.length, (i) {
-              final m   = movimentacoes[i];
-              final pu  = (m.precoUnitario != null && m.precoUnitario! > 0) ? m.precoUnitario! : null;
-              final pm2 = (m.precoM2       != null && m.precoM2!       > 0) ? m.precoM2!       : null;
-              // Total usa o preço efetivo (pu tem prioridade; fallback pm2)
-              final precoEfetivo = pu ?? pm2 ?? 0.0;
-              final total = precoEfetivo * m.quantidade;
-              final qtdStr = m.quantidade % 1 == 0
-                  ? m.quantidade.toStringAsFixed(0)
-                  : m.quantidade.toStringAsFixed(2);
+            // Linhas agrupadas por material
+            Builder(builder: (context) {
+              // Agrupa movimentações pelo materialId, mantendo ordem de primeira ocorrência
+              final Map<int, List<MovimentacaoModel>> grupos = {};
+              final List<int> ordem = [];
+              for (final m in movimentacoes) {
+                if (!grupos.containsKey(m.materialId)) {
+                  grupos[m.materialId] = [];
+                  ordem.add(m.materialId);
+                }
+                grupos[m.materialId]!.add(m);
+              }
+
+              final linhas = ordem.map((matId) => grupos[matId]!).toList();
 
               return Column(
                 mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 9),
-                    child: Row(
-                      children: [
-                        // Material
-                        Expanded(
-                          flex: 3,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                m.materialNome,
+                children: List.generate(linhas.length, (i) {
+                  final grupo = linhas[i];
+                  final ref   = grupo.first;
+
+                  final pu  = (ref.precoUnitario != null && ref.precoUnitario! > 0) ? ref.precoUnitario! : null;
+                  final pm2 = (ref.precoM2       != null && ref.precoM2!       > 0) ? ref.precoM2!       : null;
+                  final precoEfetivo = pu ?? pm2 ?? 0.0;
+
+                  final qtdTotal = grupo.fold(0.0, (acc, m) => acc + m.quantidade);
+                  final total    = precoEfetivo * qtdTotal;
+
+                  final qtdStr = qtdTotal % 1 == 0
+                      ? qtdTotal.toStringAsFixed(0)
+                      : qtdTotal.toStringAsFixed(2);
+
+                  final dataRef = grupo.map((m) => m.criadoEm).reduce(
+                    (a, b) => a.isAfter(b) ? a : b,
+                  );
+
+                  final unidLabel = (ref.materialUnidade ?? '').isNotEmpty
+                      ? 'por ${ref.materialUnidade}'
+                      : null;
+
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+                        child: Row(
+                          children: [
+                            // Material
+                            Expanded(
+                              flex: 3,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    ref.materialNome,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                      color: Theme.of(context).colorScheme.onSurface,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if ((ref.materialUnidade ?? '').isNotEmpty)
+                                    Text(
+                                      ref.materialUnidade!,
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  if ([
+                                        ref.materialIdentificador,
+                                        ref.materialMedida,
+                                        ref.materialEspessura,
+                                      ].any((v) => v != null && v.isNotEmpty))
+                                    Text(
+                                      [
+                                        if ((ref.materialIdentificador ?? '').isNotEmpty)
+                                          ref.materialIdentificador!,
+                                        if ((ref.materialMedida ?? '').isNotEmpty)
+                                          ref.materialMedida!,
+                                        if ((ref.materialEspessura ?? '').isNotEmpty)
+                                          ref.materialEspessura!,
+                                      ].join(' · '),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  // Observações únicas do grupo
+                                  ...grupo
+                                      .where((m) => m.observacao != null && m.observacao!.isNotEmpty)
+                                      .map((m) => m.ehRetalhoDeOrigem
+                                          ? '${m.observacao!} (abatido da saída)'
+                                          : m.observacao!)
+                                      .toSet()
+                                      .map((obs) => Text(
+                                            obs,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Theme.of(context).colorScheme.outline,
+                                              fontStyle: FontStyle.italic,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          )),
+                                ],
+                              ),
+                            ),
+                            // Quantidade somada
+                            SizedBox(
+                              width: 80,
+                              child: Text(
+                                '$qtdStr ${ref.materialUnidade ?? ''}',
+                                textAlign: TextAlign.right,
                                 style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                  color: Theme.of(context).colorScheme.onSurface,
-                                ),
-                                overflow: TextOverflow.ellipsis,
+                                    fontSize: 13,
+                                    color: Theme.of(context).colorScheme.onSurface),
                               ),
-                              if ((m.materialUnidade ?? '').isNotEmpty)
-                                Text(
-                                  m.materialUnidade!,
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                  overflow: TextOverflow.ellipsis,
+                            ),
+                            // Preço — coluna única com label da unidade abaixo
+                            if (mostrarPreco) ...[
+                              SizedBox(
+                                width: 110,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      precoEfetivo > 0 ? _brl(precoEfetivo) : '—',
+                                      textAlign: TextAlign.right,
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                    ),
+                                    if (unidLabel != null)
+                                      Text(
+                                        unidLabel,
+                                        textAlign: TextAlign.right,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant
+                                              .withValues(alpha: 0.7),
+                                        ),
+                                      ),
+                                  ],
                                 ),
-                              // Identificador / medida / espessura
-                              if ([
-                                    m.materialIdentificador,
-                                    m.materialMedida,
-                                    m.materialEspessura,
-                                  ].any((v) => v != null && v.isNotEmpty))
-                                Text(
-                                  [
-                                    if ((m.materialIdentificador ?? '').isNotEmpty)
-                                      m.materialIdentificador!,
-                                    if ((m.materialMedida ?? '').isNotEmpty)
-                                      m.materialMedida!,
-                                    if ((m.materialEspessura ?? '').isNotEmpty)
-                                      m.materialEspessura!,
-                                  ].join(' · '),
+                              ),
+                              SizedBox(
+                                width: 100,
+                                child: Text(
+                                  total > 0 ? _brl(total) : '—',
+                                  textAlign: TextAlign.right,
                                   style: TextStyle(
-                                    fontSize: 11,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w500,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(context).colorScheme.onSurface,
                                   ),
-                                  overflow: TextOverflow.ellipsis,
                                 ),
-                              if (m.observacao != null &&
-                                  m.observacao!.isNotEmpty)
-                                Text(
-                                  m.observacao!,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Theme.of(context).colorScheme.outline,
-                                    fontStyle: FontStyle.italic,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                              ),
                             ],
-                          ),
-                        ),
-                        // Quantidade
-                        SizedBox(
-                          width: 80,
-                          child: Text(
-                            '$qtdStr ${m.materialUnidade ?? ''}',
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                                fontSize: 13,
-                                color: Theme.of(context).colorScheme.onSurface),
-                          ),
-                        ),
-                        // Preço — colunas separadas Unit. | M² | Total
-                        if (mostrarPreco) ...[
-                          SizedBox(
-                            width: 90,
-                            child: Text(
-                              pu != null ? _brl(pu) : '—',
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            ),
-                          ),
-                          SizedBox(
-                            width: 90,
-                            child: Text(
-                              pm2 != null ? _brl(pm2) : '—',
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            ),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: Text(
-                              total > 0 ? _brl(total) : '—',
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: Theme.of(context).colorScheme.onSurface,
+                            // Data
+                            SizedBox(
+                              width: 90,
+                              child: Text(
+                                _fmtData(dataRef),
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant),
                               ),
                             ),
-                          ),
-                        ],
-                        // Data
-                        SizedBox(
-                          width: 90,
-                          child: Text(
-                            _fmtData(m.criadoEm),
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant),
-                          ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                  if (i < movimentacoes.length - 1)
-                    Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-                ],
+                      ),
+                      if (i < linhas.length - 1)
+                        Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+                    ],
+                  );
+                }),
               );
             }),
 

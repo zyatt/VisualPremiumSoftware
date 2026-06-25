@@ -1,6 +1,6 @@
 class OrdemCompraItemModel {
   final int? id;
-  final int materialId;
+  final int? materialId;
   final String materialNome;
   /// Unidade de medida do material no estoque (ex: "UNIDADE", "ML", "M/L", "KG").
   final String? materialUnidade;
@@ -22,7 +22,7 @@ class OrdemCompraItemModel {
 
   OrdemCompraItemModel({
     this.id,
-    required this.materialId,
+    this.materialId,
     required this.materialNome,
     this.materialUnidade,
     this.materialMedida,
@@ -51,7 +51,7 @@ class OrdemCompraItemModel {
 
   factory OrdemCompraItemModel.fromJson(Map<String, dynamic> json) => OrdemCompraItemModel(
     id:                     json['id'],
-    materialId:             json['materialId'] ?? 0,
+    materialId:             (json['materialId'] as num?)?.toInt(),
     materialNome:           json['material']?['nome'] ?? '',
     materialUnidade:        json['material']?['unidade'],
     materialMedida:         json['material']?['medida'],

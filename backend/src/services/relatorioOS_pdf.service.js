@@ -139,15 +139,17 @@ function drawPageHeader(doc, dados, logoPath) {
 // ── Cards de resumo ───────────────────────────────────────────────────────────
 
 function drawSummaryCards(doc, dados, y) {
-  const saidas = dados.itens; // já filtrado no service
+  const saidas   = dados.itens;
+  const entradas = dados.entradas ?? [];
 
   const cards = [
     { label: 'Saídas',          value: String(saidas.length),            color: C.vermelho, bg: C.vermelhoLt },
+    { label: 'Entradas',        value: String(entradas.length),          color: C.azul,     bg: C.azulLight  },
     { label: 'Total em saídas', value: formatCurrency(dados.totalGeral), color: C.verde,    bg: C.verdeLight },
     { label: 'Fechada em',      value: formatDate(dados.fechadaEm),      color: C.gray,     bg: C.bgHeader   },
   ];
 
-  const colW = CONTENT_W / 3;
+  const colW = CONTENT_W / 4;
   const boxH = 48;
 
   cards.forEach((card, i) => {
@@ -214,7 +216,7 @@ function buildCols(comPreco) {
     return [
       { label: 'Material', w: matW,   align: 'left'   },
       { label: 'Qtd.',     w: qtdW,   align: 'center' },
-      { label: 'Unit.',    w: unitW,  align: 'right'  },
+      { label: 'Preço',    w: unitW,  align: 'right'  },
       { label: 'Total',    w: totalW, align: 'right'  },
       { label: 'Data',     w: dataW,  align: 'right'  },
     ];
@@ -285,13 +287,15 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
        .text(qtdLabel, cx + 4, tySingle, { width: cols[1].w - 8, align: 'center', lineBreak: false });
     cx += cols[1].w;
 
-    // Unit (precoUnitario já normalizado no service: usa pm2 quando pu=0)
+    // Preço por unidade (precoUnitario já normalizado no service: usa pm2 quando pu=0)
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(item.precoUnitario > 0 ? formatCurrency(item.precoUnitario) : '—',
              cx + 4, tySingle, { width: cols[2].w - 8, align: 'right', lineBreak: false });
-    if (item.usarM2 && item.precoUnitario > 0) {
+    // Mostra a unidade do material abaixo do preço (ex.: UNIDADE, M², G, ML, M/L…)
+    if (item.unidade) {
+      const unidLabel = item.usarM2 ? `por M²` : `por ${item.unidade}`;
       doc.font('Helvetica').fontSize(6.5).fillColor(C.lightGray)
-         .text('(m²)', cx + 4, tySingle + FONT_SZ + 1, { width: cols[2].w - 8, align: 'right', lineBreak: false });
+         .text(unidLabel, cx + 4, tySingle + FONT_SZ + 1, { width: cols[2].w - 8, align: 'right', lineBreak: false });
     }
     cx += cols[2].w;
 
@@ -361,7 +365,8 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
     doc.on('end',   () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const saidas = dados.itens; // apenas SAIDA, já filtrado pelo service
+    const saidas   = dados.itens;        // apenas SAIDA, já filtrado pelo service
+    const entradas = dados.entradas ?? []; // apenas ENTRADA
 
     const desenhar = () => {
       // ── Cabeçalho de página ──────────────────────────────────────────────
@@ -401,6 +406,70 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
             y = 84;
           }
           y = drawTotalRow(doc, dados.totalGeral, y) + 4;
+        }
+      }
+
+      // ── Seção: Entradas ──────────────────────────────────────────────────
+      if (entradas.length > 0) {
+        // Garante espaço antes de começar a seção
+        if (y + 40 > PAGE_H - 50) {
+          if (totalPaginas !== null) drawFooter(doc, pageNum, totalPaginas);
+          pageNum++;
+          doc.addPage();
+          drawPageHeader(doc, dados, logoPath);
+          y = 84;
+        }
+        y += 8; // espaçamento entre seções
+
+        y = drawSectionHeader(doc, y, `Entradas de material  (${entradas.length} ${entradas.length === 1 ? 'item' : 'itens'})`);
+        y = drawMovTableHeader(doc, y, true);
+
+        for (let i = 0; i < entradas.length; i++) {
+          const item = entradas[i];
+          // Injeta sublinhas extras de contexto (retalho de origem)
+          const itemComObs = { ...item };
+          if (item.materialOrigemNome) {
+            const retalhoInfo = `Retalho de ${item.materialOrigemNome} (abatido da saída)`;
+            itemComObs.observacao = item.observacao
+              ? `${item.observacao} | ${retalhoInfo}`
+              : retalhoInfo;
+          }
+
+          const next = drawMovRow(doc, itemComObs, i, y, true, PAGE_H);
+          if (next === null) {
+            if (totalPaginas !== null) drawFooter(doc, pageNum, totalPaginas);
+            pageNum++;
+            doc.addPage();
+            drawPageHeader(doc, dados, logoPath);
+            y = drawMovTableHeader(doc, 84, true);
+            const retry = drawMovRow(doc, itemComObs, i, y, true, PAGE_H);
+            y = retry !== null ? retry : y + 22;
+          } else {
+            y = next;
+          }
+        }
+
+        // Total de entradas
+        const totalEntradas = entradas.reduce((acc, e) => {
+          const preco = e.precoUnitario > 0 ? e.precoUnitario : 0;
+          return acc + e.quantidade * preco;
+        }, 0);
+        if (totalEntradas > 0) {
+          if (y + 26 > PAGE_H - 50) {
+            if (totalPaginas !== null) drawFooter(doc, pageNum, totalPaginas);
+            pageNum++;
+            doc.addPage();
+            drawPageHeader(doc, dados, logoPath);
+            y = 84;
+          }
+          // Rodapé de entradas em azul
+          const rowH = 26;
+          fillRect(doc, MARGIN, y, CONTENT_W, rowH, C.bgHeader);
+          doc.font('Helvetica-Bold').fontSize(9).fillColor(C.gray)
+             .text('Total entradas', MARGIN + 4, y + 9, { lineBreak: false });
+          doc.font('Helvetica-Bold').fontSize(11).fillColor(C.azul)
+             .text(formatCurrency(totalEntradas), MARGIN, y + 8, { width: CONTENT_W - 4, align: 'right', lineBreak: false });
+          y += rowH + 4;
         }
       }
     };
@@ -451,7 +520,8 @@ async function gerarPdfOS(numeroOS) {
 
 // Versão de contagem (sem footers, usa doc externo)
 function gerarDocumentoContagem(dados, logoPath, doc) {
-  const saidas = dados.itens;
+  const saidas   = dados.itens;
+  const entradas = dados.entradas ?? [];
   let pageNum  = 1;
 
   drawPageHeader(doc, dados, logoPath);
@@ -470,6 +540,18 @@ function gerarDocumentoContagem(dados, logoPath, doc) {
       if (y + 26 > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84; }
       y += 30;
     }
+  }
+
+  if (entradas.length > 0) {
+    if (y + 40 > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84; }
+    y += 8 + 20 + 20; // espaçamento + section + header
+    for (const item of entradas) {
+      const rowH = Math.max(22, 10 + 10);
+      if (y + rowH > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84 + 20; }
+      y += rowH;
+    }
+    if (y + 26 > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84; }
+    y += 30;
   }
 
   doc.end();

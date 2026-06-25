@@ -26,10 +26,49 @@ function _normalizarPreco(valor) {
   return num > 0 ? num : null;
 }
 
+// Helper reutilizado por listar() e listarParaMovimentacao() para calcular
+// preço mediano e custo da última compra a partir dos dados do Prisma.
+function _mapearMaterial(m) {
+  const precos = m.fornecedorMateriais
+    .map((fm) => Number(fm.preco))
+    .filter((p) => p > 0)
+    .sort((a, b) => a - b);
+
+  const precosM2 = m.fornecedorMateriais
+    .map((fm) => Number(fm.precoMetroQuadrado))
+    .filter((p) => p > 0)
+    .sort((a, b) => a - b);
+
+  const media = (arr) => {
+    if (!arr.length) return null;
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+  };
+
+  return {
+    ...m,
+    precoMediano:         media(precos),
+    precoM2Mediano:       media(precosM2),
+    custoUltimaCompra:    _normalizarPreco(m.ultimoValorPago),
+    custoM2UltimaCompra:  _normalizarPreco(m.ultimoValorPagoM2),
+  };
+}
+
+// ── Include de fornecedores reutilizado nas duas listagens ────────────────────
+const _includeFornecedores = {
+  fornecedorMateriais: {
+    where: { ativo: true },
+    include: { fornecedor: { select: { id: true, nomeFantasia: true } } },
+  },
+};
+
 async function listar(filtros = {}) {
   const { busca, categoria, semCategoria, status, comFornecedor, id, medida, espessura, largura, comprimento, identificador, ativo } = filtros;
 
-  const where = {};
+  // Exclui materiais temporários do catálogo padrão.
+  // Eles são listados exclusivamente via listarParaMovimentacao() (dialog de
+  // entrada/saída do controle de estoque) e pela rota de estoque-temporário.
+  const where = { temporario: { not: true } };
+
   if (ativo === 'true') where.ativo = true;
   if (id) where.id = Number(id);
   if (busca) {
@@ -59,43 +98,49 @@ async function listar(filtros = {}) {
 
   const materiais = await prisma.material.findMany({
     where,
-    include: {
-      fornecedorMateriais: {
-        where: { ativo: true },
-        include: { fornecedor: { select: { id: true, nomeFantasia: true } } },
-      },
-    },
+    include: _includeFornecedores,
     orderBy: [{ ativo: 'desc' }, { nome: 'asc' }],
   });
 
+  return materiais.map(_mapearMaterial);
+}
 
-  return materiais.map((m) => {
-    const precos = m.fornecedorMateriais
-      .map((fm) => Number(fm.preco))
-      .filter((p) => p > 0)
-      .sort((a, b) => a - b);
+// ── Listagem para o dialog de nova entrada/saída do controle de estoque ───────
+// Diferente de listar(), inclui materiais temporários ativos — necessário para
+// que o operador possa dar entrada/saída em itens criados via Estoque Temporário.
+// Materiais normais aparecem primeiro (temporario=false), depois os temporários.
+async function listarParaMovimentacao(filtros = {}) {
+  const { busca, categoria, semCategoria, id, medida, espessura, identificador } = filtros;
 
-    const precosM2 = m.fornecedorMateriais
-      .map((fm) => Number(fm.precoMetroQuadrado))
-      .filter((p) => p > 0)
-      .sort((a, b) => a - b);
+  // Somente ativos; sem filtro de temporario — inclui normais E temporários.
+  const where = { ativo: true };
 
-    const media = (arr) => {
-      if (!arr.length) return null;
-      return arr.reduce((a, b) => a + b, 0) / arr.length;
-    };
+  if (id) where.id = Number(id);
+  if (busca) {
+    const tokens = busca.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 1) {
+      where.nome = { contains: tokens[0], mode: 'insensitive' };
+    } else {
+      where.AND = tokens.map((t) => ({ nome: { contains: t, mode: 'insensitive' } }));
+    }
+  }
+  if (identificador) where.identificador = { contains: identificador, mode: 'insensitive' };
+  if (medida)        where.medida        = { contains: medida,        mode: 'insensitive' };
+  if (espessura)     where.espessura     = { contains: espessura,     mode: 'insensitive' };
+  if (semCategoria === 'true') {
+    where.categoria = null;
+  } else if (categoria) {
+    where.categoria = { equals: categoria, mode: 'insensitive' };
+  }
 
-    const custoUltimaCompra   = _normalizarPreco(m.ultimoValorPago);
-    const custoM2UltimaCompra = _normalizarPreco(m.ultimoValorPagoM2);
-
-    return {
-      ...m,
-      precoMediano:         media(precos),
-      precoM2Mediano:       media(precosM2),
-      custoUltimaCompra,
-      custoM2UltimaCompra,
-    };
+  const materiais = await prisma.material.findMany({
+    where,
+    include: _includeFornecedores,
+    // Normais primeiro (temporario false < true), depois por nome
+    orderBy: [{ temporario: 'asc' }, { nome: 'asc' }],
   });
+
+  return materiais.map(_mapearMaterial);
 }
 
 async function buscarPorId(id) {
@@ -117,7 +162,6 @@ async function buscarPorId(id) {
   });
 
   if (!m) return null;
-
 
   return {
     ...m,
@@ -261,12 +305,24 @@ async function reativar(id, usuarioId, usuarioNome) {
 
 async function excluir(id, usuarioId, usuarioNome) {
   const material = await prisma.material.findUnique({ where: { id } });
+  if (!material) throw { status: 404, message: 'Material não encontrado' };
   if (material.ativo) throw { status: 400, message: 'Desative o material antes de excluí-lo' };
 
   await auditSvc.registrar(id, 'EXCLUSAO', {
     valorAntes: material.nome,
     usuarioId,
     usuarioNome,
+  });
+
+  // "Fantasmifica" os itens de OC que referenciam este material:
+  // seta materialId = null e preserva o nome em descricaoItem para que
+  // o histórico de OCs continue legível após a exclusão.
+  await prisma.ordemCompraItem.updateMany({
+    where: { materialId: id },
+    data: {
+      materialId:    null,
+      descricaoItem: material.nome,
+    },
   });
 
   return prisma.material.delete({ where: { id } });
@@ -360,6 +416,7 @@ async function atualizarCustoManual(id, data, usuarioId, usuarioNome) {
 module.exports = {
   calcularStatus,
   listar,
+  listarParaMovimentacao,
   buscarPorId,
   criar,
   atualizar,

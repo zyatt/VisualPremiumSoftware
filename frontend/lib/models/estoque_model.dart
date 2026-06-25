@@ -18,6 +18,12 @@ class MovimentacaoModel {
   // (não o custo/m² do material), e o valor correto da saída é precoM2 × 1.
   final double? larguraUsada;
   final double? comprimentoUsado;
+  // Presente apenas em ENTRADAs de retalho (reentrada manual via controle de
+  // estoque): aponta para o materialId que foi consumido na saída original.
+  // Usado para abater o valor desta entrada do custo líquido da saída
+  // original em relatórios e gastos, mesmo sendo materiais diferentes.
+  final int? materialOrigemId;
+  final String? materialOrigemNome;
 
   MovimentacaoModel({
     required this.id,
@@ -36,6 +42,8 @@ class MovimentacaoModel {
     required this.criadoEm,
     this.larguraUsada,
     this.comprimentoUsado,
+    this.materialOrigemId,
+    this.materialOrigemNome,
   });
 
   /// Nesse caso, [precoM2] é o custo proporcional total da área consumida, não o custo/m².
@@ -43,11 +51,20 @@ class MovimentacaoModel {
       larguraUsada != null && larguraUsada! > 0 &&
       comprimentoUsado != null && comprimentoUsado! > 0;
 
+  /// true quando esta movimentação é uma entrada de retalho vinculada a um
+  /// material de origem (ou seja, devolução de sobra de uma saída anterior).
+  bool get ehRetalhoDeOrigem => materialOrigemId != null;
+
   factory MovimentacaoModel.fromJson(Map<String, dynamic> json) =>
       MovimentacaoModel(
         id:                    (json['id'] as num?)?.toInt() ?? 0,
         materialId:            (json['materialId'] as num?)?.toInt() ?? 0,
-        materialNome:          json['material']?['nome'] ?? '',
+        // Quando material é null (excluído), usa descricaoItem como fallback
+        // para preservar o nome histórico da movimentação.
+        materialNome:          (json['material']?['nome'] as String?)
+                               ?? (json['descricaoItem']?.toString().trim().isNotEmpty == true
+                                   ? json['descricaoItem'].toString().trim()
+                                   : '(material excluído)'),
         materialUnidade:       json['material']?['unidade'],
         materialIdentificador: json['material']?['identificador'],
         materialMedida:        json['material']?['medida'],
@@ -69,6 +86,8 @@ class MovimentacaoModel {
         comprimentoUsado:      json['comprimentoUsado'] != null
             ? double.tryParse(json['comprimentoUsado'].toString())
             : null,
+        materialOrigemId:      (json['materialOrigemId'] as num?)?.toInt(),
+        materialOrigemNome:    json['materialOrigem']?['nome'],
       );
 }
 

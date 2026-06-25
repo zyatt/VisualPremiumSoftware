@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const path = require('path');
+
 require('dotenv').config();
 
 const app = express();
@@ -11,23 +13,28 @@ app.use(cors({ origin: '*' }));
 app.use(express.json());
 app.use(morgan('dev'));
 
-app.use('/auth',                  require('./routes/usuario.routes'));
-app.use('/api/usuarios',          require('./routes/usuario.routes'));
-app.use('/api/materiais',         require('./routes/material.routes'));
-app.use('/api/produtos',          require('./routes/produto.routes'));
-app.use('/api/fornecedores',      require('./routes/fornecedor.routes'));
-app.use('/api/orcamentos',        require('./routes/orcamento.routes'));
-app.use('/api/ordens-compra',     require('./routes/ordemCompra.routes'));
-app.use('/api/estoque',           require('./routes/estoque.routes'));
-app.use('/api/historico',         require('./routes/historico.routes'));
-app.use('/api/relatorios-os',     require('./routes/relatorioOS.routes'));
-app.use('/api/producao',          require('./routes/producao.routes'));
-app.use('/api/audit-log',         require('./routes/audit-log.routes'));
-app.use('/api/gastos-categoria',  require('./routes/gastos_categoria_route'));
-app.use('/api/alertas-estoque',   require('./routes/alertas_estoque_route'));
-app.use('/api/veiculos',          require('./routes/veiculo_route'));
-app.use('/api/orcamentos-venda',  require('./routes/orcamento_vendas.routes'));
-app.use('/api/configuracoes',     require('./routes/configuracao.routes'));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+app.use('/auth',                      require('./routes/usuario.routes'));
+app.use('/api/usuarios',              require('./routes/usuario.routes'));
+app.use('/api/materiais',             require('./routes/material.routes'));
+app.use('/api/produtos',              require('./routes/produto.routes'));
+app.use('/api/fornecedores',          require('./routes/fornecedor.routes'));
+app.use('/api/orcamentos',            require('./routes/orcamento.routes'));
+app.use('/api/ordens-compra',         require('./routes/ordemCompra.routes'));
+app.use('/api/estoque',               require('./routes/estoque.routes'));
+app.use('/api/historico',             require('./routes/historico.routes'));
+app.use('/api/relatorios-os',         require('./routes/relatorioOS.routes'));
+app.use('/api/producao',              require('./routes/producao.routes'));
+app.use('/api/audit-log',             require('./routes/audit-log.routes'));
+app.use('/api/gastos-categoria',      require('./routes/gastos_categoria_route'));
+app.use('/api/alertas-estoque',       require('./routes/alertas_estoque_route'));
+app.use('/api/veiculos',              require('./routes/veiculo_route'));
+app.use('/api/orcamentos-venda',      require('./routes/orcamento_vendas.routes'));
+app.use('/api/configuracoes',         require('./routes/configuracao.routes'));
+app.use('/api/solicitacoes-material', require('./routes/solicitacao_material.routes'));
+app.use('/api/estoque-temporario',    require('./routes/estoque_temporario.routes'));
+app.use('/api/chat',                  require('./routes/chat.routes'));
 
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 

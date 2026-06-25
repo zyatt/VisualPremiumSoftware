@@ -37,6 +37,42 @@ class MaterialRepository {
         .toList();
   }
 
+  /// GET /api/materiais/para-movimentacao
+  /// Igual a [listar] mas inclui materiais temporários ativos.
+  /// Usado exclusivamente no dialog de nova entrada/saída do controle de estoque.
+  Future<List<MaterialModel>> listarParaMovimentacao({
+    String? busca,
+    String? categoria,
+    String? id,
+    String? identificador,
+    String? medida,
+    String? espessura,
+  }) async {
+    final params = <String, String>{};
+    if (busca != null && busca.isNotEmpty)                 params['busca']         = busca;
+    if (id != null && id.isNotEmpty)                       params['id']            = id;
+    if (identificador != null && identificador.isNotEmpty) params['identificador'] = identificador;
+    if (medida != null && medida.isNotEmpty)               params['medida']        = medida;
+    if (espessura != null && espessura.isNotEmpty)         params['espessura']     = espessura;
+    if (categoria != null && categoria.isEmpty) {
+      params['semCategoria'] = 'true';
+    } else if (categoria != null && categoria.isNotEmpty) {
+      params['categoria'] = categoria;
+    }
+
+    final query = params.entries
+        .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+    final path = query.isEmpty
+        ? '/materiais/para-movimentacao'
+        : '/materiais/para-movimentacao?$query';
+
+    final list = await ApiClient.getList(path);
+    return list
+        .map((e) => MaterialModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<MaterialModel> buscarPorId(int id) async {
     final data = await ApiClient.get('/materiais/$id');
     return MaterialModel.fromJson(data);
@@ -75,6 +111,7 @@ class MaterialRepository {
     final data = await ApiClient.patch('/materiais/$id/reativar', {});
     return MaterialModel.fromJson(data);
   }
+
   /// Retorna o histórico de custos pagos via OC finalizada para o material.
   Future<List<HistoricoPrecoModel>> listarHistoricoPrecos(int materialId) async {
     final list = await ApiClient.getList('/materiais/$materialId/historico-precos');

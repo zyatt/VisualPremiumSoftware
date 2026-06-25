@@ -192,6 +192,11 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
           itensPorChave[materialId] = ItemOrcamentoData(
             materialId: materialId,
             materialNome: materialData?['nome'] as String? ?? '',
+            materialUnidade: materialData?['unidade'] as String?,
+            materialMedida: materialData?['medida'] as String?,
+            materialEspessura: materialData?['espessura'] as String?,
+            materialIdentificador: materialData?['identificador'] as String?,
+            materialCategoria: materialData?['categoria'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             precos: {},
             modoOrcamento: (item['usarM2'] as bool? ?? false)
@@ -211,6 +216,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
             precoM2: item['precoM2'] != null
                 ? double.tryParse(item['precoM2'].toString())
                 : null,
+            observacao: item['observacao'] as String?,
           );
 
           if (item['selecionado'] as bool? ?? false) {
@@ -249,6 +255,58 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
     }
   }
 
+
+  // ── Excluir orçamento (cancelado / rejeitado / convertido) ───────────────
+  Future<void> _excluirOrcamento(Map<String, dynamic> orc) async {
+    final id = orc['id'] as int;
+    final titulo = orc['titulo'] as String? ?? 'Orçamento #$id';
+
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir orçamento'),
+        content: Text(
+          'Tem certeza que deseja excluir "$titulo"?\n\nEsta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmado != true || !mounted) return;
+
+    setState(() => _carregando = true);
+    try {
+      await OrcamentoRepository().excluir(id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Orçamento "$titulo" excluído.'),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+      await _carregar();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_mensagemErro(e, acao: 'excluir orçamento')),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+        setState(() => _carregando = false);
+      }
+    }
+  }
 
   // ── PDF para orçamento convertido ────────────────────────────────────────
   Future<void> _exportarPdfConvertido(Map<String, dynamic> orc) async {
@@ -560,6 +618,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                                   _OrcamentoHistoricoCard(
                                 orcamento: orc,
                                 buscaMaterial: _buscaMaterial,
+                                onExcluir: () => _excluirOrcamento(orc),
                               ),
                             ),
 
@@ -576,6 +635,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                                   _OrcamentoHistoricoCard(
                                 orcamento: orc,
                                 buscaMaterial: _buscaMaterial,
+                                onExcluir: () => _excluirOrcamento(orc),
                               ),
                             ),
 
@@ -593,6 +653,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                                 orcamento: orc,
                                 buscaMaterial: _buscaMaterial,
                                 onVerPdf: () => _exportarPdfConvertido(orc),
+                                onExcluir: () => _excluirOrcamento(orc),
                               ),
                             ),
                           ],
@@ -685,12 +746,14 @@ class _OrcamentoHistoricoCard extends StatefulWidget {
   final Map<String, dynamic> orcamento;
   final VoidCallback? onReabrir;
   final VoidCallback? onVerPdf;
+  final VoidCallback? onExcluir;
   final String buscaMaterial;
 
   const _OrcamentoHistoricoCard({
     required this.orcamento,
     this.onReabrir,
     this.onVerPdf,
+    this.onExcluir,
     this.buscaMaterial = '',
   });
 
@@ -915,6 +978,25 @@ class _OrcamentoHistoricoCardState
                         side: const BorderSide(color: Color(0xFF0288D1)),
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 8),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  // Botão excluir (cancelados, rejeitados, convertidos)
+                  if (widget.onExcluir != null) ...[
+                    IconButton(
+                      onPressed: widget.onExcluir,
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      tooltip: 'Excluir orçamento',
+                      style: IconButton.styleFrom(
+                        foregroundColor: AppTheme.error,
+                        backgroundColor:
+                            AppTheme.error.withValues(alpha: 0.08),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        side: BorderSide(
+                            color: AppTheme.error.withValues(alpha: 0.25)),
+                        padding: const EdgeInsets.all(8),
                       ),
                     ),
                     const SizedBox(width: 8),

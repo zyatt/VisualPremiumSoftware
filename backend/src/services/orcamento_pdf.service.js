@@ -591,7 +591,7 @@ async function gerarPdfDeItens(dados) {
       const FORN_ABS   = 50;
 
       // Passo 1: tamanhos ideais
-      let mat    = 150;
+      let mat    = 170;
       let qtd    = 48;
       let melhor = 80;
       let forn   = nForn > 0 ? (contentW - mat - qtd - melhor) / nForn : FORN_IDEAL;
@@ -636,7 +636,7 @@ async function gerarPdfDeItens(dados) {
     const xForn   = (i) => xQtd + COL_QTD + i * COL_FORN;
     const xMelhor = xQtd + COL_QTD + nForn * COL_FORN;
 
-    const ROW_H      = 34;
+    const ROW_H      = 42;
     const HDR_H      = 30;
     const TOTAL_H    = 26;
     const SUGEST_H   = 28;
@@ -823,7 +823,7 @@ async function gerarPdfDeItens(dados) {
         if (iIdx % 2 === 0) fillR(margin, y, contentW, rowH, C.bgRow);
 
         const tyCtr = y + (rowH - FONT_SZ) / 2;
-        const tyTop = y + 6;
+        const tyTop = y + 8;
 
         // ── Coluna Material ────────────────────────────────────────────
         doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
@@ -894,9 +894,24 @@ async function gerarPdfDeItens(dados) {
                  .fillColor(isMen ? '#15803D' : C.gray)
                  .text(formatCurrency(total), x + 4, precoY + 9, { width: COL_FORN - 8, align: 'center', lineBreak: false });
             }
+
+            // Observação de disponibilidade
+            if (pf.observacao) {
+              const obsY = precoY + 18;
+              doc.font('Helvetica').fontSize(Math.max(4, fornFontSz - 1.5))
+                 .fillColor(C.statusWarn)
+                 .text(pf.observacao, x + 4, obsY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+            }
           } else {
             doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 0.5)).fillColor(C.lightGray)
-               .text('sem preço', x + 4, tyCtr, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+               .text('sem preço', x + 4, tyCtr - 4, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+
+            // Observação mesmo sem preço
+            if (pf.observacao) {
+              doc.font('Helvetica').fontSize(Math.max(4, fornFontSz - 1.5))
+                 .fillColor(C.statusWarn)
+                 .text(pf.observacao, x + 4, tyCtr + 5, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+            }
           }
         });
 

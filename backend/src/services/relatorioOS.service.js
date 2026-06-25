@@ -5,6 +5,7 @@ const _includeCompleto = {
   movimentacoes: {
     include: {
       material: { select: { id: true, nome: true, unidade: true, categoria: true, identificador: true, medida: true, espessura: true } },
+      materialOrigem: { select: { id: true, nome: true } },
     },
     orderBy: { criadoEm: 'asc' },
   },
@@ -81,6 +82,7 @@ async function listar({ busca, materialId, materialNome, materialIdentificador, 
         where: whereMovimentacoesInclude,
         include: {
           material: { select: { id: true, nome: true, unidade: true, categoria: true, identificador: true, medida: true, espessura: true } },
+          materialOrigem: { select: { id: true, nome: true } },
         },
         orderBy: { criadoEm: 'desc' },
       },
@@ -130,7 +132,16 @@ async function dadosParaPDF(numeroOS) {
   // entradas que ocorreram APÓS a primeira saída do material sejam contadas
   // como devoluções (redutoras de custo). Entradas anteriores à primeira saída
   // são ignoradas no cálculo — eram movimentações independentes de estoque.
-  const porMaterial = new Map(); // materialId → { preco, qtdSaida, qtdEntrada }
+  //
+  // Devoluções de RETALHO são um caso especial: a entrada é registrada num
+  // material diferente do que saiu (ex.: saiu "CHAPA" em UNIDADE, voltou
+  // "CHAPA - RETALHO" em M²), então não compartilham o mesmo materialId.
+  // O vínculo é feito via materialOrigemId, que aponta para o materialId
+  // consumido na saída original. Nesses casos abate-se o VALOR (R$) da
+  // entrada de retalho diretamente do total da saída original, já que as
+  // quantidades estão em unidades diferentes e não podem ser subtraídas
+  // diretamente.
+  const porMaterial = new Map(); // materialId → { preco, qtdSaida, qtdEntrada, valorRetalho }
 
   // Ordena todas as movimentações por criadoEm (mais antiga primeiro)
   const todasOrdenadas = [...relacao.movimentacoes].sort(
@@ -142,7 +153,7 @@ async function dadosParaPDF(numeroOS) {
 
     if (m.tipo === 'SAIDA') {
       if (!porMaterial.has(id)) {
-        porMaterial.set(id, { preco: _precoMov(m), qtdSaida: 0, qtdEntrada: 0 });
+        porMaterial.set(id, { preco: _precoMov(m), qtdSaida: 0, qtdEntrada: 0, valorRetalho: 0 });
       }
       const entry = porMaterial.get(id);
       // Caso haja múltiplas saídas com preços diferentes, usa o maior preço
@@ -150,6 +161,14 @@ async function dadosParaPDF(numeroOS) {
       entry.qtdSaida += Number(m.quantidade);
 
     } else if (m.tipo === 'ENTRADA') {
+      // Entrada de retalho vinculada a um material de origem: abate o VALOR
+      // (não a quantidade, pois unidade/material são diferentes) do total
+      // da saída original, desde que essa saída exista nesta OS.
+      if (m.materialOrigemId != null && porMaterial.has(m.materialOrigemId)) {
+        porMaterial.get(m.materialOrigemId).valorRetalho += _precoMov(m) * Number(m.quantidade);
+        continue;
+      }
+
       // Entradas via OC são reposição de estoque, não devoluções — ignorar.
       const isEntradaOC =
         (m.observacao   && m.observacao.includes('via OC')) ||
@@ -163,9 +182,11 @@ async function dadosParaPDF(numeroOS) {
     }
   }
 
-  const totalGeral = Array.from(porMaterial.values()).reduce((acc, { preco, qtdSaida, qtdEntrada }) => {
-    const qtdLiquida = Math.max(0, qtdSaida - qtdEntrada);
-    return acc + preco * qtdLiquida;
+  const totalGeral = Array.from(porMaterial.values()).reduce((acc, { preco, qtdSaida, qtdEntrada, valorRetalho }) => {
+    const qtdLiquida   = Math.max(0, qtdSaida - qtdEntrada);
+    const valorBruto   = preco * qtdLiquida;
+    const valorLiquido = Math.max(0, valorBruto - valorRetalho);
+    return acc + valorLiquido;
   }, 0);
 
   const _mapItem = (m) => {
@@ -186,6 +207,8 @@ async function dadosParaPDF(numeroOS) {
       total:         Number(m.quantidade) * preco,
       data:          m.criadoEm,
       observacao:    m.observacao,
+      materialOrigemId:   m.materialOrigemId   ?? null,
+      materialOrigemNome: m.materialOrigem?.nome ?? null,
     };
   };
 

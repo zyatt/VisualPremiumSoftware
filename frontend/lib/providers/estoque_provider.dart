@@ -90,6 +90,7 @@ class EstoqueProvider extends ChangeNotifier {
     int? ordemCompraId,
     double? larguraUsada,
     double? comprimentoUsado,
+    int? materialOrigemId,
   }) async {
     try {
       await _repo.registrarMovimentacao(
@@ -103,6 +104,7 @@ class EstoqueProvider extends ChangeNotifier {
         ordemCompraId:    ordemCompraId,
         larguraUsada:     larguraUsada,
         comprimentoUsado: comprimentoUsado,
+        materialOrigemId: materialOrigemId,
       );
       await carregarRelacoesOS();
       return true;
@@ -128,6 +130,7 @@ class EstoqueProvider extends ChangeNotifier {
     int? ordemCompraId,
     double? larguraUsada,
     double? comprimentoUsado,
+    int? materialOrigemId,
   }) async {
     try {
       await _repo.registrarMovimentacao(
@@ -141,6 +144,7 @@ class EstoqueProvider extends ChangeNotifier {
         ordemCompraId:    ordemCompraId,
         larguraUsada:     larguraUsada,
         comprimentoUsado: comprimentoUsado,
+        materialOrigemId: materialOrigemId,
       );
       return true;
     } catch (e) {

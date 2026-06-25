@@ -23,6 +23,18 @@ String _fmtData(DateTime? dt) {
 String _fmtQtd(double q) =>
     q % 1 == 0 ? q.toStringAsFixed(0) : q.toStringAsFixed(2);
 
+// Formata custo unitário com até 6 casas decimais, removendo zeros finais
+String _fmtCusto(double v) {
+  // Tenta de 2 a 6 casas, usa o mínimo que representa o valor fielmente
+  for (int casas = 2; casas <= 6; casas++) {
+    final s = v.toStringAsFixed(casas);
+    if (double.parse(s) == double.parse(v.toStringAsFixed(6))) {
+      return s.replaceAll('.', ',');
+    }
+  }
+  return v.toStringAsFixed(6).replaceAll('.', ',');
+}
+
 const _corGasto    = Color(0xFFE53935);
 const _corEstoque  = Color(0xFF1E88E5);
 const _corVeiculo  = Color(0xFFF4511E);
@@ -915,8 +927,26 @@ class _LinhaEstoque extends StatelessWidget {
         : temCustoM2
             ? m.ultimoValorPagoM2!
             : null;
-    final sufixoCusto =
-        (!temCustoUnit && temCustoM2) ? '/m²' : '';
+
+    // Sufixo da unidade para o custo unitário
+    String sufixoCusto;
+    if (!temCustoUnit && temCustoM2) {
+      sufixoCusto = '/m²';
+    } else if (temCustoUnit) {
+      final unidUpper = (m.unidade ?? '').trim().toUpperCase();
+      sufixoCusto = switch (unidUpper) {
+        'ML'                                         => '/ml',
+        'KG'                                         => '/kg',
+        'G' || 'GRAMA' || 'GRAMAS'                  => '/g',
+        'M' || 'METRO' || 'METROS'                  => '/m',
+        'CM' || 'CENTIMETRO' || 'CENTIMETROS'        => '/cm',
+        'L' || 'LITRO' || 'LITROS'                  => '/l',
+        'UNIDADE' || 'UN' || 'UND' || 'PÇ' || 'PC' => '/un',
+        _                                            => '',
+      };
+    } else {
+      sufixoCusto = '';
+    }
 
     return Column(
       children: [
@@ -963,7 +993,7 @@ class _LinhaEstoque extends StatelessWidget {
                 width: 90,
                 child: Text(
                   custo != null
-                      ? 'R\$ ${custo.toStringAsFixed(2).replaceAll('.', ',')}$sufixoCusto'
+                      ? 'R\$ ${_fmtCusto(custo)}$sufixoCusto'
                       : '—',
                   textAlign: TextAlign.right,
                   style: TextStyle(

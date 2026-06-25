@@ -3,6 +3,7 @@ import 'package:visual_premium/providers/orcamento_provider.dart';
 import '../models/usuario_model.dart';
 import '../repositories/usuario_repository.dart';
 import '../utils/api_client.dart';
+import 'solicitacao_material_provider.dart';
 
 /// Converte exceções técnicas (SocketException, ClientException, TimeoutException
 /// etc.) em uma mensagem amigável para o usuário. Mensagens de erro vindas do
@@ -25,8 +26,11 @@ String _mensagemErro(Object e) {
 class UsuarioProvider extends ChangeNotifier {
   final UsuarioRepository _repo = UsuarioRepository();
   OrcamentoProvider? _orcamentoProvider;
+  SolicitacaoMaterialProvider? _solicitacaoMaterialProvider;
 
   void setOrcamentoProvider(OrcamentoProvider p) => _orcamentoProvider = p;
+  void setSolicitacaoMaterialProvider(SolicitacaoMaterialProvider p) =>
+      _solicitacaoMaterialProvider = p;
 
   UsuarioModel? _usuarioLogado;
   UsuarioModel? get usuarioLogado => _usuarioLogado;
@@ -81,6 +85,9 @@ class UsuarioProvider extends ChangeNotifier {
     _erro       = null;
     notifyListeners();
     try {
+      // Garante que não existe SSE/estado residual de uma sessão anterior
+      // antes de autenticar o novo usuário.
+      await _solicitacaoMaterialProvider?.resetarConexao();
       final result   = await _repo.login(username, senha);
       _token         = result.token;
       _usuarioLogado = result.usuario;
@@ -102,6 +109,9 @@ class UsuarioProvider extends ChangeNotifier {
     ApiClient.setToken(null);
     await _repo.limparSessao();
     _orcamentoProvider?.trocarUsuario(null);
+    // Encerra a conexão SSE e zera o estado de solicitações do usuário que
+    // saiu, para que o próximo usuário a logar comece do zero.
+    await _solicitacaoMaterialProvider?.resetarConexao();
     notifyListeners();
   }
 }

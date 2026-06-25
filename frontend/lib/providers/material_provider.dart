@@ -207,10 +207,37 @@ class MaterialProvider extends ChangeNotifier {
 
   /// Busca rápida para autocomplete — retorna até [limite] materiais sem
   /// alterar o estado da lista principal nem disparar notifyListeners.
+  /// Usa o endpoint padrão (/materiais), que NÃO inclui temporários.
   Future<List<MaterialModel>> buscarSugestoes(String busca, {int limite = 10, bool apenasAtivos = false}) async {
     try {
       final lista = await _repo.listar(busca: busca, ativo: apenasAtivos ? true : null);
       return lista.take(limite).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Busca materiais para o dialog de nova entrada/saída do controle de estoque.
+  /// Diferente de [buscarSugestoes], usa o endpoint /para-movimentacao que
+  /// inclui materiais temporários ativos junto com os normais.
+  /// Não altera o estado da lista principal nem dispara notifyListeners.
+  Future<List<MaterialModel>> buscarParaMovimentacao({
+    String busca = '',
+    String? categoria,
+    String id = '',
+    String identificador = '',
+    String medida = '',
+    String espessura = '',
+  }) async {
+    try {
+      return await _repo.listarParaMovimentacao(
+        busca:         busca.isEmpty         ? null : busca,
+        id:            id.isEmpty            ? null : id,
+        identificador: identificador.isEmpty ? null : identificador,
+        medida:        medida.isEmpty        ? null : medida,
+        espessura:     espessura.isEmpty     ? null : espessura,
+        categoria:     categoria,
+      );
     } catch (_) {
       return [];
     }

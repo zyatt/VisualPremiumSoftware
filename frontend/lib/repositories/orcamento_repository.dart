@@ -69,6 +69,13 @@ class OrcamentoRepository {
     return ApiClient.patch('/orcamentos/$id/cancelar');
   }
 
+  // ── Excluir permanentemente ───────────────────────────────────────────────
+  // Permitido apenas para: CANCELADO, NAO_APROVADO, CONVERTIDO.
+
+  Future<void> excluir(int id) async {
+    await ApiClient.delete('/orcamentos/$id');
+  }
+
   // ── Enviar para aprovação ─────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> enviarParaAprovacao(int id) async {

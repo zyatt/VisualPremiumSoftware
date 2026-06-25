@@ -1814,6 +1814,13 @@ class _MaterialGridCard extends StatefulWidget {
 class _MaterialGridCardState extends State<_MaterialGridCard> {
   MovimentacaoModel get _primeira => widget.movimentacoes.first;
 
+  /// True quando o material desta movimentação foi excluído do cadastro.
+  /// Ações que dependem do cadastro (nova movimentação, retalho, atualizar custo)
+  /// ficam desabilitadas para evitar erros.
+  bool get _materialFoiExcluido =>
+      _primeira.materialNome == '(material excluído)' ||
+      _primeira.materialNome.isEmpty;
+
   String get _subtitulo {
     final partes = <String>[
       if ((_primeira.materialIdentificador ?? '').isNotEmpty)
@@ -1841,6 +1848,13 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       '${dt.minute.toString().padLeft(2, '0')}';
 
   void _abrirMovimentacao(BuildContext context, String tipo) {
+    if (_materialFoiExcluido) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Material excluído — não é possível registrar novas movimentações.'),
+        backgroundColor: AppTheme.warning,
+      ));
+      return;
+    }
     // Busca último preço registrado nas movimentações desta OS,
     // ou recorre ao último valor pago do material.
     final ultimaMovOS = widget.movimentacoes
@@ -1950,6 +1964,13 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
 
   // ── Atualizar custo da última compra em todas as movimentações do card ──────
   Future<void> _abrirAtualizarCusto(BuildContext context) async {
+    if (_materialFoiExcluido) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Material excluído — não é possível atualizar o custo.'),
+        backgroundColor: AppTheme.warning,
+      ));
+      return;
+    }
     final materialProvider = context.read<MaterialProvider>();
     final estoqueProvider  = context.read<EstoqueProvider>();
     final messenger        = ScaffoldMessenger.of(context);
@@ -2116,6 +2137,416 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
         backgroundColor: falhas == 0 ? AppTheme.success : AppTheme.error,
       ),
     );
+  }
+
+  Future<void> _abrirReentradaRetalho(BuildContext context) async {
+    if (_materialFoiExcluido) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Material excluído — não é possível criar reentrada de retalho.'),
+        backgroundColor: AppTheme.warning,
+      ));
+      return;
+    }
+    final material = _primeira;
+
+    final messenger       = ScaffoldMessenger.of(context);
+    final estoqueProvider = context.read<EstoqueProvider>();
+    final materialProvider = context.read<MaterialProvider>();
+
+    // Busca dados do material (dimensões e custo m²)
+    final mat = await materialProvider.buscarPorId(material.materialId);
+    if (!context.mounted) return;
+
+    final largura     = mat?.largura;
+    final comprimento = mat?.comprimento;
+
+    // Se não há dimensões, não é possível calcular área — avisa e sai.
+    if (largura == null || comprimento == null || largura <= 0 || comprimento <= 0) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text(
+          'Este material não tem largura/comprimento cadastrados. '
+          'Cadastre as dimensões para usar a reentrada de retalho.',
+        ),
+        backgroundColor: AppTheme.warning,
+      ));
+      return;
+    }
+
+    // Custo m²: prioriza o valor real das movimentações de saída desta OS
+    // (para refletir o custo que foi realmente lançado), com fallback no
+    // cadastro do material.
+    final custoM2 = () {
+      // Pega o precoM2 da movimentação de saída mais recente que tenha valor
+      final ultimaSaidaComPreco = widget.movimentacoes
+          .where((m) => m.tipo == 'SAIDA' && m.precoM2 != null && m.precoM2! > 0)
+          .fold<MovimentacaoModel?>(
+              null,
+              (prev, m) => prev == null || m.criadoEm.isAfter(prev.criadoEm) ? m : prev);
+      if (ultimaSaidaComPreco != null) {
+        // precoM2 nas saídas com modo dimensional é o custo proporcional da área
+        // usada (não o custo/m²). Recalculamos o custo/m² dividindo pela área usada.
+        if (ultimaSaidaComPreco.usouModoDimensional) {
+          final lu = ultimaSaidaComPreco.larguraUsada!;
+          final cu = ultimaSaidaComPreco.comprimentoUsado!;
+          final area = lu * cu;
+          return area > 0 ? ultimaSaidaComPreco.precoM2! / area : mat?.ultimoValorPagoM2;
+        }
+        return ultimaSaidaComPreco.precoM2;
+      }
+      // Fallback: custo unitário ÷ área da chapa
+      if (mat?.ultimoValorPago != null && mat!.ultimoValorPago! > 0) {
+        final areaChapa = largura * comprimento;
+        return areaChapa > 0 ? mat.ultimoValorPago! / areaChapa : null;
+      }
+      return mat?.ultimoValorPagoM2;
+    }();
+
+    final areaUnitaria = largura * comprimento;
+
+    // Calcula área total das saídas desta OS para este material
+    final totalSaidasUnid = widget.movimentacoes
+        .where((m) => m.tipo == 'SAIDA')
+        .fold<double>(0, (s, m) => s + m.quantidade);
+
+    final areaTotalSaida = totalSaidasUnid * areaUnitaria;
+
+    // Custo total registrado nas saídas desta OS (soma dos precoUnitario ou
+    // precoM2 reais de cada movimentação, independente do custo/m² atual).
+    final custoTotalSaidas = widget.movimentacoes
+        .where((m) => m.tipo == 'SAIDA')
+        .fold<double>(0, (s, m) {
+          if (m.usouModoDimensional && m.precoM2 != null) {
+            // precoM2 aqui já é o custo proporcional total da área usada
+            return s + m.precoM2!;
+          }
+          if (m.precoUnitario != null && m.precoUnitario! > 0) {
+            return s + m.precoUnitario! * m.quantidade;
+          }
+          if (m.precoM2 != null && m.precoM2! > 0) {
+            return s + m.precoM2! * m.quantidade;
+          }
+          return s;
+        });
+
+    final m2Ctrl = TextEditingController();
+
+    String fmt6(double v) => _brl6(v);
+    String fmtQtd(double v) =>
+        v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(4);
+
+    final resultado = await showDialog<double>(
+      context: context,
+      builder: (dlgCtx) => StatefulBuilder(
+        builder: (dlgCtx, setDlg) {
+          final m2TextoRaw = m2Ctrl.text.replaceAll(',', '.');
+          final m2Retalho  = double.tryParse(m2TextoRaw);
+
+          // M² líquido = total saído − retalho de volta (mín. 0)
+          final liquidoM2 = (m2Retalho != null && m2Retalho > 0)
+              ? (areaTotalSaida - m2Retalho).clamp(0.0, double.infinity).toDouble()
+              : null;
+
+          // Custo líquido proporcional: custoTotal × (liquidoM2 / areaTotalSaida)
+          final custoLiquido = (liquidoM2 != null && areaTotalSaida > 0 && custoTotalSaidas > 0)
+              ? custoTotalSaidas * (liquidoM2 / areaTotalSaida)
+              : (liquidoM2 != null && custoM2 != null && custoM2 > 0)
+                  ? liquidoM2 * custoM2
+                  : null;
+
+          return AlertDialog(
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.success.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.content_cut, color: AppTheme.success, size: 20),
+                ),
+                const SizedBox(width: 12),
+                const Text('Reentrada de Retalho'),
+              ],
+            ),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    material.materialNome,
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                  ),
+                  if ((material.materialEspessura ?? '').isNotEmpty)
+                    Text(
+                      material.materialEspessura!,
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    ),
+                  const SizedBox(height: 12),
+
+                  // ── Resumo das saídas ──────────────────────────────────────
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.error.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppTheme.error.withValues(alpha: 0.2)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Total saído nesta OS',
+                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${fmtQtd(totalSaidasUnid)} unid. '
+                          '× ${fmtQtd(areaUnitaria)} m²/unid. '
+                          '= ${fmtQtd(areaTotalSaida)} m²',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.error,
+                          ),
+                        ),
+                        if (custoTotalSaidas > 0) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'Custo total registrado: ${fmt6(custoTotalSaidas)}',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                          ),
+                        ] else if (custoM2 != null && custoM2 > 0) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'Custo m²: ${fmt6(custoM2)}',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: m2Ctrl,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_DecimalInputFormatter()],
+                    decoration: const InputDecoration(
+                      labelText: 'M² de retalho que sobrou *',
+                      suffixText: 'm²',
+                      isDense: true,
+                    ),
+                    onChanged: (_) => setDlg(() {}),
+                  ),
+
+                  // ── Preview do cálculo líquido ─────────────────────────────
+                  if (liquidoM2 != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.22)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'M² realmente utilizado nesta OS',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${fmtQtd(areaTotalSaida)} m² − ${fmtQtd(m2Retalho!)} m² '
+                            '= ${fmtQtd(liquidoM2)} m²',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                          if (custoLiquido != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              'Custo líquido no relatório: ${fmt6(custoLiquido)}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.success.withValues(alpha: 0.07),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppTheme.success.withValues(alpha: 0.25)),
+                    ),
+                    child: Text(
+                      'Será criado (ou somado ao existente) um material '
+                      '"${material.materialNome}" com unidade M² '
+                      'e a quantidade informada será adicionada ao estoque dele.',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dlgCtx).pop(),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: m2Retalho == null || m2Retalho <= 0
+                    ? null
+                    : () => Navigator.of(dlgCtx).pop(m2Retalho),
+                icon: const Icon(Icons.content_cut, size: 16),
+                label: const Text('Confirmar Reentrada'),
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.success),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (resultado == null || resultado <= 0) return;
+    if (!context.mounted) return;
+
+    final m2Retalho = resultado;
+
+    // ── Busca ou cria o material RETALHO ──────────────────────────────────────
+    // Nome padrão: usa literalmente o nome do material original (sem sufixo).
+    // Mesma espessura e categoria, unidade M², identificador RETALHO,
+    // custo/m² do original.
+
+    final nomeRetalho = material.materialNome;
+    final espessura   = material.materialEspessura;
+    final categoria   = mat?.categoria;
+
+    // Tenta encontrar o retalho existente pelo nome + espessura + identificador
+    final sugestoes = await materialProvider.buscarSugestoes(
+      nomeRetalho,
+      limite: 20,
+      apenasAtivos: true,
+    );
+    if (!context.mounted) return;
+
+    MaterialModel? retalhoExistente;
+    for (final s in sugestoes) {
+      final nomeNorm   = _normalizarTextoComparacaoCE(s.nome);
+      final nomeAlvo   = _normalizarTextoComparacaoCE(nomeRetalho);
+      final mesmoIdent = (s.identificador?.toUpperCase() ?? '') == 'RETALHO';
+      final mesmaEsp   = espessura == null ||
+          espessura.isEmpty ||
+          _normalizarTextoComparacaoCE(s.espessura) ==
+              _normalizarTextoComparacaoCE(espessura);
+      if (nomeNorm == nomeAlvo && mesmoIdent && mesmaEsp) {
+        retalhoExistente = s;
+        break;
+      }
+    }
+
+    int retalhoMaterialId;
+
+    if (retalhoExistente != null) {
+      retalhoMaterialId = retalhoExistente.id;
+    } else {
+      // Cria o material RETALHO
+      final ok = await materialProvider.criar({
+        'nome':              nomeRetalho,
+        'identificador':     'RETALHO',
+        'unidade':           'M²',
+        'categoria':         categoria,
+        'espessura':         espessura,
+        'quantidade':        0.0,
+        'estoqueMinimo':     0.0,
+        'estoqueConfirmado': false,
+        if (custoM2 != null && custoM2 > 0) 'ultimoValorPagoM2': custoM2,
+      });
+      if (!context.mounted) return;
+      if (!ok) {
+        messenger.showSnackBar(SnackBar(
+          content: Text(materialProvider.erro ?? 'Erro ao criar material "$nomeRetalho"'),
+          backgroundColor: AppTheme.error,
+        ));
+        return;
+      }
+      // Busca o material recém-criado
+      final lista = await materialProvider.buscarSugestoes(nomeRetalho, limite: 5);
+      if (!context.mounted) return;
+      final criado = lista.firstWhere(
+        (s) =>
+            _normalizarTextoComparacaoCE(s.nome) ==
+                _normalizarTextoComparacaoCE(nomeRetalho) &&
+            (s.identificador?.toUpperCase() ?? '') == 'RETALHO',
+        orElse: () => lista.first,
+      );
+      retalhoMaterialId = criado.id;
+    }
+
+    // ── Custo proporcional do retalho ─────────────────────────────────────────
+    // precoM2 na entrada do RETALHO = custo/m² do material original,
+    // de forma que: quantidade(m²) × precoM2 = custo proporcional no relatório.
+    final custoM2Retalho = custoM2;
+
+    // ── Registra ENTRADA do retalho vinculada a esta OS ───────────────────────
+    final entradaOk = await estoqueProvider.registrarMovimentacaoSilencioso(
+      materialId:       retalhoMaterialId,
+      tipo:             'ENTRADA',
+      quantidade:       m2Retalho,
+      numeroOS:         widget.numeroOS,
+      precoUnitario:    null,
+      precoM2:          custoM2Retalho,
+      observacao:       'Retalho de ${material.materialNome}',
+      materialOrigemId: material.materialId,
+    );
+    if (!context.mounted) return;
+
+    if (!entradaOk) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(estoqueProvider.erro ?? 'Erro ao registrar reentrada'),
+        backgroundColor: AppTheme.error,
+      ));
+      return;
+    }
+
+    // Recarrega a OS para refletir a nova movimentação
+    await estoqueProvider.carregarRelacoesOS();
+    if (!context.mounted) return;
+    await estoqueProvider.selecionarRelacaoOS(widget.numeroOS);
+    if (!context.mounted) return;
+
+    // Custo líquido final para o snackbar (mesmo cálculo do preview)
+    final liquidoM2Final = (areaTotalSaida - m2Retalho).clamp(0.0, double.infinity).toDouble();
+    final custoLiquidoFinal = custoTotalSaidas > 0 && areaTotalSaida > 0
+        ? custoTotalSaidas * (liquidoM2Final / areaTotalSaida)
+        : (custoM2 != null && custoM2 > 0 ? liquidoM2Final * custoM2 : null);
+
+    messenger.showSnackBar(SnackBar(
+      content: Text(
+        custoLiquidoFinal != null
+            ? 'Retalho registrado. Líquido utilizado: ${liquidoM2Final.toStringAsFixed(4)} m²'
+              ' — Custo: ${_brl6(custoLiquidoFinal)}'
+            : 'Retalho registrado. M² líquido utilizado: ${liquidoM2Final.toStringAsFixed(4)} m²',
+      ),
+      backgroundColor: AppTheme.success,
+    ));
   }
 
   @override
@@ -2347,6 +2778,28 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                           ),
                         ),
                       ),
+                      // ── Reentrada de Retalho (só para UNIDADE) ───────────────────────────
+                      // A verificação de dimensão (largura × comprimento) é feita
+                      // dentro de _abrirReentradaRetalho, com feedback adequado ao usuário.
+                      if (_primeira.materialUnidade?.toUpperCase() == 'UNIDADE')
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(ctx).pop();
+                              _abrirReentradaRetalho(context);
+                            },
+                            icon: const Icon(Icons.content_cut, size: 16, color: AppTheme.success),
+                            label: const Text(
+                              'Reentrada de Retalho',
+                              style: TextStyle(color: AppTheme.success),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: AppTheme.success),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: 16),
                     ] else ...[
                       Container(
@@ -3245,20 +3698,22 @@ class _MovimentacaoGlobalDialogState
       _buscouUmaVez = true;
     });
     try {
-      final provider = context.read<MaterialProvider>();
-      await provider.carregar(
+      // Usa buscarParaMovimentacao em vez de carregar() por dois motivos:
+      // 1. Não polui o estado global do MaterialProvider (sem notifyListeners).
+      // 2. Inclui materiais temporários ativos, que devem aparecer aqui mas
+      //    não no catálogo padrão de materiais.
+      final lista = await context.read<MaterialProvider>().buscarParaMovimentacao(
         busca:         _nomeCtrl.text.trim(),
         id:            _idCtrl.text.trim(),
         identificador: _identificadorCtrl.text.trim(),
         medida:        _medidaCtrl.text.trim(),
         espessura:     _espessuraCtrl.text.trim(),
         categoria:     _categoriaFiltro,
-        status:        '',
       );
       if (mounted) {
         setState(() {
-          _resultados = provider.materiais.where((m) => m.ativo).toList();
-          _buscando = false;
+          _resultados = lista; // backend já filtra ativo=true
+          _buscando   = false;
         });
       }
     } catch (_) {
@@ -3808,6 +4263,10 @@ class _MovimentacaoGlobalDialogState
   }
 }
 
+// Alias público — permite importar via `show MaterialFormDialog` em outras páginas.
+// ignore: camel_case_types
+typedef MaterialFormDialog = _CadastroMaterialDialog;
+
 class _CadastroMaterialDialog extends StatefulWidget {
   const _CadastroMaterialDialog();
 
@@ -3819,6 +4278,9 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
   final _formKey = GlobalKey<FormState>();
   bool _salvando = false;
   String? _erroDialog;
+
+  // ── Modo Retalho ──────────────────────────────────────────────────────
+  bool _modoRetalho = false;
 
   // ── Detecção de possível material duplicado ───────────────────────────
   Timer? _debounceDuplicata;
@@ -3938,23 +4400,48 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     });
   }
 
+  void _ativarModoRetalho() {
+    setState(() {
+      _modoRetalho = true;
+      _identificador.text = 'RETALHO';
+      _unidade = 'M²';
+      _medida.clear();
+      _largura.clear();
+      _comprimento.clear();
+      _estoqueMinimo.text = '0';
+    });
+  }
+
+  void _desativarModoRetalho() {
+    setState(() {
+      _modoRetalho = false;
+      _identificador.clear();
+      _unidade = null;
+    });
+  }
+
   Future<void> _salvar() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() { _salvando = true; _erroDialog = null; });
+
+    final custoValor = _custoCtrl.text.trim().isEmpty
+        ? null
+        : double.tryParse(_custoCtrl.text.trim().replaceAll(',', '.'));
 
     final dados = {
       'nome':          _nome.text.trim(),
       'identificador': _identificador.text.trim().isEmpty ? null : _identificador.text.trim(),
       'unidade':       (_unidade == null || _unidade!.isEmpty) ? null : _unidade,
       'categoria':     _categoria.text.trim().isEmpty ? null : _categoria.text.trim(),
-      'medida':        _medida.text.trim().isEmpty ? null : _medida.text.trim(),
+      'medida':        _modoRetalho ? null : (_medida.text.trim().isEmpty ? null : _medida.text.trim()),
       'espessura':     _espessura.text.trim().isEmpty ? null : _espessura.text.trim(),
-      'largura':       _largura.text.trim().isEmpty ? null : double.tryParse(_largura.text.trim()),
-      'comprimento':   _comprimento.text.trim().isEmpty ? null : double.tryParse(_comprimento.text.trim()),
+      'largura':       _modoRetalho ? null : (_largura.text.trim().isEmpty ? null : double.tryParse(_largura.text.trim())),
+      'comprimento':   _modoRetalho ? null : (_comprimento.text.trim().isEmpty ? null : double.tryParse(_comprimento.text.trim())),
       'quantidade':    0.0,
-      'estoqueMinimo': double.tryParse(_estoqueMinimo.text) ?? 0,
+      'estoqueMinimo': _modoRetalho ? 0.0 : (double.tryParse(_estoqueMinimo.text) ?? 0),
       'estoqueConfirmado': false,
-      'ultimoValorPago': _custoCtrl.text.trim().isEmpty ? null : double.tryParse(_custoCtrl.text.trim().replaceAll(',', '.')),
+      if (_modoRetalho) 'ultimoValorPagoM2': custoValor
+      else 'ultimoValorPago': custoValor,
     };
 
     final provider = context.read<MaterialProvider>();
@@ -3992,6 +4479,55 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                   Text(
                     'Cadastrar Material',
                     style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(width: 12),
+                  // ── Atalho RETALHO ────────────────────────────────────
+                  GestureDetector(
+                    onTap: _modoRetalho ? _desativarModoRetalho : _ativarModoRetalho,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: _modoRetalho
+                            ? AppTheme.primary.withValues(alpha: 0.15)
+                            : Theme.of(context).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: _modoRetalho
+                              ? AppTheme.primary
+                              : Theme.of(context).colorScheme.outlineVariant,
+                          width: _modoRetalho ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.content_cut,
+                            size: 13,
+                            color: _modoRetalho
+                                ? AppTheme.primary
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            'RETALHO',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                              color: _modoRetalho
+                                  ? AppTheme.primary
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          if (_modoRetalho) ...[
+                            const SizedBox(width: 4),
+                            Icon(Icons.check_circle, size: 13, color: AppTheme.primary),
+                          ],
+                        ],
+                      ),
+                    ),
                   ),
                   const Spacer(),
                   IconButton(
@@ -4057,8 +4593,15 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                       const SizedBox(height: 10),
                       TextFormField(
                         controller: _identificador,
-                        decoration: const InputDecoration(
+                        readOnly: _modoRetalho,
+                        decoration: InputDecoration(
                           labelText: 'Identificador',
+                          suffixIcon: _modoRetalho
+                              ? const Tooltip(
+                                  message: 'Bloqueado no modo Retalho',
+                                  child: Icon(Icons.lock_outline, size: 16),
+                                )
+                              : null,
                         ),
                         textCapitalization: TextCapitalization.characters,
                         inputFormatters: [_UpperCaseFormatter()],
@@ -4075,21 +4618,32 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _unidade,
-                            decoration: const InputDecoration(labelText: 'Unidade'),
-                            items: const [
-                              DropdownMenuItem(value: null,      child: Text('— Nenhuma —')),
-                              DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE')),
-                              DropdownMenuItem(value: 'M/L',     child: Text('M/L')),
-                              DropdownMenuItem(value: 'M',       child: Text('M')),
-                              DropdownMenuItem(value: 'ML',      child: Text('ML')),
-                              DropdownMenuItem(value: 'M²',      child: Text('M²')),
-                              DropdownMenuItem(value: 'KG',      child: Text('KG')),
-                              DropdownMenuItem(value: 'G',       child: Text('G')),
-                            ],
-                            onChanged: (v) => setState(() => _unidade = v),
-                          ),
+                          child: _modoRetalho
+                              ? InputDecorator(
+                                  decoration: InputDecoration(
+                                    labelText: 'Unidade',
+                                    suffixIcon: const Tooltip(
+                                      message: 'Bloqueado no modo Retalho',
+                                      child: Icon(Icons.lock_outline, size: 16),
+                                    ),
+                                  ),
+                                  child: const Text('M²', style: TextStyle(fontSize: 14)),
+                                )
+                              : DropdownButtonFormField<String>(
+                                  initialValue: _unidade,
+                                  decoration: const InputDecoration(labelText: 'Unidade'),
+                                  items: const [
+                                    DropdownMenuItem(value: null,      child: Text('— Nenhuma —')),
+                                    DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE')),
+                                    DropdownMenuItem(value: 'M/L',     child: Text('M/L')),
+                                    DropdownMenuItem(value: 'M',       child: Text('M')),
+                                    DropdownMenuItem(value: 'ML',      child: Text('ML')),
+                                    DropdownMenuItem(value: 'M²',      child: Text('M²')),
+                                    DropdownMenuItem(value: 'KG',      child: Text('KG')),
+                                    DropdownMenuItem(value: 'G',       child: Text('G')),
+                                  ],
+                                  onChanged: (v) => setState(() => _unidade = v),
+                                ),
                         ),
                       ]),
                       const SizedBox(height: 10),
@@ -4097,7 +4651,16 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         Expanded(
                           child: TextFormField(
                             controller: _medida,
-                            decoration: const InputDecoration(labelText: 'Medida'),
+                            readOnly: _modoRetalho,
+                            decoration: InputDecoration(
+                              labelText: 'Medida',
+                              suffixIcon: _modoRetalho
+                                  ? const Tooltip(
+                                      message: 'Bloqueado no modo Retalho',
+                                      child: Icon(Icons.lock_outline, size: 16),
+                                    )
+                                  : null,
+                            ),
                             textCapitalization: TextCapitalization.characters,
                             inputFormatters: [_UpperCaseFormatter()],
                             onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
@@ -4126,7 +4689,16 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         Expanded(
                           child: TextFormField(
                             controller: _largura,
-                            decoration: const InputDecoration(labelText: 'Largura (m)'),
+                            readOnly: _modoRetalho,
+                            decoration: InputDecoration(
+                              labelText: 'Largura (m)',
+                              suffixIcon: _modoRetalho
+                                  ? const Tooltip(
+                                      message: 'Bloqueado no modo Retalho',
+                                      child: Icon(Icons.lock_outline, size: 16),
+                                    )
+                                  : null,
+                            ),
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             inputFormatters: [_DecimalInputFormatter()],
                             onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
@@ -4136,7 +4708,16 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         Expanded(
                           child: TextFormField(
                             controller: _comprimento,
-                            decoration: const InputDecoration(labelText: 'Comprimento (m)'),
+                            readOnly: _modoRetalho,
+                            decoration: InputDecoration(
+                              labelText: 'Comprimento (m)',
+                              suffixIcon: _modoRetalho
+                                  ? const Tooltip(
+                                      message: 'Bloqueado no modo Retalho',
+                                      child: Icon(Icons.lock_outline, size: 16),
+                                    )
+                                  : null,
+                            ),
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             inputFormatters: [_DecimalInputFormatter()],
                             onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
@@ -4148,7 +4729,16 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         Expanded(
                           child: TextFormField(
                             controller: _estoqueMinimo,
-                            decoration: const InputDecoration(labelText: 'Estoque mínimo'),
+                            readOnly: _modoRetalho,
+                            decoration: InputDecoration(
+                              labelText: 'Estoque mínimo',
+                              suffixIcon: _modoRetalho
+                                  ? const Tooltip(
+                                      message: 'Bloqueado no modo Retalho',
+                                      child: Icon(Icons.lock_outline, size: 16),
+                                    )
+                                  : null,
+                            ),
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             inputFormatters: [_DecimalInputFormatter()],
                             validator: (v) =>
@@ -4161,7 +4751,11 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         Expanded(
                           child: TextFormField(
                             controller: _custoCtrl,
-                            decoration: const InputDecoration(labelText: 'Custo (última compra)'),
+                            decoration: InputDecoration(
+                              labelText: _modoRetalho
+                                  ? 'Custo m² (última compra)'
+                                  : 'Custo (última compra)',
+                            ),
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             inputFormatters: [_DecimalInputFormatter()],
                           ),
@@ -4841,6 +5435,27 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
               ),
               const SizedBox(width: 8),
               _StatusBadgeMini(status: m.status),
+              // Badge visual para materiais temporários — deixa claro ao
+              // operador que este item tem prazo de expiração automático.
+              if (m.temporario == true) ...[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFED6C02).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: const Color(0xFFED6C02).withValues(alpha: 0.4)),
+                  ),
+                  child: const Text(
+                    'TEMP',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFFED6C02),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

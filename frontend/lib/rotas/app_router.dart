@@ -2,6 +2,7 @@
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:visual_premium/pages/gastos_categoria_page.dart';
+import 'package:visual_premium/pages/solicitacoes_material_page.dart';
 import 'package:visual_premium/pages/veiculo_page.dart';
 import 'package:visual_premium/pages/orcamento_venda_page.dart'; // ← NOVO
 import '../pages/admin_page.dart';
@@ -17,6 +18,7 @@ import '../pages/controle_estoque_page.dart';
 import '../pages/historico_page.dart';
 import '../pages/relatorio_os_page.dart';
 import '../pages/producao_page.dart';
+import '../pages/chat_page.dart';
 import '../widgets/app_shell.dart';
 import '../providers/usuario_provider.dart';
 
@@ -44,18 +46,23 @@ class AppRouter {
   static final _adminNavigatorKey           = GlobalKey<NavigatorState>(debugLabel: 'admin');
   static final _gastosCategoriaNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'gastos-categoria');
   static final _veiculosNavigatorKey        = GlobalKey<NavigatorState>(debugLabel: 'veiculos');
+  static final _solicitacoesMaterialNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'solicitacoes-material');
+  static final _chatNavigatorKey                  = GlobalKey<NavigatorState>(debugLabel: 'chat');
 
+  // /inicio é intencionalmente omitido: todos os roles acessam a home.
   static const _rotasBloqueadasParaProducao = [
-    '/inicio',
     '/estoque',
     '/produtos',
     '/fornecedores',
     '/orcamento',
+    '/orcamento-venda',
     '/ordem-compra',
     '/controle-estoque',
     '/historico',
     '/relatorio-os',
-    '/orcamento-venda', // ← NOVO
+    '/gastos-categoria',
+    '/veiculos',
+    '/solicitacoes-material',
   ];
 
   static GoRouter buildRouter(UsuarioProvider usuarioProvider) {
@@ -86,8 +93,7 @@ class AppRouter {
         final isOrcamentista = roleUp == 'ORCAMENTISTA';
 
         if (naLogin) {
-          if (isProducao) return '/producao';
-          if (isOrcamentista) return '/orcamento-venda';
+          // Todos os roles caem na home; a home exibe apenas os cards permitidos.
           return '/inicio';
         }
 
@@ -104,14 +110,17 @@ class AppRouter {
         if (isCompras && path.startsWith('/admin')) return '/inicio';
 
         if (isCompras &&
-            (path.startsWith('/produtos') ||
+            (path.startsWith('/gastos-categoria') ||
+                path.startsWith('/produtos') ||
                 path.startsWith('/orcamento-venda'))) {
           return '/inicio';
         }
 
-        // ORCAMENTISTA: acesso somente a estoque, produtos e orçamento de vendas
+        // ORCAMENTISTA: acesso somente a estoque, produtos e orçamento de vendas.
+        // Qualquer outra rota (incluindo /inicio) cai em /orcamento-venda.
         if (isOrcamentista) {
           const rotasPermitidas = [
+            '/inicio',
             '/orcamento-venda',
             '/estoque',
             '/produtos',
@@ -234,6 +243,18 @@ class AppRouter {
               navigatorKey: _orcamentoVendaNavigatorKey,
               routes: [
                 GoRoute(path: '/orcamento-venda', builder: (_, __) => const OrcamentoVendaPage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _solicitacoesMaterialNavigatorKey,
+              routes: [
+                GoRoute(path: '/solicitacoes-material', builder: (_, __) => const SolicitacoesMaterialPage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _chatNavigatorKey,
+              routes: [
+                GoRoute(path: '/chat', builder: (_, __) => const ChatPage()),
               ],
             ),
           ],

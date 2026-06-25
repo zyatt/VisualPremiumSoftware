@@ -15,6 +15,7 @@ import '../providers/orcamento_venda_provider.dart';
 import '../providers/alertas_estoque_provider.dart';
 import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
+import 'estoque_temporario_page.dart';
 
 // ── Formatação de preço: até 6 casas decimais, sem zeros à direita ────────────
 
@@ -226,15 +227,22 @@ class _EstoquePageState extends State<EstoquePage> {
                   ],
                 ),
                 Spacer(),
-                IconButton(
-                  onPressed: () => context.read<MaterialProvider>().carregarCategorias(),
-                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  tooltip: 'Atualizar',
-                  style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    BotaoEstoqueTemporario(roleUsuario: widget.roleUsuario),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: () => context.read<MaterialProvider>().carregarCategorias(),
+                      icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      tooltip: 'Atualizar',
+                      style: IconButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.surface,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -2777,6 +2785,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   bool _verificandoDuplicata = false;
   List<_PossivelDuplicata> _possiveisDuplicatas = [];
 
+  // ── Modo Retalho (apenas no cadastro de material novo) ────────────────
+  bool _modoRetalho = false;
+
   late final TextEditingController _nome;
   late final TextEditingController _identificador;
   String? _unidade;
@@ -2937,6 +2948,26 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     });
   }
 
+  void _ativarModoRetalho() {
+    setState(() {
+      _modoRetalho = true;
+      _identificador.text = 'RETALHO';
+      _unidade = 'M²';
+      _medida.clear();
+      _largura.clear();
+      _comprimento.clear();
+      _estoqueMinimo.text = '0';
+    });
+  }
+
+  void _desativarModoRetalho() {
+    setState(() {
+      _modoRetalho = false;
+      _identificador.clear();
+      _unidade = null;
+    });
+  }
+
   Future<void> _salvar() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() { _salvando = true; _erroDialog = null; });
@@ -2946,12 +2977,12 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       'identificador': _identificador.text.trim().isEmpty ? null : _identificador.text.trim(),
       'unidade':       (_unidade == null || _unidade!.isEmpty) ? null : _unidade,
       'categoria':     _categoria.text.trim().isEmpty ? null : _categoria.text.trim(),
-      'medida':        _medida.text.trim().isEmpty ? null : _medida.text.trim(),
+      'medida':        _modoRetalho ? null : (_medida.text.trim().isEmpty ? null : _medida.text.trim()),
       'espessura':     _espessura.text.trim().isEmpty ? null : _espessura.text.trim(),
-      'largura':       _largura.text.trim().isEmpty ? null : double.tryParse(_largura.text.trim()),
-      'comprimento':   _comprimento.text.trim().isEmpty ? null : double.tryParse(_comprimento.text.trim()),
+      'largura':       _modoRetalho ? null : (_largura.text.trim().isEmpty ? null : double.tryParse(_largura.text.trim())),
+      'comprimento':   _modoRetalho ? null : (_comprimento.text.trim().isEmpty ? null : double.tryParse(_comprimento.text.trim())),
       'quantidade':    _bloquearQuantidade ? 0 : (double.tryParse(_quantidade.text) ?? 0),
-      'estoqueMinimo': double.tryParse(_estoqueMinimo.text) ?? 0,
+      'estoqueMinimo': _modoRetalho ? 0.0 : (double.tryParse(_estoqueMinimo.text) ?? 0),
       'estoqueConfirmado': _estoqueConfirmado,
     };
 
@@ -3034,8 +3065,15 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             const SizedBox(height: 10),
             TextFormField(
               controller: _identificador,
-              decoration: const InputDecoration(
+              readOnly: _modoRetalho,
+              decoration: InputDecoration(
                 labelText: 'Identificador',
+                suffixIcon: _modoRetalho
+                    ? const Tooltip(
+                        message: 'Bloqueado no modo Retalho',
+                        child: Icon(Icons.lock_outline, size: 16),
+                      )
+                    : null,
               ),
               textCapitalization: TextCapitalization.characters,
               inputFormatters: [_UpperCaseFormatter()],
@@ -3052,21 +3090,32 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _unidade,
-                  decoration: const InputDecoration(labelText: 'Unidade'),
-                  items: const [
-                    DropdownMenuItem(value: null,      child: Text('— Nenhuma —')),
-                    DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE')),
-                    DropdownMenuItem(value: 'M/L',     child: Text('M/L')),
-                    DropdownMenuItem(value: 'M',       child: Text('M')),
-                    DropdownMenuItem(value: 'ML',      child: Text('ML')),
-                    DropdownMenuItem(value: 'M²',      child: Text('M²')),
-                    DropdownMenuItem(value: 'KG',      child: Text('KG')),
-                    DropdownMenuItem(value: 'G',       child: Text('G')),
-                  ],
-                  onChanged: (v) => setState(() => _unidade = v),
-                ),
+                child: _modoRetalho
+                    ? InputDecorator(
+                        decoration: InputDecoration(
+                          labelText: 'Unidade',
+                          suffixIcon: const Tooltip(
+                            message: 'Bloqueado no modo Retalho',
+                            child: Icon(Icons.lock_outline, size: 16),
+                          ),
+                        ),
+                        child: const Text('M²', style: TextStyle(fontSize: 14)),
+                      )
+                    : DropdownButtonFormField<String>(
+                        initialValue: _unidade,
+                        decoration: const InputDecoration(labelText: 'Unidade'),
+                        items: const [
+                          DropdownMenuItem(value: null,      child: Text('— Nenhuma —')),
+                          DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE')),
+                          DropdownMenuItem(value: 'M/L',     child: Text('M/L')),
+                          DropdownMenuItem(value: 'M',       child: Text('M')),
+                          DropdownMenuItem(value: 'ML',      child: Text('ML')),
+                          DropdownMenuItem(value: 'M²',      child: Text('M²')),
+                          DropdownMenuItem(value: 'KG',      child: Text('KG')),
+                          DropdownMenuItem(value: 'G',       child: Text('G')),
+                        ],
+                        onChanged: (v) => setState(() => _unidade = v),
+                      ),
               ),
             ]),
             const SizedBox(height: 10),
@@ -3074,7 +3123,16 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               Expanded(
                 child: TextFormField(
                   controller: _medida,
-                  decoration: const InputDecoration(labelText: 'Medida'),
+                  readOnly: _modoRetalho,
+                  decoration: InputDecoration(
+                    labelText: 'Medida',
+                    suffixIcon: _modoRetalho
+                        ? const Tooltip(
+                            message: 'Bloqueado no modo Retalho',
+                            child: Icon(Icons.lock_outline, size: 16),
+                          )
+                        : null,
+                  ),
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [_UpperCaseFormatter()],
                   onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
@@ -3103,7 +3161,16 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               Expanded(
                 child: TextFormField(
                   controller: _largura,
-                  decoration: const InputDecoration(labelText: 'Largura (m)'),
+                  readOnly: _modoRetalho,
+                  decoration: InputDecoration(
+                    labelText: 'Largura (m)',
+                    suffixIcon: _modoRetalho
+                        ? const Tooltip(
+                            message: 'Bloqueado no modo Retalho',
+                            child: Icon(Icons.lock_outline, size: 16),
+                          )
+                        : null,
+                  ),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [_DecimalInputFormatter()],
                   onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
@@ -3113,7 +3180,16 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               Expanded(
                 child: TextFormField(
                   controller: _comprimento,
-                  decoration: const InputDecoration(labelText: 'Comprimento (m)'),
+                  readOnly: _modoRetalho,
+                  decoration: InputDecoration(
+                    labelText: 'Comprimento (m)',
+                    suffixIcon: _modoRetalho
+                        ? const Tooltip(
+                            message: 'Bloqueado no modo Retalho',
+                            child: Icon(Icons.lock_outline, size: 16),
+                          )
+                        : null,
+                  ),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [_DecimalInputFormatter()],
                   onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
@@ -3140,8 +3216,16 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               Expanded(
                 child: TextFormField(
                   controller: _estoqueMinimo,
-                  decoration:
-                      const InputDecoration(labelText: 'Estoque mínimo'),
+                  readOnly: _modoRetalho,
+                  decoration: InputDecoration(
+                    labelText: 'Estoque mínimo',
+                    suffixIcon: _modoRetalho
+                        ? const Tooltip(
+                            message: 'Bloqueado no modo Retalho',
+                            child: Icon(Icons.lock_outline, size: 16),
+                          )
+                        : null,
+                  ),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [_DecimalInputFormatter()],
                   validator: (v) =>
@@ -3371,6 +3455,57 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     _editando ? 'Editar Material' : 'Novo Material',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
+                  if (!_editando) ...[
+                    const SizedBox(width: 12),
+                    // ── Atalho RETALHO ────────────────────────────────────
+                    GestureDetector(
+                      onTap: _modoRetalho ? _desativarModoRetalho : _ativarModoRetalho,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: _modoRetalho
+                              ? AppTheme.primary.withValues(alpha: 0.15)
+                              : Theme.of(context).colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: _modoRetalho
+                                ? AppTheme.primary
+                                : Theme.of(context).colorScheme.outlineVariant,
+                            width: _modoRetalho ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.content_cut,
+                              size: 13,
+                              color: _modoRetalho
+                                  ? AppTheme.primary
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              'RETALHO',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.5,
+                                color: _modoRetalho
+                                    ? AppTheme.primary
+                                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            if (_modoRetalho) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.check_circle, size: 13, color: AppTheme.primary),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                   const Spacer(),
                   IconButton(
                     onPressed: () => Navigator.pop(context),

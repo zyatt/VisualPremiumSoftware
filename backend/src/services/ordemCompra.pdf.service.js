@@ -259,7 +259,7 @@ function drawItensTable(doc, itens, startY) {
   drawHeader();
 
   itens.forEach((item, idx) => {
-    const nome    = item.material?.nome ?? `Material ${item.materialId}`;
+    const nome    = item.material?.nome?? (item.descricaoItem?.trim() || '(material excluído)');
     const unidade = item.material?.unidade ?? '—';
     const descricao = item.descricaoItem?.trim() || null;
 

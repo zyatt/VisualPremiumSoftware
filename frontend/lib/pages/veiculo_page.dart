@@ -85,14 +85,13 @@ class _VeiculoPageState extends State<VeiculoPage> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
               child: const Text('Cancelar')),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context);
-              await context
-                  .read<VeiculoProvider>()
-                  .desativarVeiculo(veiculo.id);
+              final provider = context.read<VeiculoProvider>();
+              Navigator.of(context, rootNavigator: true).pop();
+              await provider.desativarVeiculo(veiculo.id);
             },
             child:
                 const Text('Desativar', style: TextStyle(color: AppTheme.error)),
@@ -103,7 +102,7 @@ class _VeiculoPageState extends State<VeiculoPage> {
   }
 
   void _abrirHistorico(VeiculoModel veiculo, Color cor) {
-    Navigator.of(context).push(
+    Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (_) => VeiculoServicosPage(veiculoId: veiculo.id, cor: cor),
       ),
@@ -632,7 +631,7 @@ class _VeiculoServicosPageState extends State<VeiculoServicosPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 InkWell(
-                  onTap: () => Navigator.of(context).pop(),
+                  onTap: () => Navigator.of(context, rootNavigator: true).pop(),
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -861,14 +860,13 @@ class _LinhaManutencao extends StatelessWidget {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(dialogCtx),
+              onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
               child: const Text('Cancelar')),
           TextButton(
             onPressed: () async {
-              Navigator.pop(dialogCtx);
-              await context
-                  .read<VeiculoProvider>()
-                  .deletarManutencao(manutencao.id, veiculoId);
+              final provider = context.read<VeiculoProvider>();
+              Navigator.of(dialogCtx, rootNavigator: true).pop();
+              await provider.deletarManutencao(manutencao.id, veiculoId);
             },
             child: const Text('Remover',
                 style: TextStyle(color: AppTheme.error)),
@@ -1026,7 +1024,7 @@ class _FormVeiculoDialogState extends State<_FormVeiculoDialog> {
     }
     if (mounted) {
       setState(() => _salvando = false);
-      if (ok) Navigator.pop(context);
+      if (ok) Navigator.of(context, rootNavigator: true).pop();
     }
   }
 
@@ -1066,7 +1064,7 @@ class _FormVeiculoDialogState extends State<_FormVeiculoDialog> {
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
             child: const Text('Cancelar')),
         FilledButton(
           onPressed: _salvando ? null : _salvar,
@@ -1183,7 +1181,7 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
 
     if (mounted) {
       setState(() => _salvando = false);
-      if (ok) Navigator.pop(context);
+      if (ok) Navigator.of(context, rootNavigator: true).pop();
     }
   }
 
@@ -1290,7 +1288,7 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
             child: const Text('Cancelar')),
         FilledButton(
           onPressed: _salvando ? null : _salvar,

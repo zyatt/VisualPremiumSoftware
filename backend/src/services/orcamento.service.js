@@ -76,7 +76,7 @@ async function criar(titulo, criadorId) {
  */
 async function adicionarItem(
   orcamentoId, materialId, fornecedorId, quantidade, precoUnitario,
-  { precoM2 = null, usarM2 = false, selecionado = false, descricaoItem = null } = {}
+  { precoM2 = null, usarM2 = false, selecionado = false, descricaoItem = null, observacao = null } = {}
   ) {
   const data = {
     fornecedorId: fornecedorId ?? null,
@@ -86,6 +86,7 @@ async function adicionarItem(
     usarM2: usarM2 ?? false,
     selecionado: selecionado ?? false,
     descricaoItem: descricaoItem ?? null,
+    observacao: observacao ?? null,
   };
 
   const existente = await prisma.orcamentoItem.findFirst({
@@ -233,6 +234,28 @@ async function atualizar(id, dados) {
 }
 
 /**
+ * Exclui permanentemente um orçamento e todos os seus itens.
+ * Só é permitido para status: CANCELADO, NAO_APROVADO, CONVERTIDO.
+ * Salvos (ABERTO / AGUARDANDO_APROVACAO) e APROVADO não podem ser excluídos.
+ */
+async function excluir(id) {
+  const orcamento = await prisma.orcamento.findUnique({ where: { id } });
+  if (!orcamento) throw { status: 404, message: 'Orçamento não encontrado' };
+
+  const statusPermitidos = ['CANCELADO', 'NAO_APROVADO', 'CONVERTIDO'];
+  if (!statusPermitidos.includes(orcamento.status)) {
+    throw {
+      status: 400,
+      message: 'Apenas orçamentos cancelados, rejeitados ou convertidos podem ser excluídos',
+    };
+  }
+
+  // Exclui itens primeiro (FK) e depois o orçamento
+  await prisma.orcamentoItem.deleteMany({ where: { orcamentoId: id } });
+  await prisma.orcamento.delete({ where: { id } });
+}
+
+/**
  * Oculta ou reexibe um fornecedor na visualização do orçamento (matriz, totais,
  * melhor preço e PDF). Não remove o fornecedor nem nenhum item/preço — apenas
  * grava o id na lista `fornecedoresOcultos` do orçamento, que é compartilhada
@@ -264,6 +287,7 @@ module.exports = {
   buscarPorId,
   criar,
   atualizar,
+  excluir,
   adicionarItem,
   removerItem,
   limparItens,

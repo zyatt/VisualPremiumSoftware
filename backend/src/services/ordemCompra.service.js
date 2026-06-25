@@ -440,6 +440,10 @@ async function finalizar(id, usuarioNome) {
   });
 
   for (const item of ordem.itens) {
+    // Item fantasma: material foi excluído após a OC ser criada.
+    // Não há estoque para movimentar — apenas pula.
+    if (!item.materialId || !item.material) continue;
+
     const numeroOSLimpo = item.numeroOS.trim();
     const material      = item.material;
     const osEhNumerica  = /^\d+$/.test(numeroOSLimpo);
@@ -640,7 +644,7 @@ async function reverter(id) {
 
   for (const item of ordem.itens) {
     const material = item.material;
-    if (!material) continue;
+    if (!material || !item.materialId) continue;
 
     const numeroOSLimpo = item.numeroOS?.trim() || 'OUTROS';
 

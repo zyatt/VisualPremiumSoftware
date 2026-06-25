@@ -54,12 +54,13 @@ const adicionarItem = async (req, res, next) => {
       usarM2,
       selecionado,
       descricaoItem,
+      observacao,
     } = req.body;
 
     res.status(201).json(
       await svc.adicionarItem(
         +req.params.id, materialId, fornecedorId, quantidade, precoUnitario,
-        { precoM2, usarM2, selecionado, descricaoItem }  // ← renomear
+        { precoM2, usarM2, selecionado, descricaoItem, observacao }
       )
     );
   } catch (e) {
@@ -223,6 +224,15 @@ const gerarOrdemCompra = async (req, res, next) => {
 };
 
 
+const excluir = async (req, res, next) => {
+  try {
+    await svc.excluir(+req.params.id);
+    res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+};
+
 const reabrir = async (req, res, next) => {
   try {
     res.json(await svc.reabrir(+req.params.id));
@@ -263,5 +273,6 @@ module.exports = {
   rejeitar,
   gerarOrdemCompra,
   reabrir,
+  excluir,
   definirFornecedorOculto,
 };

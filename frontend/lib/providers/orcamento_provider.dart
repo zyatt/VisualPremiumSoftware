@@ -14,17 +14,22 @@ class PrecoFornecedorData {
   double? preco;
   double? precoM2;
   String fornecedorNome;
+  /// Observação de disponibilidade digitada pelo usuário para este
+  /// material × fornecedor (ex: "Em falta", "Prazo 5 dias").
+  String? observacao;
 
   PrecoFornecedorData({
     required this.fornecedorNome,
     this.preco,
     this.precoM2,
+    this.observacao,
   });
 
   Map<String, dynamic> toJson() => {
         'fornecedorNome': fornecedorNome,
         'preco': preco,
         'precoM2': precoM2,
+        'observacao': observacao,
       };
 
   factory PrecoFornecedorData.fromJson(Map<String, dynamic> j) =>
@@ -32,6 +37,7 @@ class PrecoFornecedorData {
         fornecedorNome: j['fornecedorNome'] as String,
         preco: (j['preco'] as num?)?.toDouble(),
         precoM2: (j['precoM2'] as num?)?.toDouble(),
+        observacao: j['observacao'] as String?,
       );
 }
 

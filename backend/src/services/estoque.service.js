@@ -10,6 +10,9 @@ const _includeMovimentacoes = {
           identificador: true, medida: true, espessura: true,
         },
       },
+      materialOrigem: {
+        select: { id: true, nome: true },
+      },
     },
     orderBy: { criadoEm: 'desc' },
   },
@@ -41,6 +44,11 @@ async function registrarMovimentacao({
   precoUnitario, precoM2, observacao, ordemCompraId, descricaoItem,
   // Dimensões usadas na saída (apenas para materiais UNIDADE com largura/comprimento)
   larguraUsada, comprimentoUsado,
+  // Quando esta movimentação é uma ENTRADA de retalho (reentrada manual via
+  // controle de estoque), aponta para o materialId que foi consumido na
+  // saída original — usado para abater o valor do retalho do custo líquido
+  // da saída original em relatórios e gastos.
+  materialOrigemId,
   // Nome do usuário autenticado que registrou a movimentação
   usuarioNome,
 }) {
@@ -202,6 +210,7 @@ async function registrarMovimentacao({
         descricaoItem:    descricaoItem ?? null,
         larguraUsada:     (larguraUsada    != null ? Number(larguraUsada)    : null),
         comprimentoUsado: (comprimentoUsado != null ? Number(comprimentoUsado) : null),
+        materialOrigemId: materialOrigemId ?? null,
       },
     }),
     prisma.material.update({

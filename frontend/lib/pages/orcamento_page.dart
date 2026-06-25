@@ -293,6 +293,11 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           itensPorChave[materialId] = ItemOrcamentoData(
             materialId: materialId,
             materialNome: materialData?['nome'] as String? ?? '',
+            materialUnidade: materialData?['unidade'] as String?,
+            materialMedida: materialData?['medida'] as String?,
+            materialEspessura: materialData?['espessura'] as String?,
+            materialIdentificador: materialData?['identificador'] as String?,
+            materialCategoria: materialData?['categoria'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             precos: {},
             modoOrcamento: (item['usarM2'] as bool? ?? false)
@@ -310,6 +315,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             precoM2: item['precoM2'] != null
                 ? double.tryParse(item['precoM2'].toString())
                 : null,
+            observacao: item['observacao'] as String?,
           );
 
           if (item['selecionado'] as bool? ?? false) {
@@ -399,6 +405,11 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           itensPorChave[materialId] = ItemOrcamentoData(
             materialId: materialId,
             materialNome: materialData?['nome'] as String? ?? '',
+            materialUnidade: materialData?['unidade'] as String?,
+            materialMedida: materialData?['medida'] as String?,
+            materialEspessura: materialData?['espessura'] as String?,
+            materialIdentificador: materialData?['identificador'] as String?,
+            materialCategoria: materialData?['categoria'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             precos: {},
             modoOrcamento: (item['usarM2'] as bool? ?? false)
@@ -416,6 +427,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             precoM2: item['precoM2'] != null
                 ? double.tryParse(item['precoM2'].toString())
                 : null,
+            observacao: item['observacao'] as String?,
           );
 
           if (item['selecionado'] as bool? ?? false) {

@@ -15,6 +15,7 @@ import '../providers/orcamento_provider.dart';
 import '../providers/ordem_compra_provider.dart';
 import '../repositories/fornecedor_repository.dart';
 import '../repositories/orcamento_repository.dart';
+import '../rotas/app_router.dart';
 
 import '../theme/app_theme.dart';
 
@@ -137,6 +138,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     _abasScrollHintNotifier = _ScrollMetricsNotifier();
     _tabelaHScrollHintNotifier = _ScrollMetricsNotifier();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _sincronizarStatusServidor();
       context.read<FornecedorProvider>().carregar();
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted && _tabelaHScrollCtrl.hasClients) {
@@ -355,13 +357,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     final item = tab.itens[itemIndex];
     final pf = item.precos[fornecedorId]!;
 
-    final result = await showDialog<Map<String, double?>>(
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) => _DialogEditarPreco(
+      builder: (ctx) => _DialogEditarMaterial(
         fornecedorNome: pf.fornecedorNome,
         materialNome: item.materialNome,
         precoAtual: pf.preco,
-        precoM2Atual: pf.precoM2,
+        observacaoAtual: pf.observacao,
       ),
     );
     if (result == null) return;
@@ -369,8 +371,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     final novosPrecos = Map<int, PrecoFornecedorData>.from(item.precos);
     novosPrecos[fornecedorId] = PrecoFornecedorData(
       fornecedorNome: pf.fornecedorNome,
-      preco: result['preco'],
-      precoM2: result['precoM2'],
+      preco: result['preco'] as double?,
+      precoM2: pf.precoM2, // mantém o precoM2 existente intocado
+      observacao: result['observacao'] as String?,
     );
     provider.atualizarItemParcial(item.itemId, precos: novosPrecos);
 
@@ -378,7 +381,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     try {
       await FornecedorRepository().atualizarPreco(fornecedorId, item.materialId, {
         if (result['preco'] != null) 'preco': result['preco'],
-        if (result['precoM2'] != null) 'precoMetroQuadrado': result['precoM2'],
       });
     } catch (_) {
     } finally {
@@ -465,7 +467,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
       }
@@ -543,7 +545,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
       }
@@ -587,7 +589,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key});
+            await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
         }
@@ -603,6 +605,70 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     } finally {
       if (mounted) setState(() => _salvando = false);
     }
+  }
+
+  Future<void> _sincronizarStatusServidor() async {
+    final provider = context.read<OrcamentoProvider>();
+    final sid = provider.tabAtual?.servidorId;
+    if (sid == null) return;
+    try {
+      final orc = await OrcamentoRepository().buscarPorId(sid);
+      if (!mounted) return;
+      final status = orc['status'] as String? ?? '';
+      provider.atualizarFlagsTab(
+        aguardandoAprovacao: status == 'AGUARDANDO_APROVACAO',
+        jaFinalizado: status == 'APROVADO' || status == 'NAO_APROVADO',
+        modoGerarOC: status == 'APROVADO',
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _salvarAoFecharAba(int index) async {
+    final provider = context.read<OrcamentoProvider>();
+    final abas = provider.abas;
+    if (index < 0 || index >= abas.length) {
+      provider.fecharAba(index);
+      return;
+    }
+    final aba = abas[index];
+    final sid = aba.servidorId;
+
+    if (sid != null && aba.itens.isNotEmpty) {
+      try {
+        final repo = OrcamentoRepository();
+        await repo.limparItens(sid);
+        for (final item in aba.itens) {
+          if (item.precos.isEmpty) {
+            await repo.adicionarItem(sid, {
+              'materialId': item.materialId,
+              'fornecedorId': null,
+              'quantidade': item.quantidade,
+              'precoUnitario': null,
+              'precoM2': null,
+              'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado,
+              'selecionado': false,
+            });
+          } else {
+            for (final entry in item.precos.entries) {
+              await repo.adicionarItem(sid, {
+                'materialId': item.materialId,
+                'fornecedorId': entry.key,
+                'quantidade': item.quantidade,
+                'precoUnitario': entry.value.preco,
+                'precoM2': entry.value.precoM2,
+                'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado,
+                'selecionado': item.fornecedorSelecionado == entry.key,
+                'observacao': entry.value.observacao,
+              });
+            }
+          }
+        }
+      } catch (_) {
+        // Falha silenciosa — fecha a aba de qualquer jeito
+      }
+    }
+
+    provider.fecharAba(index);
   }
 
   Future<void> _cancelarOrcamento() async {
@@ -745,7 +811,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
         }
@@ -759,7 +825,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
             await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
           } else {
             for (final entry in item.precos.entries) {
-              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key});
+              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
             }
           }
         }
@@ -790,12 +856,30 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           duration: const Duration(seconds: 3),
         ));
 
-        // Sinaliza DEPOIS do go() para que didChangeDependencies da OrdemCompraPage
-        // só receba o id após a navegação estar completa — evitando consumo prematuro
-        // antes do carregar() trazer a OC recém-criada.
-        context.go('/ordem-compra');
+        // Sempre sinaliza primeiro: cobre o caso de primeira visita à página
+        // (initState ainda não rodou e a key abaixo ainda não está anexada).
         if (primeiraOcId != null && mounted) {
           context.read<OrdemCompraProvider>().sinalizarOcParaAbrir(primeiraOcId);
+        }
+
+        context.go('/ordem-compra');
+
+        // Caso a página de Ordem de Compra já esteja viva (StatefulShellRoute
+        // preserva estado entre navegações), nem initState nem
+        // didChangeDependencies são re-executados só porque trocamos de branch.
+        // Chamamos o método diretamente pela GlobalKey para recarregar a lista
+        // e abrir os detalhes da OC certa de forma síncrona e confiável —
+        // inclusive fechando os detalhes de outra OC que estivessem abertos.
+        if (primeiraOcId != null) {
+          final state = ordemCompraPageKey.currentState;
+          if (state != null) {
+            // Página já montada: consome o sinal nós mesmos (evita reabertura)
+            // e chamamos diretamente, sem depender de lifecycle hooks.
+            context.read<OrdemCompraProvider>().consumirOcPendente();
+            await state.abrirOcPorId(primeiraOcId);
+          }
+          // Se state for null, é a primeira visita: o initState da página vai
+          // consumir o sinal já setado acima através do postFrameCallback.
         }
       }
     } catch (e) {
@@ -1023,8 +1107,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                                     ),
                                     SizedBox(width: 6),
                                     GestureDetector(
-                                      onTap: () {
-                                        provider.fecharAba(i);
+                                      onTap: () async {
+                                        await _salvarAoFecharAba(i);
                                         if (provider.abas.isEmpty) Navigator.of(context).pop();
                                       },
                                       child: Icon(Icons.close, size: 13, color: ativa ? Colors.white.withValues(alpha: 0.8) : Theme.of(context).colorScheme.outline),
@@ -1129,6 +1213,16 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           OutlinedButton.icon(onPressed: _salvarOrcamento, icon: Icon(Icons.save_outlined, size: iconSize), label: Text('Salvar', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: AppTheme.success, side: const BorderSide(color: AppTheme.success), padding: btnPad)),
           OutlinedButton.icon(onPressed: _cancelarOrcamento, icon: Icon(Icons.delete_outline, size: iconSize), label: Text('Cancelar', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: BorderSide(color: AppTheme.error), padding: btnPad)),
           OutlinedButton.icon(onPressed: itens.isEmpty ? null : _exportarPdf, icon: Icon(Icons.picture_as_pdf_outlined, size: iconSize), label: Text('PDF', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant, side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant), padding: btnPad)),
+          OutlinedButton.icon(
+            onPressed: _sincronizarStatusServidor,
+            icon: Icon(Icons.refresh, size: iconSize),
+            label: Text('Atualizar', style: btnStyle12),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+              padding: btnPad,
+            ),
+          ),
           if (mostrarBotaoAprovar)
             OutlinedButton.icon(
               onPressed: itens.isEmpty ? null : () async { final sid = provider.tabAtual?.servidorId; if (sid == null) return; await _aprovarOrcamento(sid, provider.tabAtual?.titulo ?? ''); },
@@ -1792,6 +1886,11 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                           ])
                         : Text('Sem preço', style: TextStyle(fontSize: 9, color: AppTheme.warning, fontStyle: FontStyle.italic, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
                     if (total != null) Text(_brl(total), style: TextStyle(fontSize: 10, color: isMenorNaLinha ? AppTheme.success.withValues(alpha: 0.8) : Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
+                    if (pf.observacao != null && pf.observacao!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(pf.observacao!, style: TextStyle(fontSize: 8, color: AppTheme.warning, fontStyle: FontStyle.italic), textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
+                      ),
                     GestureDetector(onTap: () => _editarPreco(idx, fId), child: const Text('editar', style: TextStyle(fontSize: 9, color: AppTheme.primary, decoration: TextDecoration.underline), textAlign: TextAlign.center)),
                     if (isSelectedForn) const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.check_circle, size: 9, color: AppTheme.primary), SizedBox(width: 2), Text('Escolhido', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700, color: AppTheme.primary))]),
                   ]),
@@ -2221,40 +2320,47 @@ class _DialogVincularFornecedoresState extends State<_DialogVincularFornecedores
   }
 }
 
-class _DialogEditarPreco extends StatefulWidget {
+class _DialogEditarMaterial extends StatefulWidget {
   final String fornecedorNome;
   final String materialNome;
   final double? precoAtual;
-  final double? precoM2Atual;
+  final String? observacaoAtual;
 
-  const _DialogEditarPreco({required this.fornecedorNome, required this.materialNome, this.precoAtual, this.precoM2Atual});
+  const _DialogEditarMaterial({
+    required this.fornecedorNome,
+    required this.materialNome,
+    this.precoAtual,
+    this.observacaoAtual,
+  });
 
   @override
-  State<_DialogEditarPreco> createState() => _DialogEditarPrecoState();
+  State<_DialogEditarMaterial> createState() => _DialogEditarMaterialState();
 }
 
-class _DialogEditarPrecoState extends State<_DialogEditarPreco> {
+class _DialogEditarMaterialState extends State<_DialogEditarMaterial> {
   late final TextEditingController _precoCtrl;
-  late final TextEditingController _precoM2Ctrl;
+  late final TextEditingController _observacaoCtrl;
 
   @override
   void initState() {
     super.initState();
-    _precoCtrl = TextEditingController(text: widget.precoAtual != null ? widget.precoAtual!.toStringAsFixed(2) : '');
-    _precoM2Ctrl = TextEditingController(text: widget.precoM2Atual != null ? widget.precoM2Atual!.toStringAsFixed(2) : '');
+    _precoCtrl = TextEditingController(
+      text: widget.precoAtual != null ? widget.precoAtual!.toStringAsFixed(2) : '',
+    );
+    _observacaoCtrl = TextEditingController(text: widget.observacaoAtual ?? '');
   }
 
   @override
   void dispose() {
     _precoCtrl.dispose();
-    _precoM2Ctrl.dispose();
+    _observacaoCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Editar Preço — ${widget.fornecedorNome}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+      title: Text('Editar Material — ${widget.fornecedorNome}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
       content: SizedBox(
         width: 320,
         child: Column(
@@ -2267,14 +2373,20 @@ class _DialogEditarPrecoState extends State<_DialogEditarPreco> {
               controller: _precoCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
-              decoration: const InputDecoration(labelText: 'Preço unitário (R\$)', prefixText: 'R\$ ', isDense: true),
+              decoration: const InputDecoration(labelText: 'Preço (R\$)', prefixText: 'R\$ ', isDense: true),
             ),
             const SizedBox(height: 12),
             TextField(
-              controller: _precoM2Ctrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
-              decoration: const InputDecoration(labelText: 'Preço por m² (R\$)', prefixText: 'R\$ ', isDense: true),
+              controller: _observacaoCtrl,
+              maxLines: 3,
+              minLines: 1,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Disponibilidade / Observação',
+                hintText: 'Ex: Em falta, prazo 5 dias, sob consulta…',
+                isDense: true,
+                alignLabelWithHint: true,
+              ),
             ),
           ],
         ),
@@ -2285,8 +2397,8 @@ class _DialogEditarPrecoState extends State<_DialogEditarPreco> {
           style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
           onPressed: () {
             final preco = double.tryParse(_precoCtrl.text.replaceAll(',', '.'));
-            final precoM2 = double.tryParse(_precoM2Ctrl.text.replaceAll(',', '.'));
-            Navigator.pop(context, {'preco': preco, 'precoM2': precoM2});
+            final obs = _observacaoCtrl.text.trim().isEmpty ? null : _observacaoCtrl.text.trim();
+            Navigator.pop(context, {'preco': preco, 'observacao': obs});
           },
           child: const Text('Salvar'),
         ),
