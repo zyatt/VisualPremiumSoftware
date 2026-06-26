@@ -27,15 +27,21 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
   static const double _painelLargura = 320;
   static const double _painelAltura = 440;
 
-  Offset? _posicao; // canto superior-esquerdo da bolha/painel
+  // Centro da bolha em coordenadas absolutas da tela.
+  // Expandir/minimizar sempre parte desse centro — o widget cresce
+  // circularmente a partir do ponto em que o usuário clicou.
+  // Inicializado na primeira build quando o tamanho da tela é conhecido.
+  double? _cx;
+  double? _cy;
+
   bool _expandido = false;
   bool _arrastando = false;
-  Offset _inicioArrastoLocal = Offset.zero;
+  Offset _inicioArrastoGlobal = Offset.zero;
+  double _cxAoIniciar = 0;
+  double _cyAoIniciar = 0;
 
   @override
   void dispose() {
-    // Garante que, se o widget for removido da árvore com o mini-chat
-    // aberto, a flag de visibilidade não fique "travada" em true.
     try {
       context.read<ChatProvider>().definirWidgetFlutuanteVisivel(false);
     } catch (_) {}
@@ -52,84 +58,97 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
     context.read<ChatProvider>().definirWidgetFlutuanteVisivel(false);
   }
 
-  Offset _clampPosicao(Offset pos, Size tela, double largura, double altura) {
-    final maxX = tela.width - largura;
-    final maxY = tela.height - altura;
-    return Offset(
-      pos.dx.clamp(0, maxX < 0 ? 0 : maxX),
-      pos.dy.clamp(0, maxY < 0 ? 0 : maxY),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final tela = MediaQuery.of(context).size;
 
-    // Posição inicial: canto inferior direito, com uma margem.
-    _posicao ??= Offset(
-      tela.width - _bolhaTamanho - 24,
-      tela.height - _bolhaTamanho - 24,
-    );
+    _cx ??= tela.width  - 16 - _bolhaTamanho / 2;
+    _cy ??= tela.height - 16 - _bolhaTamanho / 2;
 
     final largura = _expandido ? _painelLargura : _bolhaTamanho;
     final altura  = _expandido ? _painelAltura  : _bolhaTamanho;
 
-    // Ao expandir, ajusta a posição pra o painel não vazar da tela.
-    final posicaoAtual = _clampPosicao(_posicao!, tela, largura, altura);
+    final left = (_cx! - largura / 2).clamp(0.0, tela.width  - largura);
+    final top  = (_cy! - altura  / 2).clamp(0.0, tela.height - altura);
 
-    return Positioned(
-      left: posicaoAtual.dx,
-      top: posicaoAtual.dy,
+    // AnimatedPositioned anima left/top junto com largura/altura,
+    // garantindo que o painel expanda/minimize a partir do centro
+    // da bolha sem nenhum salto de posição.
+    // O GestureDetector fica DENTRO para capturar arrasto normalmente;
+    // durante o arrasto _arrastando=true e não há mudança de _expandido,
+    // então a animação não dispara enquanto o usuário arrasta.
+    return AnimatedPositioned(
+      duration: _arrastando
+          ? Duration.zero
+          : const Duration(milliseconds: 220),
+      curve: Curves.easeOutBack,
+      left: left,
+      top:  top,
+      width:  largura,
+      height: altura,
       child: GestureDetector(
         onPanStart: (details) {
           _arrastando = false;
-          _inicioArrastoLocal = details.globalPosition;
+          _inicioArrastoGlobal = details.globalPosition;
+          _cxAoIniciar = _cx!;
+          _cyAoIniciar = _cy!;
         },
         onPanUpdate: (details) {
-          final delta = details.globalPosition - _inicioArrastoLocal;
+          final delta = details.globalPosition - _inicioArrastoGlobal;
           if (delta.distance > 4) _arrastando = true;
-          setState(() {
-            _posicao = _clampPosicao(
-              _posicao! + details.delta,
-              tela,
-              largura,
-              altura,
-            );
+          // ScheduleFrame evita setState dentro do pipeline de eventos
+          // de ponteiro, que causava o erro _debugDuringDeviceUpdate.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            setState(() {
+              _cx = (_cxAoIniciar + delta.dx)
+                  .clamp(_bolhaTamanho / 2, tela.width  - _bolhaTamanho / 2);
+              _cy = (_cyAoIniciar + delta.dy)
+                  .clamp(_bolhaTamanho / 2, tela.height - _bolhaTamanho / 2);
+            });
           });
         },
         onPanEnd: (_) {
-          if (!_arrastando) _alternarExpandido(context);
+          final foiClique = !_arrastando;
+          setState(() => _arrastando = false);
+          if (foiClique) _alternarExpandido(context);
         },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          width: largura,
-          height: altura,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(_expandido ? 16 : _bolhaTamanho / 2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.25),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-            ],
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutBack,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(
+                  _expandido ? 16 : _bolhaTamanho / 2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 160),
+              child: _expandido
+                  ? _MiniChatPainel(
+                      key: const ValueKey('painel'),
+                      onFechar: () => _fechar(context),
+                      onMinimizar: () => _alternarExpandido(context),
+                    )
+                  : const _BolhaIcone(key: ValueKey('bolha')),
+            ),
           ),
-          clipBehavior: Clip.antiAlias,
-          child: _expandido
-              ? _MiniChatPainel(onFechar: () => _fechar(context))
-              : const _BolhaIcone(),
         ),
       ),
     );
   }
 }
-
-// ─── Bolha (estado recolhido) ─────────────────────────────────────────────────
-
 class _BolhaIcone extends StatelessWidget {
-  const _BolhaIcone();
+  const _BolhaIcone({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -137,37 +156,77 @@ class _BolhaIcone extends StatelessWidget {
     final naoLidas = chat.totalNaoLidas;
     final cs = Theme.of(context).colorScheme;
 
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        Container(
-          decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle),
-          child: Icon(Icons.chat_bubble_rounded, color: cs.onPrimary, size: 26),
-        ),
-        if (naoLidas > 0)
-          Positioned(
-            right: 2,
-            top: 2,
-            child: Container(
-              constraints: const BoxConstraints(minWidth: 18),
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-              decoration: BoxDecoration(
-                color: cs.error,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: cs.surface, width: 1.5),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  cs.primary,
+                  Color.lerp(cs.primary, Colors.deepOrange, 0.35)!,
+                ],
               ),
-              child: Text(
-                naoLidas > 99 ? '99+' : '$naoLidas',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.nunito(
-                  color: cs.onError,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
+              boxShadow: [
+                BoxShadow(
+                  color: cs.primary.withValues(alpha: 0.50),
+                  blurRadius: 16,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 5),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.chat_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+          if (naoLidas > 0)
+            Positioned(
+              right: 0,
+              top: 0,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF3B30),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: cs.surface, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  naoLidas > 99 ? '99+' : '$naoLidas',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.nunito(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                  ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -176,7 +235,8 @@ class _BolhaIcone extends StatelessWidget {
 
 class _MiniChatPainel extends StatefulWidget {
   final VoidCallback onFechar;
-  const _MiniChatPainel({required this.onFechar});
+  final VoidCallback onMinimizar;
+  const _MiniChatPainel({super.key, required this.onFechar, required this.onMinimizar});
 
   @override
   State<_MiniChatPainel> createState() => _MiniChatPainelState();
@@ -219,7 +279,6 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
 
     return Column(
       children: [
-        // Header
         Container(
           padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
           decoration: BoxDecoration(color: cs.primary),
@@ -252,24 +311,36 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              IconButton(
-                icon: Icon(Icons.close_rounded, color: cs.onPrimary, size: 18),
-                onPressed: widget.onFechar,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: IconButton(
+                  icon: Icon(Icons.remove_rounded, color: cs.onPrimary, size: 18),
+                  onPressed: widget.onMinimizar,
+                  tooltip: 'Minimizar',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              ),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: IconButton(
+                  icon: Icon(Icons.close_rounded, color: cs.onPrimary, size: 18),
+                  onPressed: widget.onFechar,
+                  tooltip: 'Fechar',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
               ),
             ],
           ),
         ),
 
-        // Corpo: lista de usuários OU conversa
         Expanded(
           child: chat.usuarioAtivoId == null
               ? _MiniListaUsuarios(chat: chat)
               : _MiniConversa(chat: chat, scrollCtrl: _scrollCtrl),
         ),
 
-        // Input (só quando há conversa aberta)
         if (chat.usuarioAtivoId != null)
           Container(
             padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),

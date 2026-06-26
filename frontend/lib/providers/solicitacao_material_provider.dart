@@ -25,6 +25,7 @@ String _mensagemErro(Object e, {required String acao}) {
 
 class SolicitacaoMaterialProvider extends ChangeNotifier {
   final SolicitacaoMaterialRepository _repo = SolicitacaoMaterialRepository();
+  SolicitacaoMaterialRepository get repository => _repo;
 
   List<SolicitacaoMaterialModel> _solicitacoes = [];
   List<SolicitacaoMaterialModel> get solicitacoes => _solicitacoes;
@@ -35,6 +36,16 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
+  String? _erroLocal;
+  String? get erroLocal => _erroLocal;
+
+  void limparErro() {
+    if (_erro != null) {
+      _erro = null;
+      notifyListeners();
+    }
+  }
+
   List<LogEdicaoSolicitacaoModel> _logs = [];
   List<LogEdicaoSolicitacaoModel> get logs => _logs;
   bool _carregandoLogs = false;
@@ -43,14 +54,8 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   int _novasSolicitacoes = 0;
   int get novasSolicitacoes => _novasSolicitacoes;
 
-  // true enquanto o usuário está vendo a página de solicitações
   bool _paginaAberta = false;
-
-  // true após limparNotificacoes() ter persistido com sucesso no banco
-  // (evita que _carregarContagemInicial restaure o badge enquanto a
-  // persistência ainda está em andamento ou já foi feita nesta sessão)
   bool _visualizacaoPersistedaNaSessao = false;
-
   bool _notificacoesConectadas = false;
   bool get notificacoesConectadas => _notificacoesConectadas;
 
@@ -61,7 +66,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 5;
 
-  // ─── SSE ──────────────────────────────────────────────────────────────────
+  // ─── SSE ──────────────────────────────────
 
   Future<void> conectarNotificacoes() async {
     await _sseSub?.cancel();
@@ -71,8 +76,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     _sseClient = null;
 
     try {
-      final uri = Uri.parse(
-          '${ApiClient.baseUrl}/api/solicitacoes-material/notificacoes');
+      final uri = Uri.parse('${ApiClient.baseUrl}/api/solicitacoes-material/notificacoes');
       debugPrint('🔔 [Solicitações] Conectando ao SSE: $uri');
 
       final token = ApiClient.token;
@@ -93,8 +97,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
       final streamedResp = await _sseClient!.send(req);
 
       if (streamedResp.statusCode != 200) {
-        debugPrint(
-            '❌ [Solicitações] SSE falhou com status ${streamedResp.statusCode}');
+        debugPrint('❌ [Solicitações] SSE falhou com status ${streamedResp.statusCode}');
         _scheduleReconnect();
         return;
       }
@@ -104,16 +107,10 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
       _reconnectAttempts = 0;
       notifyListeners();
 
-      // FIX: Se a página está aberta no momento da reconexão (ex.: API reiniciou),
-      // re-persiste as visualizações no banco e mantém badge em 0.
-      // Caso contrário, carrega a contagem real do banco.
       if (_paginaAberta) {
-        debugPrint(
-            '📖 [Solicitações] Reconexão com página aberta — re-persistindo visualizações');
+        debugPrint('📖 [Solicitações] Reconexão com página aberta — re-persistindo visualizações');
         _novasSolicitacoes = 0;
         notifyListeners();
-        // Re-persiste de forma assíncrona para garantir que o banco fique
-        // sincronizado mesmo após um restart da API.
         _persistirVisualizacao();
       } else {
         await _carregarContagemInicial();
@@ -151,11 +148,8 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   }
 
   Future<void> _carregarContagemInicial() async {
-    // FIX: Se a página está aberta, não restaura o badge do banco.
-    // O usuário já está vendo as solicitações — o badge deve ser 0.
     if (_paginaAberta) {
-      debugPrint(
-          '📖 [Solicitações] _carregarContagemInicial ignorado (página aberta)');
+      debugPrint('📖 [Solicitações] _carregarContagemInicial ignorado (página aberta)');
       _novasSolicitacoes = 0;
       notifyListeners();
       return;
@@ -199,17 +193,13 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   }
 
   void _aoReceberNovaSolicitacao(Map<String, dynamic> data) {
-    debugPrint(
-        '🔔 [Solicitações] Nova solicitação recebida: ${data['numeroOS']}');
+    debugPrint('🔔 [Solicitações] Nova solicitação recebida: ${data['numeroOS']}');
 
     if (_paginaAberta) {
-      // Usuário está na página — recarrega a lista e mantém badge em 0
       debugPrint('ℹ️ [Solicitações] Página aberta — recarregando lista');
       carregar();
-      // Marca a nova solicitação como visualizada imediatamente
       _persistirVisualizacao();
     } else {
-      // Usuário fora da página — incrementa badge
       _novasSolicitacoes++;
       debugPrint('🔔 [Solicitações] Badge atualizado: $_novasSolicitacoes');
       notifyListeners();
@@ -218,16 +208,14 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
 
   void _scheduleReconnect() {
     if (_reconnectAttempts >= _maxReconnectAttempts) {
-      debugPrint(
-          '⚠️ [Solicitações] Máximo de tentativas atingido. Usando polling.');
+      debugPrint('⚠️ [Solicitações] Máximo de tentativas atingido. Usando polling.');
       _iniciarPolling();
       return;
     }
 
     _reconnectAttempts++;
     final delay = Duration(seconds: 2 * _reconnectAttempts);
-    debugPrint(
-        '🔄 [Solicitações] Reconectando SSE em ${delay.inSeconds}s (tentativa $_reconnectAttempts/$_maxReconnectAttempts)');
+    debugPrint('🔄 [Solicitações] Reconectando SSE em ${delay.inSeconds}s (tentativa $_reconnectAttempts/$_maxReconnectAttempts)');
 
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(delay, conectarNotificacoes);
@@ -238,7 +226,6 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     debugPrint('📊 [Solicitações] Iniciando polling a cada 30s como fallback');
 
     _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
-      // FIX: polling também deve respeitar _paginaAberta
       if (_paginaAberta) return;
 
       try {
@@ -246,8 +233,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
         final novoCount = data['count'] as int;
         if (novoCount != _novasSolicitacoes) {
           _novasSolicitacoes = novoCount;
-          debugPrint(
-              '🔔 [Solicitações] Polling: badge atualizado para $_novasSolicitacoes');
+          debugPrint('🔔 [Solicitações] Polling: badge atualizado para $_novasSolicitacoes');
           notifyListeners();
         }
       } catch (e) {
@@ -258,39 +244,27 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
 
   // ─── Controle de página ────────────────────────────────────────────────────
 
-  /// Chamado assim que o widget é inserido na árvore (didChangeDependencies),
-  /// ANTES do postFrameCallback. Isso garante que _paginaAberta = true antes
-  /// de qualquer evento SSE ser processado enquanto a página está visível.
   void marcarPaginaAberta() {
     if (_paginaAberta) return;
     debugPrint('📖 [Solicitações] Página marcada como aberta');
     _paginaAberta = true;
 
-    // FIX: ao marcar a página como aberta, zera o badge imediatamente
-    // (sem esperar o postFrameCallback de limparNotificacoes), evitando
-    // que um evento SSE que chegue nesse intervalo incremente o badge.
     if (_novasSolicitacoes != 0) {
       _novasSolicitacoes = 0;
       notifyListeners();
     }
   }
 
-  /// Chamado no initState (postFrameCallback) para zerar badge e persistir.
-  /// Separado de marcarPaginaAberta() para que a flag de página seja setada
-  /// imediatamente, mas a limpeza do badge (que envolve I/O) venha depois.
   Future<void> limparNotificacoes() async {
-    _paginaAberta = true; // redundante mas garante
+    _paginaAberta = true;
 
-    // FIX: zera localmente antes de aguardar a persistência para que a UI
-    // atualize imediatamente, e só persiste se ainda não foi feito nesta sessão.
     if (_novasSolicitacoes != 0) {
       _novasSolicitacoes = 0;
       notifyListeners();
     }
 
     if (_visualizacaoPersistedaNaSessao) {
-      debugPrint(
-          '✅ [Solicitações] Visualizações já persistidas nesta sessão — pulando');
+      debugPrint('✅ [Solicitações] Visualizações já persistidas nesta sessão — pulando');
       return;
     }
 
@@ -305,22 +279,15 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
       debugPrint('✅ [Solicitações] Visualizações persistidas no banco');
     } catch (e) {
       debugPrint('⚠️ [Solicitações] Erro ao persistir visualizações: $e');
-      // FIX: não marca como persistido em caso de erro — será tentado novamente
-      // na próxima reconexão SSE ou quando o usuário voltar à página.
     }
   }
 
-  /// Chamado quando o usuário sai da página (dispose do widget).
   void sairDaPagina() {
     debugPrint('👋 [Solicitações] Usuário saiu da página');
     _paginaAberta = false;
-    // FIX: reseta o flag de persistência ao sair da página, para que ao
-    // retornar (com possíveis novas solicitações no intervalo) a persistência
-    // seja feita novamente.
     _visualizacaoPersistedaNaSessao = false;
   }
 
-  /// Chamado no logout para encerrar SSE e zerar estado.
   Future<void> resetarConexao() async {
     debugPrint('🔄 [Solicitações] Resetando conexão e estado do provider');
     _reconnectAttempts = 0;
@@ -353,7 +320,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     super.dispose();
   }
 
-  // ─── CRUD ──────────────────────────────────────────────────────────────────
+  // ─── CRUD ──────────────────────────────────
 
   Future<void> carregar({
     String? busca,
@@ -383,9 +350,13 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> criar(Map<String, dynamic> dados, {File? imagem}) async {
+  Future<bool> criar(
+    Map<String, dynamic> dados, {
+    List<Map<String, dynamic>> itens = const [],
+    Map<int, File> imagensPorIndice = const {},
+  }) async {
     try {
-      await _repo.criar(dados, imagem: imagem);
+      await _repo.criar(dados, itens: itens, imagensPorIndice: imagensPorIndice);
       await carregar();
       debugPrint('✅ [Solicitações] Solicitação criada com sucesso');
       return true;
@@ -396,16 +367,71 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> atualizar(int id, Map<String, dynamic> dados,
-      {File? imagem}) async {
+  Future<bool> criarSemCarregar(
+    Map<String, dynamic> dados, {
+    List<Map<String, dynamic>> itens = const [],
+    Map<int, File> imagensPorIndice = const {},
+  }) async {
     try {
-      await _repo.atualizar(id, dados, imagem: imagem);
+      await _repo.criar(dados, itens: itens, imagensPorIndice: imagensPorIndice);
+      debugPrint('✅ [Solicitações] Solicitação criada com sucesso');
+      _erroLocal = null;
+      return true;
+    } catch (e) {
+      _erroLocal = _mensagemErro(e, acao: 'criar solicitação');
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> atualizar(int id, Map<String, dynamic> dados) async {
+    try {
+      await _repo.atualizar(id, dados);
       await carregar();
       return true;
     } catch (e) {
       _erro = _mensagemErro(e, acao: 'atualizar solicitação');
       notifyListeners();
       return false;
+    }
+  }
+
+  Future<bool> adicionarMateriais(
+    int solicitacaoId, {
+    required List<Map<String, dynamic>> itens,
+    Map<int, File> imagensPorIndice = const {},
+  }) async {
+    try {
+      await _repo.adicionarMateriais(
+        solicitacaoId,
+        itens: itens,
+        imagensPorIndice: imagensPorIndice,
+      );
+      await carregar();
+      debugPrint('✅ [Solicitações] Materiais adicionados com sucesso');
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e, acao: 'adicionar materiais');
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> marcarItemComprado(int itemId, {required bool comprado}) async {
+    try {
+      await _repo.marcarItemComprado(itemId, comprado: comprado);
+      debugPrint('✅ [Solicitações] Item marcado como ${comprado ? 'comprado' : 'não comprado'}');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> marcarAdicionalComprado(int adicionalId, {required bool comprado}) async {
+    try {
+      await _repo.marcarAdicionalComprado(adicionalId, comprado: comprado);
+      debugPrint('✅ [Solicitações] Adicional marcado como ${comprado ? 'comprado' : 'não comprado'}');
+    } catch (e) {
+      rethrow;
     }
   }
 

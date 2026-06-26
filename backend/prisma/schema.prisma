@@ -84,7 +84,8 @@ model Material {
   auditLogs                   AuditLogMaterial[]
   produtoMateriais            ProdutoMaterial[]
   orcamentoVendaItemMateriais OrcamentoVendaItemMaterial[]
-  solicitacoesMaterial        SolicitacaoMaterial[]
+  itensSolicitacao            ItemSolicitacaoMaterial[]
+  adicionaisSolicitacao       AdicionalSolicitacaoMaterial[]
 
   @@unique([nome, identificador, medida, espessura])
   @@map("materiais")
@@ -366,28 +367,79 @@ model Cliente {
 }
 
 model SolicitacaoMaterial {
-  id               Int                       @id @default(autoincrement())
-  materialId       Int
-  quantidade       Decimal                   @db.Decimal(10, 3)
-  numeroOS         String
+  id               Int                          @id @default(autoincrement())
+  /// OS única — não é permitido criar duas solicitações com a mesma numeroOS.
+  numeroOS         String                       @unique
   nomeCliente      String
-  dataSolicitacao  DateTime                  @default(now())
   dataNecessidade  DateTime
-  andamento        String                    @default("EM_ANDAMENTO")
+  andamento        String                       @default("EM_ANDAMENTO")
   observacao       String?
-  imagemUrl        String?
   usuarioId        Int
   usuarioNome      String
-  criadoEm         DateTime                  @default(now())
-  atualizadoEm     DateTime                  @updatedAt
-  material         Material                  @relation(fields: [materialId], references: [id])
-  usuario          Usuario                   @relation("SolicitacoesMaterial", fields: [usuarioId], references: [id])
+  criadoEm         DateTime                     @default(now())
+  atualizadoEm     DateTime                     @updatedAt
+ 
+  usuario          Usuario                      @relation("SolicitacoesMaterial", fields: [usuarioId], references: [id])
+  itens            ItemSolicitacaoMaterial[]
+  adicionais       AdicionalSolicitacaoMaterial[]
   logs             LogEdicaoSolicitacao[]
   visualizacoes    VisualizacaoSolicitacao[]
-
+ 
   @@index([andamento])
   @@index([dataNecessidade])
   @@map("solicitacoes_material")
+}
+ 
+/// Item original da solicitação (criado junto com a solicitação).
+/// Imutável após a criação — só ADMIN pode editar via flag isAdmin no service.
+model ItemSolicitacaoMaterial {
+  id              Int                  @id @default(autoincrement())
+  solicitacaoId   Int
+  materialId      Int
+  quantidade      Decimal              @db.Decimal(10, 3)
+  observacao      String?
+  imagemUrl       String?
+ 
+  /// Se comprado = true, registra quem e quando marcou.
+  comprado        Boolean              @default(false)
+  compradoEm      DateTime?
+  compradoPorId   Int?
+  compradoPorNome String?
+ 
+  criadoEm        DateTime             @default(now())
+ 
+  solicitacao     SolicitacaoMaterial  @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+  material        Material             @relation(fields: [materialId], references: [id])
+ 
+  @@index([solicitacaoId])
+  @@map("itens_solicitacao_material")
+}
+ 
+/// Adicional: novos materiais incluídos APÓS a criação da solicitação.
+/// Qualquer usuário autorizado pode adicionar; só ADMIN pode editar depois.
+model AdicionalSolicitacaoMaterial {
+  id              Int                  @id @default(autoincrement())
+  solicitacaoId   Int
+  materialId      Int
+  quantidade      Decimal              @db.Decimal(10, 3)
+  observacao      String?
+  imagemUrl       String?
+ 
+  adicionadoPorId   Int
+  adicionadoPorNome String
+  adicionadoEm      DateTime           @default(now())
+ 
+  /// Se comprado = true, registra quem e quando marcou.
+  comprado        Boolean              @default(false)
+  compradoEm      DateTime?
+  compradoPorId   Int?
+  compradoPorNome String?
+ 
+  solicitacao     SolicitacaoMaterial  @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+  material        Material             @relation(fields: [materialId], references: [id])
+ 
+  @@index([solicitacaoId])
+  @@map("adicionais_solicitacao_material")
 }
 
 model VisualizacaoSolicitacao {
@@ -532,7 +584,7 @@ model ConfiguracaoSistema {
   @@map("configuracoes_sistema")
 }
 
-// ─── ENUMS ────────────────────────────────────────────────────────────────────
+// ─── ENUMS ────────────────────────────────────
 
 enum Role {
   ADMIN

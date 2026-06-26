@@ -11,7 +11,7 @@ class AutoUpdateDialog extends StatefulWidget {
   static Future<void> show(BuildContext context, UpdateInfo updateInfo) {
     return showDialog(
       context: context,
-      barrierDismissible: !updateInfo.mandatory,
+      barrierDismissible: true,
       builder: (_) => AutoUpdateDialog(updateInfo: updateInfo),
     );
   }
@@ -49,13 +49,17 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
   Widget build(BuildContext context) {
     final info = widget.updateInfo;
 
-    return Dialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        width: 460,
-        padding: const EdgeInsets.all(28),
-        child: Column(
+    return PopScope(
+      // Só impede fechar (ESC / botão voltar) enquanto o download/instalação
+      // estiver em andamento. Fora isso, o usuário pode sempre sair.
+      canPop: !_downloading,
+      child: Dialog(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          width: 460,
+          padding: const EdgeInsets.all(28),
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -99,7 +103,7 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
                     ],
                   ),
                 ),
-                if (!info.mandatory && !_downloading)
+                if (!_downloading)
                   IconButton(
                     icon: Icon(Icons.close_rounded, size: 20),
                     color: Theme.of(context).colorScheme.outline,
@@ -226,12 +230,11 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  if (!info.mandatory)
-                    OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Agora não'),
-                    ),
-                  if (!info.mandatory) const SizedBox(width: 12),
+                  OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Mais tarde'),
+                  ),
+                  const SizedBox(width: 12),
                   ElevatedButton.icon(
                     onPressed: _startUpdate,
                     icon: const Icon(Icons.download_rounded, size: 18),
@@ -241,6 +244,7 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
               ),
             ],
           ],
+        ),
         ),
       ),
     );

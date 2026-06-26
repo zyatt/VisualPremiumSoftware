@@ -1,11 +1,11 @@
-// solicitacao_material_repository.dart
+import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
 import '../models/solicitacao_material_model.dart';
 import '../utils/api_client.dart';
 
 class SolicitacaoMaterialRepository {
+  // ── Listar ────────────────────────────────────────────────────────────────
   Future<List<SolicitacaoMaterialModel>> listar({
     String? busca,
     String? andamento,
@@ -15,31 +15,21 @@ class SolicitacaoMaterialRepository {
     DateTime? dataFim,
   }) async {
     final params = <String>[];
-
-    if (busca != null && busca.isNotEmpty) {
+    if (busca != null && busca.isNotEmpty)
       params.add('busca=${Uri.encodeComponent(busca)}');
-    }
-    if (andamento != null && andamento.isNotEmpty) {
+    if (andamento != null && andamento.isNotEmpty)
       params.add('andamento=${Uri.encodeComponent(andamento)}');
-    }
-    if (materialId != null) {
-      params.add('materialId=$materialId');
-    }
-    if (numeroOS != null && numeroOS.isNotEmpty) {
+    if (materialId != null) params.add('materialId=$materialId');
+    if (numeroOS != null && numeroOS.isNotEmpty)
       params.add('numeroOS=${Uri.encodeComponent(numeroOS)}');
-    }
     if (dataInicio != null) {
       final s =
-          '${dataInicio.year}-'
-          '${dataInicio.month.toString().padLeft(2, '0')}-'
-          '${dataInicio.day.toString().padLeft(2, '0')}';
+          '${dataInicio.year}-${dataInicio.month.toString().padLeft(2, '0')}-${dataInicio.day.toString().padLeft(2, '0')}';
       params.add('dataInicio=${Uri.encodeComponent(s)}');
     }
     if (dataFim != null) {
       final s =
-          '${dataFim.year}-'
-          '${dataFim.month.toString().padLeft(2, '0')}-'
-          '${dataFim.day.toString().padLeft(2, '0')}';
+          '${dataFim.year}-${dataFim.month.toString().padLeft(2, '0')}-${dataFim.day.toString().padLeft(2, '0')}';
       params.add('dataFim=${Uri.encodeComponent(s)}');
     }
 
@@ -53,48 +43,78 @@ class SolicitacaoMaterialRepository {
         .toList();
   }
 
+  // ── Buscar por ID ─────────────────────────────────────────────────────────
   Future<SolicitacaoMaterialModel> buscarPorId(int id) async {
     final data = await ApiClient.get('/solicitacoes-material/$id');
     return SolicitacaoMaterialModel.fromJson(data);
   }
 
-  // ── Criar (com imagem opcional via multipart) ─────────────────────────────
+  // ── Criar (multipart — múltiplos itens com imagens opcionais) ─────────────
   Future<SolicitacaoMaterialModel> criar(
     Map<String, dynamic> dados, {
-    File? imagem,
+    List<Map<String, dynamic>> itens = const [],
+    Map<int, File> imagensPorIndice = const {},
   }) async {
-    if (imagem != null) {
-      final data = await _enviarMultipart(
-        'POST',
-        '/solicitacoes-material',
-        dados,
-        imagem,
-      );
-      return SolicitacaoMaterialModel.fromJson(data);
-    }
-    final data = await ApiClient.post('/solicitacoes-material', dados);
+    final data = await _enviarMultipartComItens(
+      'POST',
+      '/solicitacoes-material',
+      dados,
+      itens,
+      imagensPorIndice,
+    );
     return SolicitacaoMaterialModel.fromJson(data);
   }
 
-  // ── Atualizar (com imagem opcional via multipart) ─────────────────────────
+  // ── Atualizar cabeçalho (somente ADMIN) ───────────────────────────────────
   Future<SolicitacaoMaterialModel> atualizar(
     int id,
-    Map<String, dynamic> dados, {
-    File? imagem,
-  }) async {
-    if (imagem != null) {
-      final data = await _enviarMultipart(
-        'PUT',
-        '/solicitacoes-material/$id',
-        dados,
-        imagem,
-      );
-      return SolicitacaoMaterialModel.fromJson(data);
-    }
+    Map<String, dynamic> dados,
+  ) async {
     final data = await ApiClient.put('/solicitacoes-material/$id', dados);
     return SolicitacaoMaterialModel.fromJson(data);
   }
 
+  // ── Adicionar materiais extras ─────────────────────────────────────────────
+  Future<SolicitacaoMaterialModel> adicionarMateriais(
+    int solicitacaoId, {
+    required List<Map<String, dynamic>> itens,
+    Map<int, File> imagensPorIndice = const {},
+  }) async {
+    final data = await _enviarMultipartComItens(
+      'POST',
+      '/solicitacoes-material/$solicitacaoId/adicionais',
+      {},
+      itens,
+      imagensPorIndice,
+    );
+    return SolicitacaoMaterialModel.fromJson(data);
+  }
+
+  // ── Marcar item original como comprado ────────────────────────────────────
+  Future<ItemSolicitacaoModel> marcarItemComprado(
+    int itemId, {
+    required bool comprado,
+  }) async {
+    final data = await ApiClient.patch(
+      '/solicitacoes-material/itens/$itemId/comprado',
+      {'comprado': comprado},
+    );
+    return ItemSolicitacaoModel.fromJson(data);
+  }
+
+  // ── Marcar adicional como comprado ────────────────────────────────────────
+  Future<AdicionalSolicitacaoModel> marcarAdicionalComprado(
+    int adicionalId, {
+    required bool comprado,
+  }) async {
+    final data = await ApiClient.patch(
+      '/solicitacoes-material/adicionais/$adicionalId/comprado',
+      {'comprado': comprado},
+    );
+    return AdicionalSolicitacaoModel.fromJson(data);
+  }
+
+  // ── Excluir ───────────────────────────────────────────────────────────────
   Future<void> excluir(int id) async {
     await ApiClient.delete('/solicitacoes-material/$id');
   }
@@ -110,48 +130,58 @@ class SolicitacaoMaterialRepository {
         .toList();
   }
 
-  // ── Helper multipart ──────────────────────────────────────────────────────
-  /// Envia campos de texto + arquivo de imagem via multipart/form-data.
-  /// NÃO usa ApiClient.authHeaders() (método inexistente).
-  /// Usa ApiClient.token (getter público) e replica a lógica de prefixo
-  /// /api do ApiClient._uri() interno.
-  Future<Map<String, dynamic>> _enviarMultipart(
+  // ── Helper: multipart com lista de itens e imagens por índice ─────────────
+  Future<Map<String, dynamic>> _enviarMultipartComItens(
     String method,
     String path,
     Map<String, dynamic> campos,
-    File arquivo,
+    List<Map<String, dynamic>> itens,
+    Map<int, File> imagensPorIndice,
   ) async {
-    // Replica exatamente a lógica de ApiClient._uri():
-    // rotas /auth ficam sem prefixo; todas as outras recebem /api.
     final prefixed = path.startsWith('/auth') ? path : '/api$path';
     final uri = Uri.parse('${ApiClient.baseUrl}$prefixed');
 
     final request = http.MultipartRequest(method, uri);
 
-    // Injeta o Bearer token usando o getter público ApiClient.token
     final token = ApiClient.token;
     if (token != null) {
       request.headers['Authorization'] = 'Bearer $token';
     }
 
-    // Campos de texto — serializa valores como String
+    // Campos escalares
     campos.forEach((key, value) {
-      if (value != null) {
-        request.fields[key] = value.toString();
-      }
+      if (value != null) request.fields[key] = value.toString();
     });
 
-    // Arquivo de imagem (campo "imagem" esperado pelo multer no backend)
-    request.files.add(
-      await http.MultipartFile.fromPath('imagem', arquivo.path),
-    );
+    // Itens como JSON string
+    request.fields['itens'] = jsonEncode(itens);
+
+    // Imagens por índice: campo "imagens[N]"
+    for (final entry in imagensPorIndice.entries) {
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'imagens[${entry.key}]',
+          entry.value.path,
+        ),
+      );
+    }
 
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
-    final decoded  = jsonDecode(response.body) as Map<String, dynamic>;
+
+    Map<String, dynamic> decoded;
+    try {
+      decoded = response.body.trim().isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      decoded = <String, dynamic>{};
+    }
 
     if (response.statusCode >= 400) {
-      throw Exception(decoded['message'] ?? 'Erro ao enviar arquivo');
+      final mensagem = decoded['message'] as String? ??
+          'Erro ao enviar dados (HTTP ${response.statusCode}).';
+      throw Exception(mensagem);
     }
     return decoded;
   }

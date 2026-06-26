@@ -240,7 +240,7 @@ class _EstoquePageState extends State<EstoquePage> {
                         backgroundColor: Theme.of(context).colorScheme.surface,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                      ),
+                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ],
                 ),
@@ -702,7 +702,9 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
             // ── Cabeçalho ────────────────────────────────────────────────────
             Row(
               children: [
-                InkWell(
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: InkWell(
                   onTap: () => Navigator.of(context).pop(),
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
@@ -726,6 +728,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
                         ),
                       ],
                     ),
+                  ),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -768,7 +771,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                  ),
+                  ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                 ),
               ],
             ),
@@ -1449,7 +1452,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Botão voltar
-                InkWell(
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: InkWell(
                   onTap: () => Navigator.of(context).pop(),
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
@@ -1475,6 +1480,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                         ),
                       ],
                     ),
+                  ),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -1545,19 +1551,22 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   runSpacing: 8,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const HistoricoMaterialPage(),
+                    Tooltip(
+                      message: 'Ver histórico de movimentações do estoque',
+                      child: OutlinedButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const HistoricoMaterialPage(),
+                          ),
                         ),
-                      ),
-                      icon: const Icon(Icons.history, size: 18),
-                      label: const Text('Histórico'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF7C3AED),
-                        side: const BorderSide(color: Color(0xFF7C3AED)),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
+                        icon: const Icon(Icons.history, size: 18),
+                        label: const Text('Histórico'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF7C3AED),
+                          side: const BorderSide(color: Color(0xFF7C3AED)),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                        ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                       ),
                     ),
                     Consumer<MaterialProvider>(
@@ -1587,29 +1596,41 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                               ),
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 16, vertical: 12),
+                            ).copyWith(
+                              mouseCursor: WidgetStateProperty.resolveWith(
+                                (states) => states.contains(WidgetState.disabled)
+                                    ? SystemMouseCursors.forbidden
+                                    : SystemMouseCursors.click,
+                              ),
                             ),
                           ),
                         );
                       },
                     ),
-                    OutlinedButton.icon(
-                      onPressed: _exportarPdf,
-                      icon: const Icon(Icons.picture_as_pdf, size: 18),
-                      label: const Text('Exportar Estoque (PDF)'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFFE85D04),
-                        side: const BorderSide(color: Color(0xFFE85D04)),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    Tooltip(
+                      message: 'Exportar lista de materiais em PDF',
+                      child: OutlinedButton.icon(
+                        onPressed: _exportarPdf,
+                        icon: const Icon(Icons.picture_as_pdf, size: 18),
+                        label: const Text('Exportar Estoque (PDF)'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFE85D04),
+                          side: const BorderSide(color: Color(0xFFE85D04)),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                       ),
                     ),
-                    FilledButton.icon(
-                      onPressed: () => _abrirFormMaterial(),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: Text('Novo Material'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    Tooltip(
+                      message: 'Cadastrar novo material no estoque',
+                      child: FilledButton.icon(
+                        onPressed: () => _abrirFormMaterial(),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: Text('Novo Material'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                       ),
                     ),
                     IconButton(
@@ -1620,7 +1641,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                         backgroundColor: Theme.of(context).colorScheme.surface,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                      ),
+                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ],
                 ),
@@ -1692,7 +1713,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   ),
                 ),
                 SizedBox(width: 8),
-                FilterChip(
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: FilterChip(
                   label: Text('Com fornecedor'),
                   avatar: Icon(
                     Icons.store_outlined,
@@ -1715,6 +1738,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     color: _somenteFornecedor
                         ? AppTheme.primary
                         : Theme.of(context).colorScheme.outline.withValues(alpha: 0.4),
+                  ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -2970,6 +2994,10 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
   Future<void> _salvar() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_modoRetalho && (_unidade == null || _unidade!.isEmpty)) {
+      setState(() => _erroDialog = 'Selecione uma unidade antes de salvar.');
+      return;
+    }
     setState(() { _salvando = true; _erroDialog = null; });
 
     final dados = {
@@ -3102,10 +3130,10 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                         child: const Text('M²', style: TextStyle(fontSize: 14)),
                       )
                     : DropdownButtonFormField<String>(
-                        initialValue: _unidade,
-                        decoration: const InputDecoration(labelText: 'Unidade'),
+                        value: _unidade,
+                        decoration: const InputDecoration(labelText: 'Unidade *'),
+                        hint: const Text('Selecione'),
                         items: const [
-                          DropdownMenuItem(value: null,      child: Text('— Nenhuma —')),
                           DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE')),
                           DropdownMenuItem(value: 'M/L',     child: Text('M/L')),
                           DropdownMenuItem(value: 'M',       child: Text('M')),
@@ -3114,6 +3142,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                           DropdownMenuItem(value: 'KG',      child: Text('KG')),
                           DropdownMenuItem(value: 'G',       child: Text('G')),
                         ],
+                        validator: (v) =>
+                            (v == null || v.isEmpty) ? 'Selecione uma unidade' : null,
                         onChanged: (v) => setState(() => _unidade = v),
                       ),
               ),
@@ -3544,16 +3574,21 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 children: [
                   if (_editando) ...[
                     if (widget.material!.ativo && widget.onDesativar != null)
-                      TextButton.icon(
-                        onPressed: _salvando
-                            ? null
-                            : () {
-                                Navigator.of(context, rootNavigator: true).pop(false);
-                                widget.onDesativar!(widget.material!);
-                              },
-                        icon: const Icon(Icons.block, size: 16),
-                        label: const Text('Desativar'),
-                        style: TextButton.styleFrom(foregroundColor: AppTheme.warning),
+                      MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: TextButton.icon(
+                          onPressed: _salvando
+                              ? null
+                              : () {
+                                  Navigator.of(context, rootNavigator: true).pop(false);
+                                  widget.onDesativar!(widget.material!);
+                                },
+                          icon: const Icon(Icons.block, size: 16),
+                          label: const Text('Desativar'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppTheme.warning,
+                          ),
+                        ),
                       ),
                     if (!widget.material!.ativo && widget.onReativar != null)
                       TextButton.icon(

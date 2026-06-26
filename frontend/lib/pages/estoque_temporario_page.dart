@@ -301,7 +301,7 @@ class _EstoqueTemporarioPageState extends State<EstoqueTemporarioPage> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Materiais cadastrados aqui são desativados automaticamente '
+                      'Materiais temporários são desativados automaticamente '
                       'após 3 meses — não excluídos. O histórico permanece íntegro. '
                       'Use para materiais pontuais que não fazem parte do catálogo permanente.',
                       style: TextStyle(
@@ -762,6 +762,17 @@ class _LinhaTemporarioState extends State<_LinhaTemporario> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// WRAPPER PÚBLICO — permite importar o dialog de cadastro de outras páginas
+// ─────────────────────────────────────────────────────────────────────────────
+
+class EstoqueTemporarioFormDialog extends StatelessWidget {
+  const EstoqueTemporarioFormDialog({super.key});
+
+  @override
+  Widget build(BuildContext context) => const _DialogMaterial();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // DIALOG DE CADASTRO / EDIÇÃO
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -819,7 +830,7 @@ class _DialogMaterialState extends State<_DialogMaterial> {
     setState(() => _salvando = false);
 
     if (ok) {
-      Navigator.pop(context);
+      Navigator.pop(context, true);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(_editando
             ? 'Material atualizado'

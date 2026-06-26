@@ -6,8 +6,10 @@ import '../models/estoque_model.dart';
 import '../models/material_model.dart';
 import '../providers/estoque_provider.dart';
 import '../providers/material_provider.dart';
+import '../providers/estoque_temporario_provider.dart';
 import '../theme/app_theme.dart';
 import 'historico_movimentacoes_page.dart';
+import 'estoque_temporario_page.dart' show EstoqueTemporarioFormDialog;
 
 // ── Formatação de preço: até 6 casas decimais, sem zeros à direita ────────────
 
@@ -277,6 +279,16 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     }
   }
 
+  Future<void> _cadastrarTemporario() async {
+    final criou = await showDialog<bool>(
+      context: context,
+      builder: (_) => const EstoqueTemporarioFormDialog(),
+    );
+    if (criou == true && mounted) {
+      await context.read<EstoqueTemporarioProvider>().carregar();
+    }
+  }
+
   bool get _temFiltroData => _dataInicio != null || _dataFim != null;
 
   /// Filtra pela data de criação da OS, igual ao filtro de período usado
@@ -411,15 +423,46 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   ],
                 ),
                 const Spacer(),
-                FilledButton.icon(
-                  onPressed: _abrirCadastroMaterial,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Novo Material'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
+                PopupMenuButton<String>(
+                  tooltip: 'Novo Material',
+                  onSelected: (v) {
+                    if (v == 'material') _abrirCadastroMaterial();
+                    if (v == 'temporario') _cadastrarTemporario();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'material',
+                      child: Row(
+                        children: [
+                          Icon(Icons.inventory_2_outlined, size: 18),
+                          SizedBox(width: 10),
+                          Text('Cadastrar Material'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'temporario',
+                      child: Row(
+                        children: [
+                          Icon(Icons.access_time_outlined, size: 18),
+                          SizedBox(width: 10),
+                          Text('Material Temporário'),
+                        ],
+                      ),
+                    ),
+                  ],
+                  child: FilledButton.icon(
+                    onPressed: null,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Novo Material'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: AppTheme.primary,
+                      disabledForegroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -4422,6 +4465,10 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
 
   Future<void> _salvar() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_modoRetalho && (_unidade == null || _unidade!.isEmpty)) {
+      setState(() => _erroDialog = 'Selecione uma unidade antes de salvar.');
+      return;
+    }
     setState(() { _salvando = true; _erroDialog = null; });
 
     final custoValor = _custoCtrl.text.trim().isEmpty
@@ -4630,10 +4677,10 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                                   child: const Text('M²', style: TextStyle(fontSize: 14)),
                                 )
                               : DropdownButtonFormField<String>(
-                                  initialValue: _unidade,
-                                  decoration: const InputDecoration(labelText: 'Unidade'),
+                                  value: _unidade,
+                                  decoration: const InputDecoration(labelText: 'Unidade *'),
+                                  hint: const Text('Selecione'),
                                   items: const [
-                                    DropdownMenuItem(value: null,      child: Text('— Nenhuma —')),
                                     DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE')),
                                     DropdownMenuItem(value: 'M/L',     child: Text('M/L')),
                                     DropdownMenuItem(value: 'M',       child: Text('M')),
@@ -4642,6 +4689,8 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                                     DropdownMenuItem(value: 'KG',      child: Text('KG')),
                                     DropdownMenuItem(value: 'G',       child: Text('G')),
                                   ],
+                                  validator: (v) =>
+                                      (v == null || v.isEmpty) ? 'Selecione uma unidade' : null,
                                   onChanged: (v) => setState(() => _unidade = v),
                                 ),
                         ),
