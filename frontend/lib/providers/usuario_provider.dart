@@ -47,8 +47,18 @@ class UsuarioProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
+  List<UsuarioModel> _usuariosSalvos = [];
+  /// Usuários que já logaram nesta máquina (para troca rápida).
+  List<UsuarioModel> get usuariosSalvos => _usuariosSalvos;
+
+  /// Atualiza a lista de usuários salvos; chamado na inicialização e após login.
+  Future<void> _refreshUsuariosSalvos() async {
+    _usuariosSalvos = await _repo.getUsuariosSalvos();
+  }
+
   // Chamado em main() antes de runApp — tenta restaurar sessão salva
   Future<void> restaurarSessao() async {
+    await _refreshUsuariosSalvos();
     try {
       final sessao = await _repo.carregarSessao();
       if (sessao != null) {
@@ -80,6 +90,13 @@ class UsuarioProvider extends ChangeNotifier {
     }
   }
 
+  /// Remove um usuário salvo da lista de troca rápida (não afeta o usuário no servidor).
+  Future<void> removerUsuarioSalvo(UsuarioModel usuario) async {
+    await _repo.removerUsuarioSalvo(usuario.id);
+    await _refreshUsuariosSalvos();
+    notifyListeners();
+  }
+
   Future<bool> login(String username, String senha) async {
     _carregando = true;
     _erro       = null;
@@ -92,6 +109,8 @@ class UsuarioProvider extends ChangeNotifier {
       _token         = result.token;
       _usuarioLogado = result.usuario;
       ApiClient.setToken(_token);
+      await _repo.adicionarUsuarioSalvo(result.usuario);
+      await _refreshUsuariosSalvos();
       await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
       return true;
     } catch (e) {
@@ -111,6 +130,47 @@ class UsuarioProvider extends ChangeNotifier {
     _orcamentoProvider?.trocarUsuario(null);
     // Encerra a conexão SSE e zera o estado de solicitações do usuário que
     // saiu, para que o próximo usuário a logar comece do zero.
+    await _solicitacaoMaterialProvider?.resetarConexao();
+    notifyListeners();
+  }
+
+  /// Troca diretamente para outro usuário que já logou nesta máquina,
+  /// sem precisar de senha. Requer que haja um token ativo no momento.
+  Future<bool> loginComoUsuario(UsuarioModel alvo) async {
+    _carregando = true;
+    _erro       = null;
+    notifyListeners();
+    try {
+      await _solicitacaoMaterialProvider?.resetarConexao();
+      final data    = await ApiClient.post('/auth/trocar-usuario', {'id': alvo.id});
+      final token   = data['token'] as String;
+      final usuario = UsuarioModel.fromJson(data['usuario'] as Map<String, dynamic>);
+      _token         = token;
+      _usuarioLogado = usuario;
+      ApiClient.setToken(token);
+      await _repo.salvarSessao(token, usuario);
+      await _repo.adicionarUsuarioSalvo(usuario);
+      await _refreshUsuariosSalvos();
+      await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      return false;
+    } finally {
+      _carregando = false;
+      notifyListeners();
+    }
+  }
+
+  /// Efetua logout do usuário atual sem limpar a lista de usuários salvos,
+  /// sinalizando ao router que deve ir para a tela de login.
+  Future<void> iniciarTrocaUsuario() async {
+    _usuarioLogado = null;
+    _token         = null;
+    _erro          = null;
+    ApiClient.setToken(null);
+    await _repo.limparSessao();
+    _orcamentoProvider?.trocarUsuario(null);
     await _solicitacaoMaterialProvider?.resetarConexao();
     notifyListeners();
   }

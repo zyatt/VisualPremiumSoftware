@@ -4,8 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
 class UsuarioRepository {
-  static const _keyToken   = 'session_token';
-  static const _keyUsuario = 'session_usuario';
+  static const _keyToken        = 'session_token';
+  static const _keyUsuario      = 'session_usuario';
+  /// Lista de usuários que já logaram nesta máquina (sem senha).
+  static const _keyUsuariosSalvos = 'usuarios_salvos';
 
   // ── Login remoto ──────────────────────────────────────────────────────────
   Future<({String token, UsuarioModel usuario})> login(
@@ -45,6 +47,50 @@ class UsuarioRepository {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyToken);
     await prefs.remove(_keyUsuario);
+  }
+
+  // ── Usuários salvos (troca rápida) ────────────────────────────────────────
+  /// Persiste o usuário na lista de "usuários salvos nesta máquina".
+  /// Mantém no máximo 10 entradas e garante que não há duplicatas por id.
+  Future<void> adicionarUsuarioSalvo(UsuarioModel usuario) async {
+    final prefs   = await SharedPreferences.getInstance();
+    final raw     = prefs.getString(_keyUsuariosSalvos);
+    final lista   = raw != null
+        ? (jsonDecode(raw) as List).cast<Map<String, dynamic>>()
+        : <Map<String, dynamic>>[];
+    // Remove entrada antiga do mesmo id
+    lista.removeWhere((e) => e['id'] == usuario.id);
+    // Insere no topo
+    lista.insert(0, usuario.toJson());
+    if (lista.length > 10) lista.removeLast();
+    await prefs.setString(_keyUsuariosSalvos, jsonEncode(lista));
+  }
+
+  /// Remove um usuário específico da lista de "usuários salvos nesta máquina".
+  Future<void> removerUsuarioSalvo(int id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw   = prefs.getString(_keyUsuariosSalvos);
+    if (raw == null) return;
+    final lista = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+    lista.removeWhere((e) => e['id'] == id);
+    await prefs.setString(_keyUsuariosSalvos, jsonEncode(lista));
+  }
+
+  /// Limpa toda a lista de usuários salvos nesta máquina.
+  Future<void> limparUsuariosSalvos() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyUsuariosSalvos);
+  }
+
+  /// Retorna a lista de usuários que já logaram nesta máquina.
+  Future<List<UsuarioModel>> getUsuariosSalvos() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw   = prefs.getString(_keyUsuariosSalvos);
+    if (raw == null) return [];
+    return (jsonDecode(raw) as List)
+        .cast<Map<String, dynamic>>()
+        .map(UsuarioModel.fromJson)
+        .toList();
   }
 
   // ── CRUD de usuários ──────────────────────────────────────────────────────

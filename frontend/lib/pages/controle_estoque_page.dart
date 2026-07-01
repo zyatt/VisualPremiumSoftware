@@ -6,10 +6,8 @@ import '../models/estoque_model.dart';
 import '../models/material_model.dart';
 import '../providers/estoque_provider.dart';
 import '../providers/material_provider.dart';
-import '../providers/estoque_temporario_provider.dart';
 import '../theme/app_theme.dart';
 import 'historico_movimentacoes_page.dart';
-import 'estoque_temporario_page.dart' show EstoqueTemporarioFormDialog;
 
 // ── Formatação de preço: até 6 casas decimais, sem zeros à direita ────────────
 
@@ -132,7 +130,6 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     with SingleTickerProviderStateMixin {
   final TextEditingController _buscaCtrl        = TextEditingController();
   final TextEditingController _buscaNomeCtrl    = TextEditingController();
-  final TextEditingController _buscaIdCtrl      = TextEditingController();
   final TextEditingController _identificadorCtrl = TextEditingController();
   final TextEditingController _medidaCtrl        = TextEditingController();
   final TextEditingController _espessuraCtrl     = TextEditingController();
@@ -247,7 +244,6 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     _tabController.dispose();
     _buscaCtrl.dispose();
     _buscaNomeCtrl.dispose();
-    _buscaIdCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
     _espessuraCtrl.dispose();
@@ -276,16 +272,6 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     if (!mounted) return;
     if (salvou == true) {
       context.read<MaterialProvider>().carregarCategorias();
-    }
-  }
-
-  Future<void> _cadastrarTemporario() async {
-    final criou = await showDialog<bool>(
-      context: context,
-      builder: (_) => const EstoqueTemporarioFormDialog(),
-    );
-    if (criou == true && mounted) {
-      await context.read<EstoqueTemporarioProvider>().carregar();
     }
   }
 
@@ -342,13 +328,11 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
 
   List<RelacaoOSModel> _filtrarPorMaterial(List<RelacaoOSModel> lista) {
     final nome          = _buscaNomeCtrl.text.trim().toLowerCase();
-    final idTexto       = _buscaIdCtrl.text.trim();
     final identificador = _identificadorCtrl.text.trim().toUpperCase();
     final medida        = _medidaCtrl.text.trim().toUpperCase();
     final espessura     = _espessuraCtrl.text.trim().toUpperCase();
 
     final temFiltro = nome.isNotEmpty ||
-        idTexto.isNotEmpty ||
         identificador.isNotEmpty ||
         medida.isNotEmpty ||
         espessura.isNotEmpty;
@@ -359,10 +343,6 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
       return r.movimentacoes.any((m) {
         if (nome.isNotEmpty &&
             !m.materialNome.toLowerCase().contains(nome)) {
-          return false;
-        }
-        if (idTexto.isNotEmpty &&
-            !m.materialId.toString().contains(idTexto)) {
           return false;
         }
         if (identificador.isNotEmpty) {
@@ -423,46 +403,15 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   ],
                 ),
                 const Spacer(),
-                PopupMenuButton<String>(
-                  tooltip: 'Novo Material',
-                  onSelected: (v) {
-                    if (v == 'material') _abrirCadastroMaterial();
-                    if (v == 'temporario') _cadastrarTemporario();
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: 'material',
-                      child: Row(
-                        children: [
-                          Icon(Icons.inventory_2_outlined, size: 18),
-                          SizedBox(width: 10),
-                          Text('Cadastrar Material'),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'temporario',
-                      child: Row(
-                        children: [
-                          Icon(Icons.access_time_outlined, size: 18),
-                          SizedBox(width: 10),
-                          Text('Material Temporário'),
-                        ],
-                      ),
-                    ),
-                  ],
-                  child: FilledButton.icon(
-                    onPressed: null,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Novo Material'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: AppTheme.primary,
-                      disabledForegroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 12),
-                    ),
+                FilledButton.icon(
+                  onPressed: _abrirCadastroMaterial,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Novo Material'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 12),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -561,7 +510,6 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   onPressed: () {
                     _buscaCtrl.clear();
                     _buscaNomeCtrl.clear();
-                    _buscaIdCtrl.clear();
                     _identificadorCtrl.clear();
                     _medidaCtrl.clear();
                     _espessuraCtrl.clear();
@@ -583,30 +531,6 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
 
             Row(
               children: [
-                SizedBox(
-                  width: 110,
-                  child: TextField(
-                    controller: _buscaIdCtrl,
-                    decoration: InputDecoration(
-                      hintText:   'ID...',
-                      prefixIcon: Icon(Icons.tag,
-                          color: Theme.of(context).colorScheme.outline, size: 18),
-                      isDense: true,
-                    ),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly
-                    ],
-                    onChanged: (_) {
-                      _debounceTimer?.cancel();
-                      _debounceTimer = Timer(
-                        const Duration(milliseconds: 300),
-                        () => setState(() {}),
-                      );
-                    },
-                  ),
-                ),
-                SizedBox(width: 10),
                 Expanded(
                   child: TextField(
                     controller: _identificadorCtrl,
@@ -991,7 +915,31 @@ class _OrdenacaoControl extends StatelessWidget {
 
 bool _osEhNumerica(String numeroOS) => int.tryParse(numeroOS.trim()) != null;
 
-class _OsGrid extends StatelessWidget {
+/// Classifica uma OS textual em uma das categorias grandes exibidas dentro
+/// de "Empresa": "EMPRESA-(DATA)" → EMPRESA, "INVESTIMENTO-(DATA)" →
+/// INVESTIMENTO, qualquer outra coisa → OUTROS.
+String _categoriaEmpresa(String numeroOS) {
+  final upper = numeroOS.trim().toUpperCase();
+  if (upper.startsWith('EMPRESA-') || upper == 'EMPRESA') return 'EMPRESA';
+  if (upper.startsWith('INVESTIMENTO-') || upper == 'INVESTIMENTO') return 'INVESTIMENTO';
+  return 'OUTROS';
+}
+
+class _CategoriaEmpresaInfo {
+  final String chave;
+  final String label;
+  final IconData icone;
+  final Color cor;
+  const _CategoriaEmpresaInfo(this.chave, this.label, this.icone, this.cor);
+}
+
+final _categoriasEmpresa = <_CategoriaEmpresaInfo>[
+  _CategoriaEmpresaInfo('EMPRESA', 'Empresa', Icons.business_outlined, AppTheme.primary),
+  _CategoriaEmpresaInfo('INVESTIMENTO', 'Investimento', Icons.trending_up, const Color(0xFF2E7D32)),
+  _CategoriaEmpresaInfo('OUTROS', 'Outros', Icons.category_outlined, const Color(0xFF6D4C41)),
+];
+
+class _OsGrid extends StatefulWidget {
   final List<RelacaoOSModel> relacoes;
   final String emptyMessage;
   final void Function(RelacaoOSModel) onTap;
@@ -1001,6 +949,37 @@ class _OsGrid extends StatelessWidget {
     required this.emptyMessage,
     required this.onTap,
   });
+
+  @override
+  State<_OsGrid> createState() => _OsGridState();
+}
+
+class _OsGridState extends State<_OsGrid> {
+  /// Categoria de "Empresa" atualmente aberta (null = mostra os 3 cards grandes).
+  String? _categoriaAberta;
+
+  // Chaves usadas para rolar automaticamente a tela: ao expandir uma
+  // categoria, rola até o conteúdo expandido (mini-cards); ao recolher,
+  // rola de volta até o topo dos 3 cards grandes.
+  final GlobalKey _cardsCategoriaKey = GlobalKey();
+  final GlobalKey _conteudoExpandidoKey = GlobalKey();
+
+  void _alternarCategoria(String chave, bool estaSelecionada) {
+    final abrindo = !estaSelecionada;
+    setState(() => _categoriaAberta = abrindo ? chave : null);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = abrindo ? _conteudoExpandidoKey : _cardsCategoriaKey;
+      final ctx = key.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          alignment: abrindo ? 1.0 : 0.0,
+        );
+      }
+    });
+  }
 
   SliverToBoxAdapter _cabecalho(String titulo, int count, BuildContext context) =>
       SliverToBoxAdapter(
@@ -1041,8 +1020,23 @@ class _OsGrid extends StatelessWidget {
       );
 
   @override
+  void didUpdateWidget(covariant _OsGrid oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Se a categoria aberta deixou de ter itens nos dados atuais (ex.: a
+    // última OS dela foi fechada/excluída), volta para os 3 cards grandes.
+    if (_categoriaAberta != null) {
+      final aindaExiste = widget.relacoes.any((r) =>
+          !_osEhNumerica(r.numeroOS) &&
+          _categoriaEmpresa(r.numeroOS) == _categoriaAberta);
+      if (!aindaExiste) {
+        _categoriaAberta = null;
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (relacoes.isEmpty) {
+    if (widget.relacoes.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1051,7 +1045,7 @@ class _OsGrid extends StatelessWidget {
                 size: 48, color: Theme.of(context).colorScheme.outline),
             SizedBox(height: 12),
             Text(
-              emptyMessage,
+              widget.emptyMessage,
               style: TextStyle(
                   color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 15),
             ),
@@ -1060,8 +1054,8 @@ class _OsGrid extends StatelessWidget {
       );
     }
 
-    final numericas = relacoes.where((r) =>  _osEhNumerica(r.numeroOS)).toList();
-    final textuais  = relacoes.where((r) => !_osEhNumerica(r.numeroOS)).toList();
+    final numericas = widget.relacoes.where((r) => _osEhNumerica(r.numeroOS)).toList();
+    final textuais  = widget.relacoes.where((r) => !_osEhNumerica(r.numeroOS)).toList();
 
     const gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
       maxCrossAxisExtent: 200,
@@ -1069,6 +1063,20 @@ class _OsGrid extends StatelessWidget {
       mainAxisSpacing: 12,
       childAspectRatio: 1,
     );
+
+    // Agrupa as OS textuais por categoria (EMPRESA / INVESTIMENTO / OUTROS).
+    final porCategoria = <String, List<RelacaoOSModel>>{
+      for (final c in _categoriasEmpresa) c.chave: <RelacaoOSModel>[],
+    };
+    for (final r in textuais) {
+      porCategoria[_categoriaEmpresa(r.numeroOS)]!.add(r);
+    }
+
+    final categoriaInfo = _categoriaAberta == null
+        ? null
+        : _categoriasEmpresa.firstWhere((c) => c.chave == _categoriaAberta);
+    final itensCategoria =
+        _categoriaAberta == null ? const <RelacaoOSModel>[] : porCategoria[_categoriaAberta]!;
 
     return CustomScrollView(
       slivers: [
@@ -1078,7 +1086,7 @@ class _OsGrid extends StatelessWidget {
             delegate: SliverChildBuilderDelegate(
               (ctx, i) {
                 final rel = numericas[i];
-                return _RelacaoOSCard(relacao: rel, onTap: () => onTap(rel));
+                return _RelacaoOSCard(relacao: rel, onTap: () => widget.onTap(rel));
               },
               childCount: numericas.length,
             ),
@@ -1086,20 +1094,169 @@ class _OsGrid extends StatelessWidget {
           ),
         ],
         if (textuais.isNotEmpty) ...[
-          _cabecalho('Empresa', textuais.length, context),
-          SliverGrid(
-            delegate: SliverChildBuilderDelegate(
-              (ctx, i) {
-                final rel = textuais[i];
-                return _RelacaoOSCard(relacao: rel, onTap: () => onTap(rel));
+          _cabecalho('Outros', textuais.length, context),
+          SliverToBoxAdapter(
+            child: LayoutBuilder(
+              builder: (ctx, constraints) {
+                final largura = constraints.maxWidth;
+                final colunas = largura >= 640 ? 3 : (largura >= 420 ? 2 : 1);
+                return Container(
+                  key: _cardsCategoriaKey,
+                  child: GridView.count(
+                    crossAxisCount: colunas,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 1.9,
+                    children: _categoriasEmpresa.map((cat) {
+                      final itens = porCategoria[cat.chave]!;
+                      final selecionado = _categoriaAberta == cat.chave;
+                      return _CategoriaEmpresaCard(
+                        info: cat,
+                        count: itens.length,
+                        selecionado: selecionado,
+                        onTap: itens.isEmpty
+                            ? null
+                            : () => _alternarCategoria(cat.chave, selecionado),
+                      );
+                    }).toList(),
+                  ),
+                );
               },
-              childCount: textuais.length,
             ),
-            gridDelegate: gridDelegate,
           ),
+          if (_categoriaAberta != null) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 16, bottom: 4),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 3,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: categoriaInfo!.cor,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'OS em ${categoriaInfo.label}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverGrid(
+              delegate: SliverChildBuilderDelegate(
+                (ctx, i) {
+                  final rel = itensCategoria[i];
+                  final card = _RelacaoOSCard(relacao: rel, onTap: () => widget.onTap(rel));
+                  // A chave fica no primeiro card da linha para que o auto-scroll
+                  // role até a linha de mini-cards realmente aparecer, não só o rótulo.
+                  return i == 0 ? KeyedSubtree(key: _conteudoExpandidoKey, child: card) : card;
+                },
+                childCount: itensCategoria.length,
+              ),
+              gridDelegate: gridDelegate,
+            ),
+          ],
         ],
         const SliverToBoxAdapter(child: SizedBox(height: 16)),
       ],
+    );
+  }
+}
+
+// ─── Card grande de categoria (Empresa / Investimento / Outros) ──────────────
+
+class _CategoriaEmpresaCard extends StatelessWidget {
+  final _CategoriaEmpresaInfo info;
+  final int count;
+  final bool selecionado;
+  final VoidCallback? onTap;
+
+  const _CategoriaEmpresaCard({
+    required this.info,
+    required this.count,
+    required this.selecionado,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final habilitado = onTap != null;
+    return Card(
+      elevation: selecionado ? 2 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: selecionado
+            ? BorderSide(color: info.cor, width: 1.6)
+            : BorderSide(color: Theme.of(context).colorScheme.outlineVariant, width: 1),
+      ),
+      color: selecionado ? info.cor.withValues(alpha: 0.06) : null,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Opacity(
+          opacity: habilitado ? 1 : 0.45,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: info.cor.withValues(alpha: selecionado ? 0.20 : 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(info.icone, color: info.cor, size: 26),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        info.label,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: selecionado
+                              ? info.cor
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        '$count ${count == 1 ? 'ordem' : 'ordens'}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (habilitado)
+                  Icon(
+                    selecionado ? Icons.expand_less : Icons.expand_more,
+                    color: selecionado ? info.cor : Theme.of(context).colorScheme.outline,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1790,6 +1947,27 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
   // Chave: materialId
   String _chaveGrupo(MovimentacaoModel mov) => '${mov.materialId}';
 
+  final TextEditingController _filtroCtrl = TextEditingController();
+  String _filtro = '';
+
+  @override
+  void dispose() {
+    _filtroCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _entradaCorresponde(MapEntry<String, List<MovimentacaoModel>> entry) {
+    if (_filtro.isEmpty) return true;
+    final mov = entry.value.first;
+    final campos = [
+      mov.materialNome,
+      mov.materialIdentificador ?? '',
+      mov.materialMedida ?? '',
+      mov.materialEspessura ?? '',
+    ].join(' ').toLowerCase();
+    return campos.contains(_filtro);
+  }
+
   @override
   Widget build(BuildContext context) {
     final materiaisMap = <String, List<MovimentacaoModel>>{};
@@ -1809,29 +1987,71 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
       );
     }
 
-    final entries = materiaisMap.entries.toList();
+    final entries = materiaisMap.entries.where(_entradaCorresponde).toList();
 
-    return GridView.builder(
-      padding: const EdgeInsets.all(24),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 340,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: 1.55,
-      ),
-      itemCount: entries.length,
-      itemBuilder: (ctx, i) {
-        final entry = entries[i];
-        final movs  = List<MovimentacaoModel>.from(entry.value)
-          ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
-        return _MaterialGridCard(
-          key: ValueKey(entry.key),
-          movimentacoes: movs,
-          numeroOS: widget.rel.numeroOS,
-          // OS fechada: bloqueia ações de movimentação/remoção
-          somenteLeitura: widget.rel.estaFechada,
-        );
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+          child: TextField(
+            controller: _filtroCtrl,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [_UpperCaseFormatter()],
+            decoration: InputDecoration(
+              hintText: 'Filtrar materiais por nome, identificador, medida ou espessura...',
+              prefixIcon: Icon(Icons.filter_alt_outlined,
+                  color: Theme.of(context).colorScheme.outline, size: 20),
+              isDense: true,
+              suffixIcon: _filtro.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Limpar filtro',
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () {
+                        _filtroCtrl.clear();
+                        setState(() => _filtro = '');
+                      },
+                    ),
+            ),
+            onChanged: (v) => setState(() => _filtro = v.trim().toLowerCase()),
+          ),
+        ),
+        Expanded(
+          child: entries.isEmpty
+              ? Center(
+                  child: Text(
+                    'Nenhum material encontrado para o filtro.',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(color: Theme.of(context).colorScheme.outline),
+                  ),
+                )
+              : GridView.builder(
+                  padding: const EdgeInsets.all(24),
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 340,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 1.55,
+                  ),
+                  itemCount: entries.length,
+                  itemBuilder: (ctx, i) {
+                    final entry = entries[i];
+                    final movs  = List<MovimentacaoModel>.from(entry.value)
+                      ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
+                    return _MaterialGridCard(
+                      key: ValueKey(entry.key),
+                      movimentacoes: movs,
+                      numeroOS: widget.rel.numeroOS,
+                      // OS fechada: bloqueia ações de movimentação/remoção
+                      somenteLeitura: widget.rel.estaFechada,
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }
@@ -3660,7 +3880,6 @@ class _MovimentacaoGlobalDialogState
   final List<_ItemMovimentacao> _itensSelecionados = [];
   bool _enviando = false;
 
-  final _idCtrl            = TextEditingController();
   final _nomeCtrl          = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
@@ -3692,7 +3911,6 @@ class _MovimentacaoGlobalDialogState
   @override
   void dispose() {
     _numeroOSCtrl.dispose();
-    _idCtrl.dispose();
     _nomeCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
@@ -3719,8 +3937,7 @@ class _MovimentacaoGlobalDialogState
 
   void _agendarBusca() {
     _debounce?.cancel();
-    final temValor = _idCtrl.text.isNotEmpty ||
-        _nomeCtrl.text.isNotEmpty ||
+    final temValor = _nomeCtrl.text.isNotEmpty ||
         _identificadorCtrl.text.isNotEmpty ||
         _medidaCtrl.text.isNotEmpty ||
         _espessuraCtrl.text.isNotEmpty;
@@ -3747,7 +3964,6 @@ class _MovimentacaoGlobalDialogState
       //    não no catálogo padrão de materiais.
       final lista = await context.read<MaterialProvider>().buscarParaMovimentacao(
         busca:         _nomeCtrl.text.trim(),
-        id:            _idCtrl.text.trim(),
         identificador: _identificadorCtrl.text.trim(),
         medida:        _medidaCtrl.text.trim(),
         espessura:     _espessuraCtrl.text.trim(),
@@ -3765,7 +3981,6 @@ class _MovimentacaoGlobalDialogState
   }
 
   void _limparFiltros() {
-    _idCtrl.clear();
     _nomeCtrl.clear();
     _identificadorCtrl.clear();
     _medidaCtrl.clear();
@@ -3982,25 +4197,6 @@ class _MovimentacaoGlobalDialogState
                           children: [
                             Row(
                               children: [
-                                SizedBox(
-                                  width: 90,
-                                  child: TextField(
-                                    controller: _idCtrl,
-                                    decoration: InputDecoration(
-                                      hintText: 'ID...',
-                                      prefixIcon: Icon(Icons.tag,
-                                          color: Theme.of(context).colorScheme.outline, size: 16),
-                                      isDense: true,
-                                    ),
-                                    keyboardType: TextInputType.number,
-                                    inputFormatters: [
-                                      FilteringTextInputFormatter.digitsOnly
-                                    ],
-                                    onChanged: (_) => _agendarBusca(),
-                                    onSubmitted: (_) => _buscar(),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
                                 Expanded(
                                   flex: 3,
                                   child: TextField(
@@ -4630,6 +4826,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                       ],
                       TextFormField(
                         controller: _nome,
+                        autofocus: true,
                         decoration: const InputDecoration(labelText: 'Nome *'),
                         textCapitalization: TextCapitalization.characters,
                         inputFormatters: [_UpperCaseFormatter()],
@@ -4677,17 +4874,16 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                                   child: const Text('M²', style: TextStyle(fontSize: 14)),
                                 )
                               : DropdownButtonFormField<String>(
-                                  value: _unidade,
+                                  initialValue: _unidade,
                                   decoration: const InputDecoration(labelText: 'Unidade *'),
                                   hint: const Text('Selecione'),
                                   items: const [
-                                    DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE')),
-                                    DropdownMenuItem(value: 'M/L',     child: Text('M/L')),
-                                    DropdownMenuItem(value: 'M',       child: Text('M')),
-                                    DropdownMenuItem(value: 'ML',      child: Text('ML')),
-                                    DropdownMenuItem(value: 'M²',      child: Text('M²')),
-                                    DropdownMenuItem(value: 'KG',      child: Text('KG')),
-                                    DropdownMenuItem(value: 'G',       child: Text('G')),
+                                    DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE — (unidade)')),
+                                    DropdownMenuItem(value: 'M/L',     child: Text('M/L — (metro linear)')),
+                                    DropdownMenuItem(value: 'M',       child: Text('M — (metro)')),
+                                    DropdownMenuItem(value: 'ML',      child: Text('ML — (mililitro)')),
+                                    DropdownMenuItem(value: 'M²',      child: Text('M² — (metro quadrado)')),
+                                    DropdownMenuItem(value: 'G',       child: Text('G — (grama)')),
                                   ],
                                   validator: (v) =>
                                       (v == null || v.isEmpty) ? 'Selecione uma unidade' : null,
@@ -4696,36 +4892,24 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         ),
                       ]),
                       const SizedBox(height: 10),
-                      Row(children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: _medida,
-                            readOnly: _modoRetalho,
-                            decoration: InputDecoration(
-                              labelText: 'Medida',
-                              suffixIcon: _modoRetalho
-                                  ? const Tooltip(
-                                      message: 'Bloqueado no modo Retalho',
-                                      child: Icon(Icons.lock_outline, size: 16),
-                                    )
-                                  : null,
-                            ),
-                            textCapitalization: TextCapitalization.characters,
-                            inputFormatters: [_UpperCaseFormatter()],
-                            onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
-                          ),
+                      if (_unidade != 'ML' && _unidade != 'G') ...[
+                      TextFormField(
+                        controller: _medida,
+                        readOnly: _modoRetalho,
+                        decoration: InputDecoration(
+                          labelText: 'Medida',
+                          suffixIcon: _modoRetalho
+                              ? const Tooltip(
+                                  message: 'Bloqueado no modo Retalho',
+                                  child: Icon(Icons.lock_outline, size: 16),
+                                )
+                              : null,
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextFormField(
-                            controller: _espessura,
-                            decoration: const InputDecoration(labelText: 'Espessura'),
-                            textCapitalization: TextCapitalization.characters,
-                            inputFormatters: [_UpperCaseFormatter()],
-                            onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
-                          ),
-                        ),
-                      ]),
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: [_UpperCaseFormatter()],
+                        onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
+                      ),
+                      ], // end if not ML/G (medida)
                       if (_verificandoDuplicata || _possiveisDuplicatas.isNotEmpty) ...[
                         const SizedBox(height: 10),
                         _AvisoPossivelDuplicataCE(
@@ -4733,8 +4917,28 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                           duplicatas: _possiveisDuplicatas,
                         ),
                       ],
+                      if (_unidade != 'ML' && _unidade != 'G') ...[
                       const SizedBox(height: 10),
                       Row(children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _comprimento,
+                            readOnly: _modoRetalho,
+                            decoration: InputDecoration(
+                              labelText: 'Comprimento (m)',
+                              suffixIcon: _modoRetalho
+                                  ? const Tooltip(
+                                      message: 'Bloqueado no modo Retalho',
+                                      child: Icon(Icons.lock_outline, size: 16),
+                                    )
+                                  : null,
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [_DecimalInputFormatter()],
+                            onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: TextFormField(
                             controller: _largura,
@@ -4756,23 +4960,15 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: TextFormField(
-                            controller: _comprimento,
-                            readOnly: _modoRetalho,
-                            decoration: InputDecoration(
-                              labelText: 'Comprimento (m)',
-                              suffixIcon: _modoRetalho
-                                  ? const Tooltip(
-                                      message: 'Bloqueado no modo Retalho',
-                                      child: Icon(Icons.lock_outline, size: 16),
-                                    )
-                                  : null,
-                            ),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            inputFormatters: [_DecimalInputFormatter()],
+                            controller: _espessura,
+                            decoration: const InputDecoration(labelText: 'Espessura'),
+                            textCapitalization: TextCapitalization.characters,
+                            inputFormatters: [_UpperCaseFormatter()],
                             onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                           ),
                         ),
                       ]),
+                      ], // end if not ML/G
                       const SizedBox(height: 10),
                       Row(children: [
                         Expanded(
@@ -4986,26 +5182,37 @@ class _ItemSelecionadoCard extends StatefulWidget {
 class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
   _ItemMovimentacao get item => widget.item;
 
-  // ── Detecta medida no formato "LxA" ou "LxAM" (ex: "2X1", "1.20X0.80M") ──
-  // Materiais metro linear (M/L, m, ml…) NUNCA entram no modo dimensional,
-  // mesmo que a medida esteja no formato LxC — a largura deles é fixa e o
-  // comprimento cortado já é a quantidade informada pelo usuário.
-  bool get _temMedidaDimensional {
+  // Materiais metro linear (M/L, m, ml…) NUNCA entram no modo dimensional —
+  // a largura deles é fixa e o comprimento cortado já é a quantidade
+  // informada pelo usuário.
+  bool get _eMetroLinear {
     final unidade = item.material.unidade?.toLowerCase().trim() ?? '';
     const unidadesMetroLinear = {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'};
-    if (unidadesMetroLinear.contains(unidade)) return false;
-    final medida = item.material.medida;
-    if (medida == null || medida.isEmpty) return false;
-    // Aceita sufixo opcional "M" no final (ex: 1.20X0.80M, 2X1M)
-    return RegExp(r'^\d+([.,]\d+)?\s*[xX]\s*\d+([.,]\d+)?\s*M?$', caseSensitive: false)
-        .hasMatch(medida.trim());
+    return unidadesMetroLinear.contains(unidade);
   }
 
-  /// Parseia "2X1" ou "1.20X0.80M" → (largura: 2.0, comprimento: 1.0).
-  /// Retorna null se inválido.
+  /// Retorna (largura, comprimento) da chapa/peça, em metros.
+  /// Prioriza os campos largura/comprimento cadastrados diretamente no
+  /// material (igual à tela de Produção); quando ausentes, tenta extrair do
+  /// campo medida no formato "LxA" ou "LxAM" (ex: "2X1", "1.20X0.80M") como
+  /// fallback de compatibilidade.
+  /// Retorna null se inválido ou se o material for metro linear.
   (double l, double a)? get _medidaChapa {
-    final medida = item.material.medida;
-    if (medida == null) return null;
+    if (_eMetroLinear) return null;
+
+    final m = item.material;
+    if (m.largura != null && m.largura! > 0 &&
+        m.comprimento != null && m.comprimento! > 0) {
+      return (m.largura!, m.comprimento!);
+    }
+
+    final medida = m.medida;
+    if (medida == null || medida.isEmpty) return null;
+    // Aceita sufixo opcional "M" no final (ex: 1.20X0.80M, 2X1M)
+    if (!RegExp(r'^\d+([.,]\d+)?\s*[xX]\s*\d+([.,]\d+)?\s*M?$', caseSensitive: false)
+        .hasMatch(medida.trim())) {
+      return null;
+    }
     // Remove sufixo "M" antes de parsear
     final semSufixo = medida.trim().replaceFirst(RegExp(r'M\s*$', caseSensitive: false), '').trim();
     final partes = semSufixo.split(RegExp(r'\s*[xX]\s*'));
@@ -5029,7 +5236,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
     ].join(' · ');
 
     final chapa        = _medidaChapa;
-    final podeDimensao = _temMedidaDimensional && chapa != null;
+    final podeDimensao = chapa != null;
 
     // ── Preview do cálculo dimensional ───────────────────────────────────────
     Widget? previewDimensional;
@@ -5208,7 +5415,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        'Chapa ${_fmt(chapa.$1)}×${_fmt(chapa.$2)} m',
+                        'Chapa ${_fmt(chapa.$2)}×${_fmt(chapa.$1)} m',
                         style: const TextStyle(
                             fontSize: 10,
                             color: AppTheme.primary,
@@ -5228,13 +5435,13 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
               children: [
                 Expanded(
                   child: TextField(
-                    controller: item.larguraUsadaCtrl,
+                    controller: item.alturaUsadaCtrl,
                     keyboardType:
                         TextInputType.numberWithOptions(decimal: true),
                     decoration: InputDecoration(
-                      labelText: 'Largura usada (m)',
+                      labelText: 'Comprimento usado (m)',
                       isDense: true,
-                      suffixText: '/ ${_fmt(chapa.$1)} m',
+                      suffixText: '/ ${_fmt(chapa.$2)} m',
                       suffixStyle: TextStyle(
                           fontSize: 11, color: Theme.of(context).colorScheme.outline),
                     ),
@@ -5251,13 +5458,13 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                 ),
                 Expanded(
                   child: TextField(
-                    controller: item.alturaUsadaCtrl,
+                    controller: item.larguraUsadaCtrl,
                     keyboardType:
                         TextInputType.numberWithOptions(decimal: true),
                     decoration: InputDecoration(
-                      labelText: 'Comprimento usado (m)',
+                      labelText: 'Largura usada (m)',
                       isDense: true,
-                      suffixText: '/ ${_fmt(chapa.$2)} m',
+                      suffixText: '/ ${_fmt(chapa.$1)} m',
                       suffixStyle: TextStyle(
                           fontSize: 11, color: Theme.of(context).colorScheme.outline),
                     ),
@@ -5484,27 +5691,6 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
               ),
               const SizedBox(width: 8),
               _StatusBadgeMini(status: m.status),
-              // Badge visual para materiais temporários — deixa claro ao
-              // operador que este item tem prazo de expiração automático.
-              if (m.temporario == true) ...[
-                const SizedBox(width: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFED6C02).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: const Color(0xFFED6C02).withValues(alpha: 0.4)),
-                  ),
-                  child: const Text(
-                    'TEMP',
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFED6C02),
-                    ),
-                  ),
-                ),
-              ],
             ],
           ),
         ),

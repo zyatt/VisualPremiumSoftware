@@ -10,7 +10,6 @@ import '../providers/estoque_provider.dart';
 import '../providers/fornecedor_provider.dart';
 import '../repositories/ordem_compra_repository.dart';
 import '../repositories/fornecedor_repository.dart';
-import '../repositories/estoque_temporario_repository.dart';
 import '../theme/app_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,13 +70,11 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
   final _buscaMedidaCtrl      = TextEditingController();
   final _buscaEspessuraCtrl   = TextEditingController();
   final _buscaIdentificadorCtrl = TextEditingController();
-  final _buscaIdCtrl          = TextEditingController();
   String _filtroBuscaNumero      = '';
   String _filtroBuscaNome        = '';
   String _filtroBuscaMedida      = '';
   String _filtroBuscaEspessura   = '';
   String _filtroBuscaIdentificador = '';
-  String _filtroBuscaId          = '';
 
   @override
   void initState() {
@@ -169,7 +166,6 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
     _buscaMedidaCtrl.dispose();
     _buscaEspessuraCtrl.dispose();
     _buscaIdentificadorCtrl.dispose();
-    _buscaIdCtrl.dispose();
     super.dispose();
   }
 
@@ -193,8 +189,7 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
     final qMed  = _filtroBuscaMedida.trim().toLowerCase();
     final qEsp  = _filtroBuscaEspessura.trim().toLowerCase();
     final qId   = _filtroBuscaIdentificador.trim().toUpperCase();
-    final qMid  = _filtroBuscaId.trim();
-    if (qNum.isEmpty && qNome.isEmpty && qMed.isEmpty && qEsp.isEmpty && qId.isEmpty && qMid.isEmpty) return lista;
+    if (qNum.isEmpty && qNome.isEmpty && qMed.isEmpty && qEsp.isEmpty && qId.isEmpty) return lista;
     return lista.where((o) {
       final raw = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
       if (qNum.isNotEmpty && !raw.id.toString().contains(qNum)) return false;
@@ -212,10 +207,6 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
       }
       if (qId.isNotEmpty) {
         final tem = raw.itens.any((item) => (item.materialIdentificador ?? '').toUpperCase().contains(qId));
-        if (!tem) return false;
-      }
-      if (qMid.isNotEmpty) {
-        final tem = raw.itens.any((item) => (item.materialId?.toString() ?? '').contains(qMid));
         if (!tem) return false;
       }
       return true;
@@ -411,30 +402,6 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                     onChanged: (v) => setState(() => _filtroBuscaEspessura = v),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 1,
-                  child: TextField(
-                    controller: _buscaIdCtrl,
-                    decoration: InputDecoration(
-                      hintText: 'ID...',
-                      prefixIcon: Icon(Icons.numbers, color: Theme.of(context).colorScheme.outline, size: 18),
-                      isDense: true,
-                      suffixIcon: _filtroBuscaId.isNotEmpty
-                          ? IconButton(
-                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
-                              onPressed: () {
-                                _buscaIdCtrl.clear();
-                                setState(() => _filtroBuscaId = '');
-                              },
-                            )
-                          : null,
-                    ),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    onChanged: (v) => setState(() => _filtroBuscaId = v),
-                  ),
-                ),
                 const SizedBox(width: 4),
                 IconButton.outlined(
                   tooltip: 'Limpar filtros',
@@ -442,21 +409,19 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                     Icons.filter_alt_off,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                  onPressed: (_filtroBuscaNumero.isNotEmpty || _filtroBuscaNome.isNotEmpty || _filtroBuscaMedida.isNotEmpty || _filtroBuscaEspessura.isNotEmpty || _filtroBuscaIdentificador.isNotEmpty || _filtroBuscaId.isNotEmpty)
+                  onPressed: (_filtroBuscaNumero.isNotEmpty || _filtroBuscaNome.isNotEmpty || _filtroBuscaMedida.isNotEmpty || _filtroBuscaEspessura.isNotEmpty || _filtroBuscaIdentificador.isNotEmpty)
                       ? () {
                           _buscaNumeroCtrl.clear();
                           _buscaNomeCtrl.clear();
                           _buscaMedidaCtrl.clear();
                           _buscaEspessuraCtrl.clear();
                           _buscaIdentificadorCtrl.clear();
-                          _buscaIdCtrl.clear();
                           setState(() {
                             _filtroBuscaNumero = '';
                             _filtroBuscaNome = '';
                             _filtroBuscaMedida = '';
                             _filtroBuscaEspessura = '';
                             _filtroBuscaIdentificador = '';
-                            _filtroBuscaId = '';
                           });
                         }
                       : null,
@@ -1062,14 +1027,22 @@ class _OcCardState extends State<_OcCard> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: ordem.itens.map((item) {
+                  // Item fantasma: material foi excluído após a OC ser criada.
+                  // Nesse caso materialNome vem vazio do backend (material: null),
+                  // então cai para descricaoItem para não exibir uma linha em branco.
+                  final nomeBase = item.materialNome.isNotEmpty
+                      ? item.materialNome
+                      : ((item.descricaoItem ?? '').isNotEmpty
+                          ? item.descricaoItem!
+                          : 'Material excluído');
                   final partes = <String>[
                     if ((item.materialMedida ?? '').isNotEmpty) item.materialMedida!,
                     if ((item.materialEspessura ?? '').isNotEmpty) item.materialEspessura!,
                     if ((item.materialIdentificador ?? '').isNotEmpty) item.materialIdentificador!,
                   ];
                   final desc = partes.isEmpty
-                      ? item.materialNome
-                      : '${item.materialNome} · ${partes.join(' · ')}';
+                      ? nomeBase
+                      : '$nomeBase · ${partes.join(' · ')}';
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 2),
                     child: Text(
@@ -1562,7 +1535,10 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(item.materialNome, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
+                        Text(
+                          item.materialNome.isNotEmpty ? item.materialNome : (item.descricaoItem ?? 'Material excluído'),
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
+                        ),
                         Builder(builder: (_) {
                           final sub = [
                             if (item.materialMedida != null && item.materialMedida!.isNotEmpty) item.materialMedida!,
@@ -1575,7 +1551,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                             child: Text(sub, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                           );
                         }),
-                        if (item.descricaoItem != null && item.descricaoItem!.isNotEmpty)
+                        if (item.materialNome.isNotEmpty && item.descricaoItem != null && item.descricaoItem!.isNotEmpty)
                           Padding(
                             padding: EdgeInsets.only(top: 2),
                             child: Text(
@@ -4508,7 +4484,6 @@ class _AdicionarItemDialog extends StatefulWidget {
 }
 
 class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
-  final _idCtrl            = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _nomeCtrl          = TextEditingController();
   final _categoriaCtrl     = TextEditingController();
@@ -4537,7 +4512,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
 
   @override
   void dispose() {
-    _idCtrl.dispose();
     _identificadorCtrl.dispose();
     _nomeCtrl.dispose();
     _categoriaCtrl.dispose();
@@ -4549,14 +4523,12 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
   // ── lista filtrada para o modo "só vinculados" ─────────────────────────────
   List<FornecedorMaterialVinculoModel> get _filtradosVinculados {
     var lista = widget.materiais;
-    final id        = _idCtrl.text.trim();
     final ident     = _identificadorCtrl.text.trim().toLowerCase();
     final nome      = _nomeCtrl.text.trim().toLowerCase();
     final categoria = _categoriaCtrl.text.trim().toLowerCase();
     final medida    = _medidaCtrl.text.trim().toLowerCase();
     final espessura = _espessuraCtrl.text.trim().toLowerCase();
 
-    if (id.isNotEmpty)        lista = lista.where((m) => m.materialId.toString() == id).toList();
     if (ident.isNotEmpty)     lista = lista.where((m) => (m.materialIdentificador ?? '').toLowerCase().contains(ident)).toList();
     if (nome.isNotEmpty) {
       final tokens = nome.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
@@ -4574,13 +4546,11 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
   // ── lista filtrada para o modo "todo o estoque" (client-side após fetch) ──
   List<Map<String, dynamic>> get _filtradosTodos {
     var lista = _todosOsMateriais;
-    final id        = _idCtrl.text.trim();
     final ident     = _identificadorCtrl.text.trim().toLowerCase();
     final nome      = _nomeCtrl.text.trim().toLowerCase();
     final medida    = _medidaCtrl.text.trim().toLowerCase();
     final espessura = _espessuraCtrl.text.trim().toLowerCase();
 
-    if (id.isNotEmpty)        lista = lista.where((m) => m['id'].toString() == id).toList();
     if (ident.isNotEmpty)     lista = lista.where((m) => (m['identificador'] ?? '').toString().toLowerCase().contains(ident)).toList();
     if (espessura.isNotEmpty) lista = lista.where((m) => (m['espessura'] ?? '').toString().toLowerCase().contains(espessura)).toList();
     if (medida.isNotEmpty)    lista = lista.where((m) => (m['medida'] ?? '').toString().toLowerCase().contains(medida)).toList();
@@ -4600,29 +4570,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
       final repo = FornecedorRepository();
       final todos = await repo.buscarMateriais();
 
-      // Inclui materiais temporários ativos na lista, marcados para distinção
-      final tempRepo = EstoqueTemporarioRepository();
-      final temporarios = await tempRepo.listar();
-      final tempComoMap = temporarios.map((t) => <String, dynamic>{
-        'id':          t.id,
-        'nome':        t.nome,
-        'unidade':     t.unidade,
-        'categoria':   null,
-        'identificador': null,
-        'medida':      null,
-        'espessura':   null,
-        'largura':     null,
-        'comprimento': null,
-        'temporario':  true,
-      }).toList();
-
-      // Evita duplicatas: se o material temporário já está na lista normal, não duplica
-      final idsNormais = todos.map((m) => m['id'] as int).toSet();
-      final tempSemDuplicata = tempComoMap
-          .where((t) => !idsNormais.contains(t['id'] as int))
-          .toList();
-
-      if (mounted) setState(() { _todosOsMateriais = [...todos, ...tempSemDuplicata]; });
+      if (mounted) setState(() { _todosOsMateriais = todos; });
     } catch (_) {
       // silencia — a lista fica vazia e o usuário vê o aviso
     } finally {
@@ -4633,7 +4581,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
   int get _totalItens => _quantidades.length;
 
   bool get _temFiltro =>
-      _idCtrl.text.isNotEmpty ||
       _identificadorCtrl.text.isNotEmpty ||
       _nomeCtrl.text.isNotEmpty ||
       _categoriaCtrl.text.isNotEmpty ||
@@ -4641,7 +4588,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
       _espessuraCtrl.text.isNotEmpty;
 
   void _limparFiltros() => setState(() {
-        _idCtrl.clear();
         _identificadorCtrl.clear();
         _nomeCtrl.clear();
         _categoriaCtrl.clear();
@@ -4716,7 +4662,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
     required String descricao,
     required String preco,
     required bool eNovo,
-    bool eTemporario = false,
   }) {
     final jaNaOC      = widget.materiaisJaAdicionados.contains(materialId);
     final selecionado = _quantidades.containsKey(materialId);
@@ -4768,20 +4713,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                         child: const Text(
                           'Novo vínculo',
                           style: TextStyle(fontSize: 10, color: AppTheme.primary, fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ],
-                    if (eTemporario) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Color(0xFFD97706).withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'Temporário',
-                          style: TextStyle(fontSize: 10, color: Color(0xFFD97706), fontWeight: FontWeight.w700),
                         ),
                       ),
                     ],
@@ -4889,17 +4820,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
             // ── Filtros ────────────────────────────────────────────────────
             Row(
               children: [
-                SizedBox(
-                  width: 88,
-                  child: TextField(
-                    controller: _idCtrl,
-                    decoration: _deco('ID...', icon: Icons.tag),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(width: 6),
                 Expanded(
                   child: TextField(
                     controller: _nomeCtrl,
@@ -4994,7 +4914,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                 final m = filtradosTodos[i];
                                 final mid = m['id'] as int;
                                 final eNovo = !vinculadosIds.contains(mid);
-                                final eTemporario = m['temporario'] == true;
                                 final partes = <String>[
                                   if ((m['medida'] ?? '').toString().isNotEmpty) m['medida'].toString(),
                                   if ((m['espessura'] ?? '').toString().isNotEmpty) m['espessura'].toString(),
@@ -5020,7 +4939,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                   descricao: desc,
                                   preco: precoStr,
                                   eNovo: eNovo,
-                                  eTemporario: eTemporario,
                                 );
                               },
                             )

@@ -14,6 +14,7 @@ import 'package:intl/intl.dart';
 
 import '../providers/chat_provider.dart';
 import '../models/mensagem_chat_model.dart';
+import 'reacao_mensagem_picker.dart';
 
 class ChatFloatingWidget extends StatefulWidget {
   const ChatFloatingWidget({super.key});
@@ -40,6 +41,21 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
   double _cxAoIniciar = 0;
   double _cyAoIniciar = 0;
 
+  // Último valor de ChatProvider.minimizarTrigger observado. Quando o
+  // provider incrementa esse contador (ex: troca de usuário logado),
+  // detectamos a mudança aqui e recolhemos a bolha, se estiver expandida.
+  int? _ultimoMinimizarTrigger;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _ultimoMinimizarTrigger = context.read<ChatProvider>().minimizarTrigger;
+      }
+    });
+  }
+
   @override
   void dispose() {
     try {
@@ -62,6 +78,18 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
   Widget build(BuildContext context) {
     final tela = MediaQuery.of(context).size;
 
+    // Observa o gatilho de minimizar (ex: troca de usuário logado) e
+    // recolhe a bolha se estiver expandida no momento em que ele mudar.
+    final minimizarTrigger = context.watch<ChatProvider>().minimizarTrigger;
+    if (_ultimoMinimizarTrigger != null &&
+        minimizarTrigger != _ultimoMinimizarTrigger &&
+        _expandido) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fechar(context);
+      });
+    }
+    _ultimoMinimizarTrigger = minimizarTrigger;
+
     _cx ??= tela.width  - 16 - _bolhaTamanho / 2;
     _cy ??= tela.height - 16 - _bolhaTamanho / 2;
 
@@ -80,8 +108,8 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
     return AnimatedPositioned(
       duration: _arrastando
           ? Duration.zero
-          : const Duration(milliseconds: 220),
-      curve: Curves.easeOutBack,
+          : const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
       left: left,
       top:  top,
       width:  largura,
@@ -96,16 +124,17 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
         onPanUpdate: (details) {
           final delta = details.globalPosition - _inicioArrastoGlobal;
           if (delta.distance > 4) _arrastando = true;
-          // ScheduleFrame evita setState dentro do pipeline de eventos
-          // de ponteiro, que causava o erro _debugDuringDeviceUpdate.
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            setState(() {
-              _cx = (_cxAoIniciar + delta.dx)
-                  .clamp(_bolhaTamanho / 2, tela.width  - _bolhaTamanho / 2);
-              _cy = (_cyAoIniciar + delta.dy)
-                  .clamp(_bolhaTamanho / 2, tela.height - _bolhaTamanho / 2);
-            });
+          // setState direto no callback de gesto: nada de
+          // addPostFrameCallback aqui. Adiar a atualização para o frame
+          // seguinte fazia o widget "perseguir" o dedo com 1 frame de
+          // atraso, o que dava a sensação de arrasto travado/pouco fluido.
+          // onPanUpdate já roda fora da fase de build, então setState
+          // direto é seguro e responde no mesmo frame do gesto.
+          setState(() {
+            _cx = (_cxAoIniciar + delta.dx)
+                .clamp(_bolhaTamanho / 2, tela.width  - _bolhaTamanho / 2);
+            _cy = (_cyAoIniciar + delta.dy)
+                .clamp(_bolhaTamanho / 2, tela.height - _bolhaTamanho / 2);
           });
         },
         onPanEnd: (_) {
@@ -116,8 +145,8 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutBack,
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(
@@ -130,16 +159,49 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
                 ),
               ],
             ),
-            clipBehavior: Clip.antiAlias,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 160),
-              child: _expandido
-                  ? _MiniChatPainel(
-                      key: const ValueKey('painel'),
-                      onFechar: () => _fechar(context),
-                      onMinimizar: () => _alternarExpandido(context),
-                    )
-                  : const _BolhaIcone(key: ValueKey('bolha')),
+            // Só recorta (clip) quando o painel está expandido — é nele que
+            // a lista de conversa/scroll precisa ficar contida nos cantos
+            // arredondados. Em modo bolha, Clip.none evita que o badge de
+            // não-lidas (que fica posicionado levemente para fora do
+            // círculo) seja cortado pelo próprio container.
+            clipBehavior: _expandido ? Clip.antiAlias : Clip.none,
+            // IMPORTANTE: o tamanho deste AnimatedContainer acompanha o
+            // AnimatedPositioned pai, ou seja, a CADA FRAME da animação de
+            // abrir/fechar ele tem uma largura/altura intermediária
+            // diferente (ex.: 56 -> 130 -> 220 -> 320). Se o conteúdo
+            // (ListView/ListTile da lista de usuários e da conversa) fosse
+            // filho direto daqui, ele seria relayoutado nessas larguras
+            // intermediárias a cada frame — é exatamente isso que causava
+            // os erros "RenderBox was not laid out", "child.hasSize is not
+            // true" (sliver) e "RenderFlex overflowed", além do piscar de
+            // tela ao expandir.
+            //
+            // A correção: o conteúdo é sempre desenhado no seu tamanho
+            // FINAL e FIXO (painel completo ou bolha completa) dentro de
+            // um SizedBox; o AnimatedContainer ao redor só recorta
+            // (Clip.antiAlias) a parte visível conforme cresce/encolhe.
+            // Assim o ListView nunca é relayoutado com larguras
+            // intermediárias — ele já nasce no tamanho certo.
+            child: OverflowBox(
+              alignment: Alignment.topLeft,
+              minWidth: 0,
+              minHeight: 0,
+              maxWidth: _expandido ? _painelLargura : _bolhaTamanho,
+              maxHeight: _expandido ? _painelAltura  : _bolhaTamanho,
+              child: SizedBox(
+                width:  _expandido ? _painelLargura : _bolhaTamanho,
+                height: _expandido ? _painelAltura  : _bolhaTamanho,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 160),
+                  child: _expandido
+                      ? _MiniChatPainel(
+                          key: const ValueKey('painel'),
+                          onFechar: () => _fechar(context),
+                          onMinimizar: () => _alternarExpandido(context),
+                        )
+                      : const _BolhaIcone(key: ValueKey('bolha')),
+                ),
+              ),
             ),
           ),
         ),
@@ -160,6 +222,7 @@ class _BolhaIcone extends StatelessWidget {
       cursor: SystemMouseCursors.click,
       child: Stack(
         alignment: Alignment.center,
+        clipBehavior: Clip.none,
         children: [
           Container(
             width: 56,
@@ -196,10 +259,10 @@ class _BolhaIcone extends StatelessWidget {
           ),
           if (naoLidas > 0)
             Positioned(
-              right: 0,
-              top: 0,
+              right: -4,
+              top: -4,
               child: Container(
-                constraints: const BoxConstraints(minWidth: 20),
+                constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                 decoration: BoxDecoration(
                   color: const Color(0xFFFF3B30),
@@ -245,12 +308,21 @@ class _MiniChatPainel extends StatefulWidget {
 class _MiniChatPainelState extends State<_MiniChatPainel> {
   final _controller = TextEditingController();
   final _scrollCtrl = ScrollController();
+  final _msgFocus = FocusNode();
+  int? _usuarioAtivoAnterior;
 
   @override
   void dispose() {
     _controller.dispose();
     _scrollCtrl.dispose();
+    _msgFocus.dispose();
     super.dispose();
+  }
+
+  void _focarCampoMensagem() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _msgFocus.requestFocus();
+    });
   }
 
   void _enviar(ChatProvider chat) {
@@ -277,7 +349,31 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
     final chat = context.watch<ChatProvider>();
     final cs   = Theme.of(context).colorScheme;
 
-    return Column(
+    // Sempre que a conversa ativa muda (inclusive na primeira vez que uma
+    // conversa é aberta), pede foco pro campo de mensagem explicitamente.
+    // Não dá pra confiar só em `autofocus: true` no TextField porque, se o
+    // provider já estava com usuarioAtivoId setado quando este painel
+    // montou (ex.: reaberto durante a mesma sessão), o Element do TextField
+    // pode ser reaproveitado entre rebuilds do Column — nesse caso
+    // `autofocus` não dispara de novo, já que ele só age na montagem
+    // inicial do Element, e não a cada troca de conversa.
+    if (chat.usuarioAtivoId != _usuarioAtivoAnterior) {
+      _usuarioAtivoAnterior = chat.usuarioAtivoId;
+      if (chat.usuarioAtivoId != null) _focarCampoMensagem();
+    }
+
+    // Material local e transparente: o ListTile/InkWell (lista de usuários)
+    // e os InkWell dos botões pintam o splash de toque no Material
+    // ANCESTRAL mais próximo. Sem um Material aqui perto, esse splash é
+    // pintado num Material distante (lá em cima, no Scaffold do app) e
+    // acaba ficando visualmente "embaixo" do nosso próprio
+    // AnimatedContainer/OverflowBox com fundo opaco — daí o aviso
+    // "ListTile background color or ink splashes may be invisible" e o
+    // toque sem feedback visual. Com este Material local o splash passa a
+    // ser pintado na camada certa, por cima do fundo.
+    return Material(
+      type: MaterialType.transparency,
+      child: Column(
       children: [
         Container(
           padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
@@ -353,6 +449,8 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
+                    focusNode: _msgFocus,
+                    autofocus: true,
                     maxLines: 3,
                     minLines: 1,
                     textInputAction: TextInputAction.send,
@@ -387,6 +485,7 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
             ),
           ),
       ],
+      ),
     );
   }
 }
@@ -463,21 +562,83 @@ class _MiniListaUsuarios extends StatelessWidget {
   }
 }
 
-class _MiniConversa extends StatelessWidget {
+class _MiniConversa extends StatefulWidget {
   final ChatProvider chat;
   final ScrollController scrollCtrl;
   const _MiniConversa({required this.chat, required this.scrollCtrl});
 
   @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final mensagens = chat.conversaAtual();
+  State<_MiniConversa> createState() => _MiniConversaState();
+}
+
+class _MiniConversaState extends State<_MiniConversa> {
+  int? _conversaAnterior;
+  int  _qtdMensagensAnterior = 0;
+
+  // true enquanto esperamos as mensagens de uma conversa recém-aberta (ou
+  // recém-trocada) chegarem, para então dar o salto pro fim. Sem isso, um
+  // jumpTo disparado a cada build (mesmo durante o carregamento, antes das
+  // mensagens existirem) pode "gastar" o salto num frame em que a lista
+  // ainda não tem o conteúdo final, deixando a conversa parada no topo.
+  bool _aguardandoSaltoInicial = false;
+
+  void _scrollToBottom({bool instantaneo = true}) {
+    final scrollCtrl = widget.scrollCtrl;
+    void aplicar() {
+      if (!scrollCtrl.hasClients) return;
+      final destino = scrollCtrl.position.maxScrollExtent;
+      if (instantaneo) {
+        scrollCtrl.jumpTo(destino);
+      } else {
+        scrollCtrl.animateTo(
+          destino,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (scrollCtrl.hasClients) {
-        scrollCtrl.jumpTo(scrollCtrl.position.maxScrollExtent);
+      aplicar();
+      // Segundo salto no frame seguinte: garante que o layout final da
+      // lista (alturas variáveis, reações, etc.) já foi considerado —
+      // corrige o caso em que o primeiro jumpTo acontece antes da lista
+      // terminar de se estabilizar.
+      if (instantaneo) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => aplicar());
       }
     });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chat = widget.chat;
+    final cs = Theme.of(context).colorScheme;
+    final mensagens = chat.conversaAtual();
+    final outroId = chat.usuarioAtivoId;
+
+    final chatKeyChanged = outroId != _conversaAnterior;
+    if (chatKeyChanged) {
+      _conversaAnterior       = outroId;
+      _qtdMensagensAnterior   = mensagens.length;
+      _aguardandoSaltoInicial = true;
+      if (!chat.carregandoMensagens) {
+        _aguardandoSaltoInicial = false;
+        _scrollToBottom(instantaneo: true);
+      }
+    } else if (_aguardandoSaltoInicial) {
+      if (!chat.carregandoMensagens) {
+        _qtdMensagensAnterior   = mensagens.length;
+        _aguardandoSaltoInicial = false;
+        _scrollToBottom(instantaneo: true);
+      }
+    } else {
+      final chegouMensagem = mensagens.length != _qtdMensagensAnterior;
+      if (chegouMensagem) {
+        _qtdMensagensAnterior = mensagens.length;
+        _scrollToBottom(instantaneo: false);
+      }
+    }
 
     if (chat.carregandoMensagens) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
@@ -493,55 +654,260 @@ class _MiniConversa extends StatelessWidget {
     }
 
     return ListView.builder(
-      controller: scrollCtrl,
+      controller: widget.scrollCtrl,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       itemCount: mensagens.length,
-      itemBuilder: (_, i) {
+      itemBuilder: (ctx, i) {
         final msg = mensagens[i];
         final isMinha = msg.remetenteId == chat.meuId;
         final hora = DateFormat('HH:mm').format(msg.criadoEm);
+        final anterior = i > 0 ? mensagens[i - 1] : null;
+        final mostrarData = anterior == null ||
+            !_mesmoDia(anterior.criadoEm, msg.criadoEm);
+        final minhaReacaoAtual = chat.meuId != null
+            ? msg.reacoes[chat.meuId.toString()]
+            : null;
 
-        return Align(
-          alignment: isMinha ? Alignment.centerRight : Alignment.centerLeft,
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 220),
-            margin: const EdgeInsets.only(bottom: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            decoration: BoxDecoration(
-              color: isMinha ? cs.primary : cs.surfaceContainerHighest,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(12),
-                topRight: const Radius.circular(12),
-                bottomLeft: Radius.circular(isMinha ? 12 : 3),
-                bottomRight: Radius.circular(isMinha ? 3 : 12),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment:
-                  isMinha ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-              children: [
-                Text(
-                  msg.conteudo,
-                  style: GoogleFonts.nunito(
-                    fontSize: 12.5,
-                    color: isMinha ? cs.onPrimary : cs.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  hora,
-                  style: GoogleFonts.nunito(
-                    fontSize: 9,
-                    color: isMinha
-                        ? cs.onPrimary.withValues(alpha: 0.7)
-                        : cs.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
+        Future<void> abrirSeletor(Offset posicaoGlobal) async {
+          final escolha = await mostrarSeletorReacao(
+            ctx,
+            posicaoGlobal,
+            jaReagiu: minhaReacaoAtual != null,
+          );
+          if (escolha == null) return;
+          chat.reagirMensagem(
+            msg,
+            escolha == removerReacaoSentinela ? null : escolha,
+          );
+        }
+
+        final bolha = _MiniBolhaMensagem(
+          isMinha: isMinha,
+          conteudo: msg.conteudo,
+          hora: hora,
+          temReacoes: msg.reacoes.isNotEmpty,
+          pendente: msg.pendente,
+          lida: msg.lida,
+          onTapDown: (details) => abrirSeletor(details.globalPosition),
+          reacoesBadge: msg.reacoes.isNotEmpty
+              ? ReacoesBadge(reacoes: msg.reacoes, isMinha: isMinha)
+              : null,
+        );
+
+        if (!mostrarData) return bolha;
+
+        return Column(
+          children: [
+            _MiniDateDivider(data: msg.criadoEm),
+            bolha,
+          ],
         );
       },
     );
   }
+
+  bool _mesmoDia(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+// ─── Bolha de mensagem com hover (versão compacta do widget flutuante) ───────
+
+class _MiniBolhaMensagem extends StatefulWidget {
+  final bool isMinha;
+  final String conteudo;
+  final String hora;
+  final bool temReacoes;
+  final bool pendente;
+  final bool lida;
+  final GestureTapDownCallback onTapDown;
+  final Widget? reacoesBadge;
+  const _MiniBolhaMensagem({
+    required this.isMinha,
+    required this.conteudo,
+    required this.hora,
+    required this.temReacoes,
+    required this.pendente,
+    required this.lida,
+    required this.onTapDown,
+    this.reacoesBadge,
+  });
+
+  @override
+  State<_MiniBolhaMensagem> createState() => _MiniBolhaMensagemState();
+}
+
+class _MiniBolhaMensagemState extends State<_MiniBolhaMensagem> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isMinha = widget.isMinha;
+
+    final corBase = isMinha ? cs.primary : cs.surfaceContainerHighest;
+    final corHover = isMinha
+        ? Color.lerp(corBase, Colors.white, 0.08)!
+        : Color.lerp(corBase, Colors.black, 0.05)!;
+
+    return Align(
+      alignment: isMinha ? Alignment.centerRight : Alignment.centerLeft,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit:  (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          onTapDown: widget.onTapDown,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+                constraints: const BoxConstraints(maxWidth: 220),
+                margin: EdgeInsets.only(
+                  bottom: widget.temReacoes ? 14 : 6,
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: _hover ? corHover : corBase,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(12),
+                    topRight: const Radius.circular(12),
+                    bottomLeft: Radius.circular(isMinha ? 12 : 3),
+                    bottomRight: Radius.circular(isMinha ? 3 : 12),
+                  ),
+                  boxShadow: _hover
+                      ? [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.12),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Column(
+                  crossAxisAlignment:
+                      isMinha ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.conteudo,
+                      style: GoogleFonts.nunito(
+                        fontSize: 12.5,
+                        color: isMinha ? cs.onPrimary : cs.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.hora,
+                          style: GoogleFonts.nunito(
+                            fontSize: 9,
+                            color: isMinha
+                                ? cs.onPrimary.withValues(alpha: 0.7)
+                                : cs.onSurfaceVariant,
+                          ),
+                        ),
+                        if (isMinha) ...[
+                          const SizedBox(width: 3),
+                          _TicksMensagem(
+                            pendente: widget.pendente,
+                            lida: widget.lida,
+                            corBase: cs.onPrimary.withValues(alpha: 0.7),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              if (widget.reacoesBadge != null)
+                Positioned(
+                  bottom: 0,
+                  left: isMinha ? null : 6,
+                  right: isMinha ? 6 : null,
+                  child: widget.reacoesBadge!,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Divisor de data (versão compacta do widget flutuante) ───────────────────
+
+// ─── Risquinhos de status (estilo WhatsApp) ────────────────────────────────
+// 1 risquinho cinza  -> mensagem enviada, aguardando confirmação do servidor
+// 2 risquinhos cinza -> confirmada pelo servidor, ainda não visualizada
+// 2 risquinhos azuis -> visualizada (lida) pelo destinatário
+class _TicksMensagem extends StatelessWidget {
+  final bool pendente;
+  final bool lida;
+  final Color corBase;
+  const _TicksMensagem({
+    required this.pendente,
+    required this.lida,
+    required this.corBase,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (pendente) {
+      return Icon(Icons.done, size: 12, color: corBase);
+    }
+    final corLida = const Color(0xFF4FC3F7); // azul estilo WhatsApp
+    return Icon(
+      Icons.done_all,
+      size: 12,
+      color: lida ? corLida : corBase,
+    );
+  }
+}
+
+class _MiniDateDivider extends StatelessWidget {
+  final DateTime data;
+  const _MiniDateDivider({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final hoje = DateTime.now();
+    final ontem = hoje.subtract(const Duration(days: 1));
+    String label;
+    if (_mesmoDia(data, hoje)) {
+      label = 'Hoje';
+    } else if (_mesmoDia(data, ontem)) {
+      label = 'Ontem';
+    } else {
+      label = DateFormat('dd/MM/yyyy').format(data);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Expanded(child: Divider(color: cs.outlineVariant, height: 1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              label,
+              style: GoogleFonts.nunito(
+                fontSize: 9.5,
+                color: cs.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Expanded(child: Divider(color: cs.outlineVariant, height: 1)),
+        ],
+      ),
+    );
+  }
+
+  bool _mesmoDia(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 }

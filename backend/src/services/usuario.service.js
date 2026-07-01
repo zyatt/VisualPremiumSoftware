@@ -30,6 +30,21 @@ async function refresh(payload) {
   return { token };
 }
 
+async function trocarUsuario(idAlvo) {
+  const usuario = await prisma.usuario.findUnique({ where: { id: idAlvo } });
+  if (!usuario || !usuario.ativo) throw { status: 404, message: 'Usuário não encontrado ou inativo' };
+
+  const token = jwt.sign(
+    { id: usuario.id, username: usuario.username, role: usuario.role },
+    process.env.JWT_SECRET
+  );
+
+  return {
+    token,
+    usuario: { id: usuario.id, nome: usuario.nome, username: usuario.username, role: usuario.role },
+  };
+}
+
 async function listar() {
   return prisma.usuario.findMany({
     select: { id: true, nome: true, username: true, role: true, ativo: true, criadoEm: true },
@@ -54,4 +69,4 @@ async function remover(id) {
   return prisma.usuario.delete({ where: { id } });
 }
 
-module.exports = { login, refresh, listar, criar, atualizar, remover };
+module.exports = { login, refresh, trocarUsuario, listar, criar, atualizar, remover };

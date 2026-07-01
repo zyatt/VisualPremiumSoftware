@@ -13,8 +13,6 @@ import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_client.dart';
 import '../pages/controle_estoque_page.dart' show MaterialFormDialog;
-import '../pages/estoque_temporario_page.dart' show EstoqueTemporarioFormDialog;
-import '../providers/estoque_temporario_provider.dart';
 
 class SolicitacoesMaterialPage extends StatefulWidget {
   const SolicitacoesMaterialPage({super.key});
@@ -598,11 +596,13 @@ class _ItemMaterialCriacao {
   MaterialModel? material;
   final TextEditingController quantidadeCtrl = TextEditingController();
   final TextEditingController observacaoCtrl = TextEditingController();
+  final FocusNode quantidadeFocus = FocusNode();
   File? imagem;
 
   void dispose() {
     quantidadeCtrl.dispose();
     observacaoCtrl.dispose();
+    quantidadeFocus.dispose();
   }
 }
 
@@ -770,6 +770,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                           Expanded(
                             child: TextFormField(
                               controller: _numeroOSCtrl,
+                              autofocus: true,
                               decoration: const InputDecoration(labelText: 'Número OS *'),
                               textCapitalization: TextCapitalization.characters,
                               validator: (v) => v == null || v.trim().isEmpty
@@ -893,6 +894,13 @@ class _ItemMaterialCard extends StatelessWidget {
     if (material != null) {
       item.material = material;
       (context as Element).markNeedsBuild();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        item.quantidadeFocus.requestFocus();
+        item.quantidadeCtrl.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: item.quantidadeCtrl.text.length,
+        );
+      });
     }
   }
 
@@ -921,16 +929,6 @@ class _ItemMaterialCard extends StatelessWidget {
     }
   }
 
-  Future<void> _cadastrarTemporario(BuildContext context) async {
-    final criou = await showDialog<bool>(
-      context: context,
-      builder: (_) => const EstoqueTemporarioFormDialog(),
-    );
-    if (criou == true && context.mounted) {
-      await context.read<EstoqueTemporarioProvider>().carregar();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -952,16 +950,17 @@ class _ItemMaterialCard extends StatelessWidget {
                           fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.primary)),
                 ),
                 const Spacer(),
-                PopupMenuButton<String>(
-                  tooltip: 'Cadastrar material',
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                InkWell(
+                  onTap: () => _cadastrarMaterial(context),
+                  borderRadius: BorderRadius.circular(6),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.add, size: 14, color: AppTheme.primary),
-                        const SizedBox(width: 4),
-                        const Text(
+                        Icon(Icons.add, size: 14, color: AppTheme.primary),
+                        SizedBox(width: 4),
+                        Text(
                           'Cadastrar material',
                           style: TextStyle(
                             fontSize: 12,
@@ -972,32 +971,6 @@ class _ItemMaterialCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  onSelected: (v) {
-                    if (v == 'material') _cadastrarMaterial(context);
-                    if (v == 'temporario') _cadastrarTemporario(context);
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: 'material',
-                      child: Row(
-                        children: [
-                          Icon(Icons.inventory_2_outlined, size: 18),
-                          SizedBox(width: 10),
-                          Text('Cadastrar Material'),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'temporario',
-                      child: Row(
-                        children: [
-                          Icon(Icons.access_time_outlined, size: 18),
-                          SizedBox(width: 10),
-                          Text('Material Temporário'),
-                        ],
-                      ),
-                    ),
-                  ],
                 ),
                 if (onRemover != null)
                   IconButton(
@@ -1043,6 +1016,7 @@ class _ItemMaterialCard extends StatelessWidget {
                 Expanded(
                   child: TextFormField(
                     controller: item.quantidadeCtrl,
+                    focusNode: item.quantidadeFocus,
                     decoration: const InputDecoration(labelText: 'Quantidade *'),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [
@@ -1566,7 +1540,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
                     icon: const Icon(Icons.add, size: 16),
                     label: const Text('Adicionar Materiais'),
                     style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF1E88E5),
+                      backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
                     ),
                   ),
@@ -1885,14 +1859,18 @@ class _MaterialCard extends StatelessWidget {
                       // Atributos do material
                       Builder(builder: (context) {
                         final atributos = <String>[];
-                        if (materialIdentificador != null && materialIdentificador!.isNotEmpty)
+                        if (materialIdentificador != null && materialIdentificador!.isNotEmpty) {
                           atributos.add(materialIdentificador!);
-                        if (materialMedida != null && materialMedida!.isNotEmpty)
+                        }
+                        if (materialMedida != null && materialMedida!.isNotEmpty) {
                           atributos.add(materialMedida!);
-                        if (materialEspessura != null && materialEspessura!.isNotEmpty)
+                        }
+                        if (materialEspessura != null && materialEspessura!.isNotEmpty) {
                           atributos.add(materialEspessura!);
-                        if (materialCategoria != null && materialCategoria!.isNotEmpty)
+                        }
+                        if (materialCategoria != null && materialCategoria!.isNotEmpty) {
                           atributos.add(materialCategoria!);
+                        }
                         if (atributos.isEmpty) return const SizedBox.shrink();
                         return Padding(
                           padding: const EdgeInsets.only(top: 2),
@@ -2709,7 +2687,6 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
   final _filtroCategoriaCtrl = TextEditingController();
   String _filtroCategoria = '';
   final _buscaCtrl = TextEditingController();
-  final _buscaIdCtrl = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl = TextEditingController();
   final _espessuraCtrl = TextEditingController();
@@ -2732,7 +2709,6 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
     _debounceTimer?.cancel();
     _filtroCategoriaCtrl.dispose();
     _buscaCtrl.dispose();
-    _buscaIdCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
     _espessuraCtrl.dispose();
@@ -2754,7 +2730,6 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
       _filtroCategoria = '';
       _filtroCategoriaCtrl.clear();
       _buscaCtrl.clear();
-      _buscaIdCtrl.clear();
       _identificadorCtrl.clear();
       _medidaCtrl.clear();
       _espessuraCtrl.clear();
@@ -2769,7 +2744,6 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
     final prov = context.read<MaterialProvider>();
     await prov.carregar(
       busca: _buscaCtrl.text.trim(),
-      id: _buscaIdCtrl.text.trim(),
       identificador: _identificadorCtrl.text.trim(),
       medida: _medidaCtrl.text.trim(),
       espessura: _espessuraCtrl.text.trim(),
@@ -2811,20 +2785,6 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
     }
   }
 
-  Future<void> _cadastrarTemporario(BuildContext context) async {
-    final criou = await showDialog<bool>(
-      context: context,
-      builder: (_) => const EstoqueTemporarioFormDialog(),
-    );
-    if (criou == true && mounted) {
-      await context.read<EstoqueTemporarioProvider>().carregar();
-      if (_categoriaSelecionada != null) {
-        _aplicarFiltrosMateriais();
-      }
-    }
-  }
-
-
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -2851,7 +2811,6 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                             _identificadorSelecionado = null;
                             _identificadorCtrl.clear();
                             _buscaCtrl.clear();
-                            _buscaIdCtrl.clear();
                             _medidaCtrl.clear();
                             _espessuraCtrl.clear();
                             _filtroCategoria = '';
@@ -2873,41 +2832,16 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                       _categoriaSelecionada == null
                           ? 'Selecionar Material'
                           : _identificadorSelecionado != null
-                              ? '$_categoriaLabel › ${_identificadorSelecionado == "__SEM__" ? "Sem identificador" : _identificadorSelecionado}'
+                              ? '$_categoriaLabel › ${_identificadorSelecionado == "__SEM__" ? "Sem identificador" : _identificadorSelecionado == "__TODOS__" ? "Todos" : _identificadorSelecionado}'
                               : _categoriaLabel,
                       style: Theme.of(context).textTheme.titleLarge,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  PopupMenuButton<String>(
+                  IconButton(
                     tooltip: 'Cadastrar material',
                     icon: const Icon(Icons.add_circle_outline, size: 20),
-                    onSelected: (v) {
-                      if (v == 'material') _cadastrarMaterial(context);
-                      if (v == 'temporario') _cadastrarTemporario(context);
-                    },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
-                        value: 'material',
-                        child: Row(
-                          children: [
-                            Icon(Icons.inventory_2_outlined, size: 18),
-                            SizedBox(width: 10),
-                            Text('Cadastrar Material'),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'temporario',
-                        child: Row(
-                          children: [
-                            Icon(Icons.access_time_outlined, size: 18),
-                            SizedBox(width: 10),
-                            Text('Material Temporário'),
-                          ],
-                        ),
-                      ),
-                    ],
+                    onPressed: () => _cadastrarMaterial(context),
                   ),
                   IconButton(
                     onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
@@ -3018,34 +2952,6 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
               Row(
                 children: [
                   Expanded(
-                    flex: 1,
-                    child: TextField(
-                      controller: _buscaIdCtrl,
-                      decoration: InputDecoration(
-                        hintText: 'ID',
-                        prefixIcon: Icon(Icons.tag, size: 16,
-                            color: Theme.of(context).colorScheme.outline),
-                        isDense: true,
-                        suffixIcon: _buscaIdCtrl.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.close, size: 16),
-                                onPressed: () {
-                                  _buscaIdCtrl.clear();
-                                  _aplicarFiltrosMateriais();
-                                })
-                            : null,
-                      ),
-                      keyboardType: TextInputType.number,
-                      onChanged: (_) {
-                        _debounceTimer?.cancel();
-                        _debounceTimer = Timer(
-                            const Duration(milliseconds: 350),
-                            _aplicarFiltrosMateriais);
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
                     flex: 4,
                     child: TextField(
                       controller: _buscaCtrl,
@@ -3154,7 +3060,6 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                         color: Theme.of(context).colorScheme.onSurfaceVariant),
                     onPressed: () {
                       _buscaCtrl.clear();
-                      _buscaIdCtrl.clear();
                       _identificadorCtrl.clear();
                       _medidaCtrl.clear();
                       _espessuraCtrl.clear();
@@ -3257,6 +3162,7 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
               );
             }
 
+            final totalMateriais = _materiais.length;
             return GridView.builder(
               padding: const EdgeInsets.all(16),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -3265,12 +3171,26 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                 mainAxisSpacing: 10,
                 childAspectRatio: 1.6,
               ),
-              itemCount: filtrados.length,
+              itemCount: filtrados.length + 1,
               itemBuilder: (_, i) {
-                final key = filtrados[i];
+                if (i == 0) {
+                  return _CategoriaCardSeletor(
+                    label: 'TODOS\n$totalMateriais ${totalMateriais == 1 ? 'material' : 'materiais'}',
+                    cor: AppTheme.primary,
+                    icone: Icons.apps_outlined,
+                    onTap: () {
+                      setState(() {
+                        _identificadorSelecionado = '__TODOS__';
+                        _identificadorCtrl.clear();
+                      });
+                      _aplicarFiltrosMateriais();
+                    },
+                  );
+                }
+                final key = filtrados[i - 1];
                 final label = key == '__SEM__' ? 'SEM IDENTIFICADOR' : key;
                 final qtd = grupos[key]!.length;
-                final cor = _cores[i % _cores.length];
+                final cor = _cores[(i - 1) % _cores.length];
                 return _CategoriaCardSeletor(
                   label: '$label\n$qtd ${qtd == 1 ? 'material' : 'materiais'}',
                   cor: cor,

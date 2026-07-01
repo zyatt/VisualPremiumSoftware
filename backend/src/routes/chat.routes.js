@@ -161,6 +161,64 @@ router.patch('/lidas/:outroId', autenticar, async (req, res) => {
   }
 });
 
+// PATCH /api/chat/mensagem/:id/reacao - Define (ou remove) a reação do
+// usuário logado a uma mensagem.
+// Body: { emoji: "👍" }  -> define/atualiza a reação do usuário logado
+// Body: { emoji: null }  -> remove a reação do usuário logado
+//
+// Depende do campo `reacoes Json @default("{}")` no model MensagemChat
+// (schema.prisma). Lembre de rodar `npx prisma migrate dev` (ou
+// `db push`) depois de atualizar o schema, para criar a coluna no banco.
+router.patch('/mensagem/:id/reacao', autenticar, async (req, res) => {
+  try {
+    const meuId       = req.usuario.id;
+    const mensagemId  = parseInt(req.params.id);
+    const { emoji }   = req.body;
+
+    const mensagem = await prisma.mensagemChat.findUnique({
+      where: { id: mensagemId },
+    });
+    if (!mensagem) {
+      return res.status(404).json({ error: 'Mensagem não encontrada' });
+    }
+    // Só quem participa da conversa pode reagir
+    if (mensagem.remetenteId !== meuId && mensagem.destinatarioId !== meuId) {
+      return res.status(403).json({ error: 'Sem permissão para reagir a esta mensagem' });
+    }
+
+    const reacoesAtuais = mensagem.reacoes && typeof mensagem.reacoes === 'object'
+      ? { ...mensagem.reacoes }
+      : {};
+
+    if (emoji) {
+      reacoesAtuais[String(meuId)] = emoji;
+    } else {
+      delete reacoesAtuais[String(meuId)];
+    }
+
+    const atualizada = await prisma.mensagemChat.update({
+      where: { id: mensagemId },
+      data:  { reacoes: reacoesAtuais },
+      include: {
+        remetente:    { select: { id: true, nome: true } },
+        destinatario: { select: { id: true, nome: true } },
+      },
+    });
+
+    const evento = { tipo: 'reacao_atualizada', mensagem: atualizada };
+    // Notifica os dois participantes da conversa para sincronizar em
+    // tempo real (inclusive em outras abas/dispositivos do próprio
+    // usuário que reagiu).
+    notificarUsuario(atualizada.remetenteId, evento);
+    notificarUsuario(atualizada.destinatarioId, evento);
+
+    res.json(atualizada);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao reagir à mensagem' });
+  }
+});
+
 // GET /api/chat/nao-lidas - Total de mensagens não lidas para o usuário logado
 router.get('/nao-lidas', autenticar, async (req, res) => {
   try {

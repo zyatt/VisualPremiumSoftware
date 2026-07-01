@@ -85,6 +85,9 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
   String    _acaoFiltro = '';
   Timer?    _debounce;
 
+  static const int _itensPorPagina = 50;
+  int _paginaAtual = 0;
+
   static const _acoes = [
     ('',                   'Todas as ações'),
     ('CADASTRO',           'Cadastro'),
@@ -112,6 +115,7 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
   }
 
   void _carregar() {
+    setState(() => _paginaAtual = 0);
     context.read<AuditLogProvider>().carregar(
       materialId: widget.materialIdInicial,
       acao:       _acaoFiltro.isEmpty ? null : _acaoFiltro,
@@ -376,36 +380,46 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                     );
                   }
 
-                  return ListView.separated(
-                    itemCount:  provider.logs.length,
-                    separatorBuilder: (_, __) =>
-                        Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-                    itemBuilder: (_, i) => _LinhaLog(
-                      log:            provider.logs[i],
-                      mostrarMaterial: widget.materialIdInicial == null,
-                    ),
+                  final todos        = provider.logs;
+                  final totalPaginas = (todos.length / _itensPorPagina).ceil();
+                  final paginaSegura = _paginaAtual.clamp(0, (totalPaginas - 1).clamp(0, 999));
+                  final inicio       = paginaSegura * _itensPorPagina;
+                  final fim          = (inicio + _itensPorPagina).clamp(0, todos.length);
+                  final paginados    = todos.sublist(inicio, fim);
+
+                  return Column(
+                    children: [
+                      Expanded(
+                        child: Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: SingleChildScrollView(
+                            child: Column(
+                              children: [
+                                for (int i = 0; i < paginados.length; i++) ...[
+                                  _LinhaLog(
+                                    log:             paginados[i],
+                                    mostrarMaterial: widget.materialIdInicial == null,
+                                  ),
+                                  if (i < paginados.length - 1)
+                                    Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _BarraPaginacao(
+                        paginaAtual:     paginaSegura,
+                        totalPaginas:    totalPaginas,
+                        totalItens:      todos.length,
+                        itensPorPagina:  _itensPorPagina,
+                        onPaginaChanged: (p) => setState(() => _paginaAtual = p),
+                      ),
+                    ],
                   );
                 },
               ),
-            ),
-
-            // ── Rodapé com contador ───────────────────────────────────────────
-            Consumer<AuditLogProvider>(
-              builder: (_, provider, __) {
-                if (provider.carregando || provider.logs.isEmpty) {
-                  return SizedBox.shrink();
-                }
-                return Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: Text(
-                    '${provider.logs.length} registro(s) encontrado(s)',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.outline,
-                    ),
-                  ),
-                );
-              },
             ),
           ],
         ),
@@ -735,6 +749,176 @@ class _ValorChip extends StatelessWidget {
   }
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAGINAÇÃO
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BarraPaginacao extends StatelessWidget {
+  final int paginaAtual;
+  final int totalPaginas;
+  final int totalItens;
+  final int itensPorPagina;
+  final void Function(int) onPaginaChanged;
+
+  const _BarraPaginacao({
+    required this.paginaAtual,
+    required this.totalPaginas,
+    required this.totalItens,
+    required this.itensPorPagina,
+    required this.onPaginaChanged,
+  });
+
+  List<int> _paginas() {
+    if (totalPaginas <= 7) return List.generate(totalPaginas, (i) => i);
+    final Set<int> vis = {0, totalPaginas - 1, paginaAtual};
+    if (paginaAtual > 0) vis.add(paginaAtual - 1);
+    if (paginaAtual < totalPaginas - 1) vis.add(paginaAtual + 1);
+    final sorted = vis.toList()..sort();
+    final List<int> result = [];
+    for (int i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.add(-1);
+      result.add(sorted[i]);
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inicio  = paginaAtual * itensPorPagina + 1;
+    final fim     = ((paginaAtual + 1) * itensPorPagina).clamp(0, totalItens);
+    final paginas = _paginas();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'Exibindo $inicio–$fim de $totalItens',
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _BotaoPagina(
+                icon: Icons.chevron_left,
+                tooltip: 'Página anterior',
+                enabled: paginaAtual > 0,
+                onTap: () => onPaginaChanged(paginaAtual - 1),
+              ),
+              const SizedBox(width: 4),
+              for (final p in paginas) ...[
+                if (p == -1)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text('…', style: TextStyle(color: Theme.of(context).colorScheme.outline)),
+                  )
+                else
+                  _BotaoNumeroPagina(
+                    numero: p,
+                    ativa: p == paginaAtual,
+                    onTap: () => onPaginaChanged(p),
+                  ),
+                const SizedBox(width: 4),
+              ],
+              _BotaoPagina(
+                icon: Icons.chevron_right,
+                tooltip: 'Próxima página',
+                enabled: paginaAtual < totalPaginas - 1,
+                onTap: () => onPaginaChanged(paginaAtual + 1),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BotaoPagina extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _BotaoPagina({
+    required this.icon,
+    required this.tooltip,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: enabled
+                  ? Theme.of(context).colorScheme.outlineVariant
+                  : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
+            ),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: enabled
+                ? Theme.of(context).colorScheme.onSurfaceVariant
+                : Theme.of(context).colorScheme.outline,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BotaoNumeroPagina extends StatelessWidget {
+  final int numero;
+  final bool ativa;
+  final VoidCallback onTap;
+
+  const _BotaoNumeroPagina({
+    required this.numero,
+    required this.ativa,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: ativa ? null : onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: ativa ? const Color(0xFF7C3AED) : Colors.transparent,
+          border: Border.all(
+            color: ativa ? const Color(0xFF7C3AED) : Theme.of(context).colorScheme.outlineVariant,
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '${numero + 1}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
+            color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
 // ─────────────────────────────────────────────────────────────────────────────
 // BOTÃO PARA INSERIR NA EstoqueCategoriaPage
 // ─────────────────────────────────────────────────────────────────────────────

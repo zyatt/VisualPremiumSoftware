@@ -33,7 +33,6 @@ app.use('/api/veiculos',              require('./routes/veiculo_route'));
 app.use('/api/orcamentos-venda',      require('./routes/orcamento_vendas.routes'));
 app.use('/api/configuracoes',         require('./routes/configuracao.routes'));
 app.use('/api/solicitacoes-material', require('./routes/solicitacao_material.routes'));
-app.use('/api/estoque-temporario',    require('./routes/estoque_temporario.routes'));
 app.use('/api/chat',                  require('./routes/chat.routes'));
 
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));

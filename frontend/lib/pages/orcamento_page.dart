@@ -1,3 +1,5 @@
+import 'dart:developer' as dev;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -9,6 +11,21 @@ import '../repositories/orcamento_repository.dart';
 import '../theme/app_theme.dart';
 import 'orcamento_historico_page.dart';
 import 'orcamento_editor_page.dart';
+
+// ─── Log de diagnóstico (rastreável em produção) ─────────────────────────────
+// Mesmo padrão usado em orcamento_editor_page.dart: dev.log() em vez de
+// print() porque fica disponível mesmo em build release e já carrega
+// timestamp. Use grep por "OrcamentoPage" no log do app para filtrar.
+void _logOrc(String mensagem, {Object? erro, StackTrace? stack, int? level}) {
+  dev.log(
+    mensagem,
+    time: DateTime.now(),
+    name: 'OrcamentoPage',
+    error: erro,
+    stackTrace: stack,
+    level: level ?? 0,
+  );
+}
 
 /// Remove prefixos como "Exception:", "HttpException:" que o Dart adiciona
 /// automaticamente ao fazer e.toString() em exceções. Quando o erro é de
@@ -28,6 +45,17 @@ String _mensagemErro(Object e, {required String acao}) {
   }
   final msg = raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
   return 'Erro ao $acao: $msg';
+}
+
+// Detecta se o erro veio de uma validação de status no backend (ex: outro
+// usuário já aprovou/rejeitou/enviou este orçamento antes desta ação ser
+// confirmada). Textos exatos lançados por orcamento.service.js.
+bool _isErroDeStatusDesatualizado(Object e) {
+  final raw = e.toString();
+  return raw.contains('Apenas orçamentos abertos podem ser enviados') ||
+      raw.contains('Apenas orçamentos aguardando aprovação podem ser aprovados') ||
+      raw.contains('Apenas orçamentos aguardando aprovação podem ser rejeitados') ||
+      raw.contains('Apenas orçamentos aprovados');
 }
 // ─── Formatters ───────────────────────────────
 
@@ -73,27 +101,39 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   @override
   void initState() {
     super.initState();
+    _logOrc('initState');
     _mainTabController = TabController(length: 3, vsync: this);
     _mainTabController.addListener(() {
       if (_mainTabController.indexIsChanging) return;
-      _carregarOrcamentosServidor();
+      _carregarOrcamentosServidor(origem: 'trocaDeTabPrincipal');
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FornecedorProvider>().carregar();
-      _carregarOrcamentosServidor();
+      _carregarOrcamentosServidor(origem: 'initState');
     });
   }
 
   @override
   void dispose() {
+    _logOrc('dispose');
     _mainTabController.dispose();
     super.dispose();
   }
 
   // ── Carregar orçamentos do servidor ──────────────────────────────────────────
 
-  Future<void> _carregarOrcamentosServidor() async {
+  Future<void> _carregarOrcamentosServidor({String origem = 'manual'}) async {
     if (!mounted) return;
+    if (_carregandoAprovacao) {
+      // Já existe um carregamento em andamento (ex: o listener de troca de
+      // aba do TabController disparou quase ao mesmo tempo que o
+      // postFrameCallback do initState, ou o usuário clicou em "Atualizar"
+      // mais de uma vez seguida). Evita empilhar requisições idênticas.
+      _logOrc('carregarOrcamentosServidor[$origem]: ignorado (já existe um carregamento em andamento)');
+      return;
+    }
+    final inicio = DateTime.now();
+    _logOrc('carregarOrcamentosServidor[$origem]: iniciando (3 GETs: AGUARDANDO_APROVACAO/APROVADO/NAO_APROVADO)');
     setState(() {
       _carregandoAprovacao = true;
       _erroAprovacao = null;
@@ -103,15 +143,23 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       final aguardando = await repo.listar(status: 'AGUARDANDO_APROVACAO');
       final aprovados = await repo.listar(status: 'APROVADO');
       final naoAprovados = await repo.listar(status: 'NAO_APROVADO');
-      if (!mounted) return;
+      if (!mounted) {
+        _logOrc('carregarOrcamentosServidor[$origem]: resposta chegou mas widget já foi desmontado, ignorando');
+        return;
+      }
+      _logOrc('carregarOrcamentosServidor[$origem]: sucesso em ${DateTime.now().difference(inicio).inMilliseconds}ms '
+          '(aguardando=${aguardando.length}, aprovados=${aprovados.length}, naoAprovados=${naoAprovados.length})');
       setState(() {
         _aguardandoAprovacao = aguardando;
         _aprovados = aprovados;
         _naoAprovados = naoAprovados;
       });
-    } catch (e) {
+    } catch (e, st) {
+      _logOrc('carregarOrcamentosServidor[$origem]: ERRO após ${DateTime.now().difference(inicio).inMilliseconds}ms',
+          erro: e, stack: st, level: 1000);
       if (mounted) setState(() => _erroAprovacao = _mensagemErro(e, acao: 'carregar orçamentos'));
     } finally {
+      _logOrc('carregarOrcamentosServidor[$origem]: finally, mounted=$mounted');
       if (mounted) setState(() => _carregandoAprovacao = false);
     }
   }
@@ -122,6 +170,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   // ── Aprovar orçamento ─────────────────────────────────────────────────────────
 
   Future<void> _aprovarOrcamento(int id, String titulo) async {
+    _logOrc('aprovarOrcamento(lista): botão clicado orcamentoId=$id titulo="$titulo"');
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -144,11 +193,15 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         ],
       ),
     );
+    _logOrc('aprovarOrcamento(lista): diálogo fechado, resultado=$confirmar orcamentoId=$id');
     if (confirmar != true) return;
 
+    final inicio = DateTime.now();
     setState(() => _carregandoAprovacao = true);
     try {
+      _logOrc('aprovarOrcamento(lista): chamando PATCH /orcamentos/$id/aprovar');
       await OrcamentoRepository().aprovar(id);
+      _logOrc('aprovarOrcamento(lista): sucesso em ${DateTime.now().difference(inicio).inMilliseconds}ms orcamentoId=$id');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -156,16 +209,25 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           backgroundColor: AppTheme.success,
         ),
       );
-      await _carregarOrcamentosServidor();
-    } catch (e) {
+      await _carregarOrcamentosServidor(origem: 'aposAprovar');
+    } catch (e, st) {
+      _logOrc('aprovarOrcamento(lista): ERRO após ${DateTime.now().difference(inicio).inMilliseconds}ms orcamentoId=$id',
+          erro: e, stack: st, level: 1000);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_mensagemErro(e, acao: 'aprovar orçamento')),
+            content: Text(
+              _isErroDeStatusDesatualizado(e)
+                  ? 'O status deste orçamento mudou (outra pessoa já alterou). A lista foi atualizada.'
+                  : _mensagemErro(e, acao: 'aprovar orçamento'),
+            ),
             backgroundColor: AppTheme.error,
           ),
         );
         setState(() => _carregandoAprovacao = false);
+        if (_isErroDeStatusDesatualizado(e)) {
+          await _carregarOrcamentosServidor(origem: 'erroAprovar');
+        }
       }
     }
   }
@@ -246,11 +308,18 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_mensagemErro(e, acao: 'rejeitar orçamento')),
+            content: Text(
+              _isErroDeStatusDesatualizado(e)
+                  ? 'O status deste orçamento mudou (outra pessoa já alterou). A lista foi atualizada.'
+                  : _mensagemErro(e, acao: 'rejeitar orçamento'),
+            ),
             backgroundColor: AppTheme.error,
           ),
         );
         setState(() => _carregandoAprovacao = false);
+        if (_isErroDeStatusDesatualizado(e)) {
+          await _carregarOrcamentosServidor();
+        }
       }
     }
   }
@@ -746,7 +815,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         SizedBox(width: 12),
 
         IconButton(
-          onPressed: () => _carregarOrcamentosServidor(),
+          onPressed: () => _carregarOrcamentosServidor(origem: 'botaoAtualizarManual'),
           icon: Icon(
             Icons.refresh,
             size: 18,
@@ -902,7 +971,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             ),
             const SizedBox(height: 8),
             TextButton.icon(
-              onPressed: () => _carregarOrcamentosServidor(),
+              onPressed: () => _carregarOrcamentosServidor(origem: 'botaoAtualizarManual'),
               icon: const Icon(Icons.refresh, size: 15),
               label: const Text('Atualizar'),
               style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
@@ -918,7 +987,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             TextButton.icon(
-              onPressed: () => _carregarOrcamentosServidor(),
+              onPressed: () => _carregarOrcamentosServidor(origem: 'botaoAtualizarManual'),
               icon: Icon(Icons.refresh, size: 15),
               label: Text('Atualizar', style: TextStyle(fontSize: 12)),
               style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant),

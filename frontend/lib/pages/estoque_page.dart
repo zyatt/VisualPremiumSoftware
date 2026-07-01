@@ -15,7 +15,6 @@ import '../providers/orcamento_venda_provider.dart';
 import '../providers/alertas_estoque_provider.dart';
 import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
-import 'estoque_temporario_page.dart';
 
 // ── Formatação de preço: até 6 casas decimais, sem zeros à direita ────────────
 
@@ -230,7 +229,6 @@ class _EstoquePageState extends State<EstoquePage> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    BotaoEstoqueTemporario(roleUsuario: widget.roleUsuario),
                     const SizedBox(width: 8),
                     IconButton(
                       onPressed: () => context.read<MaterialProvider>().carregarCategorias(),
@@ -1038,7 +1036,6 @@ class EstoqueCategoriaPage extends StatefulWidget {
 
 class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   late final TextEditingController _buscaCtrl;
-  final _buscaIdCtrl       = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
   final _espessuraCtrl     = TextEditingController();
@@ -1072,7 +1069,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   void dispose() {
     _debounceTimer?.cancel();
     _buscaCtrl.dispose();
-    _buscaIdCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
     _espessuraCtrl.dispose();
@@ -1085,7 +1081,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
           busca:         _buscaCtrl.text,
           categoria:     _categoriaParaProvider(),
           status:        _statusFiltro,
-          id:            _buscaIdCtrl.text.trim(),
+          id:            '',
           identificador: _identificadorCtrl.text.trim(),
           medida:        _medidaCtrl.text.trim(),
           espessura:     _espessuraCtrl.text.trim(),
@@ -1100,7 +1096,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
           busca:         _buscaCtrl.text,
           categoria:     _categoriaParaProvider(),
           status:        _statusFiltro,
-          id:            _buscaIdCtrl.text.trim(),
+          id:            '',
           identificador: _identificadorCtrl.text.trim(),
           medida:        _medidaCtrl.text.trim(),
           espessura:     _espessuraCtrl.text.trim(),
@@ -1652,26 +1648,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
             // ── Filtros linha 1 ────────────────────────────────────────────
             Row(
               children: [
-                SizedBox(
-                  width: 120,
-                  child: TextField(
-                    controller: _buscaIdCtrl,
-                    decoration: InputDecoration(
-                      hintText:   'ID...',
-                      prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
-                      isDense:    true,
-                    ),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    onChanged: (_) {
-                      _debounceTimer?.cancel();
-                      _debounceTimer = Timer(
-                          const Duration(milliseconds: 400), _aplicarFiltros);
-                    },
-                    onSubmitted: (_) => _aplicarFiltros(),
-                  ),
-                ),
-                SizedBox(width: 12),
                 Expanded(
                   flex: 3,
                   child: TextField(
@@ -1747,7 +1723,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   icon: Icon(Icons.filter_alt_off, color: scheme.onSurfaceVariant),
                   onPressed: () {
                     _buscaCtrl.clear();
-                    _buscaIdCtrl.clear();
                     _identificadorCtrl.clear();
                     _medidaCtrl.clear();
                     _espessuraCtrl.clear();
@@ -2342,8 +2317,8 @@ class _TabelaMateriais extends StatefulWidget {
     _ColDef(label: 'Categoria',                   flex: 1.0,  sortKey: 'categoria'),
     _ColDef(label: 'Medida',                      flex: 0.8,  sortKey: 'medida'),
     _ColDef(label: 'Espessura',                   flex: 0.7,  sortKey: 'espessura'),
-    _ColDef(label: 'Largura',                     flex: 0.7,  sortKey: 'largura'),
     _ColDef(label: 'Comprimento',                 flex: 0.8,  sortKey: 'comprimento'),
+    _ColDef(label: 'Largura',                     flex: 0.7,  sortKey: 'largura'),
     _ColDef(label: 'Estoque atual',               flex: 0.6,  sortKey: 'quantidade'),
     _ColDef(label: 'Estoque mínimo',              flex: 0.6,  sortKey: 'estoqueMinimo'),
     _ColDef(label: 'Unidade',                     flex: 0.9,  sortKey: 'unidade'),
@@ -2696,12 +2671,12 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _colWrap(cols[widget.mostrarCategoria ? 5 : 4], maybeOpacity(_cell(m.espessura ?? '—', context, inativo: inativo))),
                 _vDivider(context),
  
-                // Largura
-                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], maybeOpacity(_cell(m.largura != null ? m.largura!.toStringAsFixed((m.largura! % 1 == 0 ? 0 : 2).toInt()) : '—', context, inativo: inativo))),
+                // Comprimento
+                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], maybeOpacity(_cell(m.comprimento != null ? m.comprimento!.toStringAsFixed((m.comprimento! % 1 == 0 ? 0 : 2).toInt()) : '—', context, inativo: inativo))),
                 _vDivider(context),
  
-                // Comprimento
-                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], maybeOpacity(_cell(m.comprimento != null ? m.comprimento!.toStringAsFixed((m.comprimento! % 1 == 0 ? 0 : 2).toInt()) : '—', context, inativo: inativo))),
+                // Largura
+                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], maybeOpacity(_cell(m.largura != null ? m.largura!.toStringAsFixed((m.largura! % 1 == 0 ? 0 : 2).toInt()) : '—', context, inativo: inativo))),
                 _vDivider(context),
  
                 // Estoque atual (com lógica especial para específico)
@@ -2835,7 +2810,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   /// Normaliza valores de unidade salvos com grafia antiga no banco de dados.
   /// Ex.: "M2" (sem símbolo Unicode) → "M²"
   static const _unidadesValidas = {
-    'UNIDADE', 'M/L', 'M', 'ML', 'M²', 'KG', 'G',
+    'UNIDADE', 'M/L', 'M', 'ML', 'M²', 'G',
   };
   static const _aliasUnidade = {
     'M2': 'M²',
@@ -3083,6 +3058,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             ],
             TextFormField(
               controller: _nome,
+              autofocus: !_editando,
               decoration: const InputDecoration(labelText: 'Nome *'),
               textCapitalization: TextCapitalization.characters,
               inputFormatters: [_UpperCaseFormatter()],
@@ -3130,17 +3106,16 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                         child: const Text('M²', style: TextStyle(fontSize: 14)),
                       )
                     : DropdownButtonFormField<String>(
-                        value: _unidade,
+                        initialValue: _unidade,
                         decoration: const InputDecoration(labelText: 'Unidade *'),
                         hint: const Text('Selecione'),
                         items: const [
-                          DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE')),
-                          DropdownMenuItem(value: 'M/L',     child: Text('M/L')),
-                          DropdownMenuItem(value: 'M',       child: Text('M')),
-                          DropdownMenuItem(value: 'ML',      child: Text('ML')),
-                          DropdownMenuItem(value: 'M²',      child: Text('M²')),
-                          DropdownMenuItem(value: 'KG',      child: Text('KG')),
-                          DropdownMenuItem(value: 'G',       child: Text('G')),
+                          DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE — (unidade)')),
+                          DropdownMenuItem(value: 'M/L',     child: Text('M/L — (metro linear)')),
+                          DropdownMenuItem(value: 'M',       child: Text('M — (metro)')),
+                          DropdownMenuItem(value: 'ML',      child: Text('ML — (mililitro)')),
+                          DropdownMenuItem(value: 'M²',      child: Text('M² — (metro quadrado)')),
+                          DropdownMenuItem(value: 'G',       child: Text('G — (grama)')),
                         ],
                         validator: (v) =>
                             (v == null || v.isEmpty) ? 'Selecione uma unidade' : null,
@@ -3149,36 +3124,24 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
             ]),
             const SizedBox(height: 10),
-            Row(children: [
-              Expanded(
-                child: TextFormField(
-                  controller: _medida,
-                  readOnly: _modoRetalho,
-                  decoration: InputDecoration(
-                    labelText: 'Medida',
-                    suffixIcon: _modoRetalho
-                        ? const Tooltip(
-                            message: 'Bloqueado no modo Retalho',
-                            child: Icon(Icons.lock_outline, size: 16),
-                          )
-                        : null,
-                  ),
-                  textCapitalization: TextCapitalization.characters,
-                  inputFormatters: [_UpperCaseFormatter()],
-                  onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
-                ),
+            if (_unidade != 'ML' && _unidade != 'G') ...[
+            TextFormField(
+              controller: _medida,
+              readOnly: _modoRetalho,
+              decoration: InputDecoration(
+                labelText: 'Medida',
+                suffixIcon: _modoRetalho
+                    ? const Tooltip(
+                        message: 'Bloqueado no modo Retalho',
+                        child: Icon(Icons.lock_outline, size: 16),
+                      )
+                    : null,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextFormField(
-                  controller: _espessura,
-                  decoration: const InputDecoration(labelText: 'Espessura'),
-                  textCapitalization: TextCapitalization.characters,
-                  inputFormatters: [_UpperCaseFormatter()],
-                  onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
-                ),
-              ),
-            ]),
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [_UpperCaseFormatter()],
+              onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
+            ),
+            ], // end if not ML/G (medida)
             if (_verificandoDuplicata || _possiveisDuplicatas.isNotEmpty) ...[
               const SizedBox(height: 10),
               _AvisoPossivelDuplicata(
@@ -3186,8 +3149,28 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 duplicatas: _possiveisDuplicatas,
               ),
             ],
+            if (_unidade != 'ML' && _unidade != 'G') ...[
             const SizedBox(height: 10),
             Row(children: [
+              Expanded(
+                child: TextFormField(
+                  controller: _comprimento,
+                  readOnly: _modoRetalho,
+                  decoration: InputDecoration(
+                    labelText: 'Comprimento (m)',
+                    suffixIcon: _modoRetalho
+                        ? const Tooltip(
+                            message: 'Bloqueado no modo Retalho',
+                            child: Icon(Icons.lock_outline, size: 16),
+                          )
+                        : null,
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_DecimalInputFormatter()],
+                  onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
+                ),
+              ),
+              const SizedBox(width: 12),
               Expanded(
                 child: TextFormField(
                   controller: _largura,
@@ -3209,23 +3192,15 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               const SizedBox(width: 12),
               Expanded(
                 child: TextFormField(
-                  controller: _comprimento,
-                  readOnly: _modoRetalho,
-                  decoration: InputDecoration(
-                    labelText: 'Comprimento (m)',
-                    suffixIcon: _modoRetalho
-                        ? const Tooltip(
-                            message: 'Bloqueado no modo Retalho',
-                            child: Icon(Icons.lock_outline, size: 16),
-                          )
-                        : null,
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [_DecimalInputFormatter()],
+                  controller: _espessura,
+                  decoration: const InputDecoration(labelText: 'Espessura'),
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [_UpperCaseFormatter()],
                   onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                 ),
               ),
             ]),
+            ], // end if not ML/G
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
@@ -4546,25 +4521,21 @@ class _AlertasBannerEstoque extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final criticos   = provider.criticos;
-    final limites    = provider.limites;
-    final hasCritico = criticos.isNotEmpty;
-    final corPrincipal = hasCritico
-        ? Color(0xFFDC2626)
-        : Color(0xFFD97706);
+    final criticos = provider.alertas;
+    const cor = Color(0xFFDC2626);
 
     return Container(
       decoration: BoxDecoration(
-        color: corPrincipal.withValues(alpha: 0.07),
+        color: cor.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: corPrincipal.withValues(alpha: 0.30)),
+        border: Border.all(color: cor.withValues(alpha: 0.30)),
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          leading: Icon(
-            hasCritico ? Icons.error_outline_rounded : Icons.warning_amber_rounded,
-            color: corPrincipal,
+          leading: const Icon(
+            Icons.error_outline_rounded,
+            color: cor,
             size: 20,
           ),
           title: RichText(
@@ -4572,17 +4543,9 @@ class _AlertasBannerEstoque extends StatelessWidget {
               style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
               children: [
                 TextSpan(
-                  text: hasCritico
-                      ? '${criticos.length} material${criticos.length > 1 ? 'is' : ''} com estoque crítico'
-                      : '${limites.length} material${limites.length > 1 ? 'is' : ''} no limite',
-                  style: TextStyle(fontWeight: FontWeight.w700),
+                  text: '${criticos.length} material${criticos.length > 1 ? 'is' : ''} com estoque crítico',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
-                if (hasCritico && limites.isNotEmpty)
-                  TextSpan(
-                    text: ' e ${limites.length} no limite',
-                    style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
-                  ),
               ],
             ),
           ),
@@ -4597,14 +4560,8 @@ class _AlertasBannerEstoque extends StatelessWidget {
                     if (criticos.isNotEmpty)
                       _BannerSecao(
                         label: 'CRÍTICO — abaixo do mínimo',
-                        cor: const Color(0xFFDC2626),
+                        cor: cor,
                         alertas: criticos,
-                      ),
-                    if (limites.isNotEmpty)
-                      _BannerSecao(
-                        label: 'LIMITE — igual ao mínimo',
-                        cor: const Color(0xFFD97706),
-                        alertas: limites,
                       ),
                   ],
                 ),

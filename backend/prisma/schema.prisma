@@ -36,6 +36,9 @@ model MensagemChat {
   conteudo       String   @db.Text
   lida           Boolean  @default(false)
   criadoEm       DateTime @default(now())
+  // idUsuario (string) -> emoji. Uma reação por usuário por mensagem;
+  // reagir de novo com outro emoji substitui a anterior.
+  reacoes        Json     @default("{}")
   remetente      Usuario  @relation("MensagemRemetente",    fields: [remetenteId],    references: [id])
   destinatario   Usuario  @relation("MensagemDestinatario", fields: [destinatarioId], references: [id])
 
@@ -63,15 +66,6 @@ model Material {
   ativo                       Boolean                    @default(true)
   ultimoValorPago             Decimal?                   @db.Decimal(15, 6)
   ultimoValorPagoM2           Decimal?                   @db.Decimal(15, 6)
-  /// Indica que o material foi cadastrado como temporário.
-  /// Quando true, o backend desativa (ativo = false) automaticamente após desativaEm.
-  temporario                  Boolean                    @default(false)
-  /// Data em que o material temporário será desativado automaticamente. Null para permanentes.
-  desativaEm                  DateTime?
-  /// Observação livre — usada especialmente por materiais temporários.
-  observacaoTemporario        String?
-  /// Nome do usuário que cadastrou como temporário (snapshot).
-  criadoPorNome               String?
   criadoEm                    DateTime                   @default(now())
   atualizadoEm                DateTime                   @updatedAt
   fornecedorMateriais         FornecedorMaterial[]

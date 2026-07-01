@@ -5,6 +5,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/usuario_provider.dart';
+import '../models/usuario_model.dart';
 import '../providers/alertas_estoque_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/veiculo_provider.dart';
@@ -67,6 +68,7 @@ class AppShell extends StatefulWidget {
       const AppMenuItem(icon: Icons.inventory_2_rounded,             label: 'Estoque',            route: '/estoque',               color: Color(0xFF6C63FF)),
       const AppMenuItem(icon: Icons.shopping_bag_rounded,            label: 'Produtos',           route: '/produtos',              color: Color(0xFF06B6D4)),
       const AppMenuItem(icon: Icons.people_rounded,                  label: 'Fornecedores',       route: '/fornecedores',          color: Color(0xFF03DAC6)),
+      const AppMenuItem(icon: Icons.assignment_rounded,              label: 'Solicitações',       route: '/solicitacoes-material', color: Color(0xFFF59E0B)),
       const AppMenuItem(icon: Icons.request_quote_rounded,           label: 'Orç. Compras',       route: '/orcamento',             color: Color(0xFFFF9800)),
       const AppMenuItem(icon: Icons.sell_rounded,                    label: 'Orç. Vendas',        route: '/orcamento-venda',       color: Color(0xFF22C55E)),
       const AppMenuItem(icon: Icons.shopping_cart_rounded,           label: 'Ordem de Compra',    route: '/ordem-compra',          color: Color(0xFF4CAF50)),
@@ -74,22 +76,28 @@ class AppShell extends StatefulWidget {
       const AppMenuItem(icon: Icons.history_rounded,                 label: 'Histórico de OC',    route: '/historico',             color: Color(0xFF9C27B0)),
       const AppMenuItem(icon: Icons.description_rounded,             label: 'Relatório OS',       route: '/relatorio-os',          color: Color(0xFF2196F3)),
       const AppMenuItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção',           route: '/producao',              color: Color(0xFF00BCD4)),
-      const AppMenuItem(icon: Icons.assignment_rounded,              label: 'Solicitações',       route: '/solicitacoes-material', color: Color(0xFFF59E0B)),
       const AppMenuItem(icon: Icons.pie_chart_rounded,               label: 'Gastos',             route: '/gastos-categoria',      color: Color(0xFFFF7043)),
       const AppMenuItem(icon: Icons.directions_car_rounded,          label: 'Veículos',           route: '/veiculos',              color: Color(0xFF607D8B)),
       const AppMenuItem(icon: Icons.chat_rounded,                    label: 'Chat',               route: '/chat',                  color: Color(0xFF26C6DA)),
     ];
 
-    if (r == 'ADMIN' || r == 'GERENTE') {
+    if (r == 'ADMIN') {
       return [
         ...completo,
         const AppMenuItem(icon: Icons.admin_panel_settings_rounded, label: 'Admin', route: '/admin', color: Color(0xFFFF5722)),
       ];
     }
 
+    if (r == 'GERENTE') {
+      // Gerente não vê: Admin, Gastos e Orç. Vendas
+      return completo
+          .where((e) => !['/gastos-categoria', '/orcamento-venda'].contains(e.route))
+          .toList();
+    }
+
     // COMPRAS e demais roles
     return completo
-        .where((e) => !['/gastos-categoria'].contains(e.route))
+        .where((e) => !['/gastos-categoria', '/orcamento-venda'].contains(e.route))
         .toList();
   }
 
@@ -98,21 +106,43 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
+  /// Id do usuário para o qual já conectamos SSE/chat. Usado para detectar
+  /// troca de usuário (via "Trocar para") e reconectar tudo, já que o
+  /// AppShell NUNCA é recriado nesse fluxo — initState() só roda uma vez.
+  int? _usuarioIdConectado;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<AlertasEstoqueProvider>().iniciarPolling();
       context.read<VeiculoProvider>().carregarVeiculos();
-      // Conecta ao stream SSE de novas solicitações
-      context.read<SolicitacaoMaterialProvider>().conectarNotificacoes();
-      // Inicializa chat com id e token do usuário logado
-      final usuario = context.read<UsuarioProvider>().usuarioLogado;
-      final token   = context.read<UsuarioProvider>().token;
-      if (usuario != null && token != null) {
-        context.read<ChatProvider>().inicializar(usuario.id, token);
-      }
+      _conectarParaUsuarioAtual();
     });
+  }
+
+  /// (Re)conecta o SSE de notificações e inicializa o chat para o usuário
+  /// logado no momento. Chamado tanto no initState quanto sempre que
+  /// detectamos, no build(), que o usuário ativo mudou (troca de usuário
+  /// sem reiniciar o app).
+  void _conectarParaUsuarioAtual() {
+    final usuario = context.read<UsuarioProvider>().usuarioLogado;
+    final token   = context.read<UsuarioProvider>().token;
+
+    _usuarioIdConectado = usuario?.id;
+
+    // Conecta (ou reconecta) ao stream SSE de novas solicitações
+    context.read<SolicitacaoMaterialProvider>().conectarNotificacoes();
+
+    // Trocar de usuário não deve deixar a conversa do usuário anterior
+    // aberta na tela: recolhe o mini-chat flutuante (se estiver expandido)
+    // antes de inicializar o chat do novo usuário.
+    context.read<ChatProvider>().minimizarWidgetFlutuante();
+
+    // Inicializa chat com id e token do usuário logado
+    if (usuario != null && token != null) {
+      context.read<ChatProvider>().inicializar(usuario.id, token);
+    }
   }
 
   @override
@@ -121,6 +151,15 @@ class _AppShellState extends State<AppShell> {
     final isWide   = MediaQuery.of(context).size.width >= 800;
 
     final usuario = context.watch<UsuarioProvider>().usuarioLogado;
+
+    // ── Detecta troca de usuário (via "Trocar para") e reconecta SSE/chat ──
+    // O AppShell não é recriado nesse fluxo, então é aqui que percebemos
+    // que o usuário ativo mudou e disparamos a reconexão.
+    if (usuario != null && usuario.id != _usuarioIdConectado) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) _conectarParaUsuarioAtual();
+      });
+    }
 
     // ── Visibilidade real da tela de Chat ──────────────────────────────────
     // O ChatPage vive dentro de um StatefulShellRoute.indexedStack, então ela
@@ -231,12 +270,28 @@ class _SidebarContentState extends State<_SidebarContent> {
     );
   }
 
+  void _abrirTrocaUsuario(BuildContext context) {
+    final usuarioProvider = context.read<UsuarioProvider>();
+    final salvos = usuarioProvider.usuariosSalvos;
+    final atual  = usuarioProvider.usuarioLogado;
+
+    // Filtra o usuário atual da lista
+    final outros = salvos.where((u) => u.id != atual?.id).toList();
+
+    showDialog(
+      context: context,
+      builder: (_) => _TrocaUsuarioDialog(
+        usuarioAtual: atual,
+        usuariosSalvos: outros,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final usuario     = context.watch<UsuarioProvider>().usuarioLogado;
     final alertas     = context.watch<AlertasEstoqueProvider>();
     final nAlertas    = alertas.totalAlertas;
-    final nCriticos   = alertas.totalCriticos;
     final veiculoProv = context.watch<VeiculoProvider>();
     // Conta veículos que têm alguma manutenção com retiradaHoje == true
     final nRetirada = veiculoProv.veiculos
@@ -308,7 +363,6 @@ class _SidebarContentState extends State<_SidebarContent> {
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 child: _AlertasSidebarBanner(
                   totalAlertas: nAlertas,
-                  totalCriticos: nCriticos,
                   onTap: () => _mostrarPainelAlertas(context, alertas),
                 ),
               ),
@@ -371,42 +425,62 @@ class _SidebarContentState extends State<_SidebarContent> {
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    radius: 14,
-                    backgroundColor:
-                        AppTheme.accent.withValues(alpha: 0.2),
-                    child: Text(
-                      (usuario?.nome ?? 'U')[0].toUpperCase(),
-                      style: GoogleFonts.nunito(
-                        color: AppTheme.accent,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          usuario?.nome ?? '',
-                          style: GoogleFonts.nunito(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                    child: Material(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => _abrirTrocaUsuario(context),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 4),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 14,
+                                backgroundColor:
+                                    AppTheme.accent.withValues(alpha: 0.2),
+                                child: Text(
+                                  (usuario?.nome ?? 'U')[0].toUpperCase(),
+                                  style: GoogleFonts.nunito(
+                                    color: AppTheme.accent,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      usuario?.nome ?? '',
+                                      style: GoogleFonts.nunito(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      usuario?.role ?? '',
+                                      style: GoogleFonts.nunito(
+                                        color: Colors.white38,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.unfold_more_rounded,
+                                  size: 15, color: Colors.white24),
+                            ],
                           ),
-                          overflow: TextOverflow.ellipsis,
                         ),
-                        Text(
-                          usuario?.role ?? '',
-                          style: GoogleFonts.nunito(
-                            color: Colors.white38,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                   IconButton(
@@ -716,6 +790,70 @@ class _ConfiguracoesDialog extends StatelessWidget {
                   ),
                 ),
               ),
+              // ── Trocar usuário ──────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      final usuarioProvider =
+                          context.read<UsuarioProvider>();
+                      final salvos = usuarioProvider.usuariosSalvos;
+                      final atual  = usuarioProvider.usuarioLogado;
+                      final outros = salvos
+                          .where((u) => u.id != atual?.id)
+                          .toList();
+                      showDialog(
+                        context: context,
+                        builder: (_) => _TrocaUsuarioDialog(
+                          usuarioAtual: atual,
+                          usuariosSalvos: outros,
+                        ),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: AppTheme.primary
+                                  .withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.switch_account_rounded,
+                                color: AppTheme.primary, size: 16),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Trocar usuário',
+                            style: GoogleFonts.nunito(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
+                          const Spacer(),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: 18,
+                            color: colorScheme.onSurfaceVariant
+                                .withValues(alpha: 0.5),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Material(
@@ -726,7 +864,6 @@ class _ConfiguracoesDialog extends StatelessWidget {
                     onTap: () {
                       Navigator.of(context).pop();
                       context.read<UsuarioProvider>().logout();
-                      context.go('/login');
                     },
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
@@ -775,29 +912,408 @@ class _ConfiguracoesDialog extends StatelessWidget {
   }
 }
 
+// ─── Dialog de troca de usuário ──────────────────────────────────────────────
+
+class _TrocaUsuarioDialog extends StatefulWidget {
+  final UsuarioModel? usuarioAtual;
+  final List<UsuarioModel> usuariosSalvos;
+
+  const _TrocaUsuarioDialog({
+    required this.usuarioAtual,
+    required this.usuariosSalvos,
+  });
+
+  @override
+  State<_TrocaUsuarioDialog> createState() => _TrocaUsuarioDialogState();
+}
+
+class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
+  late List<UsuarioModel> _usuariosSalvos;
+  UsuarioModel? get usuarioAtual => widget.usuarioAtual;
+
+  @override
+  void initState() {
+    super.initState();
+    _usuariosSalvos = List.of(widget.usuariosSalvos);
+  }
+
+  Future<void> _confirmarRemocao(UsuarioModel u) async {
+    final colorScheme = Theme.of(context).colorScheme;
+    final confirmou = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: colorScheme.surface,
+        title: Text('Remover usuário salvo',
+            style: GoogleFonts.raleway(fontWeight: FontWeight.w700)),
+        content: Text(
+          'Remover "${u.nome}" da lista de troca rápida nesta máquina? '
+          'Será necessário digitar a senha novamente para entrar com esse usuário.',
+          style: GoogleFonts.nunito(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Cancelar', style: GoogleFonts.nunito()),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            child: Text('Remover',
+                style: GoogleFonts.nunito(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmou == true && mounted) {
+      await context.read<UsuarioProvider>().removerUsuarioSalvo(u);
+      setState(() {
+        _usuariosSalvos.removeWhere((e) => e.id == u.id);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final usuariosSalvos = _usuariosSalvos;
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark      = Theme.of(context).brightness == Brightness.dark;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding:
+          const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Container(
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: colorScheme.outline.withValues(alpha: 0.5),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color:
+                    Colors.black.withValues(alpha: isDark ? 0.5 : 0.12),
+                blurRadius: 32,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Cabeçalho ────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 12, 16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.switch_account_rounded,
+                          color: AppTheme.primary, size: 18),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Trocar usuário',
+                      style: GoogleFonts.raleway(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: Icon(Icons.close_rounded,
+                          size: 18,
+                          color: colorScheme.onSurfaceVariant),
+                      onPressed: () => Navigator.of(context).pop(),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ),
+              ),
+              Divider(
+                  color: colorScheme.outline.withValues(alpha: 0.4),
+                  height: 1),
+
+              // ── Usuário atual ─────────────────────────────────────────────
+              if (usuarioAtual != null) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+                  child: Text(
+                    'SESSÃO ATUAL',
+                    style: GoogleFonts.nunito(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.2,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color:
+                          AppTheme.primary.withValues(alpha: 0.07),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color:
+                            AppTheme.primary.withValues(alpha: 0.25),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 16,
+                          backgroundColor:
+                              AppTheme.accent.withValues(alpha: 0.15),
+                          child: Text(
+                            usuarioAtual!.nome[0].toUpperCase(),
+                            style: GoogleFonts.nunito(
+                              color: AppTheme.accent,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                usuarioAtual!.nome,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: colorScheme.onSurface,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                usuarioAtual!.role,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppTheme.success
+                                .withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            'Ativo',
+                            style: GoogleFonts.nunito(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.success,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+
+              // ── Outros usuários salvos ────────────────────────────────────
+              if (usuariosSalvos.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+                  child: Text(
+                    'TROCAR PARA',
+                    style: GoogleFonts.nunito(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.2,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                ...usuariosSalvos.map((u) => Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 2),
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(12),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () async {
+                            Navigator.of(context).pop();
+                            final provider = context.read<UsuarioProvider>();
+                            final ok = await provider.loginComoUsuario(u);
+                            if (!ok && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    provider.erro ?? 'Erro ao trocar usuário',
+                                    style: GoogleFonts.nunito(),
+                                  ),
+                                  backgroundColor: AppTheme.error,
+                                ),
+                              );
+                            } else {
+                              SessionState.welcomeShown = false;
+                            }
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 16,
+                                  backgroundColor: colorScheme
+                                      .onSurfaceVariant
+                                      .withValues(alpha: 0.12),
+                                  child: Text(
+                                    u.nome[0].toUpperCase(),
+                                    style: GoogleFonts.nunito(
+                                      color:
+                                          colorScheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        u.nome,
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: colorScheme.onSurface,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        u.role,
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 11,
+                                          color: colorScheme
+                                              .onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.delete_outline_rounded,
+                                    size: 18,
+                                    color: colorScheme.onSurfaceVariant
+                                        .withValues(alpha: 0.6),
+                                  ),
+                                  tooltip: 'Remover desta lista',
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => _confirmarRemocao(u),
+                                ),
+                                Icon(
+                                  Icons.login_rounded,
+                                  size: 16,
+                                  color: colorScheme.onSurfaceVariant
+                                      .withValues(alpha: 0.5),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    )),
+              ] else if (usuarioAtual != null) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+                  child: Text(
+                    'TROCAR PARA',
+                    style: GoogleFonts.nunito(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.2,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                  child: Text(
+                    'Nenhum outro usuário logou nesta máquina ainda.',
+                    style: GoogleFonts.nunito(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+
+              Divider(
+                  color: colorScheme.outline.withValues(alpha: 0.3),
+                  height: 1),
+
+              // ── Entrar com outra conta ────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    context.read<UsuarioProvider>().iniciarTrocaUsuario();
+                    context.go('/login');
+                  },
+                  icon: const Icon(Icons.person_add_rounded, size: 16),
+                  label: Text('Entrar com outra conta',
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ─── Banner compacto de alertas de estoque ───────────────────────────────────
 
 class _AlertasSidebarBanner extends StatelessWidget {
   final int totalAlertas;
-  final int totalCriticos;
   final VoidCallback onTap;
 
   const _AlertasSidebarBanner({
     required this.totalAlertas,
-    required this.totalCriticos,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isCritico = totalCriticos > 0;
-    final cor   = isCritico ? const Color(0xFFDC2626) : const Color(0xFFD97706);
-    final corBg = isCritico
-        ? const Color(0x1ADC2626)
-        : const Color(0x1AD97706);
-    final icone = isCritico
-        ? Icons.error_outline_rounded
-        : Icons.warning_amber_rounded;
+    const cor   = Color(0xFFDC2626);
+    const corBg = Color(0x1ADC2626);
 
     return Material(
       color: corBg,
@@ -809,22 +1325,24 @@ class _AlertasSidebarBanner extends StatelessWidget {
           padding:
               const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Icon(icone, size: 15, color: cor),
+              const Icon(Icons.error_outline_rounded, size: 15, color: cor),
               const SizedBox(width: 7),
               Expanded(
                 child: Text(
-                  '$totalAlertas material${totalAlertas > 1 ? 'is' : ''} em alerta',
+                  '$totalAlertas material${totalAlertas > 1 ? 'is' : ''} em crítico',
                   style: GoogleFonts.nunito(
                     color: cor,
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                   ),
-                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
+                  softWrap: true,
                 ),
               ),
-              Icon(Icons.chevron_right_rounded,
-                  size: 14, color: cor.withValues(alpha: 0.6)),
+              const Icon(Icons.chevron_right_rounded,
+                  size: 14, color: Color(0x99DC2626)),
             ],
           ),
         ),
@@ -937,14 +1455,13 @@ class _PainelAlertasDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final criticos = alertas.criticos;
-    final limites  = alertas.limites;
+    final itens = alertas.alertas;
 
     return AlertDialog(
       title: Row(
         children: [
-          const Icon(Icons.warning_amber_rounded,
-              color: Color(0xFFD97706), size: 20),
+          const Icon(Icons.error_outline_rounded,
+              color: Color(0xFFDC2626), size: 20),
           const SizedBox(width: 8),
           const Text('Alertas de Estoque'),
           const Spacer(),
@@ -960,7 +1477,7 @@ class _PainelAlertasDialog extends StatelessWidget {
       content: SizedBox(
         width: 440,
         height: 400,
-        child: criticos.isEmpty && limites.isEmpty
+        child: itens.isEmpty
             ? Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -985,28 +1502,14 @@ class _PainelAlertasDialog extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (criticos.isNotEmpty) ...[
-                      _AlertaSecaoHeader(
-                        label: 'Críticos — abaixo do mínimo',
-                        count: criticos.length,
-                        cor: const Color(0xFFDC2626),
-                        icone: Icons.error_outline_rounded,
-                      ),
-                      const SizedBox(height: 6),
-                      ...criticos.map((a) => _AlertaItemTile(alerta: a)),
-                      if (limites.isNotEmpty)
-                        const SizedBox(height: 16),
-                    ],
-                    if (limites.isNotEmpty) ...[
-                      _AlertaSecaoHeader(
-                        label: 'No limite — igual ao mínimo',
-                        count: limites.length,
-                        cor: const Color(0xFFD97706),
-                        icone: Icons.warning_amber_rounded,
-                      ),
-                      const SizedBox(height: 6),
-                      ...limites.map((a) => _AlertaItemTile(alerta: a)),
-                    ],
+                    _AlertaSecaoHeader(
+                      label: 'Críticos — abaixo do mínimo',
+                      count: itens.length,
+                      cor: const Color(0xFFDC2626),
+                      icone: Icons.error_outline_rounded,
+                    ),
+                    const SizedBox(height: 6),
+                    ...itens.map((a) => _AlertaItemTile(alerta: a)),
                   ],
                 ),
               ),
@@ -1169,10 +1672,7 @@ class _AlertaItemTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isCritico = alerta.isCritico as bool;
-    final cor = isCritico
-        ? const Color(0xFFDC2626)
-        : const Color(0xFFD97706);
+    const cor = Color(0xFFDC2626);
 
     final partes = <String>[];
     if ((alerta.categoria as String?) != null &&

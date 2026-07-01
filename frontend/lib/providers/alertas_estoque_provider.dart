@@ -7,14 +7,7 @@ class AlertasEstoqueProvider extends ChangeNotifier {
   List<AlertaEstoqueModel> _alertas = [];
   List<AlertaEstoqueModel> get alertas => _alertas;
 
-  List<AlertaEstoqueModel> get criticos =>
-      _alertas.where((a) => a.isCritico).toList();
-
-  List<AlertaEstoqueModel> get limites =>
-      _alertas.where((a) => !a.isCritico).toList();
-
   int get totalAlertas => _alertas.length;
-  int get totalCriticos => criticos.length;
 
   bool _carregando = false;
   bool get carregando => _carregando;

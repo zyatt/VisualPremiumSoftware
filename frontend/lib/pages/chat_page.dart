@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../providers/chat_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../models/mensagem_chat_model.dart';
+import '../widgets/reacao_mensagem_picker.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
@@ -189,7 +190,10 @@ class _ListaUsuarios extends StatelessWidget {
               return _UsuarioTile(
                 usuario:   u,
                 isAtivo:   isAtivo,
-                onTap:     () => onSelecionar(u),
+                // Se o usuário clicado já é a conversa ativa, não faz nada.
+                // Evita reabrir/recarregar a mesma conversa (o que fazia o
+                // chat rolar de volta pro topo).
+                onTap:     isAtivo ? () {} : () => onSelecionar(u),
               );
             },
           ),
@@ -308,6 +312,18 @@ class _PainelConversaState extends State<_PainelConversa> {
   final _scrollCtrl    = ScrollController();
   final _focusNode     = FocusNode();
 
+  int? _conversaAnterior;
+  int  _qtdMensagensAnterior = 0;
+
+  // true enquanto esperamos as mensagens de uma conversa recém-aberta (ou
+  // recém-trocada) chegarem, para então dar o salto inicial pro fim. Evita
+  // o bug em que a troca de conversa é "detectada" (e consumida) já no
+  // build de loading — antes das mensagens chegarem — fazendo o salto
+  // instantâneo nunca ser de fato aplicado quando os dados terminam de
+  // carregar (o build seguinte via chegouMensagem então usava animateTo,
+  // que pode não alcançar o fim exato).
+  bool _aguardandoSaltoInicial = false;
+
   @override
   void dispose() {
     _controller.dispose();
@@ -323,14 +339,37 @@ class _PainelConversaState extends State<_PainelConversa> {
     widget.chat.enviarMensagem(texto).then((_) => _scrollToBottom());
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollCtrl.hasClients) {
+  // instantaneo=true força um "salto" direto pro fim (jumpTo), garantindo
+  // que sempre chega exatamente no maxScrollExtent mais atual — usado ao
+  // abrir/trocar de conversa. animateTo pode ser interrompido por um novo
+  // build/callback antes de terminar (ex.: mensagens chegando em sequência
+  // via socket), fazendo o scroll parar "quase" no fim, que era a causa da
+  // última mensagem ficar cortada/incompleta na tela.
+  void _scrollToBottom({bool instantaneo = false}) {
+    void aplicar() {
+      if (!_scrollCtrl.hasClients) return;
+      final destino = _scrollCtrl.position.maxScrollExtent;
+      if (instantaneo) {
+        _scrollCtrl.jumpTo(destino);
+      } else {
         _scrollCtrl.animateTo(
-          _scrollCtrl.position.maxScrollExtent,
+          destino,
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
         );
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      aplicar();
+      // Segundo salto no frame seguinte: quando a lista acabou de trocar
+      // de conteúdo (nova conversa carregada), o maxScrollExtent do
+      // primeiro frame pode ainda não refletir o layout final de todos os
+      // itens (alturas variáveis, reações, etc). Um jumpTo extra no
+      // próximo frame corrige qualquer resíduo e garante que realmente
+      // pousa no fim.
+      if (instantaneo) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => aplicar());
       }
     });
   }
@@ -346,7 +385,41 @@ class _PainelConversaState extends State<_PainelConversa> {
       orElse: () => UsuarioChat(id: 0, nome: '...', role: ''),
     );
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    final chatKeyChanged = outroId != _conversaAnterior;
+    if (chatKeyChanged) {
+      // Conversa trocou (ou é a primeira aberta). Registramos a troca já
+      // aqui, mas só marcamos o salto como "resolvido" quando as mensagens
+      // realmente chegarem — se ainda estiver carregando (mensagens vazia
+      // por estar buscando os dados), fica pendente em
+      // _aguardandoSaltoInicial até o próximo build que já tiver os dados.
+      _conversaAnterior     = outroId;
+      _qtdMensagensAnterior = mensagens.length;
+      _aguardandoSaltoInicial = true;
+      if (!chat.carregandoMensagens) {
+        _aguardandoSaltoInicial = false;
+        _scrollToBottom(instantaneo: true);
+      }
+      // Ao trocar de conversa, leva o foco pro campo de digitação
+      // automaticamente, pra já poder digitar sem precisar clicar.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.requestFocus();
+      });
+    } else if (_aguardandoSaltoInicial) {
+      // As mensagens da conversa que acabamos de abrir/trocar terminaram
+      // de carregar agora — dá o salto instantâneo pro fim.
+      if (!chat.carregandoMensagens) {
+        _qtdMensagensAnterior   = mensagens.length;
+        _aguardandoSaltoInicial = false;
+        _scrollToBottom(instantaneo: true);
+      }
+    } else {
+      final chegouMensagem = mensagens.length != _qtdMensagensAnterior;
+      if (chegouMensagem) {
+        _qtdMensagensAnterior = mensagens.length;
+        // Mensagem nova chegando numa conversa já aberta: animação suave.
+        _scrollToBottom();
+      }
+    }
 
     return Column(
       children: [
@@ -431,7 +504,12 @@ class _PainelConversaState extends State<_PainelConversa> {
                         return Column(
                           children: [
                             if (showDate) _DateDivider(data: msg.criadoEm),
-                            _BubbleMensagem(mensagem: msg, isMinha: isMinha),
+                            _BubbleMensagem(
+                              mensagem: msg,
+                              isMinha: isMinha,
+                              meuId: chat.meuId,
+                              onReagir: (emoji) => chat.reagirMensagem(msg, emoji),
+                            ),
                           ],
                         );
                       },
@@ -451,6 +529,7 @@ class _PainelConversaState extends State<_PainelConversa> {
                 child: TextField(
                   controller:  _controller,
                   focusNode:   _focusNode,
+                  autofocus:   true,
                   maxLines:    4,
                   minLines:    1,
                   textInputAction: TextInputAction.send,
@@ -491,61 +570,142 @@ class _PainelConversaState extends State<_PainelConversa> {
 
 // ─── Bubble de mensagem ───────────────────────────────────────────────────────
 
-class _BubbleMensagem extends StatelessWidget {
+class _BubbleMensagem extends StatefulWidget {
   final MensagemChat mensagem;
   final bool isMinha;
-  const _BubbleMensagem({required this.mensagem, required this.isMinha});
+  final int? meuId;
+  final ValueChanged<String?> onReagir;
+  const _BubbleMensagem({
+    required this.mensagem,
+    required this.isMinha,
+    required this.meuId,
+    required this.onReagir,
+  });
+
+  @override
+  State<_BubbleMensagem> createState() => _BubbleMensagemState();
+}
+
+class _BubbleMensagemState extends State<_BubbleMensagem> {
+  bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
+    final mensagem = widget.mensagem;
+    final isMinha  = widget.isMinha;
+    final meuId    = widget.meuId;
+    final onReagir = widget.onReagir;
+
     final cs   = Theme.of(context).colorScheme;
     final hora = DateFormat('HH:mm').format(mensagem.criadoEm);
+    final minhaReacaoAtual =
+        meuId != null ? mensagem.reacoes[meuId.toString()] : null;
+
+    Future<void> abrirSeletor(Offset posicaoGlobal) async {
+      final escolha = await mostrarSeletorReacao(
+        context,
+        posicaoGlobal,
+        jaReagiu: minhaReacaoAtual != null,
+      );
+      if (escolha == null) return;
+      onReagir(escolha == removerReacaoSentinela ? null : escolha);
+    }
+
+    final corBase = isMinha ? cs.primary : cs.surfaceContainerHighest;
+    // Leve realce no hover: clareia (msg própria) ou escurece de leve
+    // (msg do outro) o suficiente pra sinalizar interatividade sem
+    // chamar atenção demais.
+    final corHover = isMinha
+        ? Color.lerp(corBase, Colors.white, 0.08)!
+        : Color.lerp(corBase, Colors.black, 0.05)!;
 
     return Align(
       alignment: isMinha ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.72,
-        ),
-        margin: EdgeInsets.only(
-          bottom: 4,
-          left:  isMinha ? 60 : 0,
-          right: isMinha ? 0  : 60,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(
-          color: isMinha
-              ? cs.primary
-              : cs.surfaceContainerHighest,
-          borderRadius: BorderRadius.only(
-            topLeft:     const Radius.circular(16),
-            topRight:    const Radius.circular(16),
-            bottomLeft:  Radius.circular(isMinha ? 16 : 4),
-            bottomRight: Radius.circular(isMinha ? 4  : 16),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit:  (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          onTapDown: (details) => abrirSeletor(details.globalPosition),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.72,
+                ),
+                margin: EdgeInsets.only(
+                  bottom: mensagem.reacoes.isEmpty ? 4 : 16,
+                  left:  isMinha ? 60 : 0,
+                  right: isMinha ? 0  : 60,
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                decoration: BoxDecoration(
+                  color: _hover ? corHover : corBase,
+                  borderRadius: BorderRadius.only(
+                    topLeft:     const Radius.circular(16),
+                    topRight:    const Radius.circular(16),
+                    bottomLeft:  Radius.circular(isMinha ? 16 : 4),
+                    bottomRight: Radius.circular(isMinha ? 4  : 16),
+                  ),
+                  boxShadow: _hover
+                      ? [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.12),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Column(
+                  crossAxisAlignment:
+                      isMinha ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      mensagem.conteudo,
+                      style: GoogleFonts.nunito(
+                        fontSize: 13,
+                        color: isMinha ? cs.onPrimary : cs.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          hora,
+                          style: GoogleFonts.nunito(
+                            fontSize: 10,
+                            color: isMinha
+                                ? cs.onPrimary.withValues(alpha: 0.7)
+                                : cs.onSurfaceVariant,
+                          ),
+                        ),
+                        if (isMinha) ...[
+                          const SizedBox(width: 4),
+                          _TicksMensagem(
+                            pendente: mensagem.pendente,
+                            lida: mensagem.lida,
+                            corBase: cs.onPrimary.withValues(alpha: 0.7),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              if (mensagem.reacoes.isNotEmpty)
+                Positioned(
+                  bottom: 0,
+                  left:  isMinha ? null : 66,
+                  right: isMinha ? 6    : null,
+                  child: ReacoesBadge(reacoes: mensagem.reacoes, isMinha: isMinha),
+                ),
+            ],
           ),
-        ),
-        child: Column(
-          crossAxisAlignment:
-              isMinha ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            Text(
-              mensagem.conteudo,
-              style: GoogleFonts.nunito(
-                fontSize: 13,
-                color: isMinha ? cs.onPrimary : cs.onSurface,
-              ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              hora,
-              style: GoogleFonts.nunito(
-                fontSize: 10,
-                color: isMinha
-                    ? cs.onPrimary.withValues(alpha: 0.7)
-                    : cs.onSurfaceVariant,
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -553,6 +713,34 @@ class _BubbleMensagem extends StatelessWidget {
 }
 
 // ─── Divisor de data ──────────────────────────────────────────────────────────
+
+// ─── Risquinhos de status (estilo WhatsApp) ────────────────────────────────
+// 1 risquinho cinza  -> mensagem enviada, aguardando confirmação do servidor
+// 2 risquinhos cinza -> confirmada pelo servidor, ainda não visualizada
+// 2 risquinhos azuis -> visualizada (lida) pelo destinatário
+class _TicksMensagem extends StatelessWidget {
+  final bool pendente;
+  final bool lida;
+  final Color corBase;
+  const _TicksMensagem({
+    required this.pendente,
+    required this.lida,
+    required this.corBase,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (pendente) {
+      return Icon(Icons.done, size: 14, color: corBase);
+    }
+    final corLida = const Color(0xFF4FC3F7); // azul estilo WhatsApp
+    return Icon(
+      Icons.done_all,
+      size: 14,
+      color: lida ? corLida : corBase,
+    );
+  }
+}
 
 class _DateDivider extends StatelessWidget {
   final DateTime data;

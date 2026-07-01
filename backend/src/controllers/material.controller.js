@@ -10,15 +10,12 @@ const listar = async (req, res, next) => {
   try { res.json(await svc.listar(req.query)); } catch (e) { next(e); }
 };
 
-// Listagem exclusiva para o dialog de entrada/saída do controle de estoque.
-// Inclui materiais normais E temporários ativos (ao contrário de listar(),
-// que exclui temporários para não poluir o catálogo padrão).
-const listarParaMovimentacao = async (req, res, next) => {
-  try { res.json(await svc.listarParaMovimentacao(req.query)); } catch (e) { next(e); }
-};
-
 const buscarPorId = async (req, res, next) => {
   try { res.json(await svc.buscarPorId(+req.params.id)); } catch (e) { next(e); }
+};
+
+const listarParaMovimentacao = async (req, res, next) => {
+  try { res.json(await svc.listarParaMovimentacao(req.query)); } catch (e) { next(e); }
 };
 
 const criar = async (req, res, next) => {
@@ -83,8 +80,8 @@ const listarHistoricoPrecos = async (req, res, next) => {
 
 module.exports = {
   listar,
-  listarParaMovimentacao,
   buscarPorId,
+  listarParaMovimentacao,
   criar,
   atualizar,
   desativar,

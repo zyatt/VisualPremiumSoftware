@@ -1,4 +1,4 @@
-/// Representa um material com estoque crítico ou no limite.
+/// Representa um material com estoque crítico.
 class AlertaEstoqueModel {
   final int id;
   final String nome;
@@ -9,8 +9,6 @@ class AlertaEstoqueModel {
   final String? espessura;
   final double quantidade;
   final double estoqueMinimo;
-  /// 'CRITICO' | 'LIMITE'
-  final String status;
 
   const AlertaEstoqueModel({
     required this.id,
@@ -22,10 +20,7 @@ class AlertaEstoqueModel {
     this.espessura,
     required this.quantidade,
     required this.estoqueMinimo,
-    required this.status,
   });
-
-  bool get isCritico => status == 'CRITICO';
 
   factory AlertaEstoqueModel.fromJson(Map<String, dynamic> json) =>
       AlertaEstoqueModel(
@@ -38,6 +33,5 @@ class AlertaEstoqueModel {
         espessura:     json['espessura'],
         quantidade:    (json['quantidade'] as num?)?.toDouble() ?? 0,
         estoqueMinimo: (json['estoqueMinimo'] as num?)?.toDouble() ?? 0,
-        status:        json['status'] ?? 'CRITICO',
       );
 }

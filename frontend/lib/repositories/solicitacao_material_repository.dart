@@ -15,13 +15,16 @@ class SolicitacaoMaterialRepository {
     DateTime? dataFim,
   }) async {
     final params = <String>[];
-    if (busca != null && busca.isNotEmpty)
+    if (busca != null && busca.isNotEmpty) {
       params.add('busca=${Uri.encodeComponent(busca)}');
-    if (andamento != null && andamento.isNotEmpty)
+    }
+    if (andamento != null && andamento.isNotEmpty) {
       params.add('andamento=${Uri.encodeComponent(andamento)}');
+    }
     if (materialId != null) params.add('materialId=$materialId');
-    if (numeroOS != null && numeroOS.isNotEmpty)
+    if (numeroOS != null && numeroOS.isNotEmpty) {
       params.add('numeroOS=${Uri.encodeComponent(numeroOS)}');
+    }
     if (dataInicio != null) {
       final s =
           '${dataInicio.year}-${dataInicio.month.toString().padLeft(2, '0')}-${dataInicio.day.toString().padLeft(2, '0')}';

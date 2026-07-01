@@ -873,6 +873,9 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                 // Nome
                 TextFormField(
                   controller: _nomeCtrl,
+                  // Só autofoca ao criar um usuário novo; na edição não
+                  // força o teclado/foco de cara.
+                  autofocus: !_isEdicao,
                   decoration:
                       const InputDecoration(labelText: 'Nome'),
                   validator: (v) => v == null || v.trim().isEmpty

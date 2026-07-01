@@ -7,6 +7,18 @@ import '../providers/producao_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 
+/// Formata um valor monetário com até 6 casas decimais, removendo zeros
+/// à direita desnecessários (mínimo 2 casas). Ex.: 1.5 → "R$ 1,50";
+/// 0.000125 → "R$ 0,000125"; 1.234560 → "R$ 1,23456".
+String _brl6(double v) {
+  final s6 = v.toStringAsFixed(6);
+  final trimmed = s6.replaceAll(RegExp(r'0+$'), '');
+  final partes = trimmed.split('.');
+  final dec = partes.length > 1 ? partes[1] : '';
+  final decFinal = dec.length < 2 ? dec.padRight(2, '0') : dec;
+  return 'R\$ ${partes[0].replaceAll('.', ',')},$decFinal';
+}
+
 class _UpperCaseFormatter extends TextInputFormatter {
   static final _acentos = {
     'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A',
@@ -930,7 +942,6 @@ class _ProducaoCategoriaPage extends StatefulWidget {
 
 class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
   final _buscaCtrl         = TextEditingController();
-  final _buscaIdCtrl       = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
   final _espessuraCtrl     = TextEditingController();
@@ -959,7 +970,6 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
   void dispose() {
     _debounce?.cancel();
     _buscaCtrl.dispose();
-    _buscaIdCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
     _espessuraCtrl.dispose();
@@ -974,7 +984,6 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
             busca:         _buscaCtrl.text.trim(),
             categoria:     _categoriaParaProvider(),
             status:        _statusFiltro.isEmpty ? null : _statusFiltro,
-            id:            _buscaIdCtrl.text.trim(),
             identificador: _identificadorCtrl.text.trim(),
             medida:        _medidaCtrl.text.trim(),
             espessura:     _espessuraCtrl.text.trim(),
@@ -984,7 +993,6 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
 
   void _limparFiltros() {
     _buscaCtrl.clear();
-    _buscaIdCtrl.clear();
     _identificadorCtrl.clear();
     _medidaCtrl.clear();
     _espessuraCtrl.clear();
@@ -1095,22 +1103,6 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
 
             Row(
               children: [
-                SizedBox(
-                  width: 110,
-                  child: TextField(
-                    controller: _buscaIdCtrl,
-                    decoration: InputDecoration(
-                      hintText:   'ID...',
-                      prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
-                      isDense:    true,
-                    ),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    onChanged: (_) => _aplicarFiltros(),
-                    onSubmitted: (_) => _aplicarFiltros(),
-                  ),
-                ),
-                SizedBox(width: 12),
                 Expanded(
                   flex: 3,
                   child: TextField(
@@ -1327,7 +1319,6 @@ class _TabelaMateriais extends StatelessWidget {
     _ColDef(label: 'Medida',        flex: 0.8),
     _ColDef(label: 'Espessura',     flex: 0.7),
     _ColDef(label: 'Estoque atual', flex: 0.7),
-    _ColDef(label: 'Em uso',        flex: 0.6),
     _ColDef(label: 'Disponível',    flex: 0.7),
     _ColDef(label: 'Status',        flex: 0.8),
   ];
@@ -1512,22 +1503,6 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _colWrap(cols[widget.mostrarCategoria ? 8 : 7], Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
-                    m.emUso > 0
-                        ? m.emUso.toStringAsFixed(m.emUso % 1 == 0 ? 0 : 2)
-                        : '—',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: m.emUso > 0 ? AppTheme.warning : Theme.of(context).colorScheme.outline,
-                      fontWeight: m.emUso > 0 ? FontWeight.w600 : FontWeight.normal,
-                    ),
-                  ),
-                )),
-                _vDivider(),
-
-                _colWrap(cols[widget.mostrarCategoria ? 9 : 8], Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                  child: Text(
                     disponivel.toStringAsFixed(disponivel % 1 == 0 ? 0 : 2),
                     textAlign: TextAlign.center,
                     style: TextStyle(
@@ -1539,7 +1514,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 )),
                 _vDivider(),
 
-                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], Center(
+                _colWrap(cols[widget.mostrarCategoria ? 9 : 8], Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                     child: _StatusBadge(status: m.statusReal),
@@ -1629,25 +1604,36 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
     super.dispose();
   }
 
-  bool get _temMedidaDimensional {
-    final unidade = widget.material.unidade?.toUpperCase().trim() ?? '';
-    if (unidade != 'UNIDADE') return false;
-    final medida = widget.material.medida;
-    if (medida == null || medida.isEmpty) return false;
-    return RegExp(r'^\d+([.,]\d+)?\s*[xX]\s*\d+([.,]\d+)?\s*M?$', caseSensitive: false)
-        .hasMatch(medida.trim());
+  /// True se a unidade do material é metro linear (m, m/l, ml, etc.).
+  bool get _eMetroLinear {
+    final u = widget.material.unidade?.toLowerCase().trim() ?? '';
+    return const {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'}.contains(u);
   }
 
-  (double l, double a)? get _medidaChapa {
-    final medida = widget.material.medida;
-    if (medida == null) return null;
-    final semSufixo = medida.trim().replaceFirst(RegExp(r'M\s*$', caseSensitive: false), '').trim();
-    final partes = semSufixo.split(RegExp(r'\s*[xX]\s*'));
-    if (partes.length < 2) return null;
-    final l = double.tryParse(partes[0].replaceAll(',', '.'));
-    final a = double.tryParse(partes[1].replaceAll(',', '.'));
-    if (l == null || l <= 0 || a == null || a <= 0) return null;
-    return (l, a);
+  /// True se o material é UNIDADE (chapa/peça) e tem largura + comprimento
+  /// cadastrados.
+  bool get _podeInformarDimensao {
+    final m = widget.material;
+    if (_eMetroLinear) return false;
+    return (m.unidade?.toUpperCase() == 'UNIDADE') &&
+        m.largura != null && m.largura! > 0 &&
+        m.comprimento != null && m.comprimento! > 0;
+  }
+
+  /// Custo por m² sugerido para este material (gravado ou derivado do
+  /// custo unitário / área da chapa).
+  double? get _custoM2Sugerido {
+    final m = widget.material;
+    final custoM2Gravado = m.ultimoValorPagoM2;
+    if (custoM2Gravado != null && custoM2Gravado > 0) return custoM2Gravado;
+
+    final larg = m.largura;
+    final comp = m.comprimento;
+    if (larg != null && comp != null && larg > 0 && comp > 0) {
+      final pu = m.ultimoValorPago;
+      if (pu != null && pu > 0) return pu / (larg * comp);
+    }
+    return null;
   }
 
   String _fmt(double v) =>
@@ -1671,7 +1657,7 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
 
     double? largUsada;
     double? compUsado;
-    if (_modoDimensional && _temMedidaDimensional) {
+    if (_modoDimensional && _podeInformarDimensao) {
       final l = double.tryParse(_larguraCtrl.text.replaceAll(',', '.'));
       final c = double.tryParse(_alturaCtrl.text.replaceAll(',', '.'));
       if (l != null && l > 0 && c != null && c > 0) {
@@ -1743,6 +1729,7 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
 
               TextFormField(
                 controller: _osCtrl,
+                autofocus: true,
                 decoration: const InputDecoration(
                   labelText: 'Número da OS *',
                   isDense:   true,
@@ -1755,10 +1742,12 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
               const SizedBox(height: 12),
 
               Builder(builder: (_) {
-                final chapa = _medidaChapa;
-                if (!_temMedidaDimensional || chapa == null) {
+                final m = widget.material;
+                if (!_podeInformarDimensao) {
                   return const SizedBox.shrink();
                 }
+                final largura     = m.largura!;
+                final comprimento = m.comprimento!;
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1792,7 +1781,7 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                             ),
                             const SizedBox(width: 6),
                             Text(
-                              'Informar por dimensão usada',
+                              'Informar dimensão usada',
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
@@ -1810,7 +1799,7 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
-                                'Para chapas',
+                                'Chapa ${_fmt(comprimento)}×${_fmt(largura)} m',
                                 style: const TextStyle(
                                     fontSize: 10,
                                     color: AppTheme.primary,
@@ -1828,12 +1817,12 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                         children: [
                           Expanded(
                             child: TextField(
-                              controller: _larguraCtrl,
+                              controller: _alturaCtrl,
                               keyboardType: const TextInputType.numberWithOptions(decimal: true),
                               decoration: InputDecoration(
-                                labelText: 'Largura usada (m)',
+                                labelText: 'Comprimento usado (m)',
                                 isDense:    true,
-                                suffixText: '/ ${_fmt(chapa.$1)} m',
+                                suffixText: '/ ${_fmt(comprimento)} m',
                                 suffixStyle: TextStyle(
                                     fontSize: 11, color: Theme.of(context).colorScheme.outline),
                               ),
@@ -1850,12 +1839,12 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                           ),
                           Expanded(
                             child: TextField(
-                              controller: _alturaCtrl,
+                              controller: _larguraCtrl,
                               keyboardType: const TextInputType.numberWithOptions(decimal: true),
                               decoration: InputDecoration(
-                                labelText: 'Comprimento usado (m)',
+                                labelText: 'Largura usada (m)',
                                 isDense:    true,
-                                suffixText: '/ ${_fmt(chapa.$2)} m',
+                                suffixText: '/ ${_fmt(largura)} m',
                                 suffixStyle: TextStyle(
                                     fontSize: 11, color: Theme.of(context).colorScheme.outline),
                               ),
@@ -1866,21 +1855,26 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                       ),
 
                       Builder(builder: (_) {
+                        final comp = double.tryParse(
+                            _alturaCtrl.text.replaceAll(',', '.'));
                         final larg = double.tryParse(
                             _larguraCtrl.text.replaceAll(',', '.'));
-                        final alt  = double.tryParse(
-                            _alturaCtrl.text.replaceAll(',', '.'));
                         if (larg == null || larg <= 0 ||
-                            alt == null  || alt  <= 0) {
+                            comp == null || comp <= 0) {
                           return const SizedBox.shrink();
                         }
-                        final areaUsada = larg * alt;
-                        final areaTotal = chapa.$1 * chapa.$2;
-                        final fracao    = areaUsada / areaTotal;
-                        final pct       = (fracao * 100).toStringAsFixed(1);
-                        final qtdCalc   = fracao.toStringAsFixed(4).replaceAll(RegExp(r'0+$'), '');
-                        final qtdDisplay = qtdCalc.endsWith('.') ? '${qtdCalc}0' : qtdCalc;
-                        
+                        final areaUsada   = larg * comp;
+                        final areaTotal   = largura * comprimento;
+                        final areaRetalho = double.parse(
+                            (areaTotal - areaUsada).toStringAsFixed(4));
+                        final temRetalho  = areaRetalho > 0.0001;
+
+                        final custoM2 = _custoM2Sugerido;
+                        final custoProporcional =
+                            (custoM2 != null && custoM2 > 0)
+                                ? custoM2 * areaUsada
+                                : null;
+
                         return Container(
                           margin: const EdgeInsets.only(top: 8),
                           padding: const EdgeInsets.symmetric(
@@ -1903,26 +1897,31 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                                         fontSize: 12,
                                         color: Theme.of(context).colorScheme.onSurfaceVariant),
                                     children: [
-                                      TextSpan(
-                                          text: '${_fmt(larg)} × ${_fmt(alt)} m  =  '),
+                                      TextSpan(text: 'Área usada: '),
                                       TextSpan(
                                         text: '${_fmt(areaUsada)} m²',
                                         style: TextStyle(
                                             fontWeight: FontWeight.w700,
                                             color: Theme.of(context).colorScheme.onSurface),
                                       ),
-                                      const TextSpan(text: '  →  '),
-                                      TextSpan(
-                                        text: qtdDisplay,
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            color: AppTheme.primary),
-                                      ),
-                                      TextSpan(
-                                        text: ' ${m.unidade ?? 'UN'}  ($pct% da chapa)',
-                                        style: TextStyle(
-                                            color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                      ),
+                                      if (temRetalho) ...[
+                                        TextSpan(text: '  ·  Retalho: '),
+                                        TextSpan(
+                                          text: '${_fmt(areaRetalho)} m²',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: AppTheme.success),
+                                        ),
+                                      ],
+                                      if (custoProporcional != null) ...[
+                                        TextSpan(text: '  ·  Custo: '),
+                                        TextSpan(
+                                          text: _brl6(custoProporcional),
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: AppTheme.error),
+                                        ),
+                                      ],
                                     ],
                                   ),
                                 ),

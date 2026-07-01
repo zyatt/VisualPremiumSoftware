@@ -119,7 +119,7 @@ class _VeiculoPageState extends State<VeiculoPage> {
             .toUpperCase() ??
         '';
 
-    if (role != 'ADMIN' && role != 'GERENTE') {
+    if (role != 'ADMIN' && role != 'GERENTE' && role != 'COMPRAS') {
       return Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Center(
@@ -1047,6 +1047,7 @@ class _FormVeiculoDialogState extends State<_FormVeiculoDialog> {
                 context: context,
                 controller: _nomeCtrl,
                 label:      'Nome do veículo',
+                autofocus:  true,
                 validator:  (v) =>
                     (v == null || v.trim().isEmpty) ? 'Informe o nome' : null,
               ),
@@ -1315,11 +1316,13 @@ Widget _campo({
   String?                        hint,
   String? Function(String?)?     validator,
   TextInputType?                 inputType,
+  bool                           autofocus = false,
 }) {
   return TextFormField(
     controller:  controller,
     keyboardType: inputType,
     validator:   validator,
+    autofocus:   autofocus,
     style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
     decoration: InputDecoration(
       labelText:     label,

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as dev;
 import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -19,6 +20,23 @@ import '../rotas/app_router.dart';
 
 import '../theme/app_theme.dart';
 
+// ─── Log de diagnóstico (rastreável em produção via `flutter logs` /
+// console do app empacotado, e visível também no DevTools). Não usamos
+// print() porque print() é descartado/limita em alguns builds release;
+// dev.log() sempre fica disponível e inclui timestamp automaticamente.
+// Prefixamos tudo com [Orcamento] + o nome do orçamento (quando houver)
+// para facilitar grep nos logs do usuário quando ele reportar um travamento.
+void _logOrc(String mensagem, {Object? erro, StackTrace? stack, int? level}) {
+  dev.log(
+    mensagem,
+    time: DateTime.now(),
+    name: 'OrcamentoEditor',
+    error: erro,
+    stackTrace: stack,
+    level: level ?? 0,
+  );
+}
+
 String _mensagemErro(Object e, {required String acao}) {
   final raw = e.toString();
   if (raw.contains('SocketException') ||
@@ -33,6 +51,18 @@ String _mensagemErro(Object e, {required String acao}) {
   }
   final msg = raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
   return 'Erro ao $acao: $msg';
+}
+
+// Detecta se o erro veio de uma validação de status no backend (ex: o
+// orçamento foi aprovado/enviado por outro usuário entre o momento em que
+// esta tela carregou e a ação ser confirmada). Esses são os textos exatos
+// lançados por orcamento.service.js em enviarParaAprovacao/aprovar/rejeitar.
+bool _isErroDeStatusDesatualizado(Object e) {
+  final raw = e.toString();
+  return raw.contains('Apenas orçamentos abertos podem ser enviados') ||
+      raw.contains('Apenas orçamentos aguardando aprovação podem ser aprovados') ||
+      raw.contains('Apenas orçamentos aguardando aprovação podem ser rejeitados') ||
+      raw.contains('Apenas orçamentos aprovados');
 }
 
 class _HorizontalScrollBehavior extends MaterialScrollBehavior {
@@ -88,8 +118,7 @@ class OrcamentoEditorPage extends StatefulWidget {
   State<OrcamentoEditorPage> createState() => _OrcamentoEditorPageState();
 }
 
-class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
-  final _searchIdCtrl = TextEditingController();
+class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsBindingObserver {
   final _searchNomeCtrl = TextEditingController();
   final _searchIdentificadorCtrl = TextEditingController();
   final _searchMedidaCtrl = TextEditingController();
@@ -98,6 +127,17 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
   final _tabelaHScrollCtrl = ScrollController();
   final _pageScrollCtrl = ScrollController();
   Timer? _debounceMatBusca;
+  // Sincroniza periodicamente o status do orçamento (aprovado/rejeitado/
+  // aguardando aprovação) com o servidor, para que os botões de ação não
+  // fiquem desatualizados quando outro usuário (ou outra aba) altera o
+  // status enquanto esta tela permanece aberta. Sem isso, a única forma de
+  // ver o estado correto era fechar e reabrir a aba do orçamento.
+  Timer? _autoSyncTimer;
+  // Evita que múltiplas chamadas de sincronização rodem sobrepostas (ex:
+  // timer de 30s disparando ao mesmo tempo que um clique manual em
+  // "Atualizar" ou um resume do app). Sem isso, em sessões longas com várias
+  // abas de orçamento abertas, as chamadas podem se acumular e travar a UI.
+  bool _syncing = false;
   late final _ScrollMetricsNotifier _abasScrollHintNotifier;
   late final _ScrollMetricsNotifier _tabelaHScrollHintNotifier;
 
@@ -135,10 +175,11 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _abasScrollHintNotifier = _ScrollMetricsNotifier();
     _tabelaHScrollHintNotifier = _ScrollMetricsNotifier();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _sincronizarStatusServidor();
+      _sincronizarStatusServidor(origem: 'initState');
       context.read<FornecedorProvider>().carregar();
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted && _tabelaHScrollCtrl.hasClients) {
@@ -155,6 +196,39 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     _abasScrollCtrl.addListener(() {
       if (mounted) _abasScrollHintNotifier.update(_abasScrollCtrl);
     });
+    // Reconfere o status no servidor a cada 30s enquanto a tela estiver
+    // aberta, para refletir aprovações/rejeições feitas por outro usuário
+    // (ou em outra aba) sem precisar fechar e reabrir o orçamento.
+    _logOrc('initState: iniciando _autoSyncTimer (30s)');
+    _iniciarAutoSyncTimer();
+  }
+
+  void _iniciarAutoSyncTimer() {
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _sincronizarStatusServidor(origem: 'timer30s');
+    });
+  }
+
+  // Chamado quando o app volta ao primeiro plano (ex: usuário alterna de
+  // app/aba e retorna). Reconfere o status, já que pode ter mudado enquanto
+  // o app estava em segundo plano. Também pausamos o timer periódico
+  // enquanto o app está em background e o recriamos ao voltar — isso evita
+  // que, em sessões longas, ticks "atrasados" se acumulem e disparem em
+  // rajada (várias requisições simultâneas) assim que o app volta ao
+  // primeiro plano, o que pode travar a UI por alguns segundos.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _logOrc('didChangeAppLifecycleState: $state');
+    if (state == AppLifecycleState.resumed) {
+      _iniciarAutoSyncTimer();
+      _sincronizarStatusServidor(origem: 'lifecycleResumed');
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      _autoSyncTimer?.cancel();
+      _autoSyncTimer = null;
+    }
   }
 
   void _scrollAbasEsquerda() {
@@ -171,8 +245,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
 
   @override
   void dispose() {
+    _logOrc('dispose: cancelando _autoSyncTimer e liberando controllers');
+    WidgetsBinding.instance.removeObserver(this);
+    _autoSyncTimer?.cancel();
     _debounceMatBusca?.cancel();
-    _searchIdCtrl.dispose();
     _searchNomeCtrl.dispose();
     _searchIdentificadorCtrl.dispose();
     _searchMedidaCtrl.dispose();
@@ -191,13 +267,12 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
   }
 
   Future<void> _executarBuscaMateriais() async {
-    final id = _searchIdCtrl.text.trim();
     final nome = _searchNomeCtrl.text.trim();
     final identificador = _searchIdentificadorCtrl.text.trim();
     final medida = _searchMedidaCtrl.text.trim();
     final esp = _searchEspCtrl.text.trim();
 
-    final algumFiltro = id.isNotEmpty || nome.isNotEmpty || identificador.isNotEmpty || medida.isNotEmpty || esp.isNotEmpty;
+    final algumFiltro = nome.isNotEmpty || identificador.isNotEmpty || medida.isNotEmpty || esp.isNotEmpty;
 
     if (!algumFiltro) {
       setState(() { _resultadosBusca = []; _mostrarResultados = false; });
@@ -207,7 +282,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
     try {
       await context.read<MaterialProvider>().carregar(
         busca: nome.isNotEmpty ? nome : '',
-        id: id.isNotEmpty ? id : '',
         identificador: identificador.isNotEmpty ? identificador : '',
         medida: medida.isNotEmpty ? medida : '',
         espessura: esp.isNotEmpty ? esp : '',
@@ -246,7 +320,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
       materialStatus: material.status,
       precos: precos,
     ));
-    _searchIdCtrl.clear();
     _searchNomeCtrl.clear();
     _searchIdentificadorCtrl.clear();
     _searchMedidaCtrl.clear();
@@ -556,13 +629,26 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
       provider.atualizarFlagsTab(aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
       Navigator.of(context).pop();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_mensagemErro(e, acao: 'enviar para aprovação')), backgroundColor: AppTheme.error));
+      if (mounted) {
+        if (_isErroDeStatusDesatualizado(e)) {
+          await _sincronizarStatusServidor(origem: 'erroEnviarAprovacao');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('O status deste orçamento mudou (outra pessoa já enviou ou aprovou). A tela foi atualizada.'),
+              backgroundColor: AppTheme.error,
+            ));
+          }
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_mensagemErro(e, acao: 'enviar para aprovação')), backgroundColor: AppTheme.error));
+        }
+      }
     } finally {
       if (mounted) setState(() => _salvando = false);
     }
   }
 
   Future<void> _aprovarOrcamento(int id, String titulo) async {
+    _logOrc('aprovarOrcamento: botão clicado orcamentoId=$id titulo="$titulo"');
     final provider = context.read<OrcamentoProvider>();
 
     final confirmar = await showDialog<bool>(
@@ -576,14 +662,18 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
         ],
       ),
     );
+    _logOrc('aprovarOrcamento: diálogo de confirmação fechado, resultado=$confirmar orcamentoId=$id');
     if (confirmar != true) return;
 
     setState(() => _salvando = true);
+    final inicio = DateTime.now();
     final tab = provider.tabAtual;
     try {
       if (tab != null) {
         final repo = OrcamentoRepository();
+        _logOrc('aprovarOrcamento: limpando itens no servidor orcamentoId=$id');
         await repo.limparItens(id);
+        _logOrc('aprovarOrcamento: regravando ${tab.itens.length} itens orcamentoId=$id');
         for (final item in tab.itens) {
          if (item.precos.isEmpty) {
           await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
@@ -593,34 +683,78 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           }
         }
         }
+      } else {
+        _logOrc('aprovarOrcamento: AVISO tabAtual é null, pulando regravação de itens orcamentoId=$id', level: 900);
       }
+      _logOrc('aprovarOrcamento: chamando PATCH /orcamentos/$id/aprovar');
       await OrcamentoRepository().aprovar(id);
-      if (!mounted) return;
+      _logOrc('aprovarOrcamento: sucesso em ${DateTime.now().difference(inicio).inMilliseconds}ms orcamentoId=$id');
+      if (!mounted) {
+        _logOrc('aprovarOrcamento: sucesso no servidor mas widget já desmontado orcamentoId=$id', level: 900);
+        return;
+      }
       provider.atualizarFlagsTab(aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
       provider.fecharAbaAposOperacao();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Orçamento #$id aprovado com sucesso!'), backgroundColor: AppTheme.success));
       Navigator.of(context).pop();
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_mensagemErro(e, acao: 'aprovar orçamento')), backgroundColor: AppTheme.error));
+    } catch (e, st) {
+      _logOrc('aprovarOrcamento: ERRO após ${DateTime.now().difference(inicio).inMilliseconds}ms orcamentoId=$id',
+          erro: e, stack: st, level: 1000);
+      if (mounted) {
+        if (_isErroDeStatusDesatualizado(e)) {
+          await _sincronizarStatusServidor(origem: 'erroAprovar');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('O status deste orçamento mudou (outra pessoa já aprovou ou alterou). A tela foi atualizada.'),
+              backgroundColor: AppTheme.error,
+            ));
+          }
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_mensagemErro(e, acao: 'aprovar orçamento')), backgroundColor: AppTheme.error));
+        }
+      }
     } finally {
+      _logOrc('aprovarOrcamento: finally, liberando _salvando orcamentoId=$id mounted=$mounted');
       if (mounted) setState(() => _salvando = false);
     }
   }
 
-  Future<void> _sincronizarStatusServidor() async {
+  Future<void> _sincronizarStatusServidor({String origem = 'manual'}) async {
     final provider = context.read<OrcamentoProvider>();
     final sid = provider.tabAtual?.servidorId;
-    if (sid == null) return;
+    if (sid == null) {
+      _logOrc('sincronizarStatusServidor[$origem]: ignorado (aba sem servidorId, ainda não salva)');
+      return;
+    }
+    if (_syncing) {
+      _logOrc('sincronizarStatusServidor[$origem]: ignorado (já existe uma sincronização em andamento) orcamentoId=$sid');
+      return;
+    }
+    _syncing = true;
+    final inicio = DateTime.now();
+    _logOrc('sincronizarStatusServidor[$origem]: iniciando GET /orcamentos/$sid');
     try {
+      // ApiClient já aplica timeout de 15s em toda chamada HTTP — se a
+      // requisição nunca responder, ela mesma lança TimeoutException aqui,
+      // caindo no catch abaixo (sem deixar o `_syncing` travado em true).
       final orc = await OrcamentoRepository().buscarPorId(sid);
-      if (!mounted) return;
+      if (!mounted) {
+        _logOrc('sincronizarStatusServidor[$origem]: resposta chegou mas widget já foi desmontado, ignorando orcamentoId=$sid');
+        return;
+      }
       final status = orc['status'] as String? ?? '';
+      _logOrc('sincronizarStatusServidor[$origem]: sucesso em ${DateTime.now().difference(inicio).inMilliseconds}ms '
+          'orcamentoId=$sid status=$status');
       provider.atualizarFlagsTab(
         aguardandoAprovacao: status == 'AGUARDANDO_APROVACAO',
         jaFinalizado: status == 'APROVADO' || status == 'NAO_APROVADO',
         modoGerarOC: status == 'APROVADO',
       );
-    } catch (_) {}
+    } catch (e, st) {
+      _logOrc('sincronizarStatusServidor[$origem]: ERRO orcamentoId=$sid', erro: e, stack: st, level: 1000);
+    } finally {
+      _syncing = false;
+    }
   }
 
   Future<void> _salvarAoFecharAba(int index) async {
@@ -1062,7 +1196,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                                 setState(() {
                                   _itensSelecionados.clear();
                                   _materiaisParaBulk.clear();
-                                  _searchIdCtrl.clear();
                                   _searchNomeCtrl.clear();
                                   _searchIdentificadorCtrl.clear();
                                   _searchMedidaCtrl.clear();
@@ -1071,6 +1204,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                                   _mostrarResultados = false;
                                 });
                                 provider.selecionarAba(i);
+                                _sincronizarStatusServidor(origem: 'trocaDeAba');
                               },
                               child: AnimatedContainer(
                                 duration: Duration(milliseconds: 150),
@@ -1214,7 +1348,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           OutlinedButton.icon(onPressed: _cancelarOrcamento, icon: Icon(Icons.delete_outline, size: iconSize), label: Text('Cancelar', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: BorderSide(color: AppTheme.error), padding: btnPad)),
           OutlinedButton.icon(onPressed: itens.isEmpty ? null : _exportarPdf, icon: Icon(Icons.picture_as_pdf_outlined, size: iconSize), label: Text('PDF', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant, side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant), padding: btnPad)),
           OutlinedButton.icon(
-            onPressed: _sincronizarStatusServidor,
+            onPressed: () => _sincronizarStatusServidor(origem: 'botaoAtualizarManual'),
             icon: Icon(Icons.refresh, size: iconSize),
             label: Text('Atualizar', style: btnStyle12),
             style: OutlinedButton.styleFrom(
@@ -1352,47 +1486,11 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              SizedBox(
-                width: 70,
-                child: TextField(
-                  controller: _searchIdCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'ID',
-                    prefixIcon: const Icon(Icons.tag, size: 13),
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 8,
-                    ),
-                    suffixIcon:
-                        _buscando && _searchIdCtrl.text.isNotEmpty
-                            ? const Padding(
-                                padding: EdgeInsets.all(8),
-                                child: SizedBox(
-                                  width: 12,
-                                  height: 12,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: AppTheme.primary,
-                                  ),
-                                ),
-                              )
-                            : null,
-                  ),
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                  ],
-                  onChanged: (_) => _agendarBuscaMateriais(),
-                ),
-              ),
-
-              const SizedBox(width: 6),
-
               Expanded(
                 flex: 3,
                 child: TextField(
                   controller: _searchNomeCtrl,
+                  autofocus: true,
                   inputFormatters: [_NoCommaFormatter()],
                   decoration: InputDecoration(
                     labelText: 'Nome',
@@ -1501,7 +1599,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
                 onPressed: () {
-                  _searchIdCtrl.clear();
                   _searchNomeCtrl.clear();
                   _searchIdentificadorCtrl.clear();
                   _searchMedidaCtrl.clear();

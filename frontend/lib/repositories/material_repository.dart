@@ -37,10 +37,7 @@ class MaterialRepository {
         .toList();
   }
 
-  /// GET /api/materiais/para-movimentacao
-  /// Igual a [listar] mas inclui materiais temporários ativos.
-  /// Usado exclusivamente no dialog de nova entrada/saída do controle de estoque.
-  Future<List<MaterialModel>> listarParaMovimentacao({
+   Future<List<MaterialModel>> listarParaMovimentacao({
     String? busca,
     String? categoria,
     String? id,

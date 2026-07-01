@@ -6,10 +6,14 @@ class MaterialProducaoModel {
   final String? medida;
   final String? espessura;
   final String? unidade;
+  final double? largura;
+  final double? comprimento;
   final double quantidade;
   final double emUso;
   final double estoqueMinimo;
   final String statusReal;
+  final double? ultimoValorPago;
+  final double? ultimoValorPagoM2;
 
   MaterialProducaoModel({
     required this.id,
@@ -19,10 +23,14 @@ class MaterialProducaoModel {
     this.medida,
     this.espessura,
     this.unidade,
+    this.largura,
+    this.comprimento,
     required this.quantidade,
     required this.emUso,
     required this.estoqueMinimo,
     required this.statusReal,
+    this.ultimoValorPago,
+    this.ultimoValorPagoM2,
   });
 
   factory MaterialProducaoModel.fromJson(Map<String, dynamic> json) {
@@ -33,6 +41,14 @@ class MaterialProducaoModel {
       return double.tryParse(value.toString()) ?? defaultValue;
     }
 
+    double? parseDoubleOrNull(dynamic value) {
+      if (value == null) return null;
+      if (value is num) return value.toDouble();
+      final str = value.toString().trim();
+      if (str.isEmpty) return null;
+      return double.tryParse(str);
+    }
+
     return MaterialProducaoModel(
       id:             (json['id'] as num?)?.toInt() ?? 0,
       nome:           json['nome']?.toString() ?? '',
@@ -41,10 +57,14 @@ class MaterialProducaoModel {
       medida:         json['medida']?.toString(),
       espessura:      json['espessura']?.toString(),
       unidade:        json['unidade']?.toString(),
+      largura:        parseDoubleOrNull(json['largura']),
+      comprimento:    parseDoubleOrNull(json['comprimento']),
       quantidade:     parseDouble(json['quantidade'], 0.0),
       emUso:          parseDouble(json['emUso'], 0.0),
       estoqueMinimo:  parseDouble(json['estoqueMinimo'], 0.0),
       statusReal:     json['statusReal']?.toString() ?? 'OK',
+      ultimoValorPago:   parseDoubleOrNull(json['custoUltimaCompra'] ?? json['ultimoValorPago']),
+      ultimoValorPagoM2: parseDoubleOrNull(json['custoM2UltimaCompra'] ?? json['ultimoValorPagoM2']),
     );
   }
 }

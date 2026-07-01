@@ -26,8 +26,7 @@ function _normalizarPreco(valor) {
   return num > 0 ? num : null;
 }
 
-// Helper reutilizado por listar() e listarParaMovimentacao() para calcular
-// preço mediano e custo da última compra a partir dos dados do Prisma.
+// Helper para calcular preço mediano e custo da última compra a partir dos dados do Prisma.
 function _mapearMaterial(m) {
   const precos = m.fornecedorMateriais
     .map((fm) => Number(fm.preco))
@@ -64,10 +63,7 @@ const _includeFornecedores = {
 async function listar(filtros = {}) {
   const { busca, categoria, semCategoria, status, comFornecedor, id, medida, espessura, largura, comprimento, identificador, ativo } = filtros;
 
-  // Exclui materiais temporários do catálogo padrão.
-  // Eles são listados exclusivamente via listarParaMovimentacao() (dialog de
-  // entrada/saída do controle de estoque) e pela rota de estoque-temporário.
-  const where = { temporario: { not: true } };
+  const where = {};
 
   if (ativo === 'true') where.ativo = true;
   if (id) where.id = Number(id);
@@ -105,42 +101,8 @@ async function listar(filtros = {}) {
   return materiais.map(_mapearMaterial);
 }
 
-// ── Listagem para o dialog de nova entrada/saída do controle de estoque ───────
-// Diferente de listar(), inclui materiais temporários ativos — necessário para
-// que o operador possa dar entrada/saída em itens criados via Estoque Temporário.
-// Materiais normais aparecem primeiro (temporario=false), depois os temporários.
 async function listarParaMovimentacao(filtros = {}) {
-  const { busca, categoria, semCategoria, id, medida, espessura, identificador } = filtros;
-
-  // Somente ativos; sem filtro de temporario — inclui normais E temporários.
-  const where = { ativo: true };
-
-  if (id) where.id = Number(id);
-  if (busca) {
-    const tokens = busca.trim().split(/\s+/).filter(Boolean);
-    if (tokens.length === 1) {
-      where.nome = { contains: tokens[0], mode: 'insensitive' };
-    } else {
-      where.AND = tokens.map((t) => ({ nome: { contains: t, mode: 'insensitive' } }));
-    }
-  }
-  if (identificador) where.identificador = { contains: identificador, mode: 'insensitive' };
-  if (medida)        where.medida        = { contains: medida,        mode: 'insensitive' };
-  if (espessura)     where.espessura     = { contains: espessura,     mode: 'insensitive' };
-  if (semCategoria === 'true') {
-    where.categoria = null;
-  } else if (categoria) {
-    where.categoria = { equals: categoria, mode: 'insensitive' };
-  }
-
-  const materiais = await prisma.material.findMany({
-    where,
-    include: _includeFornecedores,
-    // Normais primeiro (temporario false < true), depois por nome
-    orderBy: [{ temporario: 'asc' }, { nome: 'asc' }],
-  });
-
-  return materiais.map(_mapearMaterial);
+  return listar({ ...filtros, ativo: 'true' });
 }
 
 async function buscarPorId(id) {

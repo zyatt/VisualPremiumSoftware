@@ -15,6 +15,13 @@ async function refresh(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function trocarUsuario(req, res, next) {
+  try {
+    const result = await usuarioService.trocarUsuario(Number(req.body.id));
+    res.json(result);
+  } catch (err) { next(err); }
+}
+
 async function listar(req, res, next) {
   try {
     const usuarios = await usuarioService.listar();
@@ -43,4 +50,4 @@ async function remover(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { login, refresh, listar, criar, atualizar, remover };
+module.exports = { login, refresh, trocarUsuario, listar, criar, atualizar, remover };

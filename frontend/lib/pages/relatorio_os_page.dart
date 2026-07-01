@@ -160,7 +160,6 @@ class _UpperCaseFormatter extends TextInputFormatter {
 class _RelatorioOSPageState extends State<RelatorioOSPage> {
   // ── Controllers ───────────────────────────────────────────────────────────
   final _buscaOSCtrl       = TextEditingController(); // busca por nº OS
-  final _materialIdCtrl    = TextEditingController();
   final _materialNomeCtrl  = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
@@ -183,7 +182,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   void dispose() {
     _debounce?.cancel();
     _buscaOSCtrl.dispose();
-    _materialIdCtrl.dispose();
     _materialNomeCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
@@ -196,9 +194,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
           busca:                 _buscaOSCtrl.text.trim().isEmpty
               ? null
               : _buscaOSCtrl.text.trim(),
-          materialId:            _materialIdCtrl.text.trim().isEmpty
-              ? null
-              : _materialIdCtrl.text.trim(),
           materialNome:          _materialNomeCtrl.text.trim().isEmpty
               ? null
               : _materialNomeCtrl.text.trim(),
@@ -225,7 +220,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   }
 
   void _limparFiltrosMaterial() {
-    _materialIdCtrl.clear();
     _materialNomeCtrl.clear();
     _identificadorCtrl.clear();
     _medidaCtrl.clear();
@@ -240,7 +234,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   bool get _temFiltroData => _dataInicio != null || _dataFim != null;
 
   bool get _temFiltroMaterial =>
-      _materialIdCtrl.text.isNotEmpty ||
       _materialNomeCtrl.text.isNotEmpty ||
       _identificadorCtrl.text.isNotEmpty ||
       _medidaCtrl.text.isNotEmpty ||
@@ -352,26 +345,9 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
             ),
             const SizedBox(height: 10),
 
-            // ── Filtro linha 2: ID + identificador + medida + espessura
+            // ── Filtro linha 2: identificador + medida + espessura
             Row(
               children: [
-                SizedBox(
-                  width: 110,
-                  child: TextField(
-                    controller: _materialIdCtrl,
-                    onChanged: _onChanged,
-                    onSubmitted: (_) => _aplicarFiltros(),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: InputDecoration(
-                      hintText: 'ID mat...',
-                      prefixIcon: Icon(Icons.tag,
-                          color: Theme.of(context).colorScheme.outline, size: 18),
-                      isDense: true,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
                 Expanded(
                   child: TextField(
                     controller: _identificadorCtrl,
@@ -610,9 +586,33 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
 
 bool _osEhNumerica(String numeroOS) => int.tryParse(numeroOS.trim()) != null;
 
+/// Classifica uma OS textual em uma das categorias grandes exibidas dentro
+/// de "Empresa": "EMPRESA-(DATA)" → EMPRESA, "INVESTIMENTO-(DATA)" →
+/// INVESTIMENTO, qualquer outra coisa → OUTROS.
+String _categoriaEmpresa(String numeroOS) {
+  final upper = numeroOS.trim().toUpperCase();
+  if (upper.startsWith('EMPRESA-') || upper == 'EMPRESA') return 'EMPRESA';
+  if (upper.startsWith('INVESTIMENTO-') || upper == 'INVESTIMENTO') return 'INVESTIMENTO';
+  return 'OUTROS';
+}
+
+class _CategoriaEmpresaInfo {
+  final String chave;
+  final String label;
+  final IconData icone;
+  final Color cor;
+  const _CategoriaEmpresaInfo(this.chave, this.label, this.icone, this.cor);
+}
+
+final _categoriasEmpresa = <_CategoriaEmpresaInfo>[
+  _CategoriaEmpresaInfo('EMPRESA', 'Empresa', Icons.business_outlined, AppTheme.primary),
+  _CategoriaEmpresaInfo('INVESTIMENTO', 'Investimento', Icons.trending_up, const Color(0xFF2E7D32)),
+  _CategoriaEmpresaInfo('OUTROS', 'Outros', Icons.category_outlined, const Color(0xFF6D4C41)),
+];
+
 // ─── Grid de OS (separado em numéricas × descritivas) ────────────────────────
 
-class _RelatorioOSGrid extends StatelessWidget {
+class _RelatorioOSGrid extends StatefulWidget {
   final List<RelacaoOSModel> relatorios;
   final void Function(RelacaoOSModel) onTap;
 
@@ -620,6 +620,37 @@ class _RelatorioOSGrid extends StatelessWidget {
     required this.relatorios,
     required this.onTap,
   });
+
+  @override
+  State<_RelatorioOSGrid> createState() => _RelatorioOSGridState();
+}
+
+class _RelatorioOSGridState extends State<_RelatorioOSGrid> {
+  /// Categoria de "Empresa" atualmente aberta (null = mostra os 3 cards grandes).
+  String? _categoriaAberta;
+
+  // Chaves usadas para rolar automaticamente a tela: ao expandir uma
+  // categoria, rola até o conteúdo expandido (mini-cards); ao recolher,
+  // rola de volta até o topo dos 3 cards grandes.
+  final GlobalKey _cardsCategoriaKey = GlobalKey();
+  final GlobalKey _conteudoExpandidoKey = GlobalKey();
+
+  void _alternarCategoria(String chave, bool estaSelecionada) {
+    final abrindo = !estaSelecionada;
+    setState(() => _categoriaAberta = abrindo ? chave : null);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = abrindo ? _conteudoExpandidoKey : _cardsCategoriaKey;
+      final ctx = key.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          alignment: abrindo ? 1.0 : 0.0,
+        );
+      }
+    });
+  }
 
   SliverToBoxAdapter _cabecalho(BuildContext context, String titulo, int count) =>
       SliverToBoxAdapter(
@@ -660,11 +691,26 @@ class _RelatorioOSGrid extends StatelessWidget {
       );
 
   @override
+  void didUpdateWidget(covariant _RelatorioOSGrid oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Se a categoria aberta deixou de ter itens nos dados atuais (ex.: a
+    // OS dela foi revertida/excluída), volta para os 3 cards grandes.
+    if (_categoriaAberta != null) {
+      final aindaExiste = widget.relatorios.any((r) =>
+          !_osEhNumerica(_limparNumeroOS(r.numeroOS)) &&
+          _categoriaEmpresa(_limparNumeroOS(r.numeroOS)) == _categoriaAberta);
+      if (!aindaExiste) {
+        _categoriaAberta = null;
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final numericas = relatorios
+    final numericas = widget.relatorios
         .where((r) => _osEhNumerica(_limparNumeroOS(r.numeroOS)))
         .toList();
-    final textuais = relatorios
+    final textuais = widget.relatorios
         .where((r) => !_osEhNumerica(_limparNumeroOS(r.numeroOS)))
         .toList();
 
@@ -674,6 +720,20 @@ class _RelatorioOSGrid extends StatelessWidget {
       mainAxisSpacing: 12,
       childAspectRatio: 1,
     );
+
+    // Agrupa as OS textuais por categoria (EMPRESA / INVESTIMENTO / OUTROS).
+    final porCategoria = <String, List<RelacaoOSModel>>{
+      for (final c in _categoriasEmpresa) c.chave: <RelacaoOSModel>[],
+    };
+    for (final r in textuais) {
+      porCategoria[_categoriaEmpresa(_limparNumeroOS(r.numeroOS))]!.add(r);
+    }
+
+    final categoriaInfo = _categoriaAberta == null
+        ? null
+        : _categoriasEmpresa.firstWhere((c) => c.chave == _categoriaAberta);
+    final itensCategoria =
+        _categoriaAberta == null ? const <RelacaoOSModel>[] : porCategoria[_categoriaAberta]!;
 
     return CustomScrollView(
       slivers: [
@@ -685,7 +745,7 @@ class _RelatorioOSGrid extends StatelessWidget {
                 final rel = numericas[i];
                 return _RelatorioOSCard(
                   relatorio: rel,
-                  onTap: () => onTap(rel),
+                  onTap: () => widget.onTap(rel),
                 );
               },
               childCount: numericas.length,
@@ -694,23 +754,172 @@ class _RelatorioOSGrid extends StatelessWidget {
           ),
         ],
         if (textuais.isNotEmpty) ...[
-          _cabecalho(context, 'Empresa', textuais.length),
-          SliverGrid(
-            delegate: SliverChildBuilderDelegate(
-              (ctx, i) {
-                final rel = textuais[i];
-                return _RelatorioOSCard(
-                  relatorio: rel,
-                  onTap: () => onTap(rel),
+          _cabecalho(context, 'Outros', textuais.length),
+          SliverToBoxAdapter(
+            child: LayoutBuilder(
+              builder: (ctx, constraints) {
+                final largura = constraints.maxWidth;
+                final colunas = largura >= 640 ? 3 : (largura >= 420 ? 2 : 1);
+                return Container(
+                  key: _cardsCategoriaKey,
+                  child: GridView.count(
+                    crossAxisCount: colunas,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 1.9,
+                    children: _categoriasEmpresa.map((cat) {
+                      final itens = porCategoria[cat.chave]!;
+                      final selecionado = _categoriaAberta == cat.chave;
+                      return _CategoriaEmpresaCard(
+                        info: cat,
+                        count: itens.length,
+                        selecionado: selecionado,
+                        onTap: itens.isEmpty
+                            ? null
+                            : () => _alternarCategoria(cat.chave, selecionado),
+                      );
+                    }).toList(),
+                  ),
                 );
               },
-              childCount: textuais.length,
             ),
-            gridDelegate: gridDelegate,
           ),
+          if (_categoriaAberta != null) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 16, bottom: 4),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 3,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: categoriaInfo!.cor,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'OS em ${categoriaInfo.label}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverGrid(
+              delegate: SliverChildBuilderDelegate(
+                (ctx, i) {
+                  final rel = itensCategoria[i];
+                  final card = _RelatorioOSCard(
+                    relatorio: rel,
+                    onTap: () => widget.onTap(rel),
+                  );
+                  // A chave fica no primeiro card da linha para que o auto-scroll
+                  // role até a linha de mini-cards realmente aparecer, não só o rótulo.
+                  return i == 0 ? KeyedSubtree(key: _conteudoExpandidoKey, child: card) : card;
+                },
+                childCount: itensCategoria.length,
+              ),
+              gridDelegate: gridDelegate,
+            ),
+          ],
         ],
         const SliverToBoxAdapter(child: SizedBox(height: 16)),
       ],
+    );
+  }
+}
+
+// ─── Card grande de categoria (Empresa / Investimento / Outros) ──────────────
+
+class _CategoriaEmpresaCard extends StatelessWidget {
+  final _CategoriaEmpresaInfo info;
+  final int count;
+  final bool selecionado;
+  final VoidCallback? onTap;
+
+  const _CategoriaEmpresaCard({
+    required this.info,
+    required this.count,
+    required this.selecionado,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final habilitado = onTap != null;
+    return Card(
+      elevation: selecionado ? 2 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: selecionado
+            ? BorderSide(color: info.cor, width: 1.6)
+            : BorderSide(color: Theme.of(context).colorScheme.outlineVariant, width: 1),
+      ),
+      color: selecionado ? info.cor.withValues(alpha: 0.06) : null,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Opacity(
+          opacity: habilitado ? 1 : 0.45,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: info.cor.withValues(alpha: selecionado ? 0.20 : 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(info.icone, color: info.cor, size: 26),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        info.label,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: selecionado
+                              ? info.cor
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        '$count ${count == 1 ? 'ordem' : 'ordens'}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (habilitado)
+                  Icon(
+                    selecionado ? Icons.expand_less : Icons.expand_more,
+                    color: selecionado ? info.cor : Theme.of(context).colorScheme.outline,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

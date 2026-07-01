@@ -102,7 +102,6 @@ class FornecedoresPage extends StatefulWidget {
 
 class _FornecedoresPageState extends State<FornecedoresPage> {
   final _buscaCtrl   = TextEditingController();
-  final _buscaIdCtrl = TextEditingController();
   String _tipoFiltro = '';
   Timer? _debounceTimer;
 
@@ -123,7 +122,6 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
   void dispose() {
     _debounceTimer?.cancel();
     _buscaCtrl.dispose();
-    _buscaIdCtrl.dispose();
     super.dispose();
   }
 
@@ -144,7 +142,6 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
     context.read<FornecedorProvider>().carregar(
           busca: _buscaCtrl.text,
           tipo: _tipoFiltro,
-          id: _buscaIdCtrl.text.trim(),
         );
   }
 
@@ -275,25 +272,6 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
 
             Row(
               children: [
-                SizedBox(
-                  width: 120,
-                  child: TextField(
-                    controller: _buscaIdCtrl,
-                    decoration: InputDecoration(
-                      hintText: 'ID...',
-                      prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
-                      isDense: true,
-                    ),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    onChanged: (_) {
-                      _debounceTimer?.cancel();
-                      _debounceTimer = Timer(const Duration(milliseconds: 400), _aplicarFiltros);
-                    },
-                    onSubmitted: (_) => _aplicarFiltros(),
-                  ),
-                ),
-                const SizedBox(width: 12),
                 Expanded(
                   flex: 3,
                   child: TextField(
@@ -355,7 +333,6 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                       color: scheme.onSurfaceVariant),
                   onPressed: () {
                     _buscaCtrl.clear();
-                    _buscaIdCtrl.clear();
                     setState(() => _tipoFiltro = '');
                     context.read<FornecedorProvider>().carregar();
                   },
@@ -404,7 +381,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty || _buscaIdCtrl.text.isNotEmpty
+                            _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty
                                 ? Icons.search_off_outlined
                                 : Icons.storefront_outlined,
                             size: 64,
@@ -412,7 +389,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                           ),
                           SizedBox(height: 16),
                           Text(
-                            _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty || _buscaIdCtrl.text.isNotEmpty
+                            _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty
                                 ? 'Nenhum fornecedor encontrado'
                                 : 'Nenhum fornecedor cadastrado',
                             style: Theme.of(context)
@@ -422,7 +399,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                           ),
                           SizedBox(height: 8),
                           Text(
-                            _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty || _buscaIdCtrl.text.isNotEmpty
+                            _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty
                                 ? 'Tente um termo diferente.'
                                 : 'Clique em "Novo Fornecedor" para começar.',
                             style: Theme.of(context)
@@ -971,6 +948,7 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
 
                       TextFormField(
                         controller: _nomeFantasiaCtrl,
+                        autofocus: !_editando,
                         decoration:
                             const InputDecoration(labelText: 'Nome fantasia *'),
                         inputFormatters: [_UpperCaseFormatter()],
@@ -1130,7 +1108,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
   late FornecedorModel _fornecedor;
 
   // filtros locais
-  final _filtroIdCtrl           = TextEditingController();
   final _filtroNomeCtrl         = TextEditingController();
   final _filtroIdentificadorCtrl = TextEditingController();
   final _filtroMedidaCtrl       = TextEditingController();
@@ -1140,7 +1117,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
   void initState() {
     super.initState();
     _fornecedor = widget.fornecedor;
-    _filtroIdCtrl.addListener(_atualizar);
     _filtroNomeCtrl.addListener(_atualizar);
     _filtroIdentificadorCtrl.addListener(_atualizar);
     _filtroMedidaCtrl.addListener(_atualizar);
@@ -1151,7 +1127,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
 
   @override
   void dispose() {
-    _filtroIdCtrl.dispose();
     _filtroNomeCtrl.dispose();
     _filtroIdentificadorCtrl.dispose();
     _filtroMedidaCtrl.dispose();
@@ -1160,14 +1135,12 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
   }
 
   List<FornecedorMaterialVinculoModel> get _materiaisFiltrados {
-    final id           = _filtroIdCtrl.text.trim();
     final nome         = _filtroNomeCtrl.text.trim().toLowerCase();
     final identificador = _filtroIdentificadorCtrl.text.trim().toLowerCase();
     final medida       = _filtroMedidaCtrl.text.trim().toLowerCase();
     final espessura    = _filtroEspessuraCtrl.text.trim().toLowerCase();
 
     return _fornecedor.materiais.where((m) {
-      if (id.isNotEmpty && !m.materialId.toString().startsWith(id)) return false;
       if (nome.isNotEmpty &&
           !(m.materialNome ?? '').toLowerCase().contains(nome)) {
         return false;
@@ -1189,14 +1162,12 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
   }
 
   bool get _temFiltro =>
-      _filtroIdCtrl.text.isNotEmpty ||
       _filtroNomeCtrl.text.isNotEmpty ||
       _filtroIdentificadorCtrl.text.isNotEmpty ||
       _filtroMedidaCtrl.text.isNotEmpty ||
       _filtroEspessuraCtrl.text.isNotEmpty;
 
   void _limparFiltros() {
-    _filtroIdCtrl.clear();
     _filtroNomeCtrl.clear();
     _filtroIdentificadorCtrl.clear();
     _filtroMedidaCtrl.clear();
@@ -1330,31 +1301,12 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                 children: [
                   Row(
                     children: [
-                      // ID
-                      SizedBox(
-                        width: 80,
-                        child: TextField(
-                          controller: _filtroIdCtrl,
-                          decoration: InputDecoration(
-                            hintText: 'ID',
-                            prefixIcon: Icon(Icons.tag,
-                                color: Theme.of(context).colorScheme.outline, size: 16),
-                            isDense: true,
-                            contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 8),
-                          ),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
                       // Nome
                       Expanded(
                         flex: 3,
                         child: TextField(
                           controller: _filtroNomeCtrl,
+                          autofocus: true,
                           decoration: InputDecoration(
                             hintText: 'Buscar por nome…',
                             prefixIcon: Icon(Icons.search,
@@ -1961,54 +1913,10 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(
-                      width: 120,
-                      child: TextFormField(
-                        controller: _materialIdCtrl,
-                        decoration: InputDecoration(
-                          labelText: 'ID *',
-                          isDense: true,
-                          suffixIcon: _buscandoMateriais
-                              ? const Padding(
-                                  padding: EdgeInsets.all(10),
-                                  child: SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: AppTheme.primary),
-                                  ),
-                                )
-                              : _materialIdSelecionado != null
-                                  ? const Icon(Icons.check_circle,
-                                      color: AppTheme.success, size: 18)
-                                  : _idNaoEncontrado
-                                      ? const Icon(Icons.error_outline,
-                                          color: AppTheme.error, size: 18)
-                                      : null,
-                        ),
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                        ],
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Obrigatório';
-                          }
-                          if (_idNaoEncontrado) {
-                            return 'ID não encontrado';
-                          }
-                          if (_materialIdSelecionado == null) {
-                            return 'Aguarde a validação';
-                          }
-                          return null;
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
                     Expanded(
                       child: TextFormField(
                         controller: _materialNomeCtrl,
+                        autofocus: true,
                         decoration: InputDecoration(
                           labelText: 'Nome do material *',
                           isDense: true,
@@ -2851,42 +2759,10 @@ class _VincularPorMaterialDialogState
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      SizedBox(
-                        width: 110,
-                        child: TextField(
-                          controller: _materialIdCtrl,
-                          decoration: InputDecoration(
-                            labelText: 'ID',
-                            isDense: true,
-                            suffixIcon: _buscandoMaterial
-                                ? const Padding(
-                                    padding: EdgeInsets.all(10),
-                                    child: SizedBox(
-                                      width: 14,
-                                      height: 14,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: AppTheme.primary),
-                                    ),
-                                  )
-                                : _materialIdSelecionado != null
-                                    ? const Icon(Icons.check_circle,
-                                        color: AppTheme.success, size: 18)
-                                    : _idNaoEncontrado
-                                        ? const Icon(Icons.error_outline,
-                                            color: AppTheme.error, size: 18)
-                                        : null,
-                          ),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
                       Expanded(
                         child: TextField(
                           controller: _materialNomeCtrl,
+                          autofocus: true,
                           decoration: InputDecoration(
                             labelText: 'Nome do material',
                             isDense: true,

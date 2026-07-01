@@ -33,6 +33,21 @@ class ChatProvider extends ChangeNotifier {
   int?             get meuId              => _meuId;
   String?          get erroUsuarios       => _erroUsuarios;
 
+  // Contador incrementado toda vez que algo externo (ex: troca de usuário
+  // logado) precisa forçar o mini-chat flutuante a minimizar. O
+  // ChatFloatingWidget observa esse valor e, ao perceber que mudou,
+  // recolhe-se sozinho — o provider não tem referência direta ao widget.
+  int _minimizarTrigger = 0;
+  int              get minimizarTrigger   => _minimizarTrigger;
+
+  /// Pede para o mini-chat flutuante (bolha) recolher, se estiver expandido.
+  /// Usado, por exemplo, ao trocar de usuário logado, para não deixar a
+  /// conversa de um usuário aberta na tela depois da troca.
+  void minimizarWidgetFlutuante() {
+    _minimizarTrigger++;
+    notifyListeners();
+  }
+
   List<MensagemChat> conversaAtual() {
     if (_usuarioAtivoId == null) return [];
     return _conversas[_usuarioAtivoId] ?? [];
@@ -117,16 +132,91 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> enviarMensagem(String conteudo) async {
     if (_usuarioAtivoId == null || conteudo.trim().isEmpty) return;
+    final destinatarioId = _usuarioAtivoId!;
+    final texto = conteudo.trim();
+
+    // Id temporário negativo (nunca colide com ids reais do banco) para
+    // identificar a mensagem otimista e poder trocá-la depois pela
+    // confirmada vinda do servidor.
+    final tempId = -DateTime.now().millisecondsSinceEpoch;
+    final otimista = MensagemChat(
+      id: tempId,
+      remetenteId: _meuId ?? 0,
+      destinatarioId: destinatarioId,
+      conteudo: texto,
+      lida: false,
+      criadoEm: DateTime.now(),
+      pendente: true,
+    );
+    _adicionarMensagem(otimista);
+
     try {
       final data = await ApiClient.post('/chat/mensagem', {
-        'destinatarioId': _usuarioAtivoId,
-        'conteudo':       conteudo.trim(),
+        'destinatarioId': destinatarioId,
+        'conteudo':       texto,
       });
       final msg = MensagemChat.fromJson(data);
+      _removerMensagem(destinatarioId, tempId);
       _adicionarMensagem(msg);
     } catch (e) {
       debugPrint('ChatProvider.enviarMensagem erro: $e');
+      // Remove a mensagem otimista que falhou para não ficar presa
+      // mostrando 1 risquinho para sempre.
+      _removerMensagem(destinatarioId, tempId);
     }
+  }
+
+  void _removerMensagem(int outroId, int id) {
+    final lista = _conversas[outroId];
+    if (lista == null) return;
+    lista.removeWhere((m) => m.id == id);
+    notifyListeners();
+  }
+
+  /// Define (ou remove, passando `emoji: null`) a reação do usuário logado
+  /// a uma mensagem. Atualiza o estado local otimisticamente e também
+  /// recebe a confirmação via SSE (que faz a mesma atualização de forma
+  /// idempotente, então não há problema em aplicar duas vezes).
+  Future<void> reagirMensagem(MensagemChat mensagem, String? emoji) async {
+    final outroId = mensagem.remetenteId == _meuId
+        ? mensagem.destinatarioId
+        : mensagem.remetenteId;
+
+    // Atualização otimista: já reflete na tela antes da resposta do servidor.
+    final reacoesOtimistas = Map<String, String>.from(mensagem.reacoes);
+    if (_meuId != null) {
+      if (emoji != null) {
+        reacoesOtimistas[_meuId.toString()] = emoji;
+      } else {
+        reacoesOtimistas.remove(_meuId.toString());
+      }
+    }
+    _substituirMensagem(
+      outroId,
+      mensagem.copyComReacoes(reacoesOtimistas),
+    );
+
+    try {
+      final data = await ApiClient.patch(
+        '/chat/mensagem/${mensagem.id}/reacao',
+        {'emoji': emoji},
+      );
+      _substituirMensagem(outroId, MensagemChat.fromJson(data));
+    } catch (e) {
+      debugPrint('ChatProvider.reagirMensagem erro: $e');
+      // Em caso de falha, desfaz a atualização otimista voltando ao
+      // estado original da mensagem.
+      _substituirMensagem(outroId, mensagem);
+    }
+  }
+
+  void _substituirMensagem(int outroId, MensagemChat atualizada) {
+    final lista = _conversas[outroId];
+    if (lista == null) return;
+    final idx = lista.indexWhere((m) => m.id == atualizada.id);
+    if (idx == -1) return;
+    lista[idx] = atualizada;
+    notifyListeners();
   }
 
   void _adicionarMensagem(MensagemChat msg) {
@@ -209,6 +299,13 @@ class ChatProvider extends ChangeNotifier {
               notifyListeners();
             }
           }
+        } else if (tipo == 'reacao_atualizada') {
+          final msg = MensagemChat.fromJson(
+              data['mensagem'] as Map<String, dynamic>);
+          final outroId = msg.remetenteId == _meuId
+              ? msg.destinatarioId
+              : msg.remetenteId;
+          _substituirMensagem(outroId, msg);
         }
         _sseBuffer = '';
       } catch (_) {}

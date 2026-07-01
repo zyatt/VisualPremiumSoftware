@@ -23,7 +23,6 @@ import 'providers/veiculo_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/orcamento_venda_provider.dart';
 import 'providers/solicitacao_material_provider.dart';
-import 'providers/estoque_temporario_provider.dart';
 import 'providers/chat_provider.dart';
 
 import 'widgets/update_checker_widget.dart';
@@ -80,7 +79,6 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => OrcamentoVendaProvider()),
         ChangeNotifierProvider.value(value: solicitacaoMaterialProvider),
-        ChangeNotifierProvider(create: (_) => EstoqueTemporarioProvider()),
         ChangeNotifierProvider(create: (_) => ChatProvider()),
       ],
       child: Consumer<ThemeProvider>(

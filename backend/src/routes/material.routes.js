@@ -10,9 +10,6 @@ const ESCRITA      = ['ADMIN', 'GERENTE'];             // editar / manter
 const EXCLUSAO     = ['ADMIN', 'GERENTE'];             // desativar / excluir
 
 router.get('/categorias',         authMiddleware, roleMiddleware(LEITURA),  ctrl.listarCategorias);
-// Rota específica para o dialog de entrada/saída do controle de estoque.
-// Inclui materiais temporários ativos — deve vir ANTES de '/:id' para não
-// ser capturada pelo parâmetro dinâmico.
 router.get('/para-movimentacao',  authMiddleware, roleMiddleware(LEITURA),  ctrl.listarParaMovimentacao);
 router.get('/',                   authMiddleware, roleMiddleware(LEITURA),  ctrl.listar);
 router.get('/:id',                authMiddleware, roleMiddleware(LEITURA),  ctrl.buscarPorId);
