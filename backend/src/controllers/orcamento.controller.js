@@ -28,7 +28,7 @@ const buscarPorId = async (req, res, next) => {
 
 const criar = async (req, res, next) => {
   try {
-    const criadorId = req.usuario.id;  // ← adicionar
+    const criadorId = req.usuario.id;
     res.status(201).json(await svc.criar(req.body.titulo, criadorId));
   } catch (e) {
     next(e);
@@ -50,8 +50,6 @@ const adicionarItem = async (req, res, next) => {
       fornecedorId,
       quantidade,
       precoUnitario,
-      precoM2,
-      usarM2,
       selecionado,
       descricaoItem,
       observacao,
@@ -60,7 +58,7 @@ const adicionarItem = async (req, res, next) => {
     res.status(201).json(
       await svc.adicionarItem(
         +req.params.id, materialId, fornecedorId, quantidade, precoUnitario,
-        { precoM2, usarM2, selecionado, descricaoItem, observacao }
+        { selecionado, descricaoItem, observacao }
       )
     );
   } catch (e) {
@@ -77,7 +75,6 @@ const removerItem = async (req, res, next) => {
   }
 };
 
-// DELETE /orcamentos/:id/itens — remove TODOS os itens do orçamento de uma vez
 const limparItens = async (req, res, next) => {
   try {
     await svc.limparItens(+req.params.id);
@@ -126,17 +123,12 @@ const gerarOrdemCompra = async (req, res, next) => {
   try {
     const orcamentoId = +req.params.id;
     
-    // Valida que o orçamento está aprovado
     await svc.validarParaOC(orcamentoId);
     
-    // Busca o orçamento completo com itens
     const orcamento = await svc.buscarPorId(orcamentoId);
 
-    // Fornecedores ocultos nunca entram na OC, mesmo que estejam selecionados
-    // (a ocultação só é desfeita explicitamente pelo usuário).
     const ocultos = new Set(orcamento.fornecedoresOcultos || []);
 
-    // Agrupa itens por fornecedor (apenas os selecionados)
     const itensPorFornecedor = new Map();
     
     for (const item of orcamento.itens || []) {
@@ -158,42 +150,35 @@ const gerarOrdemCompra = async (req, res, next) => {
       throw { status: 400, message: 'Nenhum item com fornecedor selecionado no orçamento' };
     }
     
-    // Cria uma OC para cada fornecedor
     const ocsCriadas = [];
     const ocService = require('../services/ordemCompra.service');
     
     for (const [fornecedorId, grupo] of itensPorFornecedor) {
-      // Extrai números de OS únicos dos itens deste fornecedor
       const numerosOS = [...new Set(
         grupo.itens
           .map(i => i.descricaoItem?.trim())
           .filter(Boolean)
       )];
       
-      // Se nenhum item tem OS, usa 'EMPRESA' como padrão
       if (numerosOS.length === 0) {
         numerosOS.push('EMPRESA');
       }
       
-      // Monta os itens da OC
       const itensOC = grupo.itens.map(item => ({
         materialId: item.materialId,
         descricaoItem: item.descricaoItem || null,
         numeroOS: item.descricaoItem?.trim() || numerosOS[0],
         quantidade: item.quantidade,
-        precoUnitario: item.usarM2 ? 0 : (item.precoUnitario || 0),
-        precoMetroQuadrado: item.usarM2 ? (item.precoM2 || 0) : 0,
-        usarM2: item.usarM2 || false,
+        precoUnitario: item.precoUnitario || 0,
       }));
       
-      // Cria a OC
       const oc = await ocService.criar({
         fornecedorId,
         requisitante: req.usuario.nome,
         formaPagamento: null,
         prazoPagamento: null,
         observacoes: `Gerada a partir do orçamento #${orcamentoId}`,
-        empresa: 'VISUAL PREMIUM', // ou pegar do orçamento se disponível
+        empresa: 'VISUAL PREMIUM',
         data: new Date(),
         status: 'EM_ANDAMENTO',
         orcamentoId,
@@ -209,7 +194,6 @@ const gerarOrdemCompra = async (req, res, next) => {
       });
     }
     
-    // Marca o orçamento como convertido
     await svc.atualizar(orcamentoId, { status: 'CONVERTIDO' });
     
     res.json({
@@ -241,11 +225,6 @@ const reabrir = async (req, res, next) => {
   }
 };
 
-// PATCH /orcamentos/:id/fornecedores-ocultos
-// Body: { fornecedorId: number, oculto: boolean }
-// Oculta ou reexibe um fornecedor na visualização do orçamento (matriz, totais,
-// melhor preço e PDF). Não exclui nenhum dado — é reversível e visível para
-// qualquer usuário que abrir este orçamento.
 const definirFornecedorOculto = async (req, res, next) => {
   try {
     const { fornecedorId, oculto } = req.body;

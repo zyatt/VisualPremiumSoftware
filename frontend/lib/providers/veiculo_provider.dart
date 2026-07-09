@@ -219,6 +219,29 @@ class VeiculoProvider extends ChangeNotifier {
     }
   }
 
+  /// Marca (ou desmarca) o serviço como finalizado manualmente. Isso remove
+  /// imediatamente o status "Em andamento" e a notificação de retirada, sem
+  /// esperar a data mudar.
+  Future<bool> finalizarManutencao(
+    int manutencaoId,
+    int veiculoId, {
+    bool finalizada = true,
+  }) async {
+    try {
+      await ApiClient.put(
+        '/veiculos/manutencoes/$manutencaoId/finalizar',
+        {'finalizada': finalizada},
+      );
+      await carregarManutencoes(veiculoId);
+      await carregarVeiculos(); // atualiza última manutenção no card e badge
+      return true;
+    } catch (e) {
+      _erroManPorVeiculo[veiculoId] = _mensagemErro(e);
+      notifyListeners();
+      return false;
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Gastos
   // ─────────────────────────────────────────────────────────────────────────

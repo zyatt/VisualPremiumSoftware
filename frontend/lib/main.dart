@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:go_router/go_router.dart';
 
 import 'rotas/app_router.dart';
 import 'theme/app_theme.dart';
@@ -13,7 +14,6 @@ import 'providers/estoque_provider.dart';
 import 'providers/fornecedor_provider.dart';
 import 'providers/orcamento_provider.dart';
 import 'providers/ordem_compra_provider.dart';
-import 'providers/historico_provider.dart';
 import 'providers/relatorio_os_provider.dart';
 import 'providers/producao_provider.dart';
 import 'providers/audit_log_provider.dart';
@@ -26,6 +26,7 @@ import 'providers/solicitacao_material_provider.dart';
 import 'providers/chat_provider.dart';
 
 import 'widgets/update_checker_widget.dart';
+import 'widgets/theme_transition.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,7 +47,7 @@ Future<void> main() async {
   ));
 }
 
-class VisualPremiumApp extends StatelessWidget {
+class VisualPremiumApp extends StatefulWidget {
   final UsuarioProvider             usuarioProvider;
   final OrcamentoProvider           orcamentoProvider;
   final SolicitacaoMaterialProvider solicitacaoMaterialProvider;
@@ -59,17 +60,26 @@ class VisualPremiumApp extends StatelessWidget {
   });
 
   @override
+  State<VisualPremiumApp> createState() => _VisualPremiumAppState();
+}
+
+class _VisualPremiumAppState extends State<VisualPremiumApp> {
+  // Criado uma única vez. Se isso for reconstruído a cada troca de tema
+  // (ex: dentro de um Consumer<ThemeProvider>), o GoRouter reinicia do zero
+  // em initialLocation: '/' — ou seja, a LoadingPage reaparece a cada toggle.
+  late final GoRouter _router = AppRouter.buildRouter(widget.usuarioProvider);
+
+  @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider.value(value: usuarioProvider),
-        ChangeNotifierProvider.value(value: orcamentoProvider),
+        ChangeNotifierProvider.value(value: widget.usuarioProvider),
+        ChangeNotifierProvider.value(value: widget.orcamentoProvider),
         ChangeNotifierProvider(create: (_) => MaterialProvider()),
         ChangeNotifierProvider(create: (_) => ProdutoProvider()),
         ChangeNotifierProvider(create: (_) => EstoqueProvider()),
         ChangeNotifierProvider(create: (_) => FornecedorProvider()),
         ChangeNotifierProvider(create: (_) => OrdemCompraProvider()),
-        ChangeNotifierProvider(create: (_) => HistoricoProvider()),
         ChangeNotifierProvider(create: (_) => RelatorioOSProvider()),
         ChangeNotifierProvider(create: (_) => ProducaoProvider()),
         ChangeNotifierProvider(create: (_) => AuditLogProvider()),
@@ -78,7 +88,7 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => VeiculoProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => OrcamentoVendaProvider()),
-        ChangeNotifierProvider.value(value: solicitacaoMaterialProvider),
+        ChangeNotifierProvider.value(value: widget.solicitacaoMaterialProvider),
         ChangeNotifierProvider(create: (_) => ChatProvider()),
       ],
       child: Consumer<ThemeProvider>(
@@ -89,8 +99,21 @@ class VisualPremiumApp extends StatelessWidget {
             theme: AppTheme.light,
             darkTheme: AppTheme.dark,
             themeMode: themeProvider.themeMode,   // ← controlado pelo provider
-            builder: (context, child) => UpdateChecker(child: child!),
-            routerConfig: AppRouter.buildRouter(usuarioProvider),
+            // AnimatedTheme faz a transição de cores (fundo, texto, bordas
+            // etc.) suavemente em vez do corte seco que MaterialApp aplica
+            // por padrão ao trocar theme/darkTheme. O ThemeTransitionOverlay
+            // adiciona por cima um efeito de revelação circular a partir do
+            // ponto tocado (ver widgets/theme_transition.dart), que é quem
+            // dispara o toggle propriamente dito.
+            builder: (context, child) => ThemeTransitionOverlay(
+              child: AnimatedTheme(
+                data: themeProvider.isDark ? AppTheme.dark : AppTheme.light,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                child: UpdateChecker(child: child!),
+              ),
+            ),
+            routerConfig: _router, // ← reaproveitado, nunca recriado
             localizationsDelegates: const [
               GlobalMaterialLocalizations.delegate,
               GlobalWidgetsLocalizations.delegate,

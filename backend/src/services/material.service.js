@@ -1,6 +1,35 @@
 const prisma = require('../utils/prisma');
 const auditSvc = require('./audit-log.service');
 
+const _sseClients = new Map();
+let _nextSseId = 1;
+
+function registrarSseCliente(res, usuarioId) {
+  const id = _nextSseId++;
+  _sseClients.set(id, { res, usuarioId });
+  console.log(`[SSE Materiais] Cliente ${usuarioId} conectado (total: ${_sseClients.size})`);
+  try {
+    res.write(`data: ${JSON.stringify({ tipo: 'conectado', usuarioId })}\n\n`);
+  } catch (err) {
+    console.error(`[SSE Materiais] Erro ao enviar confirmação: ${err.message}`);
+  }
+  return () => {
+    _sseClients.delete(id);
+    console.log(`[SSE Materiais] Cliente ${usuarioId} desconectado (total: ${_sseClients.size})`);
+  };
+}
+
+function _broadcast(tipo, dados, excludeUsuarioId) {
+  const payload = `data: ${JSON.stringify({ tipo, ...dados })}\n\n`;
+  let enviados = 0;
+  for (const { res, usuarioId } of _sseClients.values()) {
+    if (excludeUsuarioId !== undefined && usuarioId === excludeUsuarioId) continue;
+    try { res.write(payload); enviados++; }
+    catch (err) { console.error(`[SSE Materiais] Erro para usuário ${usuarioId}: ${err.message}`); }
+  }
+  console.log(`[SSE Materiais] Evento '${tipo}' enviado para ${enviados} cliente(s)`);
+}
+
 function calcularStatus(quantidade, estoqueMinimo, ativo) {
   if (!ativo) return 'INATIVO';
   const q = Number(quantidade);
@@ -8,6 +37,26 @@ function calcularStatus(quantidade, estoqueMinimo, ativo) {
   if (q > min) return 'OK';
   if (q === min) return 'LIMITE';
   return 'CRITICO';
+}
+
+function _broadcastCritico(material) {
+  _broadcast('material_critico', {
+    materialId:    material.id,
+    nome:          material.nome,
+    identificador: material.identificador,
+    medida:        material.medida,
+    espessura:     material.espessura,
+    unidade:       material.unidade,
+    categoria:     material.categoria,
+    quantidade:    Number(material.quantidade),
+    estoqueMinimo: Number(material.estoqueMinimo),
+  });
+}
+
+function notificarSeCritico(statusAntes, materialDepois) {
+  if (statusAntes !== 'CRITICO' && materialDepois.status === 'CRITICO') {
+    _broadcastCritico(materialDepois);
+  }
 }
 
 function _throwDuplicado(medida, espessura) {
@@ -26,7 +75,6 @@ function _normalizarPreco(valor) {
   return num > 0 ? num : null;
 }
 
-// Helper para calcular preço mediano e custo da última compra a partir dos dados do Prisma.
 function _mapearMaterial(m) {
   const precos = m.fornecedorMateriais
     .map((fm) => Number(fm.preco))
@@ -52,7 +100,6 @@ function _mapearMaterial(m) {
   };
 }
 
-// ── Include de fornecedores reutilizado nas duas listagens ────────────────────
 const _includeFornecedores = {
   fornecedorMateriais: {
     where: { ativo: true },
@@ -164,6 +211,12 @@ async function criar(data, usuarioId, usuarioNome) {
       usuarioNome,
     });
 
+    _broadcast('material_atualizado', {
+      motivo: 'criar',
+      materialId: material.id,
+      nome: material.nome,
+    }, usuarioId);
+
     return material;
   } catch (e) {
     if (e?.code === 'P2002') _throwDuplicado(medidaTrimmed, espessuraTrimmed);
@@ -212,6 +265,14 @@ async function atualizar(id, data, usuarioId, usuarioNome) {
 
     await auditSvc.registrarEdicao(id, snapAntes, material, usuarioId, usuarioNome);
 
+    _broadcast('material_atualizado', {
+      motivo: 'atualizar',
+      materialId: material.id,
+      nome: material.nome,
+    }, usuarioId);
+
+    notificarSeCritico(snapAntes.status, material);
+
     return material;
   } catch (e) {
     if (e?.code === 'P2002') _throwDuplicado(medidaTrimmed, espessuraTrimmed);
@@ -246,6 +307,7 @@ async function desativar(id, usuarioId, usuarioNome) {
   });
 
   await auditSvc.registrar(id, 'DESATIVACAO', { usuarioId, usuarioNome });
+  _broadcast('material_atualizado', { motivo: 'desativar', materialId: id }, usuarioId);
   return result;
 }
 
@@ -262,6 +324,7 @@ async function reativar(id, usuarioId, usuarioNome) {
   });
 
   await auditSvc.registrar(id, 'REATIVACAO', { usuarioId, usuarioNome });
+  _broadcast('material_atualizado', { motivo: 'reativar', materialId: id }, usuarioId);
   return result;
 }
 
@@ -276,9 +339,6 @@ async function excluir(id, usuarioId, usuarioNome) {
     usuarioNome,
   });
 
-  // "Fantasmifica" os itens de OC que referenciam este material:
-  // seta materialId = null e preserva o nome em descricaoItem para que
-  // o histórico de OCs continue legível após a exclusão.
   await prisma.ordemCompraItem.updateMany({
     where: { materialId: id },
     data: {
@@ -287,13 +347,16 @@ async function excluir(id, usuarioId, usuarioNome) {
     },
   });
 
-  return prisma.material.delete({ where: { id } });
+  const deletado = await prisma.material.delete({ where: { id } });
+  _broadcast('material_atualizado', { motivo: 'excluir', materialId: id }, usuarioId);
+  return deletado;
 }
 
 async function confirmarEstoque(id, usuarioId, usuarioNome) {
   const result = await prisma.material.update({ where: { id }, data: { estoqueConfirmado: true } });
 
   await auditSvc.registrar(id, 'ESTOQUE_CONFIRMADO', { usuarioId, usuarioNome });
+  _broadcast('material_atualizado', { motivo: 'confirmar', materialId: id }, usuarioId);
   return result;
 }
 
@@ -368,6 +431,8 @@ async function atualizarCustoManual(id, data, usuarioId, usuarioNome) {
     });
   }
 
+  _broadcast('material_atualizado', { motivo: 'custo', materialId: id }, usuarioId);
+
   return {
     ...result,
     custoUltimaCompra:   _normalizarPreco(result.ultimoValorPago),
@@ -377,6 +442,7 @@ async function atualizarCustoManual(id, data, usuarioId, usuarioNome) {
 
 module.exports = {
   calcularStatus,
+  notificarSeCritico,
   listar,
   listarParaMovimentacao,
   buscarPorId,
@@ -389,4 +455,5 @@ module.exports = {
   atualizarCustoManual,
   listarCategorias,
   listarHistoricoPrecos,
+  registrarSseCliente,
 };

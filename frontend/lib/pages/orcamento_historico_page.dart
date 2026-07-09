@@ -199,9 +199,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
             materialCategoria: materialData?['categoria'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             precos: {},
-            modoOrcamento: (item['usarM2'] as bool? ?? false)
-                ? ModoOrcamento.metroQuadrado
-                : ModoOrcamento.unitario,
           );
         }
 
@@ -212,9 +209,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                 fornecedorData['nomeFantasia'] as String? ?? '',
             preco: item['precoUnitario'] != null
                 ? double.tryParse(item['precoUnitario'].toString())
-                : null,
-            precoM2: item['precoM2'] != null
-                ? double.tryParse(item['precoM2'].toString())
                 : null,
             observacao: item['observacao'] as String?,
           );
@@ -322,9 +316,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
         final precoUnitario = item['precoUnitario'] != null
             ? double.tryParse(item['precoUnitario'].toString())
             : null;
-        final precoM2 = item['precoM2'] != null
-            ? double.tryParse(item['precoM2'].toString())
-            : null;
         final fornecedorNome =
             (item['fornecedor'] as Map<String, dynamic>?)?['nomeFantasia']
                 as String? ??
@@ -338,8 +329,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
           'materialEspessura': item['material']?['espessura'],
           'materialIdentificador': item['material']?['identificador'],
           'quantidade': double.tryParse(item['quantidade'].toString()) ?? 1,
-          'modoOrcamento':
-              (item['usarM2'] as bool? ?? false) ? 'metroQuadrado' : 'unitario',
           'fornecedorSelecionado':
               (item['selecionado'] as bool? ?? false) ? fornecedorId : null,
           'precos': fornecedorId != null
@@ -347,7 +336,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                   '$fornecedorId': {
                     'fornecedorNome': fornecedorNome,
                     'preco': precoUnitario,
-                    'precoM2': precoM2,
                   }
                 }
               : <String, dynamic>{},
@@ -412,16 +400,10 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
             // ── Cabeçalho ────────────────────────────────────────────────────
             Row(
               children: [
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: Icon(Icons.arrow_back_ios_new,
-                      size: 18, color: cs.onSurfaceVariant),
-                  style: IconButton.styleFrom(
-                    backgroundColor: cs.surface,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: cs.outlineVariant),
-                  ),
+                _BotaoVoltar(
+                  label: 'Voltar',
+                  tooltip: 'Voltar',
+                  onTap: () => Navigator.of(context).pop(),
                 ),
                 const SizedBox(width: 16),
                 Column(
@@ -451,6 +433,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                   icon: Icon(Icons.refresh,
                       size: 18, color: cs.onSurfaceVariant),
                   tooltip: 'Atualizar',
+                  mouseCursor: SystemMouseCursors.click,
                   style: IconButton.styleFrom(
                     backgroundColor: cs.surface,
                     shape: RoundedRectangleBorder(
@@ -832,6 +815,7 @@ class _OrcamentoHistoricoCardState
           // ── Cabeçalho do card ───────────────────────────────────────────
           InkWell(
             onTap: () => setState(() => _expandido = !_expandido),
+            mouseCursor: SystemMouseCursors.click,
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(12)),
             child: Padding(
@@ -962,6 +946,7 @@ class _OrcamentoHistoricoCardState
                         backgroundColor: AppTheme.primary,
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 8),
+                        enabledMouseCursor: SystemMouseCursors.click,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -978,6 +963,7 @@ class _OrcamentoHistoricoCardState
                         side: const BorderSide(color: Color(0xFF0288D1)),
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 8),
+                        enabledMouseCursor: SystemMouseCursors.click,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -988,6 +974,7 @@ class _OrcamentoHistoricoCardState
                       onPressed: widget.onExcluir,
                       icon: const Icon(Icons.delete_outline, size: 18),
                       tooltip: 'Excluir orçamento',
+                      mouseCursor: SystemMouseCursors.click,
                       style: IconButton.styleFrom(
                         foregroundColor: AppTheme.error,
                         backgroundColor:
@@ -1309,6 +1296,83 @@ class _OrcamentoHistoricoCardState
             const SizedBox(height: 4),
           ],
         ],
+      ),
+    );
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// WIDGETS AUXILIARES
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
+// Mesmo padrão usado no cabeçalho das páginas de estoque / histórico de material.
+class _BotaoVoltar extends StatefulWidget {
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _BotaoVoltar({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_BotaoVoltar> createState() => _BotaoVoltarState();
+}
+
+class _BotaoVoltarState extends State<_BotaoVoltar> {
+  bool _hovered = false;
+  static const _accent = Color(0xFFF59E0B);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        child: InkWell(
+          onTap: widget.onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? _accent.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              border: Border.all(
+                color: _hovered
+                    ? _accent.withValues(alpha: 0.6)
+                    : scheme.outlineVariant,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _hovered ? _accent : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

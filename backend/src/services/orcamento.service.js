@@ -1,6 +1,5 @@
 const prisma = require('../utils/prisma');
 
-// ── include padrão reutilizado ────────────────────────────────────────────────
 const _itensInclude = {
   itens: {
     include: {
@@ -66,24 +65,14 @@ async function criar(titulo, criadorId) {
   });
 }
 
-/**
- * Adiciona (ou atualiza) um item no orçamento.
- * Cada combinação (orcamentoId, materialId, fornecedorId) é uma linha única.
- * O campo `selecionado` indica o fornecedor escolhido para a compra.
- *
- * Payload esperado:
- *   { materialId, fornecedorId?, quantidade, precoUnitario?, precoM2?, usarM2?, selecionado? }
- */
 async function adicionarItem(
   orcamentoId, materialId, fornecedorId, quantidade, precoUnitario,
-  { precoM2 = null, usarM2 = false, selecionado = false, descricaoItem = null, observacao = null } = {}
+  { selecionado = false, descricaoItem = null, observacao = null } = {}
   ) {
   const data = {
     fornecedorId: fornecedorId ?? null,
     quantidade,
     precoUnitario: precoUnitario ?? null,
-    precoM2: precoM2 ?? null,
-    usarM2: usarM2 ?? false,
     selecionado: selecionado ?? false,
     descricaoItem: descricaoItem ?? null,
     observacao: observacao ?? null,
@@ -106,9 +95,6 @@ async function removerItem(orcamentoId, itemId) {
   return prisma.orcamentoItem.deleteMany({ where: { id: itemId, orcamentoId } });
 }
 
-// Remove TODOS os itens de um orçamento de uma só vez (operação atômica).
-// Usado pelo Flutter ao regravar o orçamento inteiro, evitando race conditions
-// do loop de deleteMany individual com catch silencioso.
 async function limparItens(orcamentoId) {
   return prisma.orcamentoItem.deleteMany({ where: { orcamentoId } });
 }
@@ -129,7 +115,6 @@ async function enviarParaAprovacao(id) {
 
   if (!orcamento) throw { status: 404, message: 'Orçamento não encontrado' };
 
-  // Permite reenviar se já estava aguardando aprovação (após reabrir)
   if (orcamento.status !== 'ABERTO' && orcamento.status !== 'AGUARDANDO_APROVACAO')
     throw { status: 400, message: 'Apenas orçamentos abertos podem ser enviados para aprovação' };
 
@@ -188,8 +173,6 @@ async function validarParaOC(orcamentoId) {
 
   if (!orcamento) throw { status: 404, message: 'Orçamento não encontrado' };
 
-  // Aceita APROVADO (fluxo normal) ou ABERTO (orçamento reaberto do estado
-  // APROVADO para que o usuário selecione fornecedores antes de gerar a OC).
   if (orcamento.status !== 'APROVADO' && orcamento.status !== 'ABERTO')
     throw { status: 400, message: 'Apenas orçamentos aprovados (ou reabertos de aprovado) podem gerar ordem de compra' };
 
@@ -199,11 +182,6 @@ async function validarParaOC(orcamentoId) {
   return true;
 }
 
-/**
- * Reabre o orçamento para edição.
- * Mantém todos os itens intactos e volta o status para ABERTO.
- * Limpa os campos de aprovação.
- */
 async function reabrir(id) {
   const orcamento = await prisma.orcamento.findUnique({ where: { id } });
 
@@ -216,7 +194,6 @@ async function reabrir(id) {
       message: 'Apenas orçamentos aguardando aprovação, aprovados ou não aprovados podem ser reabertos',
     };
 
-  // Volta para ABERTO e limpa aprovação
   return prisma.orcamento.update({
     where: { id },
     data: {
@@ -233,11 +210,6 @@ async function atualizar(id, dados) {
   return prisma.orcamento.update({ where: { id }, data: dados });
 }
 
-/**
- * Exclui permanentemente um orçamento e todos os seus itens.
- * Só é permitido para status: CANCELADO, NAO_APROVADO, CONVERTIDO.
- * Salvos (ABERTO / AGUARDANDO_APROVACAO) e APROVADO não podem ser excluídos.
- */
 async function excluir(id) {
   const orcamento = await prisma.orcamento.findUnique({ where: { id } });
   if (!orcamento) throw { status: 404, message: 'Orçamento não encontrado' };
@@ -250,20 +222,10 @@ async function excluir(id) {
     };
   }
 
-  // Exclui itens primeiro (FK) e depois o orçamento
   await prisma.orcamentoItem.deleteMany({ where: { orcamentoId: id } });
   await prisma.orcamento.delete({ where: { id } });
 }
 
-/**
- * Oculta ou reexibe um fornecedor na visualização do orçamento (matriz, totais,
- * melhor preço e PDF). Não remove o fornecedor nem nenhum item/preço — apenas
- * grava o id na lista `fornecedoresOcultos` do orçamento, que é compartilhada
- * entre todos os usuários que abrirem este orçamento.
- *
- * `oculto: true`  → adiciona o fornecedorId à lista (se ainda não estiver).
- * `oculto: false` → remove o fornecedorId da lista.
- */
 async function definirFornecedorOculto(orcamentoId, fornecedorId, oculto) {
   const orcamento = await prisma.orcamento.findUnique({
     where: { id: orcamentoId },

@@ -15,7 +15,6 @@ import '../pages/fornecedores_page.dart';
 import '../pages/orcamento_page.dart';
 import '../pages/ordem_compra_page.dart';
 import '../pages/controle_estoque_page.dart';
-import '../pages/historico_page.dart';
 import '../pages/relatorio_os_page.dart';
 import '../pages/producao_page.dart';
 import '../pages/chat_page.dart';
@@ -40,7 +39,6 @@ class AppRouter {
   static final _orcamentoVendaNavigatorKey  = GlobalKey<NavigatorState>(debugLabel: 'orcamento-venda');
   static final _ordemCompraNavigatorKey     = GlobalKey<NavigatorState>(debugLabel: 'ordem-compra');
   static final _controleEstoqueNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'controle-estoque');
-  static final _historicoNavigatorKey       = GlobalKey<NavigatorState>(debugLabel: 'historico');
   static final _relatorioOSNavigatorKey     = GlobalKey<NavigatorState>(debugLabel: 'relatorio-os');
   static final _producaoNavigatorKey        = GlobalKey<NavigatorState>(debugLabel: 'producao');
   static final _adminNavigatorKey           = GlobalKey<NavigatorState>(debugLabel: 'admin');
@@ -58,7 +56,6 @@ class AppRouter {
     '/orcamento-venda',
     '/ordem-compra',
     '/controle-estoque',
-    '/historico',
     '/relatorio-os',
     '/gastos-categoria',
     '/veiculos',
@@ -201,12 +198,6 @@ class AppRouter {
               navigatorKey: _controleEstoqueNavigatorKey,
               routes: [
                 GoRoute(path: '/controle-estoque', builder: (_, __) => const ControleEstoquePage()),
-              ],
-            ),
-            StatefulShellBranch(
-              navigatorKey: _historicoNavigatorKey,
-              routes: [
-                GoRoute(path: '/historico', builder: (_, __) => const HistoricoPage()),
               ],
             ),
             StatefulShellBranch(

@@ -1,17 +1,11 @@
 const prisma = require('../utils/prisma');
 
-/**
- * Normaliza valores de preço: converte 0 para null (ausência de informação)
- */
 function _normalizarPreco(valor) {
   if (valor == null) return null;
   const num = Number(valor);
   return num > 0 ? num : null;
 }
 
-/**
- * Normaliza o campo numerosOS independente do formato recebido.
- */
 function _normalizarNumerosOS(numerosOS) {
   if (!numerosOS) return [];
   if (typeof numerosOS === 'string') return numerosOS.trim() ? [numerosOS.trim()] : [];
@@ -51,7 +45,6 @@ function _expandirItensComDistribuicao(itens) {
 
     if (dist.length > 0) {
       for (const linha of dist) {
-        // Calcula precoTotal considerando qtdUnidade
         let precoTotal;
         if (item.usarM2 && Number(item.precoMetroQuadrado) > 0) {
           precoTotal = Number(linha.quantidade) * Number(item.precoMetroQuadrado);
@@ -88,18 +81,9 @@ const _selectMaterial = {
   identificador: true,
 };
 
-/**
- * Após salvar uma OC, sincroniza os vínculos FornecedorMaterial com base nos
- * preços informados nos itens. Faz upsert de cada material: se não existia o
- * vínculo, cria; se já existia, atualiza apenas os campos de preço que foram
- * informados (> 0). Materiais com usarM2 atualizam precoMetroQuadrado;
- * demais atualizam preco.
- */
 async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
   if (!fornecedorId || !Array.isArray(itens) || itens.length === 0) return;
 
-  // Agrupa por materialId para evitar upserts duplicados (um material pode
-  // aparecer em múltiplas linhas de distribuição de OS)
   const porMaterial = new Map();
   for (const item of itens) {
     const mid = Number(item.materialId);
@@ -113,7 +97,6 @@ async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
         precoM2:    Number(item.precoMetroQuadrado ?? 0),
       });
     } else {
-      // Mantém o maior preço informado caso haja repetição
       if (Number(item.precoUnitario ?? 0) > existing.preco) existing.preco = Number(item.precoUnitario);
       if (Number(item.precoMetroQuadrado ?? 0) > existing.precoM2) existing.precoM2 = Number(item.precoMetroQuadrado);
     }
@@ -123,7 +106,6 @@ async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
     const updateData = {};
     if (!dados.usarM2 && dados.preco > 0) updateData.preco = dados.preco;
     if (dados.usarM2 && dados.precoM2 > 0) updateData.precoMetroQuadrado = dados.precoM2;
-    // Se ambos foram informados, atualiza os dois
     if (!dados.usarM2 && dados.precoM2 > 0) updateData.precoMetroQuadrado = dados.precoM2;
 
     if (Object.keys(updateData).length === 0) continue;
@@ -384,9 +366,6 @@ async function recalcularTotal(ordemCompraId) {
   return prisma.ordemCompra.update({ where: { id: ordemCompraId }, data: { valorTotal } });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FINALIZAR
-// ─────────────────────────────────────────────────────────────────────────────
 async function finalizar(id, usuarioNome) {
  const ordem = await prisma.ordemCompra.findUnique({
     where: { id },
@@ -406,7 +385,6 @@ async function finalizar(id, usuarioNome) {
     throw { status: 400, message: 'Não é possível finalizar uma OC sem itens' };
   }
 
-  // ── Valida que nenhuma OS *numérica* da OC está fechada no controle de estoque ──
   const numerosOS = [...new Set(ordem.itens.map((i) => i.numeroOS?.trim()).filter(Boolean))];
   const numerosOSNumericas = numerosOS.filter((os) => /^\d+$/.test(os));
   if (numerosOSNumericas.length > 0) {
@@ -440,8 +418,6 @@ async function finalizar(id, usuarioNome) {
   });
 
   for (const item of ordem.itens) {
-    // Item fantasma: material foi excluído após a OC ser criada.
-    // Não há estoque para movimentar — apenas pula.
     if (!item.materialId || !item.material) continue;
 
     const numeroOSLimpo = item.numeroOS.trim();
@@ -451,7 +427,6 @@ async function finalizar(id, usuarioNome) {
     let relacaoOS;
 
     if (osEhNumerica) {
-      // Numéricas continuam sendo únicas
       relacaoOS = await prisma.relacaoOS.upsert({
         where: { numeroOS: numeroOSLimpo },
         create: {
@@ -467,7 +442,6 @@ async function finalizar(id, usuarioNome) {
         `${String(_d.getMonth() + 1).padStart(2, '0')}-` +
         `${_d.getFullYear()}`;
 
-      // procura relação aberta criada pela produção ou pelo estoque
       const relacaoAberta = await prisma.relacaoOS.findFirst({
         where: {
           status: 'EM_ANDAMENTO',
@@ -534,7 +508,6 @@ async function finalizar(id, usuarioNome) {
       ? _larguraMat * _comprimentoMat
       : null;
 
-    // Detecta se o material é armazenado por metro linear
     const _unidade = (material?.unidade ?? '').toString().toLowerCase().trim();
     const _eMetroLinear = ['m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'].includes(_unidade);
 
@@ -542,11 +515,9 @@ async function finalizar(id, usuarioNome) {
       ? (precoM2Final ?? null)
       : (() => {
           if (novoUltimoValorPago == null || novoUltimoValorPago <= 0) return null;
-          // Metro linear: divide pelo comprimento (largura da bobina/rolo)
           if (_eMetroLinear && _larguraMat != null && _larguraMat > 0) {
             return novoUltimoValorPago / _larguraMat;
           }
-          // Peça inteira: divide pela área total da peça
           if (_areaTotal != null && _areaTotal > 0) {
             return novoUltimoValorPago / _areaTotal;
           }
@@ -570,9 +541,6 @@ async function finalizar(id, usuarioNome) {
         relacaoOSId:   relacaoOS.id,
         ordemCompraId: id,
         precoUnitario: precoUnitarioMovimentacao,
-        // Para materiais com dimensões comprados por unidade (usarM2=false),
-        // grava o custo/m² calculado na movimentação de entrada, para que
-        // o estoque_service possa derivá-lo ao criar o retalho na saída.
         precoM2:       item.usarM2 ? precoM2Final : novoUltimoValorPagoM2,
         descricaoItem: item.descricaoItem ?? null,
         observacao:    `Entrada via OC #${id} – ${usuarioNome ?? 'Usuário'}`,
@@ -621,9 +589,6 @@ async function finalizar(id, usuarioNome) {
   return finalizada;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CANCELAR
-// ─────────────────────────────────────────────────────────────────────────────
 async function cancelar(id) {
   const ordem = await prisma.ordemCompra.findUnique({ where: { id } });
   if (!ordem) throw { status: 404, message: 'Ordem de compra não encontrada' };
@@ -631,9 +596,6 @@ async function cancelar(id) {
   return prisma.ordemCompra.update({ where: { id }, data: { status: 'CANCELADO' } });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// REVERTER
-// ─────────────────────────────────────────────────────────────────────────────
 async function reverter(id) {
   const ordem = await prisma.ordemCompra.findUnique({
     where: { id },

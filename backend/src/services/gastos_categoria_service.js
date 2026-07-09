@@ -1,11 +1,5 @@
 const prisma = require('../utils/prisma');
 
-// ═════════════════════════════════════════════════════════════════════════════
-// SEÇÃO 1 — VALOR ATUAL EM ESTOQUE
-// Multiplica quantidade atual de cada material pelo custo da última compra.
-// Agrupa por categoria e retorna totais.
-// ═════════════════════════════════════════════════════════════════════════════
-
 async function valorEmEstoque() {
   const materiais = await prisma.material.findMany({
     where: { ativo: true },
@@ -46,13 +40,6 @@ async function valorEmEstoque() {
     const custo    = Number(mat.ultimoValorPago   || 0);
     const custoM2  = Number(mat.ultimoValorPagoM2 || 0);
 
-    // Regra de calculo:
-    // 1. Se tem custo unitario -> qtd x custo (sempre preferido, qualquer unidade)
-    // 2. Se SÓ tem custoM2 E unidade é M2 -> qtd x custoM2
-    //    (a quantidade já representa m², então é direto)
-    //    Se além disso tiver largura/comprimento, usa area unitaria × qtd × custoM2
-    //    para materiais onde qty = numero de folhas (ex: vinil em chapas vendidas por m2)
-    // 3. Qualquer outra unidade (ML, UNIDADE, KG, etc.) sem custo unitario -> sem custo
     const unidadeM2 = ['M2', 'M²', 'M2²', 'M 2', 'METRO QUADRADO'].includes(
       (mat.unidade || '').trim().toUpperCase()
     );
@@ -61,15 +48,12 @@ async function valorEmEstoque() {
       valorTotal = qtd * custo;
     } else if (custoM2 > 0 && unidadeM2) {
       if (mat.largura && mat.comprimento) {
-        // qty = número de folhas; calcula área total em m²
         const area = Number(mat.largura) * Number(mat.comprimento);
         valorTotal = qtd * area * custoM2;
       } else {
-        // qty já é em m²
         valorTotal = qtd * custoM2;
       }
     }
-    // Se não caiu em nenhuma das condições acima: valorTotal permanece 0 (sem custo)
 
     porCategoria[cat].totalValor   += valorTotal;
     porCategoria[cat].qtdMateriais += 1;
@@ -99,25 +83,6 @@ async function valorEmEstoque() {
     .sort((a, b) => b.totalValor - a.totalValor);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// SEÇÃO 2 — GASTOS (OS FECHADAS)
-//
-// Regra de negócio:
-//   - Só contam SAÍDAS que tiveram origem em ENTRADA por Ordem de Compra (OC).
-//   - Se um material teve 2 saídas e 2 entradas via controle de estoque,
-//     o saldo líquido é 0 e NÃO vai para o gasto.
-//   - Se entrou por OC e depois saiu, conta como gasto (saída líquida).
-//
-// Algoritmo por material dentro de cada OS:
-//   1. Separa movimentações em ordem cronológica.
-//   2. Mantém um "saldo OC" separado do "saldo controle".
-//      - ENTRADA via OC  → incrementa saldoOC
-//      - ENTRADA via controle → incrementa saldoControle
-//   3. Para cada SAÍDA, consome primeiro do saldoOC (gera custo real),
-//      depois do saldoControle (não gera custo — devolução/ajuste).
-//   4. O gasto é: quantidade consumida do saldoOC × preço da saída.
-// ═════════════════════════════════════════════════════════════════════════════
-
 async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
   const whereMovimentacao = { relacaoOS: { status: 'FECHADA' } };
 
@@ -146,15 +111,7 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
     orderBy: { criadoEm: 'asc' },
   });
 
-  // ── Devoluções de retalho ──────────────────────────────────────────────────
-  // Entradas com materialOrigemId vinculado são devoluções de retalho: a
-  // sobra de uma saída foi registrada como entrada de OUTRO material (ex.:
-  // saiu "CHAPA" em UNIDADE, voltou "CHAPA - RETALHO" em M²). Como o valor
-  // não pode ser abatido por quantidade (unidades diferentes), é abatido em
-  // R$ direto do gasto do material de origem, por OS. Essas movimentações são
-  // retiradas do fluxo normal de agrupamento por material para não aparecerem
-  // como gasto (zerado) do próprio material retalho.
-  const valorRetalhoPorOSMaterial = {}; // `${osId}-${materialOrigemId}` → valor R$
+  const valorRetalhoPorOSMaterial = {};
   const movimentacoesSemRetalho = [];
 
   for (const mov of movimentacoes) {
@@ -170,7 +127,6 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
     movimentacoesSemRetalho.push(mov);
   }
 
-  // Agrupa por OS → material para calcular o saldo correto por escopo
   const porOS = {};
 
   for (const mov of movimentacoesSemRetalho) {
@@ -208,22 +164,10 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
         };
       }
 
-      // ── Lógica de saldo líquido ───────────────────────────────────────────
-      // Regra: toda saída gera gasto. Entradas posteriores à primeira saída
-      // são devoluções e reduzem o saldo (independente da origem — OC ou controle).
-      // Entradas ANTES da primeira saída são reposição de estoque e não entram
-      // no cálculo (não havia consumo a ser coberto ainda).
-      //
-      // Algoritmo:
-      //   - Percorre movs em ordem cronológica.
-      //   - Acumula qtdSaida e qtdEntradaPosSaida separadamente.
-      //   - qtdLiquida = max(0, qtdSaida - qtdEntradaPosSaida)
-      //   - preço = maior preço de saída registrado para o material nessa OS.
-
       let primeiroSaidaVisto = false;
       let qtdSaida           = 0;
-      let qtdDevolucao       = 0; // entradas após a primeira saída
-      let precoRef           = 0; // maior preço de saída (unitário ou m²)
+      let qtdDevolucao       = 0;
+      let precoRef           = 0;
 
       const _ehEntradaOC = (m) =>
         m.ordemCompraId != null ||
@@ -234,14 +178,11 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
         const qtd = Number(mov.quantidade);
 
         if (mov.tipo === 'ENTRADA') {
-          // Entradas via OC são reposição de estoque, não devolução — ignora
           if (_ehEntradaOC(mov)) continue;
-          // Só conta como devolução se já houve ao menos uma saída nessa OS
           if (primeiroSaidaVisto) qtdDevolucao += qtd;
           continue;
         }
 
-        // SAÍDA
         if (qtd <= 0) continue;
         primeiroSaidaVisto = true;
         qtdSaida += qtd;
@@ -255,8 +196,6 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
       const qtdLiquida = Math.max(0, qtdSaida - qtdDevolucao);
       const valorBruto = precoRef * qtdLiquida;
 
-      // Abate o valor de retalho devolvido (em outro material) para este
-      // material de origem, nesta mesma OS.
       const valorRetalho = valorRetalhoPorOSMaterial[`${osId}-${matId}`] || 0;
       const gasto        = Math.max(0, valorBruto - valorRetalho);
 
@@ -278,10 +217,6 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
     .filter((g) => g.totalGasto > 0)
     .sort((a, b) => b.totalGasto - a.totalGasto);
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-// SEÇÃO 3 — GASTOS MENSAIS (para gráfico) — mesma regra de saldo líquido
-// ═════════════════════════════════════════════════════════════════════════════
 
 async function gastosMensais({ ano } = {}) {
   const anoAlvo = Number(ano) || new Date().getFullYear();
@@ -309,17 +244,12 @@ async function gastosMensais({ ano } = {}) {
     orderBy: { criadoEm: 'asc' },
   });
 
-  // Inicializa todos os 12 meses
   const porMes = {};
   for (let m = 1; m <= 12; m++) {
     const key  = `${anoAlvo}-${String(m).padStart(2, '0')}`;
     porMes[key] = { mesAno: key, totalGasto: 0 };
   }
 
-  // Agrupa por (osId, materialId) para calcular saldo líquido por mês da saída.
-  // Entradas de retalho (materialOrigemId preenchido) são desviadas: não entram
-  // no grupo do material retalho — em vez disso, seu valor é acumulado como
-  // abatimento (valorRetalho) do grupo do material que efetivamente saiu.
   const grupos = {};
 
   const _grupo = (osId, matId) => {
@@ -345,15 +275,9 @@ async function gastosMensais({ ano } = {}) {
     (m.descricaoItem && m.descricaoItem.includes('via OC'));
 
   for (const { movs, valorRetalho } of Object.values(grupos)) {
-    // Mesma lógica de saldo líquido, mas precisamos distribuir por mês de saída
-    // Estratégia: calcula qtdLiquida total e debita proporcionalmente das saídas
-    // em ordem cronológica (mais simples: atribui o gasto ao mês da última saída
-    // que tiver saldo positivo após descontar devoluções).
-
     let primeiroSaidaVisto = false;
     let qtdDevolucaoRestante = 0;
 
-    // Primeiro pass: conta devoluções totais (por quantidade, mesmo material)
     for (const mov of movs) {
       if (mov.tipo === 'ENTRADA' && !_ehEntradaOC(mov) && primeiroSaidaVisto) {
         qtdDevolucaoRestante += Number(mov.quantidade);
@@ -361,10 +285,8 @@ async function gastosMensais({ ano } = {}) {
       if (mov.tipo === 'SAIDA') primeiroSaidaVisto = true;
     }
 
-    // Monta a lista de saídas líquidas (após devolução por quantidade) com
-    // mês e valor bruto, na ordem cronológica original.
     primeiroSaidaVisto = false;
-    const saidasLiquidas = []; // { mes, valor }
+    const saidasLiquidas = [];
     for (const mov of movs) {
       if (mov.tipo === 'ENTRADA') continue;
       if (mov.tipo !== 'SAIDA') continue;
@@ -373,7 +295,6 @@ async function gastosMensais({ ano } = {}) {
       const qtd = Number(mov.quantidade);
       if (qtd <= 0) continue;
 
-      // Quantas dessas unidades são "líquidas" (não devolvidas)
       const devDesc    = Math.min(qtd, qtdDevolucaoRestante);
       qtdDevolucaoRestante -= devDesc;
       const qtdLiquida = qtd - devDesc;
@@ -387,9 +308,6 @@ async function gastosMensais({ ano } = {}) {
       }
     }
 
-    // Abate o valor de retalho devolvido (R$) das saídas líquidas, a partir
-    // da mais recente — mesmo critério de prioridade usado nas devoluções
-    // por quantidade acima.
     let valorRetalhoRestante = valorRetalho || 0;
     for (let i = saidasLiquidas.length - 1; i >= 0 && valorRetalhoRestante > 0; i--) {
       const desconto = Math.min(saidasLiquidas[i].valor, valorRetalhoRestante);

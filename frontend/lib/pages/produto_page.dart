@@ -56,12 +56,11 @@ class _ProdutoPageState extends State<ProdutoPage> {
 
   @override
   Widget build(BuildContext context) {
-    final cs    = Theme.of(context).colorScheme;
     final prov  = context.watch<ProdutoProvider>();
     final isWide = MediaQuery.of(context).size.width >= 700;
 
     return Scaffold(
-      backgroundColor: cs.surface,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         children: [
           // ── Cabeçalho ────────────────────────────────────────────────────
@@ -111,8 +110,6 @@ class _ProdutoPageState extends State<ProdutoPage> {
                             produtos:     prov.produtos,
                             podeEscrever: _podeEscrever,
                             onEditar:     (p) => _abrirFormulario(context, produto: p),
-                            onToggleAtivo: (p) => _toggleAtivo(context, p),
-                            onExcluir:    (p) => _confirmarExclusao(context, p),
                             onDetalhe:    (p) => _abrirDetalhe(context, p),
                           )
                         : _ListaMobileProdutos(
@@ -130,8 +127,12 @@ class _ProdutoPageState extends State<ProdutoPage> {
   void _abrirFormulario(BuildContext context, {ProdutoModel? produto}) {
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (_) => _ProdutoFormDialog(produto: produto),
+      builder: (_) => _ProdutoFormDialog(
+        produto: produto,
+        onDesativar: produto != null ? (p) => _toggleAtivo(context, p) : null,
+        onReativar:  produto != null ? (p) => _toggleAtivo(context, p) : null,
+        onExcluir:   produto != null ? (p) => _confirmarExclusao(context, p) : null,
+      ),
     );
   }
 
@@ -519,22 +520,25 @@ class _EstadoVazio extends StatelessWidget {
 
 // ─── Tabela (wide) ────────────────────────────────────────────────────────────
 
-class _TabelaProdutos extends StatelessWidget {
+class _TabelaProdutos extends StatefulWidget {
   final List<ProdutoModel> produtos;
   final bool podeEscrever;
   final ValueChanged<ProdutoModel> onEditar;
-  final ValueChanged<ProdutoModel> onToggleAtivo;
-  final ValueChanged<ProdutoModel> onExcluir;
   final ValueChanged<ProdutoModel> onDetalhe;
 
   const _TabelaProdutos({
     required this.produtos,
     required this.podeEscrever,
     required this.onEditar,
-    required this.onToggleAtivo,
-    required this.onExcluir,
     required this.onDetalhe,
   });
+
+  @override
+  State<_TabelaProdutos> createState() => _TabelaProdutosState();
+}
+
+class _TabelaProdutosState extends State<_TabelaProdutos> {
+  int? _hoveredId;
 
   @override
   Widget build(BuildContext context) {
@@ -557,7 +561,6 @@ class _TabelaProdutos extends StatelessWidget {
             3: FixedColumnWidth(90),
             4: FlexColumnWidth(2),
             5: FixedColumnWidth(70),
-            6: FixedColumnWidth(120),
           },
           children: [
             // Cabeçalho
@@ -565,17 +568,16 @@ class _TabelaProdutos extends StatelessWidget {
               decoration: BoxDecoration(
                 color: cs.surfaceContainerLow,
               ),
-              children: [
+              children: const [
                 _ThCell('ID'),
                 _ThCell('Nome'),
                 _ThCell('Categoria'),
                 _ThCell('Materiais', align: TextAlign.center),
                 _ThCell('Custo estimado'),
                 _ThCell('Status', align: TextAlign.center),
-                _ThCell('Ações', align: TextAlign.center),
               ],
             ),
-            ...produtos.map((p) => _buildRow(context, p)),
+            ...widget.produtos.map((p) => _buildRow(context, p)),
           ],
         ),
       ),
@@ -583,124 +585,123 @@ class _TabelaProdutos extends StatelessWidget {
   }
 
   TableRow _buildRow(BuildContext context, ProdutoModel p) {
-    final cs   = Theme.of(context).colorScheme;
-    final custo = p.custoEstimado;
+    final cs      = Theme.of(context).colorScheme;
+    final custo   = p.custoEstimado;
+    final hovered = _hoveredId == p.id;
+
+    final bgColor = hovered
+        ? AppTheme.primary.withValues(alpha: 0.07)
+        : p.ativo
+            ? null
+            : cs.surfaceContainerLow.withValues(alpha: 0.5);
+
+    void handleTap() {
+      widget.podeEscrever ? widget.onEditar(p) : widget.onDetalhe(p);
+    }
+
+    Widget wrapCell(Widget child, {Alignment align = Alignment.centerLeft}) {
+      return MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hoveredId = p.id),
+        onExit: (_) => setState(() {
+          if (_hoveredId == p.id) _hoveredId = null;
+        }),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: handleTap,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            alignment: align,
+            child: child,
+          ),
+        ),
+      );
+    }
 
     return TableRow(
       decoration: BoxDecoration(
-        color: p.ativo ? null : cs.surfaceContainerLow.withValues(alpha: 0.5),
+        color: bgColor,
         border: Border(
             bottom:
                 BorderSide(color: cs.outline.withValues(alpha: 0.08))),
       ),
       children: [
-        _TdCell(
-          child: Text(
+        TableCell(
+          verticalAlignment: TableCellVerticalAlignment.middle,
+          child: wrapCell(Text(
             '#${p.id}',
             style: GoogleFonts.nunito(
                 fontSize: 11,
                 color: cs.onSurfaceVariant,
                 fontWeight: FontWeight.w600),
+          )),
+        ),
+        TableCell(
+          verticalAlignment: TableCellVerticalAlignment.middle,
+          child: wrapCell(Text(
+            p.nome,
+            style: GoogleFonts.nunito(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: p.ativo ? cs.onSurface : cs.onSurfaceVariant,
+              decoration: p.ativo ? null : TextDecoration.lineThrough,
+            ),
+          )),
+        ),
+        TableCell(
+          verticalAlignment: TableCellVerticalAlignment.middle,
+          child: wrapCell(
+            p.categoria != null
+                ? _Chip(
+                    label: p.categoria!,
+                    color: AppTheme.primary,
+                  )
+                : Text('—',
+                    style: GoogleFonts.nunito(
+                        fontSize: 12, color: cs.onSurfaceVariant)),
           ),
         ),
-        _TdCell(
-          child: InkWell(
-            onTap: () => onDetalhe(p),
-            borderRadius: BorderRadius.circular(4),
-            child: Text(
-              p.nome,
-              style: GoogleFonts.nunito(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: p.ativo ? cs.onSurface : cs.onSurfaceVariant,
-                decoration: p.ativo ? null : TextDecoration.lineThrough,
+        TableCell(
+          verticalAlignment: TableCellVerticalAlignment.middle,
+          child: wrapCell(
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(6),
               ),
-            ),
-          ),
-        ),
-        _TdCell(
-          child: p.categoria != null
-              ? _Chip(
-                  label: p.categoria!,
-                  color: AppTheme.primary,
-                )
-              : Text('—',
-                  style: GoogleFonts.nunito(
-                      fontSize: 12, color: cs.onSurfaceVariant)),
-        ),
-        _TdCell(
-          align: Alignment.center,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: cs.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(
-              '${p.materiais.length}',
-              style: GoogleFonts.nunito(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: cs.onSurface),
-            ),
-          ),
-        ),
-        _TdCell(
-          child: custo != null
-              ? Text(
-                  _fmtBrl(custo),
-                  style: GoogleFonts.nunito(
+              child: Text(
+                '${p.materiais.length}',
+                style: GoogleFonts.nunito(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.primary,
-                  ),
-                )
-              : Text('—',
-                  style: GoogleFonts.nunito(
-                      fontSize: 12, color: cs.onSurfaceVariant)),
+                    color: cs.onSurface),
+              ),
+            ),
+            align: Alignment.center,
+          ),
         ),
-        _TdCell(
-          align: Alignment.center,
-          child: _StatusBadge(ativo: p.ativo),
-        ),
-        _TdCell(
-          align: Alignment.center,
-          child: podeEscrever
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _IconBtn(
-                      icon: Icons.edit_rounded,
-                      tooltip: 'Editar',
+        TableCell(
+          verticalAlignment: TableCellVerticalAlignment.middle,
+          child: wrapCell(
+            custo != null
+                ? Text(
+                    _fmtBrl(custo),
+                    style: GoogleFonts.nunito(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
                       color: AppTheme.primary,
-                      onTap: () => onEditar(p),
                     ),
-                    _IconBtn(
-                      icon: p.ativo
-                          ? Icons.visibility_off_rounded
-                          : Icons.visibility_rounded,
-                      tooltip: p.ativo ? 'Desativar' : 'Reativar',
-                      color: p.ativo
-                          ? const Color(0xFFD97706)
-                          : const Color(0xFF15803D),
-                      onTap: () => onToggleAtivo(p),
-                    ),
-                    if (!p.ativo)
-                      _IconBtn(
-                        icon: Icons.delete_outline_rounded,
-                        tooltip: 'Excluir',
-                        color: AppTheme.error,
-                        onTap: () => onExcluir(p),
-                      ),
-                  ],
-                )
-              : IconButton(
-                  icon: const Icon(Icons.visibility_rounded, size: 15),
-                  tooltip: 'Ver detalhes',
-                  onPressed: () => onDetalhe(p),
-                  visualDensity: VisualDensity.compact,
-                  color: AppTheme.primary,
-                ),
+                  )
+                : Text('—',
+                    style: GoogleFonts.nunito(
+                        fontSize: 12, color: cs.onSurfaceVariant)),
+          ),
+        ),
+        TableCell(
+          verticalAlignment: TableCellVerticalAlignment.middle,
+          child: wrapCell(_StatusBadge(ativo: p.ativo), align: Alignment.center),
         ),
       ],
     );
@@ -725,26 +726,6 @@ class _ThCell extends StatelessWidget {
           fontWeight: FontWeight.w700,
           letterSpacing: 0.8,
           color: cs.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
-}
-
-class _TdCell extends StatelessWidget {
-  final Widget child;
-  final Alignment align;
-  const _TdCell({required this.child, this.align = Alignment.centerLeft});
-
-  @override
-  Widget build(BuildContext context) {
-    return TableCell(
-      verticalAlignment: TableCellVerticalAlignment.middle,
-      child: Align(
-        alignment: align,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: child,
         ),
       ),
     );
@@ -1135,7 +1116,16 @@ class _MaterialItemTile extends StatelessWidget {
 
 class _ProdutoFormDialog extends StatefulWidget {
   final ProdutoModel? produto;
-  const _ProdutoFormDialog({this.produto});
+  final ValueChanged<ProdutoModel>? onDesativar;
+  final ValueChanged<ProdutoModel>? onReativar;
+  final ValueChanged<ProdutoModel>? onExcluir;
+
+  const _ProdutoFormDialog({
+    this.produto,
+    this.onDesativar,
+    this.onReativar,
+    this.onExcluir,
+  });
 
   @override
   State<_ProdutoFormDialog> createState() => _ProdutoFormDialogState();
@@ -1360,11 +1350,58 @@ class _ProdutoFormDialogState extends State<_ProdutoFormDialog> {
               ),
 
               // Botões
+              const Divider(height: 0),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    if (_editando) ...[
+                      if (widget.produto!.ativo && widget.onDesativar != null)
+                        TextButton.icon(
+                          onPressed: _salvando
+                              ? null
+                              : () {
+                                  Navigator.of(context, rootNavigator: true)
+                                      .pop();
+                                  widget.onDesativar!(widget.produto!);
+                                },
+                          icon: const Icon(Icons.visibility_off_rounded,
+                              size: 16),
+                          label: Text('Desativar', style: GoogleFonts.nunito()),
+                          style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFFD97706)),
+                        ),
+                      if (!widget.produto!.ativo && widget.onReativar != null)
+                        TextButton.icon(
+                          onPressed: _salvando
+                              ? null
+                              : () {
+                                  Navigator.of(context, rootNavigator: true)
+                                      .pop();
+                                  widget.onReativar!(widget.produto!);
+                                },
+                          icon: const Icon(Icons.visibility_rounded, size: 16),
+                          label: Text('Reativar', style: GoogleFonts.nunito()),
+                          style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFF15803D)),
+                        ),
+                      if (!widget.produto!.ativo && widget.onExcluir != null)
+                        TextButton.icon(
+                          onPressed: _salvando
+                              ? null
+                              : () {
+                                  Navigator.of(context, rootNavigator: true)
+                                      .pop();
+                                  widget.onExcluir!(widget.produto!);
+                                },
+                          icon: const Icon(Icons.delete_outline_rounded,
+                              size: 16),
+                          label: Text('Excluir', style: GoogleFonts.nunito()),
+                          style: TextButton.styleFrom(
+                              foregroundColor: AppTheme.error),
+                        ),
+                    ],
+                    const Spacer(),
                     TextButton(
                       onPressed:
                           _salvando ? null : () => Navigator.pop(context),

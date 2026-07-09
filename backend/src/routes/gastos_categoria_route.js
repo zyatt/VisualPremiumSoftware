@@ -2,8 +2,6 @@ const express = require('express');
 const router  = express.Router();
 const svc     = require('../services/gastos_categoria_service');
 
-// GET /gastos-categoria/estoque
-// Retorna valor atual em estoque (qtd × custo última compra) agrupado por categoria
 router.get('/estoque', async (req, res) => {
   try {
     const dados = await svc.valorEmEstoque();
@@ -13,8 +11,6 @@ router.get('/estoque', async (req, res) => {
   }
 });
 
-// GET /gastos-categoria?dataInicio=YYYY-MM-DD&dataFim=YYYY-MM-DD
-// Retorna gastos reais (saídas com origem em OC) de OS fechadas
 router.get('/', async (req, res) => {
   try {
     const { dataInicio, dataFim } = req.query;
@@ -25,7 +21,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /gastos-categoria/mensal?ano=2024
 router.get('/mensal', async (req, res) => {
   try {
     const { ano } = req.query;

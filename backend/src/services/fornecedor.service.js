@@ -152,12 +152,10 @@ async function remover(id) {
   if (!atual) throw { status: 404, message: 'Fornecedor não encontrado' };
 
   return prisma.$transaction([
-    // Desativa os vínculos com materiais
     prisma.fornecedorMaterial.updateMany({
       where: { fornecedorId: id },
       data: { ativo: false },
     }),
-    // Limpa o fornecedor de itens de orçamentos ainda abertos
     prisma.orcamentoItem.updateMany({
       where: {
         fornecedorId: id,
@@ -167,7 +165,6 @@ async function remover(id) {
       },
       data: { fornecedorId: null, selecionado: false },
     }),
-    // Por último, desativa o fornecedor
     prisma.fornecedor.update({
       where: { id },
       data: { ativo: false },
@@ -175,18 +172,11 @@ async function remover(id) {
   ]);
 }
 
-/**
- * Converte um valor de preço para string decimal com até 6 casas,
- * evitando imprecisão de ponto flutuante ao gravar no campo Decimal(15,6).
- * O Prisma aceita strings numéricas diretamente em campos Decimal.
- */
 function _normalizarPrecoDecimal(valor) {
   if (valor == null || valor === '') return null;
-  // Já é string numérica vinda do Flutter — preserva como está (até 6 casas)
   const str = String(valor).trim();
   const num = Number(str);
   if (isNaN(num)) return null;
-  // Formata com até 6 casas decimais, sem zeros desnecessários à direita
   return parseFloat(num.toFixed(6)).toString();
 }
 

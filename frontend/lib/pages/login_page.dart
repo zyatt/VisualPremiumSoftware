@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:visual_premium/widgets/theme_transition.dart';
 import '../providers/usuario_provider.dart';
 import '../providers/theme_provider.dart';
 import '../theme/app_theme.dart';
@@ -45,7 +46,7 @@ class _LoginPageState extends State<LoginPage> {
 
     final logoAsset = isDark
         ? 'assets/images/logo.png'
-        : 'assets/images/logoPreta.png';
+        : 'assets/images/logo.png';
 
     return Scaffold(
       body: Stack(
@@ -236,7 +237,11 @@ class _ThemeToggleButton extends StatelessWidget {
         elevation: 0,
         child: InkWell(
           borderRadius: BorderRadius.circular(50),
-          onTap: themeProvider.toggle,
+          onTap: () {
+            ThemeTransitionOverlay.of(context)?.switchTheme(
+              onSwitch: () => themeProvider.toggle(),
+            );
+          },
           child: Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(

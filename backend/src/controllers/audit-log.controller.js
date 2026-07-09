@@ -1,5 +1,3 @@
-// audit-log.controller.js
-
 const svc = require('../services/audit-log.service');
 
 const listar = async (req, res, next) => {

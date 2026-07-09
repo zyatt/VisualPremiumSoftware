@@ -18,7 +18,6 @@ function formatNumber(value) {
   }).format(value ?? 0);
 }
 
-// Formata número sem decimais se for inteiro, com até 2 casas se tiver fração
 function formatNumberSmart(value) {
   const v = value ?? 0;
   const isInt = Number.isInteger(v) || Math.abs(v - Math.round(v)) < 0.0001;
@@ -118,7 +117,6 @@ function drawPageHeader(doc, oc, logoPath) {
   doc.strokeColor(C.divider).lineWidth(0.8)
      .moveTo(ocX - 6, 10).lineTo(ocX - 6, H - 10).stroke();
 
-  // Se for OC real (tem id numérico), mostra label de OC + número; caso contrário mostra ORÇAMENTO
   const isOC = oc._isOrdemCompra === true;
   if (isOC) {
     doc.font('Helvetica-Bold').fontSize(7.5).fillColor(C.gray)
@@ -196,9 +194,8 @@ function drawItensTable(doc, itens, startY) {
     { key: 'material',   label: 'MATERIAL',    w: 155, hAlign: 'left',   cAlign: 'left',   pad: 5 },
     { key: 'qtd',        label: 'QTD',         w: 100, hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'unidade',    label: 'UNIDADE',     w: 44,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'precoUnit',  label: 'PREÇO UNIT.', w: 78,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'precoM2',    label: 'PREÇO M²',    w: 68,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'precoTotal', label: 'TOTAL',       w: 78,  hAlign: 'center', cAlign: 'right',  pad: 5 },
+    { key: 'precoUnit',  label: 'PREÇO UNIT.', w: 95,  hAlign: 'center', cAlign: 'center', pad: 3 },
+    { key: 'precoTotal', label: 'TOTAL',       w: 95,  hAlign: 'center', cAlign: 'right',  pad: 5 },
   ];
 
   let cx = MARGIN;
@@ -260,7 +257,7 @@ function drawItensTable(doc, itens, startY) {
     const tySingle = y + (rowH - FONT_SZ) / 2;
     const tyMulti  = y + ROW_PAD_V;
 
-    const [C0, C1, C2, C3, C4, C5] = cols;
+    const [C0, C1, C2, C3, C4] = cols;
 
     doc.save();
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
@@ -284,14 +281,9 @@ function drawItensTable(doc, itens, startY) {
        .text(formatCurrency(item.precoUnitario), C3.x + C3.pad, tySingle,
              { width: C3.w - C3.pad * 2, align: 'center', lineBreak: false });
 
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(item.precoMetroQuadrado != null ? formatCurrency(item.precoMetroQuadrado) : '—',
-             C4.x + C4.pad, tySingle,
-             { width: C4.w - C4.pad * 2, align: 'center', lineBreak: false });
-
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
-       .text(formatCurrency(item.precoTotal), C5.x + C5.pad, tySingle,
-             { width: C5.w - C5.pad * 2, align: 'right', lineBreak: false });
+       .text(formatCurrency(item.precoTotal), C4.x + C4.pad, tySingle,
+             { width: C4.w - C4.pad * 2, align: 'right', lineBreak: false });
 
     drawColDividers(y, rowH);
     y += rowH;
@@ -374,14 +366,8 @@ function drawFooter(doc, pageNum, empresaNome = 'Visual Premium') {
      .text(`Página ${pageNum}`, MARGIN, y, { width: CONTENT_W, align: 'right' });
 }
 
-// ─── Gerador de PDF de Orçamento — Layout Matricial (espelha o editor Flutter) ─
-
-/**
- * Monta a lista ordenada de todos os IDs de fornecedores presentes nos itens.
- * Retorna array de { fornecedorId, fornecedorNome }.
- */
 function coletarFornecedores(itens) {
-  const map = new Map(); // id -> nome
+  const map = new Map();
   itens.forEach((item) => {
     Object.entries(item.precos ?? {}).forEach(([fId, pf]) => {
       if (!map.has(fId)) map.set(fId, pf.fornecedorNome ?? `Fornecedor ${fId}`);
@@ -390,22 +376,11 @@ function coletarFornecedores(itens) {
   return Array.from(map.entries()).map(([id, nome]) => ({ id, nome }));
 }
 
-/**
- * Para cada item, obtém o preço efetivo de um fornecedor (unitário ou m²).
- */
-function precoEfetivo(pf, usarM2) {
+function precoEfetivo(pf) {
   if (!pf) return null;
-  if (usarM2) return pf.precoM2 ?? pf.preco ?? null;
   return pf.preco ?? null;
 }
 
-/**
- * Remove do payload os preços de fornecedores ocultos, caso o chamador
- * informe `dados.fornecedoresOcultos` (array de ids). O app Flutter já envia
- * os itens sem esses preços, mas este filtro fica como segunda camada de
- * proteção para qualquer outro client que delegue o filtro ao servidor —
- * um fornecedor oculto nunca deve aparecer no PDF nem entrar nos totais.
- */
 function aplicarFornecedoresOcultos(itens, fornecedoresOcultos) {
   if (!Array.isArray(fornecedoresOcultos) || fornecedoresOcultos.length === 0) return itens;
   const ocultos = new Set(fornecedoresOcultos.map(String));
@@ -420,16 +395,11 @@ function aplicarFornecedoresOcultos(itens, fornecedoresOcultos) {
   });
 }
 
-/**
- * Desenha a tabela matricial do orçamento (materiais × fornecedores).
- * Orientação landscape: gira para A4 wide quando há muitos fornecedores.
- */
 async function gerarPdfDeItens(dados) {
   const { titulo = 'Orçamento', fornecedoresOcultos = [] } = dados;
   const itens = aplicarFornecedoresOcultos(dados.itens ?? [], fornecedoresOcultos);
 
   return new Promise((resolve, reject) => {
-    // Decidir orientação: landscape se > 3 fornecedores para ter espaço
     const fornecedores = coletarFornecedores(itens);
     const useLandscape = fornecedores.length > 3;
 
@@ -449,14 +419,12 @@ async function gerarPdfDeItens(dados) {
     const logoPath = path.join(__dirname, '../../../frontend/assets/images/logoPreta.png');
     const orcFake  = { _isOrdemCompra: false, logoEmpresa: 'PREMIUM', empresa: 'VISUAL PREMIUM' };
 
-    // ── helpers locais que respeitam as dimensões da página ─────────────
     const fillR = (x, y, w, h, color) => doc.fillColor(color).rect(x, y, w, h).fill();
     const hlineL = (y, color = C.divider, lw = 0.5) => {
       doc.strokeColor(color).lineWidth(lw)
          .moveTo(margin, y).lineTo(pW - margin, y).stroke();
     };
 
-    // ── Cabeçalho da página (versão simplificada para landscape) ────────
     const drawHeader = () => {
       const H = 70;
       fillR(0, 0, pW, H, C.white);
@@ -470,7 +438,6 @@ async function gerarPdfDeItens(dados) {
            .text('Visual Premium', margin, 22, { lineBreak: false });
       }
 
-      // Título do orçamento
       doc.font('Helvetica-Bold').fontSize(13).fillColor(C.accent)
          .text('ORÇAMENTO', margin + logoW + 12, 20, { width: contentW - logoW - 12, align: 'right', lineBreak: false });
       doc.font('Helvetica').fontSize(7.5).fillColor(C.lightGray)
@@ -491,15 +458,10 @@ async function gerarPdfDeItens(dados) {
          .text(`Página ${pageNum}`, margin, y, { width: contentW, align: 'right' });
     };
 
-    // ── Cálculos matriciais ──────────────────────────────────────────────
     const totalMateriais = itens.length;
 
-    // Para cada item, qual modo usar
-    const usarM2PorItem = itens.map((item) => item.modoOrcamento === 'metroQuadrado');
-
-    // Para cada fornecedor: total acumulado e cobertura
-    const totaisForn    = {}; // id -> { total, comPreco, vinculados }
-    const menorPorItem  = []; // menor preço por item (menor entre fornecedores)
+    const totaisForn    = {};
+    const menorPorItem  = [];
 
     fornecedores.forEach(({ id }) => {
       totaisForn[id] = { total: 0, comPreco: 0, vinculados: 0 };
@@ -507,14 +469,13 @@ async function gerarPdfDeItens(dados) {
 
     itens.forEach((item, iIdx) => {
       const qtd    = item.quantidade ?? 1;
-      const usM2   = usarM2PorItem[iIdx];
       let   menor  = null;
 
       fornecedores.forEach(({ id }) => {
         const pf = (item.precos ?? {})[id];
         if (!pf) return;
         totaisForn[id].vinculados += 1;
-        const p = precoEfetivo(pf, usM2);
+        const p = precoEfetivo(pf);
         if (p != null) {
           totaisForn[id].total    += p * qtd;
           totaisForn[id].comPreco += 1;
@@ -525,22 +486,10 @@ async function gerarPdfDeItens(dados) {
       menorPorItem.push(menor);
     });
 
-    // Ordena fornecedores pelo total ascendente, zeros por último —
-    // espelha exatamente o sort do Flutter em _buildTabelaMatriz:
-    //   if (ta == 0 && tb == 0) return 0;
-    //   if (ta == 0) return 1;   // zero vai pro fim
-    //   if (tb == 0) return -1;
-    //   return ta.compareTo(tb); // ascendente
-    fornecedores.sort((a, b) => {
-      const ta = totaisForn[a.id]?.total ?? 0;
-      const tb = totaisForn[b.id]?.total ?? 0;
-      if (ta === 0 && tb === 0) return 0;
-      if (ta === 0) return 1;
-      if (tb === 0) return -1;
-      return ta - tb;
-    });
+    fornecedores.sort((a, b) =>
+      (a.nome ?? '').localeCompare(b.nome ?? '', 'pt-BR', { sensitivity: 'base' })
+    );
 
-    // Total da coluna "Melhor Preço" (soma dos menores por item)
     let totalMelhorPreco  = 0;
     let matComMelhorPreco = 0;
     itens.forEach((item, i) => {
@@ -551,13 +500,11 @@ async function gerarPdfDeItens(dados) {
       }
     });
 
-    // Fornecedor com menor total (para destaque de coluna)
     const fornComPreco = fornecedores.filter(({ id }) => totaisForn[id].total > 0);
     const menorTotalForn = fornComPreco.length > 0
       ? Math.min(...fornComPreco.map(({ id }) => totaisForn[id].total))
       : null;
 
-    // Sugestão: fornecedor com maior cobertura e menor total
     let maxCob        = 0;
     let suggFornId    = null;
     let suggFornNome  = null;
@@ -573,33 +520,22 @@ async function gerarPdfDeItens(dados) {
       }
     });
 
-    // ── Layout de colunas ────────────────────────────────────────────────
-    // Colunas fixas: Material | Qtd | ...Fornecedores... | Melhor Preço
-    // Escala automaticamente para acomodar qualquer número de fornecedores
     const nForn      = fornecedores.length;
     const FOOTER_RES = 100;
 
-    // Largura ideal por fornecedor quando há espaço sobrando
     const FORN_IDEAL = 85;
 
-    // Calcula quanto espaço é necessário com as proporções padrão
-    // e reduz as colunas fixas proporcionalmente se necessário
     const calcLayout = () => {
-      // Largura mínima absoluta da coluna Melhor Preço — nunca eliminada
       const MELHOR_MIN = 60;
-      // Largura mínima por coluna de fornecedor antes de comprimir fixas
       const FORN_ABS   = 50;
 
-      // Passo 1: tamanhos ideais
       let mat    = 170;
       let qtd    = 48;
       let melhor = 80;
       let forn   = nForn > 0 ? (contentW - mat - qtd - melhor) / nForn : FORN_IDEAL;
 
-      // Cap superior: não deixar fornecedor ficar largo demais
       if (forn >= FORN_IDEAL) forn = FORN_IDEAL;
 
-      // Passo 2: comprime colunas fixas moderadamente (mat→110, qtd→36, melhor→70)
       if (forn < FORN_ABS) {
         mat    = 110;
         qtd    = 36;
@@ -607,7 +543,6 @@ async function gerarPdfDeItens(dados) {
         forn   = nForn > 0 ? (contentW - mat - qtd - melhor) / nForn : FORN_IDEAL;
       }
 
-      // Passo 3: comprime mais agressivamente (mat→88, qtd→28, melhor→MELHOR_MIN)
       if (forn < FORN_ABS) {
         mat    = 88;
         qtd    = 28;
@@ -615,8 +550,6 @@ async function gerarPdfDeItens(dados) {
         forn   = nForn > 0 ? (contentW - mat - qtd - melhor) / nForn : FORN_IDEAL;
       }
 
-      // Passo 4: aceita forn menor que FORN_ABS — divide o que sobra igualmente
-      // (coluna Melhor jamais é zerada; apenas forn encolhe mais)
       if (forn < FORN_ABS) {
         forn = Math.max(38, (contentW - mat - qtd - melhor) / nForn);
       }
@@ -626,11 +559,9 @@ async function gerarPdfDeItens(dados) {
 
     const { COL_MAT, COL_QTD, COL_MELHOR, COL_FORN } = calcLayout();
 
-    // Fator de escala para fontes (1.0 em tamanho normal, <1 quando comprimido)
     const fontScale  = Math.min(1, COL_FORN / FORN_IDEAL);
     const fornFontSz = Math.max(5, Math.round(6.5 * fontScale * 10) / 10);
 
-    // x inicial de cada coluna
     const xMat    = margin;
     const xQtd    = xMat + COL_MAT;
     const xForn   = (i) => xQtd + COL_QTD + i * COL_FORN;
@@ -642,22 +573,18 @@ async function gerarPdfDeItens(dados) {
     const SUGEST_H   = 28;
     const FONT_SZ    = 7;
 
-    // ── Função: cabeçalho da tabela ──────────────────────────────────────
     const drawTableHeader = (y) => {
       fillR(margin, y, contentW, HDR_H, '#F1F3F5');
       hlineL(y, '#D1D5DB', 0.8);
 
       const ty = y + (HDR_H - 7) / 2;
 
-      // Material
       doc.font('Helvetica-Bold').fontSize(6.5).fillColor(C.gray)
          .text('MATERIAL', xMat + 4, ty, { width: COL_MAT - 8, lineBreak: false });
 
-      // Qtd
       doc.font('Helvetica-Bold').fontSize(6.5).fillColor(C.gray)
          .text('QTD', xQtd + 2, ty, { width: COL_QTD - 4, align: 'center', lineBreak: false });
 
-      // Fornecedores
       fornecedores.forEach(({ id, nome }, fi) => {
         const x        = xForn(fi);
         const isMenuor = menorTotalForn != null && totaisForn[id].total === menorTotalForn && totaisForn[id].total > 0;
@@ -682,14 +609,12 @@ async function gerarPdfDeItens(dados) {
            .text(`${cob}/${totalMateriais} mat.`, x + 4, isMenuor ? y + 21 : ty + 8,
                  { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
-        // Divisor vertical
         if (fi > 0) {
           doc.strokeColor(C.divider).lineWidth(0.4)
              .moveTo(x, y + 4).lineTo(x, y + HDR_H - 4).stroke();
         }
       });
 
-      // Coluna Melhor Preço
       doc.font('Helvetica-Bold').fontSize(6).fillColor('#1D4ED8')
          .text('★ MELHOR', xMelhor + 4, ty - 4, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
       doc.font('Helvetica').fontSize(5.5).fillColor('#93C5FD')
@@ -702,7 +627,6 @@ async function gerarPdfDeItens(dados) {
       return y + HDR_H;
     };
 
-    // ── Função: linha de totais ──────────────────────────────────────────
     const drawTotalsRow = (y) => {
       fillR(margin, y, contentW, TOTAL_H, '#F8F9FA');
       hlineL(y, '#D1D5DB', 1);
@@ -729,7 +653,6 @@ async function gerarPdfDeItens(dados) {
         }
       });
 
-      // Melhor total acumulado
       fillR(xMelhor + 2, y + 3, COL_MELHOR - 4, TOTAL_H - 6, '#EFF6FF');
       doc.rect(xMelhor + 2, y + 3, COL_MELHOR - 4, TOTAL_H - 6)
          .strokeColor('#BFDBFE').lineWidth(0.5).stroke();
@@ -744,7 +667,6 @@ async function gerarPdfDeItens(dados) {
       return y + TOTAL_H;
     };
 
-    // ── Função: bloco de sugestão de compra ideal ────────────────────────
     const drawSugestao = (y) => {
       if (!suggFornId || matComMelhorPreco === 0) return y;
 
@@ -780,30 +702,21 @@ async function gerarPdfDeItens(dados) {
       return y + SUGEST_H;
     };
 
-    // ═══════════════════════════════════════════════════════════════════
-    // INÍCIO DO DOCUMENTO
-    // ═══════════════════════════════════════════════════════════════════
-
     let y = drawHeader();
 
     if (itens.length === 0) {
       doc.font('Helvetica').fontSize(10).fillColor(C.gray)
          .text('Nenhum item neste orçamento.', margin, y + 20, { width: contentW, align: 'center' });
     } else {
-      // Seção: título da tabela matricial
       drawSectionHeader(doc, y, `Comparativo de Preços — ${totalMateriais} ${totalMateriais === 1 ? 'material' : 'materiais'} × ${nForn} ${nForn === 1 ? 'fornecedor' : 'fornecedores'}`);
       y += 26;
 
-      // Cabeçalho da tabela
       y = drawTableHeader(y);
 
-      // ── Linhas de materiais ────────────────────────────────────────────
       itens.forEach((item, iIdx) => {
         const qtd  = item.quantidade ?? 1;
-        const usM2 = usarM2PorItem[iIdx];
         const menor = menorPorItem[iIdx];
 
-        // Mede altura necessária para o nome (pode quebrar linha)
         doc.font('Helvetica-Bold').fontSize(FONT_SZ);
         const nomeH = doc.heightOfString(item.materialNome, { width: COL_MAT - 8 });
         const descH = item.descricao?.trim()
@@ -811,7 +724,6 @@ async function gerarPdfDeItens(dados) {
           : 0;
         const rowH  = Math.max(ROW_H, nomeH + descH + 14);
 
-        // Quebra de página
         if (y + rowH > pH - FOOTER_RES) {
           drawFooterL(doc.bufferedPageRange().count);
           doc.addPage();
@@ -819,13 +731,11 @@ async function gerarPdfDeItens(dados) {
           y = drawTableHeader(y);
         }
 
-        // Fundo alternado
         if (iIdx % 2 === 0) fillR(margin, y, contentW, rowH, C.bgRow);
 
         const tyCtr = y + (rowH - FONT_SZ) / 2;
         const tyTop = y + 8;
 
-        // ── Coluna Material ────────────────────────────────────────────
         doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
            .text(item.materialNome, xMat + 4, tyTop, { width: COL_MAT - 8, lineBreak: true });
 
@@ -840,8 +750,7 @@ async function gerarPdfDeItens(dados) {
              .text(item.descricao.trim(), xMat + 4, tyTop + nomeH + (subparts ? 7 : 1), { width: COL_MAT - 8, lineBreak: false });
         }
 
-        // ── Coluna Qtd ─────────────────────────────────────────────────
-        const unidLabel = usM2 ? 'm²' : (item.materialUnidade || '');
+        const unidLabel = item.materialUnidade || '';
         doc.font('Helvetica').fontSize(6.5).fillColor(C.black)
            .text(formatNumberSmart(qtd), xQtd + 2, tyCtr - 4, { width: COL_QTD - 4, align: 'center', lineBreak: false });
         if (unidLabel) {
@@ -849,27 +758,23 @@ async function gerarPdfDeItens(dados) {
              .text(unidLabel, xQtd + 2, tyCtr + 4, { width: COL_QTD - 4, align: 'center', lineBreak: false });
         }
 
-        // ── Colunas de fornecedores ────────────────────────────────────
         fornecedores.forEach(({ id }, fi) => {
           const x      = xForn(fi);
           const pf     = (item.precos ?? {})[id];
 
-          // Divisor vertical
           doc.strokeColor(C.divider).lineWidth(0.3)
              .moveTo(x, y + 4).lineTo(x, y + rowH - 4).stroke();
 
           if (!pf) {
-            // Fornecedor não vinculado
             doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
                .text('—', x + 4, tyCtr, { width: COL_FORN - 8, align: 'center', lineBreak: false });
             return;
           }
 
-          const preco  = precoEfetivo(pf, usM2);
+          const preco  = precoEfetivo(pf);
           const total  = preco != null ? preco * qtd : null;
           const isMen  = menor != null && preco != null && preco === menor;
 
-          // Destaque fundo verde suave para o menor da linha
           if (isMen) {
             fillR(x + 2, y + 2, COL_FORN - 4, rowH - 4, '#F0FDF4');
             doc.rect(x + 2, y + 2, COL_FORN - 4, rowH - 4)
@@ -877,7 +782,6 @@ async function gerarPdfDeItens(dados) {
           }
 
           if (preco != null) {
-            // Seta para baixo + preço
             if (isMen) {
               doc.font('Helvetica-Bold').fontSize(Math.max(4.5, fornFontSz - 1)).fillColor(C.statusOk)
                  .text('▼ MENOR', x + 4, y + 5, { width: COL_FORN - 8, align: 'center', lineBreak: false });
@@ -888,14 +792,12 @@ async function gerarPdfDeItens(dados) {
                .fillColor(isMen ? C.statusOk : C.black)
                .text(formatCurrency(preco), x + 4, precoY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
-            // Total da linha
             if (total != null) {
               doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 1))
                  .fillColor(isMen ? '#15803D' : C.gray)
                  .text(formatCurrency(total), x + 4, precoY + 9, { width: COL_FORN - 8, align: 'center', lineBreak: false });
             }
 
-            // Observação de disponibilidade
             if (pf.observacao) {
               const obsY = precoY + 18;
               doc.font('Helvetica').fontSize(Math.max(4, fornFontSz - 1.5))
@@ -906,7 +808,6 @@ async function gerarPdfDeItens(dados) {
             doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 0.5)).fillColor(C.lightGray)
                .text('sem preço', x + 4, tyCtr - 4, { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
-            // Observação mesmo sem preço
             if (pf.observacao) {
               doc.font('Helvetica').fontSize(Math.max(4, fornFontSz - 1.5))
                  .fillColor(C.statusWarn)
@@ -915,7 +816,6 @@ async function gerarPdfDeItens(dados) {
           }
         });
 
-        // ── Coluna Melhor Preço ────────────────────────────────────────
         doc.strokeColor('#BFDBFE').lineWidth(0.3)
            .moveTo(xMelhor, y + 4).lineTo(xMelhor, y + rowH - 4).stroke();
 
@@ -938,7 +838,6 @@ async function gerarPdfDeItens(dados) {
         y += rowH;
       });
 
-      // ── Linha de totais ────────────────────────────────────────────────
       if (y + TOTAL_H + SUGEST_H > pH - FOOTER_RES) {
         drawFooterL(doc.bufferedPageRange().count);
         doc.addPage();
@@ -950,7 +849,6 @@ async function gerarPdfDeItens(dados) {
       y += 12;
     }
 
-    // Rodapé em todas as páginas
     const range = doc.bufferedPageRange();
     for (let i = 0; i < range.count; i++) {
       doc.switchToPage(range.start + i);
@@ -960,8 +858,6 @@ async function gerarPdfDeItens(dados) {
     doc.end();
   });
 }
-
-// ─── Gerador de PDF de Ordem de Compra (por ID do banco) ─────────────────────
 
 const ordemCompraPdfService = {
   async gerarPdf(id) {

@@ -97,6 +97,7 @@ class _DashCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
+          mouseCursor: SystemMouseCursors.click,
           onTap: () => context.go(route),
           child: Padding(
             padding: const EdgeInsets.all(20),

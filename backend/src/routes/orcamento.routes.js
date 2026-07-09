@@ -13,12 +13,12 @@ router.post('/pdf',                      authMiddleware, roleMiddleware(LEITURA)
 router.get('/',                          authMiddleware, roleMiddleware(LEITURA),  ctrl.listar);
 router.get('/:id',                       authMiddleware, roleMiddleware(LEITURA),  ctrl.buscarPorId);
 router.post('/',                         authMiddleware, roleMiddleware(ESCRITA),  ctrl.criar);
-router.patch('/:id',                     authMiddleware, roleMiddleware(ESCRITA),  ctrl.atualizar);      // ← aqui, antes das subrotas
+router.patch('/:id',                     authMiddleware, roleMiddleware(ESCRITA),  ctrl.atualizar);
 router.patch('/:id/cancelar',            authMiddleware, roleMiddleware(EXCLUSAO), ctrl.cancelar);
 router.delete('/:id',                    authMiddleware, roleMiddleware(EXCLUSAO), ctrl.excluir);
 
 router.post('/:id/itens',                authMiddleware, roleMiddleware(ESCRITA),  ctrl.adicionarItem);
-router.delete('/:id/itens',              authMiddleware, roleMiddleware(ESCRITA),  ctrl.limparItens);   // ← limpa todos de uma vez
+router.delete('/:id/itens',              authMiddleware, roleMiddleware(ESCRITA),  ctrl.limparItens);
 router.delete('/:id/itens/:itemId',      authMiddleware, roleMiddleware(ESCRITA),  ctrl.removerItem);
 router.patch('/:id/itens/:itemId',       authMiddleware, roleMiddleware(ESCRITA),  ctrl.atualizarItem);
 

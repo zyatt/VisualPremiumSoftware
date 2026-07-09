@@ -15,12 +15,51 @@ import 'package:intl/intl.dart';
 import '../providers/chat_provider.dart';
 import '../models/mensagem_chat_model.dart';
 import 'reacao_mensagem_picker.dart';
+import 'encaminhamento_chat_card.dart';
 
 class ChatFloatingWidget extends StatefulWidget {
   const ChatFloatingWidget({super.key});
 
   @override
   State<ChatFloatingWidget> createState() => _ChatFloatingWidgetState();
+}
+
+// ─── Indicador de presença (versão compacta do widget flutuante) ──────────────
+class _MiniStatusDot extends StatelessWidget {
+  final bool online;
+  final double size;
+  const _MiniStatusDot({required this.online}) : size = 10;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: online ? const Color(0xFF22C55E) : const Color(0xFF9CA3AF),
+        border: Border.all(color: Theme.of(context).colorScheme.surface, width: 1.5),
+      ),
+    );
+  }
+}
+
+/// Mesma lógica de `_formatarStatusUsuario` em chat_page.dart, duplicada
+/// aqui para manter os dois arquivos de UI de chat independentes (padrão já
+/// usado no arquivo para outros widgets "Mini*").
+String _formatarStatusUsuarioMini(UsuarioChat usuario) {
+  if (usuario.online) return 'Online';
+  final ultimo = usuario.ultimoAcesso;
+  if (ultimo == null) return 'Offline';
+  final agora  = DateTime.now();
+  final hora   = DateFormat('HH:mm').format(ultimo);
+  bool mesmoDia(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+  if (mesmoDia(ultimo, agora)) return 'Visto por último às $hora';
+  if (mesmoDia(ultimo, agora.subtract(const Duration(days: 1)))) {
+    return 'Visto ontem às $hora';
+  }
+  return 'Visto em ${DateFormat('dd/MM').format(ultimo)} às $hora';
 }
 
 class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
@@ -35,6 +74,12 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
   double? _cx;
   double? _cy;
 
+  // Último tamanho de tela observado. Usado para detectar mudanças (ex:
+  // maximizar/restaurar a janela, entrar em fullscreen, rotacionar o
+  // dispositivo) e reposicionar a bolha proporcionalmente, em vez de
+  // deixá-la "presa" nas coordenadas absolutas antigas.
+  Size? _telaAnterior;
+
   bool _expandido = false;
   bool _arrastando = false;
   Offset _inicioArrastoGlobal = Offset.zero;
@@ -46,12 +91,18 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
   // detectamos a mudança aqui e recolhemos a bolha, se estiver expandida.
   int? _ultimoMinimizarTrigger;
 
+  // Contrapartida: último valor de ChatProvider.abrirConversaTrigger
+  // observado. Ao mudar, expandimos a bolha (a conversa em si já foi
+  // selecionada pelo provider antes de incrementar o trigger).
+  int? _ultimoAbrirConversaTrigger;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _ultimoMinimizarTrigger = context.read<ChatProvider>().minimizarTrigger;
+        _ultimoAbrirConversaTrigger = context.read<ChatProvider>().abrirConversaTrigger;
       }
     });
   }
@@ -90,8 +141,40 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
     }
     _ultimoMinimizarTrigger = minimizarTrigger;
 
-    _cx ??= tela.width  - 16 - _bolhaTamanho / 2;
-    _cy ??= tela.height - 16 - _bolhaTamanho / 2;
+    // Idem, mas para o gatilho de ABRIR (expandir com uma conversa
+    // específica) — disparado após encaminhar solicitação/material.
+    final abrirConversaTrigger = context.watch<ChatProvider>().abrirConversaTrigger;
+    if (_ultimoAbrirConversaTrigger != null &&
+        abrirConversaTrigger != _ultimoAbrirConversaTrigger &&
+        !_expandido) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() => _expandido = true);
+          context.read<ChatProvider>().definirWidgetFlutuanteVisivel(true);
+        }
+      });
+    }
+    _ultimoAbrirConversaTrigger = abrirConversaTrigger;
+
+    if (_cx == null || _cy == null) {
+      // Primeira build: ancora no canto inferior direito.
+      _cx = tela.width  - 16 - _bolhaTamanho / 2;
+      _cy = tela.height - 16 - _bolhaTamanho / 2;
+    } else if (_telaAnterior != null &&
+        (_telaAnterior!.width != tela.width ||
+         _telaAnterior!.height != tela.height)) {
+      // A tela mudou de tamanho (ex: maximizar/restaurar a janela, entrar
+      // em fullscreen). Reescala a posição da bolha proporcionalmente para
+      // que ela mantenha a mesma posição RELATIVA na tela — se estava perto
+      // do canto inferior direito, continua perto do canto inferior
+      // direito na nova resolução, em vez de ficar "presa" no pixel
+      // absoluto antigo.
+      _cx = _cx! * (tela.width  / _telaAnterior!.width);
+      _cy = _cy! * (tela.height / _telaAnterior!.height);
+      _cx = _cx!.clamp(_bolhaTamanho / 2, tela.width  - _bolhaTamanho / 2);
+      _cy = _cy!.clamp(_bolhaTamanho / 2, tela.height - _bolhaTamanho / 2);
+    }
+    _telaAnterior = tela;
 
     final largura = _expandido ? _painelLargura : _bolhaTamanho;
     final altura  = _expandido ? _painelAltura  : _bolhaTamanho;
@@ -310,6 +393,7 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
   final _scrollCtrl = ScrollController();
   final _msgFocus = FocusNode();
   int? _usuarioAtivoAnterior;
+  MensagemChat? _respondendoA;
 
   @override
   void dispose() {
@@ -329,7 +413,16 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
     final texto = _controller.text.trim();
     if (texto.isEmpty) return;
     _controller.clear();
-    chat.enviarMensagem(texto).then((_) => _scrollToBottom());
+    final respondendoA = _respondendoA;
+    setState(() => _respondendoA = null);
+    chat
+        .enviarMensagem(texto, respondendoA: respondendoA)
+        .then((_) => _scrollToBottom());
+  }
+
+  void _responderA(MensagemChat msg) {
+    setState(() => _respondendoA = msg);
+    _msgFocus.requestFocus();
   }
 
   void _scrollToBottom() {
@@ -386,46 +479,100 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
                   onPressed: () => chat.fecharConversa(),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  style: IconButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(
+                          SystemMouseCursors.click)),
                 ),
-              Icon(Icons.chat_bubble_rounded, color: cs.onPrimary, size: 16),
+              Builder(builder: (context) {
+                final ativo = chat.usuarioAtivoId != null
+                    ? chat.usuarioPorId(chat.usuarioAtivoId!)
+                    : null;
+                if (ativo == null) {
+                  return Icon(Icons.chat_bubble_rounded, color: cs.onPrimary, size: 16);
+                }
+                final inicial = ativo.nome.isNotEmpty ? ativo.nome[0].toUpperCase() : '?';
+                return Stack(
+                  children: [
+                    CircleAvatar(
+                      radius: 12,
+                      backgroundColor: cs.onPrimary.withValues(alpha: 0.20),
+                      child: Text(
+                        inicial,
+                        style: GoogleFonts.nunito(
+                          color: cs.onPrimary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      right: -1,
+                      bottom: -1,
+                      child: _MiniStatusDot(online: ativo.online),
+                    ),
+                  ],
+                );
+              }),
               const SizedBox(width: 6),
               Expanded(
-                child: Text(
-                  chat.usuarioAtivoId == null
-                      ? 'Chat'
-                      : chat.usuarios
-                          .firstWhere(
-                            (u) => u.id == chat.usuarioAtivoId,
-                            orElse: () => UsuarioChat(id: 0, nome: '...', role: ''),
-                          )
-                          .nome,
-                  style: GoogleFonts.nunito(
-                    color: cs.onPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      chat.usuarioAtivoId == null
+                          ? 'Chat'
+                          : chat.usuarios
+                              .firstWhere(
+                                (u) => u.id == chat.usuarioAtivoId,
+                                orElse: () => UsuarioChat(id: 0, nome: '...', role: ''),
+                              )
+                              .nome,
+                      style: GoogleFonts.nunito(
+                        color: cs.onPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (chat.usuarioAtivoId != null)
+                      Text(
+                        chat.estaDigitando(chat.usuarioAtivoId!)
+                            ? 'digitando...'
+                            : _formatarStatusUsuarioMini(
+                                chat.usuarioPorId(chat.usuarioAtivoId!) ??
+                                    UsuarioChat(id: 0, nome: '', role: ''),
+                              ),
+                        style: GoogleFonts.nunito(
+                          color: cs.onPrimary.withValues(alpha: 0.85),
+                          fontSize: 10,
+                          fontStyle: chat.estaDigitando(chat.usuarioAtivoId!)
+                              ? FontStyle.italic
+                              : FontStyle.normal,
+                        ),
+                      ),
+                  ],
                 ),
               ),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: IconButton(
-                  icon: Icon(Icons.remove_rounded, color: cs.onPrimary, size: 18),
-                  onPressed: widget.onMinimizar,
-                  tooltip: 'Minimizar',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                ),
+              IconButton(
+                icon: Icon(Icons.remove_rounded, color: cs.onPrimary, size: 18),
+                onPressed: widget.onMinimizar,
+                tooltip: 'Minimizar',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                style: IconButton.styleFrom().copyWith(
+                    mouseCursor: WidgetStateProperty.all(
+                        SystemMouseCursors.click)),
               ),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: IconButton(
-                  icon: Icon(Icons.close_rounded, color: cs.onPrimary, size: 18),
-                  onPressed: widget.onFechar,
-                  tooltip: 'Fechar',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                ),
+              IconButton(
+                icon: Icon(Icons.close_rounded, color: cs.onPrimary, size: 18),
+                onPressed: widget.onFechar,
+                tooltip: 'Fechar',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                style: IconButton.styleFrom().copyWith(
+                    mouseCursor: WidgetStateProperty.all(
+                        SystemMouseCursors.click)),
               ),
             ],
           ),
@@ -434,7 +581,11 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
         Expanded(
           child: chat.usuarioAtivoId == null
               ? _MiniListaUsuarios(chat: chat)
-              : _MiniConversa(chat: chat, scrollCtrl: _scrollCtrl),
+              : _MiniConversa(
+                  chat: chat,
+                  scrollCtrl: _scrollCtrl,
+                  onResponder: _responderA,
+                ),
         ),
 
         if (chat.usuarioAtivoId != null)
@@ -444,7 +595,16 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
               color: cs.surface,
               border: Border(top: BorderSide(color: cs.outlineVariant)),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_respondendoA != null)
+                  _MiniPreviewResposta(
+                    mensagem: _respondendoA!,
+                    meuId: chat.meuId,
+                    onCancelar: () => setState(() => _respondendoA = null),
+                  ),
+                Row(
               children: [
                 Expanded(
                   child: TextField(
@@ -455,6 +615,7 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
                     minLines: 1,
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _enviar(chat),
+                    onChanged: (_) => chat.notificarDigitando(),
                     style: GoogleFonts.nunito(fontSize: 13),
                     decoration: InputDecoration(
                       hintText: 'Mensagem...',
@@ -474,12 +635,15 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
                 const SizedBox(width: 6),
                 InkWell(
                   borderRadius: BorderRadius.circular(16),
+                  mouseCursor: SystemMouseCursors.click,
                   onTap: () => _enviar(chat),
                   child: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle),
                     child: Icon(Icons.send_rounded, color: cs.onPrimary, size: 16),
                   ),
+                ),
+              ],
                 ),
               ],
             ),
@@ -519,25 +683,35 @@ class _MiniListaUsuarios extends StatelessWidget {
         return ListTile(
           dense: true,
           onTap: () => chat.abrirConversa(u.id),
-          leading: CircleAvatar(
-            radius: 16,
-            backgroundColor: cs.primary.withValues(alpha: 0.15),
-            child: Text(
-              inicial,
-              style: GoogleFonts.nunito(
-                color: cs.primary,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
+          leading: Stack(
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: cs.primary.withValues(alpha: 0.15),
+                child: Text(
+                  inicial,
+                  style: GoogleFonts.nunito(
+                    color: cs.primary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
               ),
-            ),
+              Positioned(
+                right: -1,
+                bottom: -1,
+                child: _MiniStatusDot(online: u.online),
+              ),
+            ],
           ),
           title: Text(
             u.nome,
             style: GoogleFonts.nunito(fontWeight: FontWeight.w600, fontSize: 13),
           ),
           subtitle: Text(
-            u.role,
+            u.online ? u.role : _formatarStatusUsuarioMini(u),
             style: GoogleFonts.nunito(fontSize: 10, color: cs.onSurfaceVariant),
+            overflow: TextOverflow.ellipsis,
           ),
           trailing: u.naoLidas > 0
               ? Container(
@@ -565,7 +739,12 @@ class _MiniListaUsuarios extends StatelessWidget {
 class _MiniConversa extends StatefulWidget {
   final ChatProvider chat;
   final ScrollController scrollCtrl;
-  const _MiniConversa({required this.chat, required this.scrollCtrl});
+  final ValueChanged<MensagemChat> onResponder;
+  const _MiniConversa({
+    required this.chat,
+    required this.scrollCtrl,
+    required this.onResponder,
+  });
 
   @override
   State<_MiniConversa> createState() => _MiniConversaState();
@@ -683,23 +862,32 @@ class _MiniConversaState extends State<_MiniConversa> {
 
         final bolha = _MiniBolhaMensagem(
           isMinha: isMinha,
+          mensagem: msg,
           conteudo: msg.conteudo,
           hora: hora,
           temReacoes: msg.reacoes.isNotEmpty,
           pendente: msg.pendente,
           lida: msg.lida,
           onTapDown: (details) => abrirSeletor(details.globalPosition),
+          onLongPress: () => widget.onResponder(msg),
+          respondendoAConteudo: msg.respondendoAConteudo,
+          respondendoARemetenteNome: msg.respondendoARemetenteNome,
           reacoesBadge: msg.reacoes.isNotEmpty
               ? ReacoesBadge(reacoes: msg.reacoes, isMinha: isMinha)
               : null,
         );
 
-        if (!mostrarData) return bolha;
+        final bolhaAnimada = _MiniEntradaAnimada(
+          animar: i == mensagens.length - 1,
+          child: bolha,
+        );
+
+        if (!mostrarData) return bolhaAnimada;
 
         return Column(
           children: [
             _MiniDateDivider(data: msg.criadoEm),
-            bolha,
+            bolhaAnimada,
           ],
         );
       },
@@ -714,21 +902,29 @@ class _MiniConversaState extends State<_MiniConversa> {
 
 class _MiniBolhaMensagem extends StatefulWidget {
   final bool isMinha;
+  final MensagemChat mensagem;
   final String conteudo;
   final String hora;
   final bool temReacoes;
   final bool pendente;
   final bool lida;
   final GestureTapDownCallback onTapDown;
+  final VoidCallback onLongPress;
+  final String? respondendoAConteudo;
+  final String? respondendoARemetenteNome;
   final Widget? reacoesBadge;
   const _MiniBolhaMensagem({
     required this.isMinha,
+    required this.mensagem,
     required this.conteudo,
     required this.hora,
     required this.temReacoes,
     required this.pendente,
     required this.lida,
     required this.onTapDown,
+    required this.onLongPress,
+    this.respondendoAConteudo,
+    this.respondendoARemetenteNome,
     this.reacoesBadge,
   });
 
@@ -757,6 +953,7 @@ class _MiniBolhaMensagemState extends State<_MiniBolhaMensagem> {
         onExit:  (_) => setState(() => _hover = false),
         child: GestureDetector(
           onTapDown: widget.onTapDown,
+          onLongPress: widget.onLongPress,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -790,13 +987,59 @@ class _MiniBolhaMensagemState extends State<_MiniBolhaMensagem> {
                   crossAxisAlignment:
                       isMinha ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      widget.conteudo,
-                      style: GoogleFonts.nunito(
-                        fontSize: 12.5,
-                        color: isMinha ? cs.onPrimary : cs.onSurface,
+                    if (widget.respondendoAConteudo != null)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: (isMinha ? cs.onPrimary : cs.primary)
+                              .withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border(
+                            left: BorderSide(
+                              color: isMinha ? cs.onPrimary : cs.primary,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.respondendoARemetenteNome ?? '...',
+                              style: GoogleFonts.nunito(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: isMinha ? cs.onPrimary : cs.primary,
+                              ),
+                            ),
+                            Text(
+                              widget.respondendoAConteudo!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.nunito(
+                                fontSize: 10.5,
+                                color: (isMinha ? cs.onPrimary : cs.onSurface)
+                                    .withValues(alpha: 0.85),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                    if (widget.mensagem.ehEncaminhamento)
+                      EncaminhamentoChatCard(
+                        mensagem: widget.mensagem,
+                        isMinha: isMinha,
+                        compacta: true,
+                      )
+                    else
+                      Text(
+                        widget.conteudo,
+                        style: GoogleFonts.nunito(
+                          fontSize: 12.5,
+                          color: isMinha ? cs.onPrimary : cs.onSurface,
+                        ),
+                      ),
                     const SizedBox(height: 2),
                     Row(
                       mainAxisSize: MainAxisSize.min,
@@ -864,6 +1107,118 @@ class _TicksMensagem extends StatelessWidget {
       Icons.done_all,
       size: 12,
       color: lida ? corLida : corBase,
+    );
+  }
+}
+
+// ─── Preview compacto da mensagem sendo respondida (mini-chat) ────────────────
+
+class _MiniPreviewResposta extends StatelessWidget {
+  final MensagemChat mensagem;
+  final int? meuId;
+  final VoidCallback onCancelar;
+  const _MiniPreviewResposta({
+    required this.mensagem,
+    required this.meuId,
+    required this.onCancelar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final autor = mensagem.remetenteId == meuId
+        ? 'Você'
+        : (mensagem.remetenteNome ?? '...');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+        border: Border(left: BorderSide(color: cs.primary, width: 2.5)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Respondendo a $autor',
+                  style: GoogleFonts.nunito(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w700,
+                    color: cs.primary,
+                  ),
+                ),
+                Text(
+                  mensagem.conteudo,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.nunito(fontSize: 10.5, color: cs.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 13),
+            onPressed: onCancelar,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+            color: cs.onSurfaceVariant,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Entrada animada (versão compacta, ver explicação em chat_page.dart) ──────
+
+class _MiniEntradaAnimada extends StatefulWidget {
+  final Widget child;
+  final bool animar;
+  const _MiniEntradaAnimada({required this.child, required this.animar});
+
+  @override
+  State<_MiniEntradaAnimada> createState() => _MiniEntradaAnimadaState();
+}
+
+class _MiniEntradaAnimadaState extends State<_MiniEntradaAnimada>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 200),
+  );
+  late final Animation<double> _opacidade =
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+  late final Animation<Offset> _posicao = Tween<Offset>(
+    begin: const Offset(0, 0.15),
+    end: Offset.zero,
+  ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animar) {
+      _ctrl.forward();
+    } else {
+      _ctrl.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _opacidade,
+      child: SlideTransition(position: _posicao, child: widget.child),
     );
   }
 }

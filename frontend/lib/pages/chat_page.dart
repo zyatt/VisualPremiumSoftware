@@ -9,12 +9,52 @@ import '../providers/chat_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../models/mensagem_chat_model.dart';
 import '../widgets/reacao_mensagem_picker.dart';
+import '../widgets/encaminhamento_chat_card.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
 
   @override
   State<ChatPage> createState() => _ChatPageState();
+}
+
+// ─── Indicador de presença (bolinha verde/cinza no avatar) ────────────────────
+class _StatusDot extends StatelessWidget {
+  final bool online;
+  final double size;
+  const _StatusDot({required this.online}) : size = 12;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: online ? const Color(0xFF22C55E) : const Color(0xFF9CA3AF),
+        border: Border.all(color: Theme.of(context).colorScheme.surface, width: 2),
+      ),
+    );
+  }
+}
+
+/// Texto de status exibido junto ao nome do usuário: "Online" quando
+/// conectado agora, ou "Visto por último às HH:mm" (ajustando para "ontem"
+/// ou uma data completa quando aplicável) com base no último momento em
+/// que a conexão SSE dele caiu.
+String _formatarStatusUsuario(UsuarioChat usuario) {
+  if (usuario.online) return 'Online';
+  final ultimo = usuario.ultimoAcesso;
+  if (ultimo == null) return 'Offline';
+  final agora  = DateTime.now();
+  final hora   = DateFormat('HH:mm').format(ultimo);
+  bool mesmoDia(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+  if (mesmoDia(ultimo, agora)) return 'Visto por último às $hora';
+  if (mesmoDia(ultimo, agora.subtract(const Duration(days: 1)))) {
+    return 'Visto ontem às $hora';
+  }
+  return 'Visto em ${DateFormat('dd/MM').format(ultimo)} às $hora';
 }
 
 class _ChatPageState extends State<ChatPage> {
@@ -38,32 +78,66 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     final chat    = context.watch<ChatProvider>();
     final isWide  = MediaQuery.of(context).size.width >= 700;
-    final cs      = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: cs.surface,
-      appBar: AppBar(
-        backgroundColor: cs.surface,
-        elevation: 0,
-        title: Text(
-          'Chat',
-          style: GoogleFonts.raleway(
-            fontWeight: FontWeight.w700,
-            color: cs.onSurface,
-          ),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Cabeçalho ──────────────────────────────────────────────────
+            Row(
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Chat',
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineMedium
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Converse com outros usuários',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: () => chat.carregarUsuarios(),
+                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  tooltip: 'Atualizar',
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                  ).copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // ── Corpo (lista de usuários / conversa) ────────────────────────
+            Expanded(
+              child: Card(
+                clipBehavior: Clip.antiAlias,
+                child: isWide
+                    ? _LayoutWide(chat: chat)
+                    : _LayoutNarrow(chat: chat),
+              ),
+            ),
+          ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: () => chat.carregarUsuarios(),
-            tooltip: 'Atualizar',
-          ),
-          const SizedBox(width: 8),
-        ],
       ),
-      body: isWide
-          ? _LayoutWide(chat: chat)
-          : _LayoutNarrow(chat: chat),
     );
   }
 }
@@ -218,10 +292,13 @@ class _UsuarioTile extends StatelessWidget {
     final cs     = Theme.of(context).colorScheme;
     final inicial = usuario.nome.isNotEmpty ? usuario.nome[0].toUpperCase() : '?';
 
-    return Material(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Material(
       color: isAtivo ? cs.primaryContainer : Colors.transparent,
       child: InkWell(
         onTap: onTap,
+        mouseCursor: SystemMouseCursors.click,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
@@ -239,6 +316,11 @@ class _UsuarioTile extends StatelessWidget {
                         fontSize: 15,
                       ),
                     ),
+                  ),
+                  Positioned(
+                    right: -1,
+                    bottom: -1,
+                    child: _StatusDot(online: usuario.online),
                   ),
                   if (usuario.naoLidas > 0)
                     Positioned(
@@ -279,11 +361,12 @@ class _UsuarioTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     Text(
-                      usuario.role,
+                      usuario.online ? usuario.role : _formatarStatusUsuario(usuario),
                       style: GoogleFonts.nunito(
                         fontSize: 11,
                         color: cs.onSurfaceVariant,
                       ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
@@ -291,6 +374,7 @@ class _UsuarioTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -324,6 +408,10 @@ class _PainelConversaState extends State<_PainelConversa> {
   // que pode não alcançar o fim exato).
   bool _aguardandoSaltoInicial = false;
 
+  // Mensagem selecionada para responder (citar). Fica visível como um
+  // preview acima do campo de digitação até o envio ou cancelamento.
+  MensagemChat? _respondendoA;
+
   @override
   void dispose() {
     _controller.dispose();
@@ -336,7 +424,16 @@ class _PainelConversaState extends State<_PainelConversa> {
     final texto = _controller.text.trim();
     if (texto.isEmpty) return;
     _controller.clear();
-    widget.chat.enviarMensagem(texto).then((_) => _scrollToBottom());
+    final respondendoA = _respondendoA;
+    setState(() => _respondendoA = null);
+    widget.chat
+        .enviarMensagem(texto, respondendoA: respondendoA)
+        .then((_) => _scrollToBottom());
+  }
+
+  void _responderA(MensagemChat msg) {
+    setState(() => _respondendoA = msg);
+    _focusNode.requestFocus();
   }
 
   // instantaneo=true força um "salto" direto pro fim (jumpTo), garantindo
@@ -437,16 +534,25 @@ class _PainelConversaState extends State<_PainelConversa> {
                   icon: const Icon(Icons.arrow_back_rounded),
                   onPressed: () => chat.fecharConversa(),
                 ),
-              CircleAvatar(
-                radius: 17,
-                backgroundColor: cs.primary.withValues(alpha: 0.15),
-                child: Text(
-                  outro.nome.isNotEmpty ? outro.nome[0].toUpperCase() : '?',
-                  style: GoogleFonts.nunito(
-                    color: cs.primary,
-                    fontWeight: FontWeight.w700,
+              Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 17,
+                    backgroundColor: cs.primary.withValues(alpha: 0.15),
+                    child: Text(
+                      outro.nome.isNotEmpty ? outro.nome[0].toUpperCase() : '?',
+                      style: GoogleFonts.nunito(
+                        color: cs.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
-                ),
+                  Positioned(
+                    right: -1,
+                    bottom: -1,
+                    child: _StatusDot(online: outro.online),
+                  ),
+                ],
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -461,12 +567,33 @@ class _PainelConversaState extends State<_PainelConversa> {
                         color: cs.onSurface,
                       ),
                     ),
-                    Text(
-                      outro.role,
-                      style: GoogleFonts.nunito(
-                        fontSize: 11,
-                        color: cs.onSurfaceVariant,
-                      ),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      child: chat.estaDigitando(outro.id)
+                          ? Row(
+                              key: const ValueKey('digitando'),
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'digitando',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    fontStyle: FontStyle.italic,
+                                    color: cs.primary,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                const _PontinhosDigitando(),
+                              ],
+                            )
+                          : Text(
+                              _formatarStatusUsuario(outro),
+                              key: const ValueKey('status'),
+                              style: GoogleFonts.nunito(
+                                fontSize: 11,
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
                     ),
                   ],
                 ),
@@ -504,11 +631,19 @@ class _PainelConversaState extends State<_PainelConversa> {
                         return Column(
                           children: [
                             if (showDate) _DateDivider(data: msg.criadoEm),
-                            _BubbleMensagem(
-                              mensagem: msg,
-                              isMinha: isMinha,
-                              meuId: chat.meuId,
-                              onReagir: (emoji) => chat.reagirMensagem(msg, emoji),
+                            _EntradaAnimada(
+                              // Só a última mensagem da lista (a mais nova)
+                              // ganha a animação de entrada — reconstruções
+                              // da lista inteira (ex.: troca de conversa)
+                              // não devem fazer todo mundo "surgir" de novo.
+                              animar: i == mensagens.length - 1,
+                              child: _BubbleMensagem(
+                                mensagem: msg,
+                                isMinha: isMinha,
+                                meuId: chat.meuId,
+                                onReagir: (emoji) => chat.reagirMensagem(msg, emoji),
+                                onResponder: () => _responderA(msg),
+                              ),
                             ),
                           ],
                         );
@@ -523,7 +658,16 @@ class _PainelConversaState extends State<_PainelConversa> {
             color: cs.surface,
             border: Border(top: BorderSide(color: cs.outlineVariant)),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_respondendoA != null)
+                _PreviewResposta(
+                  mensagem: _respondendoA!,
+                  meuId: chat.meuId,
+                  onCancelar: () => setState(() => _respondendoA = null),
+                ),
+              Row(
             children: [
               Expanded(
                 child: TextField(
@@ -534,10 +678,12 @@ class _PainelConversaState extends State<_PainelConversa> {
                   minLines:    1,
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) => _enviar(),
+                  onChanged: (_) => chat.notificarDigitando(),
                   style: GoogleFonts.nunito(fontSize: 14),
                   decoration: InputDecoration(
                     hintText: 'Digite uma mensagem...',
                     hintStyle: GoogleFonts.nunito(color: cs.onSurfaceVariant),
+                    isDense: true,
                     filled: true,
                     fillColor: cs.surfaceContainerHighest,
                     border: OutlineInputBorder(
@@ -550,13 +696,18 @@ class _PainelConversaState extends State<_PainelConversa> {
                 ),
               ),
               const SizedBox(width: 8),
-              FloatingActionButton.small(
-                heroTag: 'chat_page_send',
-                onPressed: _enviar,
-                backgroundColor: cs.primary,
-                foregroundColor: cs.onPrimary,
-                child: const Icon(Icons.send_rounded, size: 18),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: FloatingActionButton.small(
+                  heroTag: 'chat_page_send',
+                  onPressed: _enviar,
+                  backgroundColor: cs.primary,
+                  foregroundColor: cs.onPrimary,
+                  child: const Icon(Icons.send_rounded, size: 18),
+                ),
               ),
+            ],
+          ),
             ],
           ),
         ),
@@ -575,11 +726,13 @@ class _BubbleMensagem extends StatefulWidget {
   final bool isMinha;
   final int? meuId;
   final ValueChanged<String?> onReagir;
+  final VoidCallback onResponder;
   const _BubbleMensagem({
     required this.mensagem,
     required this.isMinha,
     required this.meuId,
     required this.onReagir,
+    required this.onResponder,
   });
 
   @override
@@ -627,6 +780,10 @@ class _BubbleMensagemState extends State<_BubbleMensagem> {
         onExit:  (_) => setState(() => _hover = false),
         child: GestureDetector(
           onTapDown: (details) => abrirSeletor(details.globalPosition),
+          // Toque longo = responder (citar) esta mensagem. Convive com o
+          // onTapDown de reação porque long-press só é resolvido depois de
+          // um tempo segurado, sem conflitar com o tap comum.
+          onLongPress: widget.onResponder,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -664,13 +821,55 @@ class _BubbleMensagemState extends State<_BubbleMensagem> {
                   crossAxisAlignment:
                       isMinha ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      mensagem.conteudo,
-                      style: GoogleFonts.nunito(
-                        fontSize: 13,
-                        color: isMinha ? cs.onPrimary : cs.onSurface,
+                    if (mensagem.ehResposta)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: (isMinha ? cs.onPrimary : cs.primary)
+                              .withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border(
+                            left: BorderSide(
+                              color: isMinha ? cs.onPrimary : cs.primary,
+                              width: 2.5,
+                            ),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              mensagem.respondendoARemetenteNome ?? '...',
+                              style: GoogleFonts.nunito(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: isMinha ? cs.onPrimary : cs.primary,
+                              ),
+                            ),
+                            Text(
+                              mensagem.respondendoAConteudo ?? '',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.nunito(
+                                fontSize: 11.5,
+                                color: (isMinha ? cs.onPrimary : cs.onSurface)
+                                    .withValues(alpha: 0.85),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                    if (mensagem.ehEncaminhamento)
+                      EncaminhamentoChatCard(mensagem: mensagem, isMinha: isMinha)
+                    else
+                      Text(
+                        mensagem.conteudo,
+                        style: GoogleFonts.nunito(
+                          fontSize: 13,
+                          color: isMinha ? cs.onPrimary : cs.onSurface,
+                        ),
+                      ),
                     const SizedBox(height: 3),
                     Row(
                       mainAxisSize: MainAxisSize.min,
@@ -784,6 +983,179 @@ class _DateDivider extends StatelessWidget {
 
   bool _mesmoDia(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+// ─── Entrada animada da mensagem (fade + slide sutil) ─────────────────────────
+// Roda uma única vez, na montagem do widget: como o ListView.builder recria
+// um Element novo pra cada índice novo que aparece no fim da lista, isso
+// naturalmente dispara só pra mensagem que acabou de chegar — mensagens já
+// existentes (reconstruídas por outro motivo, ex.: reação chegando) mantêm
+// seu Element e não reanimam.
+class _EntradaAnimada extends StatefulWidget {
+  final Widget child;
+  final bool animar;
+  const _EntradaAnimada({required this.child, required this.animar});
+
+  @override
+  State<_EntradaAnimada> createState() => _EntradaAnimadaState();
+}
+
+class _EntradaAnimadaState extends State<_EntradaAnimada>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+  late final Animation<double> _opacidade =
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+  late final Animation<Offset> _posicao = Tween<Offset>(
+    begin: const Offset(0, 0.12),
+    end: Offset.zero,
+  ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animar) {
+      _ctrl.forward();
+    } else {
+      _ctrl.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _opacidade,
+      child: SlideTransition(position: _posicao, child: widget.child),
+    );
+  }
+}
+
+// ─── Preview da mensagem sendo respondida (acima do campo de digitação) ───────
+
+class _PreviewResposta extends StatelessWidget {
+  final MensagemChat mensagem;
+  final int? meuId;
+  final VoidCallback onCancelar;
+  const _PreviewResposta({
+    required this.mensagem,
+    required this.meuId,
+    required this.onCancelar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final autor = mensagem.remetenteId == meuId
+        ? 'Você'
+        : (mensagem.remetenteNome ?? '...');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+        border: Border(left: BorderSide(color: cs.primary, width: 3)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Respondendo a $autor',
+                  style: GoogleFonts.nunito(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: cs.primary,
+                  ),
+                ),
+                Text(
+                  mensagem.conteudo,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.nunito(
+                    fontSize: 12,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 16),
+            onPressed: onCancelar,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            color: cs.onSurfaceVariant,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Três pontinhos pulsando (indicador de "digitando...") ────────────────────
+
+class _PontinhosDigitando extends StatefulWidget {
+  const _PontinhosDigitando();
+
+  @override
+  State<_PontinhosDigitando> createState() => _PontinhosDigitandoState();
+}
+
+class _PontinhosDigitandoState extends State<_PontinhosDigitando>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, _) {
+        return SizedBox(
+          width: 20,
+          height: 8,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: List.generate(3, (i) {
+              // Cada pontinho tem sua fase defasada dentro do ciclo, criando
+              // o efeito de "onda" clássico de indicador de digitação.
+              final fase = (_ctrl.value + i * 0.2) % 1.0;
+              final escala = 0.5 + 0.5 * (1 - (fase - 0.5).abs() * 2).clamp(0.0, 1.0);
+              return Transform.scale(
+                scale: escala,
+                child: Container(
+                  width: 5,
+                  height: 5,
+                  decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle),
+                ),
+              );
+            }),
+          ),
+        );
+      },
+    );
+  }
 }
 
 // ─── Empty state ──────────────────────────────────────────────────────────────

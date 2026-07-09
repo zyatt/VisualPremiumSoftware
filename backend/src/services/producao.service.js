@@ -1,6 +1,6 @@
 const prisma = require('../utils/prisma');
+const materialSvc = require('./material.service');
 
-// ── Include reutilizável ──────────────────────────────────────────────────────
 const _includeSolicitacao = {
   material: {
     select: {
@@ -13,7 +13,6 @@ const _includeSolicitacao = {
   baixas: { orderBy: { criadoEm: 'asc' } },
 };
 
-// ── Helpers ───────────────────────────────────
 function _calcularStatus(quantidade, estoqueMinimo, ativo) {
   if (!ativo) return 'INATIVO';
   const q   = Number(quantidade);
@@ -43,8 +42,6 @@ async function _emUsoMaterial(materialId) {
   }, 0);
 }
 
-// ── Listar materiais (visão produção) ─────────────────────────────────────────
-// Suporta filtros: busca (nome), categoria, status, id, identificador, medida, espessura
 async function listarMateriais({ busca, categoria, status, id, identificador, medida, espessura } = {}) {
   const where = { ativo: true };
 
@@ -75,16 +72,13 @@ async function listarMateriais({ busca, categoria, status, id, identificador, me
   return resultado;
 }
 
-// ── Criar solicitação ─────────────────────────────────────────────────────────
 async function criarSolicitacao({ materialId, descricaoItem, quantidadeReservada, numeroOS, usuarioId, usuarioNome, larguraUsada, comprimentoUsado }) {
   const material = await prisma.material.findUnique({ where: { id: materialId } });
   if (!material || !material.ativo) throw { status: 404, message: 'Material não encontrado ou inativo' };
 
-  // Busca o nome real do usuário no banco para garantir que nunca use o username
   const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId }, select: { nome: true } });
   const nomeReal = usuario?.nome ?? usuarioNome;
 
-  // Normaliza o número da OS: sem espaços extras, maiúsculas
   const numeroOSNorm = (numeroOS ?? '').trim().toUpperCase();
 
   const saldo = Number(material.quantidade);
@@ -101,13 +95,12 @@ async function criarSolicitacao({ materialId, descricaoItem, quantidadeReservada
 
   const qtd = Number(quantidadeReservada);
 
-  // Recalcula status do material sem reserva pendente (solicitação já finalizada)
   const matAtualizado = await prisma.material.findUnique({ where: { id: materialId } });
-  const emUso         = await _emUsoMaterial(materialId); // 0 reservas abertas
+  const emUso         = await _emUsoMaterial(materialId);
   const novoStatus    = _statusComReserva(matAtualizado.quantidade, emUso, matAtualizado.estoqueMinimo, matAtualizado.ativo);
   await prisma.material.update({ where: { id: materialId }, data: { status: novoStatus } });
+  materialSvc.notificarSeCritico(material.status, { ...matAtualizado, status: novoStatus });
 
-  // Cria já finalizada — sem passar por ABERTA/EM_USO
   const solicitacao = await prisma.solicitacaoProducao.create({
     data: {
       numeroOS: numeroOSNorm,
@@ -128,7 +121,6 @@ async function criarSolicitacao({ materialId, descricaoItem, quantidadeReservada
   return solicitacao;
 }
 
-// ── Registrar baixa ───────────────────────────────────────────────────────────
 async function registrarBaixa({ solicitacaoId, quantidade, observacao }) {
   const sol = await prisma.solicitacaoProducao.findUnique({
     where:   { id: solicitacaoId },
@@ -151,7 +143,6 @@ async function registrarBaixa({ solicitacaoId, quantidade, observacao }) {
     data: { solicitacaoId, quantidade: Number(quantidade), observacao: observacao ?? null },
   });
 
-  // Atualiza status para EM_USO, mas NÃO finaliza automaticamente
   const atualizada = await prisma.solicitacaoProducao.update({
     where: { id: solicitacaoId },
     data: {
@@ -165,11 +156,10 @@ async function registrarBaixa({ solicitacaoId, quantidade, observacao }) {
   const emUso  = await _emUsoMaterial(sol.materialId);
   const novoSt = _statusComReserva(mat.quantidade, emUso, mat.estoqueMinimo, mat.ativo);
   await prisma.material.update({ where: { id: sol.materialId }, data: { status: novoSt } });
-
+  materialSvc.notificarSeCritico(sol.material.status, { ...mat, status: novoSt });
   return atualizada;
 }
 
-// ── Finalizar solicitação ─────────────────────────────────────────────────────
 async function finalizarSolicitacao({ solicitacaoId }) {
   const sol = await prisma.solicitacaoProducao.findUnique({
     where:   { id: solicitacaoId },
@@ -201,14 +191,11 @@ async function finalizarSolicitacao({ solicitacaoId }) {
   const emUso  = await _emUsoMaterial(sol.materialId);
   const novoSt = _statusComReserva(mat.quantidade, emUso, mat.estoqueMinimo, mat.ativo);
   await prisma.material.update({ where: { id: sol.materialId }, data: { status: novoSt } });
+  materialSvc.notificarSeCritico(sol.material.status, { ...mat, status: novoSt });
 
   return finalizada;
 }
 
-// ── Excluir registro do histórico ─────────────────────────────────────────────
-// Apenas solicitações FINALIZADAS podem ser excluídas.
-// A exclusão remove somente o registro histórico; o estoque já foi
-// acertado no momento da finalização, portanto não há reversão.
 async function excluirHistorico(solicitacaoId) {
   const sol = await prisma.solicitacaoProducao.findUnique({
     where: { id: solicitacaoId },
@@ -218,11 +205,9 @@ async function excluirHistorico(solicitacaoId) {
     throw { status: 400, message: 'Somente solicitações finalizadas podem ser excluídas do histórico' };
   }
 
-  // BaixaProducao tem onDelete: Cascade, portanto são removidas automaticamente
   await prisma.solicitacaoProducao.delete({ where: { id: solicitacaoId } });
 }
 
-// ── Registrar saída no controle de estoque ────────────────────────────────────
 async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUsado } = {}) {
   const qtdUsada = Number(sol.quantidadeUsada);
   if (qtdUsada <= 0) return;
@@ -230,7 +215,6 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
   const observacao = `Saída via produção – ${sol.usuarioNome}`;
   const numeroOS   = sol.numeroOS;
 
-  // Busca o preço do material (último valor pago registrado)
   const material = sol.material ?? await prisma.material.findUnique({
     where: { id: sol.materialId },
     select: { ultimoValorPago: true, ultimoValorPagoM2: true, largura: true, comprimento: true, unidade: true },
@@ -241,14 +225,9 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
   let precoUnitarioFinal = precoUnitario;
   let precoM2Final       = precoM2;
 
-  // ── Custo proporcional por dimensão usada (igual ao estoque.service.js) ──────
   const _unidadeMat = (material?.unidade ?? '').toLowerCase().trim();
   const _eMetroLinear = ['m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'].includes(_unidadeMat);
 
-  // Para material metro linear, precoM2 (ultimoValorPagoM2) é o custo/m² puro —
-  // que NÃO deve ser multiplicado pela quantidade em metros no relatório.
-  // O valor correto é precoUnitario (custo/metro linear = ultimoValorPago).
-  // Zeramos precoM2Final para que o relatório use apenas precoUnitario.
   if (_eMetroLinear) {
     precoM2Final = null;
   }
@@ -277,7 +256,6 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
     }
   }
 
-  // Busca ou cria a RelacaoOS adequada.
   const osEhNumerica = /^\d+$/.test(numeroOS);
 
   const _d   = new Date();
@@ -340,7 +318,6 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
     },
   });
 
-  // ── Retalho (igual ao estoque.service.js) ────────────────────────────────────
   if (
     !sol.descricaoItem &&
     larguraUsada != null && comprimentoUsado != null &&
@@ -445,7 +422,6 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
   }
 }
 
-// ── Listar solicitações ───────────────────────────────────────────────────────
 async function listarSolicitacoes({ usuarioId, status, busca } = {}) {
   const where = {};
   if (usuarioId) where.usuarioId = usuarioId;
@@ -462,7 +438,6 @@ async function listarSolicitacoes({ usuarioId, status, busca } = {}) {
   });
 }
 
-// ── Buscar uma solicitação ────────────────────────────────────────────────────
 async function buscarSolicitacao(id) {
   const sol = await prisma.solicitacaoProducao.findUnique({
     where:   { id },
@@ -472,7 +447,6 @@ async function buscarSolicitacao(id) {
   return sol;
 }
 
-// ── Listar categorias de materiais ────────────────────────────────────────────
 async function listarCategorias() {
   const cats = await prisma.material.findMany({
     where:    { ativo: true, categoria: { not: null } },

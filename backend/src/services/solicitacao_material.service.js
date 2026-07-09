@@ -2,7 +2,6 @@ const prisma = require('../utils/prisma');
 const path   = require('path');
 const fs     = require('fs');
 
-// ─── SSE ──────────────────────────────────────────────────────────────────────
 const _sseClients = new Map();
 let _nextSseId = 1;
 
@@ -32,10 +31,10 @@ function _broadcast(tipo, dados, excludeUsuarioId) {
   console.log(`[SSE Solicitações] Evento '${tipo}' enviado para ${enviados} cliente(s)`);
 }
 
-// ─── Include base ─────────────────────────────────────────────────────────────
 const _materialSelect = {
   id: true, nome: true, unidade: true, identificador: true,
   medida: true, espessura: true, categoria: true, quantidade: true,
+  largura: true, comprimento: true,
 };
 
 const _includeBase = {
@@ -50,7 +49,6 @@ const _includeBase = {
   },
 };
 
-// ─── Listar ───────────────────────────────────
 async function listar(filtros = {}) {
   const { busca, andamento, materialId, numeroOS, dataInicio, dataFim } = filtros;
   const where = {};
@@ -86,7 +84,6 @@ async function listar(filtros = {}) {
   });
 }
 
-// ─── Buscar por ID ────────────────────────────────────────────────────────────
 async function buscarPorId(id) {
   return prisma.solicitacaoMaterial.findUnique({
     where: { id },
@@ -94,7 +91,6 @@ async function buscarPorId(id) {
   });
 }
 
-// ─── Logs ─────────────────────────────────────
 async function listarLogs(solicitacaoId) {
   return prisma.logEdicaoSolicitacao.findMany({
     where: { solicitacaoId },
@@ -102,7 +98,6 @@ async function listarLogs(solicitacaoId) {
   });
 }
 
-// ─── Validar material ativo ───────────────────────────────────────────────────
 async function _validarMaterial(materialId) {
   const mat = await prisma.material.findUnique({
     where: { id: materialId },
@@ -113,10 +108,23 @@ async function _validarMaterial(materialId) {
   return mat;
 }
 
-// ─── Criar ────────────────────────────────────
-// `data.itens` = [{ materialId, quantidade, observacao?, imagemUrl? }, ...]
+async function verificarOSExiste(numeroOS, ignorarId) {
+  const sol = await prisma.solicitacaoMaterial.findUnique({
+    where: { numeroOS },
+    select: { id: true, numeroOS: true, nomeCliente: true, andamento: true },
+  });
+  if (!sol) return { existe: false };
+  if (ignorarId && sol.id === Number(ignorarId)) return { existe: false };
+  return {
+    existe: true,
+    id: sol.id,
+    numeroOS: sol.numeroOS,
+    nomeCliente: sol.nomeCliente,
+    andamento: sol.andamento,
+  };
+}
+
 async function criar(data, usuarioId, usuarioNome) {
-  // OS única
   const existe = await prisma.solicitacaoMaterial.findUnique({
     where: { numeroOS: data.numeroOS },
   });
@@ -127,7 +135,6 @@ async function criar(data, usuarioId, usuarioNome) {
     };
   }
 
-  // Valida todos os materiais antes de persistir
   const itensRaw = Array.isArray(data.itens) ? data.itens : [];
   if (itensRaw.length === 0) throw { status: 400, message: 'Informe ao menos um material.' };
   for (const item of itensRaw) {
@@ -162,23 +169,24 @@ async function criar(data, usuarioId, usuarioNome) {
     numeroOS:    nova.numeroOS,
     nomeCliente: nova.nomeCliente,
     usuarioNome: nova.usuarioNome,
+    observacao:  nova.observacao,
+    qtdMateriais: nova.itens.length,
     criadoEm:    nova.criadoEm,
   }, usuarioId);
 
   return nova;
 }
 
-// ─── Atualizar cabeçalho (somente ADMIN) ─────────────────────────────────────
-// Apenas campos do cabeçalho da solicitação (não os itens).
 async function atualizar(id, data, editorId, editorNome, editorRole) {
   const sol = await prisma.solicitacaoMaterial.findUnique({ where: { id } });
   if (!sol) throw { status: 404, message: 'Solicitação não encontrada' };
 
-  if (editorRole !== 'ADMIN') {
-    throw { status: 403, message: 'Apenas administradores podem editar uma solicitação existente.' };
+  const ehAdmin   = editorRole === 'ADMIN' || editorRole === 'GERENTE';
+  const ehCriador = sol.usuarioId === editorId;
+  if (!ehAdmin && !ehCriador) {
+    throw { status: 403, message: 'Apenas o criador da solicitação, um gerente ou um administrador pode editar os dados.' };
   }
 
-  // Impede trocar numeroOS para uma OS já usada por outra solicitação
   if (data.numeroOS && data.numeroOS !== sol.numeroOS) {
     const conflito = await prisma.solicitacaoMaterial.findUnique({
       where: { numeroOS: data.numeroOS },
@@ -191,11 +199,9 @@ async function atualizar(id, data, editorId, editorNome, editorRole) {
   if (data.nomeCliente     !== undefined) updateData.nomeCliente     = data.nomeCliente;
   if (data.dataNecessidade !== undefined) updateData.dataNecessidade = new Date(data.dataNecessidade);
   if (data.andamento       !== undefined) {
-    // Valida os únicos estados permitidos
     if (!['EM_ANDAMENTO', 'FINALIZADO'].includes(data.andamento)) {
       throw { status: 400, message: 'Andamento inválido. Valores permitidos: EM_ANDAMENTO, FINALIZADO.' };
     }
-    // Bloqueia finalizar se houver materiais não comprados
     if (data.andamento === 'FINALIZADO') {
       await _verificarTodosComprados(id);
     }
@@ -216,14 +222,21 @@ async function atualizar(id, data, editorId, editorNome, editorRole) {
     await prisma.logEdicaoSolicitacao.create({
       data: { solicitacaoId: id, editorId, editorNome: editorNome ?? 'Desconhecido', antes, depois },
     });
+
+    _broadcast('solicitacao_atualizada', {
+      id:          atualizado.id,
+      numeroOS:    atualizado.numeroOS,
+      nomeCliente: atualizado.nomeCliente,
+      editorNome:  editorNome ?? 'Desconhecido',
+      acao:        'edicao_dados',
+      antes,
+      depois,
+    }, editorId);
   }
 
   return atualizado;
 }
 
-// ─── Adicionar materiais extras (adicional) ───────────────────────────────────
-// Apenas o criador da solicitação ou um ADMIN pode adicionar materiais.
-// `itens` = [{ materialId, quantidade, observacao?, imagemUrl? }, ...]
 async function adicionarMateriais(solicitacaoId, itens, usuarioId, usuarioNome, usuarioRole) {
   const sol = await prisma.solicitacaoMaterial.findUnique({ where: { id: solicitacaoId } });
   if (!sol) throw { status: 404, message: 'Solicitação não encontrada' };
@@ -253,7 +266,6 @@ async function adicionarMateriais(solicitacaoId, itens, usuarioId, usuarioNome, 
           imagemUrl:         item.imagemUrl         ?? null,
           adicionadoPorId:   usuarioId,
           adicionadoPorNome: usuarioNome,
-          // adicionadoEm = default(now())
         },
         include: { material: { select: _materialSelect } },
       })
@@ -267,9 +279,11 @@ async function adicionarMateriais(solicitacaoId, itens, usuarioId, usuarioNome, 
   });
 
   _broadcast('solicitacao_atualizada', {
-    id:       solicitacaoId,
-    numeroOS: sol.numeroOS,
-    tipo:     'adicional',
+    id:          solicitacaoId,
+    numeroOS:    sol.numeroOS,
+    nomeCliente: sol.nomeCliente,
+    editorNome:  usuarioNome ?? 'Desconhecido',
+    acao:        'adicao_material',
   }, usuarioId);
 
   return atualizado;
@@ -352,8 +366,8 @@ async function _verificarTodosComprados(solicitacaoId) {
   }
 }
 
-// ─── Excluir ──────────────────────────────────────────────────────────────────
-async function excluir(id) {
+// ─── Excluir ──────────────────────────────────
+async function excluir(id, usuarioId, usuarioRole) {
   const sol = await prisma.solicitacaoMaterial.findUnique({
     where: { id },
     include: {
@@ -362,6 +376,13 @@ async function excluir(id) {
     },
   });
   if (!sol) throw { status: 404, message: 'Solicitação não encontrada' };
+
+  // Permite ADMIN, GERENTE ou o próprio criador da solicitação excluir
+  const ehAdmin   = usuarioRole === 'ADMIN' || usuarioRole === 'GERENTE';
+  const ehCriador = sol.usuarioId === usuarioId;
+  if (!ehAdmin && !ehCriador) {
+    throw { status: 403, message: 'Apenas o criador da solicitação, um gerente ou um administrador pode excluir.' };
+  }
 
   // Remove arquivos de imagem do disco
   const _rmImagem = (url) => {
@@ -373,6 +394,160 @@ async function excluir(id) {
   sol.adicionais.forEach((a) => _rmImagem(a.imagemUrl));
 
   return prisma.solicitacaoMaterial.delete({ where: { id } });
+}
+
+// ─── Autorização para editar/excluir um material de uma solicitação ─────────
+// Regra igual à edição do cabeçalho: ADMIN/GERENTE ou o próprio criador da
+// solicitação, e apenas enquanto ela não estiver FINALIZADA.
+async function _autorizarEdicaoMaterial(solicitacaoId, usuarioId, usuarioRole) {
+  const sol = await prisma.solicitacaoMaterial.findUnique({ where: { id: solicitacaoId } });
+  if (!sol) throw { status: 404, message: 'Solicitação não encontrada' };
+
+  const ehAdmin   = usuarioRole === 'ADMIN' || usuarioRole === 'GERENTE';
+  const ehCriador = sol.usuarioId === usuarioId;
+  if (!ehAdmin && !ehCriador) {
+    throw { status: 403, message: 'Apenas o criador da solicitação, um gerente ou um administrador pode editar os materiais.' };
+  }
+  if (sol.andamento === 'FINALIZADO') {
+    throw { status: 400, message: 'Solicitação finalizada. Reabra-a para editar os materiais.' };
+  }
+  return sol;
+}
+
+// ─── Editar quantidade/observação de um item ou adicional ───────────────────
+async function atualizarItem(tipo, itemId, data, usuarioId, usuarioNome, usuarioRole) {
+  const model = tipo === 'item'
+    ? prisma.itemSolicitacaoMaterial
+    : prisma.adicionalSolicitacaoMaterial;
+
+  const registro = await model.findUnique({
+    where: { id: itemId },
+    include: { material: { select: _materialSelect } },
+  });
+  if (!registro) throw { status: 404, message: 'Item não encontrado.' };
+
+  const sol = await _autorizarEdicaoMaterial(registro.solicitacaoId, usuarioId, usuarioRole);
+
+  const updateData = {};
+  const antes = { quantidade: registro.quantidade, observacao: registro.observacao };
+
+  if (data.quantidade !== undefined) {
+    const qtd = Number(data.quantidade);
+    if (!Number.isFinite(qtd) || qtd <= 0) {
+      throw { status: 400, message: 'Quantidade inválida.' };
+    }
+    updateData.quantidade = qtd;
+  }
+  if (data.observacao !== undefined) {
+    updateData.observacao = data.observacao === '' ? null : data.observacao;
+  }
+
+  const depois = {
+    quantidade: updateData.quantidade !== undefined ? updateData.quantidade : registro.quantidade,
+    observacao: updateData.observacao !== undefined ? updateData.observacao : registro.observacao,
+  };
+  const houveMudanca = JSON.stringify(antes) !== JSON.stringify(depois);
+
+  if (houveMudanca) {
+    updateData.editadoEm = new Date();
+    updateData.editadoPorNome = usuarioNome ?? 'Desconhecido';
+  }
+
+  const atualizado = await model.update({
+    where: { id: itemId },
+    data: updateData,
+    include: { material: { select: _materialSelect } },
+  });
+
+  if (houveMudanca && usuarioId) {
+    await prisma.logEdicaoSolicitacao.create({
+      data: {
+        solicitacaoId: registro.solicitacaoId,
+        editorId:      usuarioId,
+        editorNome:    usuarioNome ?? 'Desconhecido',
+        antes,
+        depois,
+        // Contexto (não é um campo alterado em si, mas identifica qual
+        // material foi editado — usado pela aba Histórico para exibir
+        // uma legenda antes do diff de campos).
+        item: `${registro.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
+      },
+    });
+
+    _broadcast('solicitacao_atualizada', {
+      id:          registro.solicitacaoId,
+      numeroOS:    sol.numeroOS,
+      nomeCliente: sol.nomeCliente,
+      editorNome:  usuarioNome ?? 'Desconhecido',
+      acao:        'edicao_material',
+      item:        `${registro.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
+      antes,
+      depois,
+    }, usuarioId);
+  }
+
+  return atualizado;
+}
+
+// ─── Remover um item ou adicional de uma solicitação ─────────────────────────
+async function excluirItem(tipo, itemId, usuarioId, usuarioNome, usuarioRole) {
+  const model = tipo === 'item'
+    ? prisma.itemSolicitacaoMaterial
+    : prisma.adicionalSolicitacaoMaterial;
+
+  const registro = await model.findUnique({
+    where: { id: itemId },
+    include: { material: { select: _materialSelect } },
+  });
+  if (!registro) throw { status: 404, message: 'Item não encontrado.' };
+
+  const sol = await _autorizarEdicaoMaterial(registro.solicitacaoId, usuarioId, usuarioRole);
+
+  const [itensCount, adicionaisCount] = await Promise.all([
+    prisma.itemSolicitacaoMaterial.count({ where: { solicitacaoId: registro.solicitacaoId } }),
+    prisma.adicionalSolicitacaoMaterial.count({ where: { solicitacaoId: registro.solicitacaoId } }),
+  ]);
+  if (itensCount + adicionaisCount <= 1) {
+    throw {
+      status: 400,
+      message: 'Não é possível excluir o único material da solicitação. Exclua a solicitação inteira, se necessário.',
+    };
+  }
+
+  if (registro.imagemUrl) {
+    const disco = path.join(__dirname, '..', 'uploads', 'solicitacoes', path.basename(registro.imagemUrl));
+    fs.unlink(disco, () => {});
+  }
+
+  await model.delete({ where: { id: itemId } });
+
+  if (usuarioId) {
+    await prisma.logEdicaoSolicitacao.create({
+      data: {
+        solicitacaoId: registro.solicitacaoId,
+        editorId:      usuarioId,
+        editorNome:    usuarioNome ?? 'Desconhecido',
+        antes: { quantidade: registro.quantidade, observacao: registro.observacao },
+        depois: { excluido: true },
+        // Contexto: nome do material removido — consumido pela aba Histórico
+        // para exibir "Material removido: <nome>" em vez de um diff de campos.
+        item: `${registro.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
+      },
+    });
+  }
+
+  _broadcast('solicitacao_atualizada', {
+    id:          registro.solicitacaoId,
+    numeroOS:    sol.numeroOS,
+    nomeCliente: sol.nomeCliente,
+    editorNome:  usuarioNome ?? 'Desconhecido',
+    acao:        'exclusao_material',
+    materialNome: registro.material?.nome,
+    item:        `${registro.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
+    antes:       { quantidade: registro.quantidade, observacao: registro.observacao },
+    depois:      { excluido: true },
+  }, usuarioId);
+  return { solicitacaoId: registro.solicitacaoId };
 }
 
 // ─── Contar novas ─────────────────────────────────────────────────────────────
@@ -417,10 +592,13 @@ async function marcarTodasComoVisualizadas(usuarioId) {
 module.exports = {
   listar,
   buscarPorId,
+  verificarOSExiste,
   criar,
   atualizar,
   adicionarMateriais,
   marcarComprado,
+  atualizarItem,
+  excluirItem,
   excluir,
   listarLogs,
   registrarSseCliente,

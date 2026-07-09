@@ -1,6 +1,6 @@
 const prisma = require('../utils/prisma');
+const materialSvc = require('./material.service');
 
-// ── include reutilizável ──────────────────────────────────────────────────────
 const _includeMovimentacoes = {
   movimentacoes: {
     include: {
@@ -18,7 +18,6 @@ const _includeMovimentacoes = {
   },
 };
 
-// ── Controle de Estoque: apenas OS EM_ANDAMENTO ───────────────────────────────
 async function listarEmAndamento(busca) {
   const where = { status: 'EM_ANDAMENTO' };
   if (busca) where.numeroOS = { contains: busca, mode: 'insensitive' };
@@ -38,18 +37,11 @@ async function buscarPorNumeroOS(numeroOS) {
   });
 }
 
-// ── Registrar movimentação ────────────────────────────────────────────────────
 async function registrarMovimentacao({
   materialId, tipo, quantidade, numeroOS,
   precoUnitario, precoM2, observacao, ordemCompraId, descricaoItem,
-  // Dimensões usadas na saída (apenas para materiais UNIDADE com largura/comprimento)
   larguraUsada, comprimentoUsado,
-  // Quando esta movimentação é uma ENTRADA de retalho (reentrada manual via
-  // controle de estoque), aponta para o materialId que foi consumido na
-  // saída original — usado para abater o valor do retalho do custo líquido
-  // da saída original em relatórios e gastos.
   materialOrigemId,
-  // Nome do usuário autenticado que registrou a movimentação
   usuarioNome,
 }) {
   const material = await prisma.material.findUnique({ where: { id: materialId } });
@@ -57,7 +49,6 @@ async function registrarMovimentacao({
   
   const osEhNumerica = /^\d+$/.test(numeroOS);
   const osTemSufixo  = /#(OC|S|E)/.test(numeroOS);
-  // Verifica se OS não está fechada (busca a mais recente com esse numeroOS)
   if (osEhNumerica) {
     const relacaoExistente = await prisma.relacaoOS.findFirst({
       where: { numeroOS },
@@ -84,26 +75,17 @@ async function registrarMovimentacao({
 
   const delta = tipo === 'ENTRADA' ? quantidade : -quantidade;
 
-  // Resolve qual RelacaoOS usar:
-  // 1. OS numérica ou com sufixo (#OC/#S/#E): upsert direto pelo numeroOS exato.
-  // 2. OS textual sem sufixo: verifica se já existe uma RelacaoOS EM_ANDAMENTO
-  //    com esse numeroOS (ex: criada pela produção). Se existir, reutiliza.
-  //    Só cria nova com sufixo de timestamp quando não houver nenhuma aberta.
-  
   let relacao;
 
   if (osEhNumerica || osTemSufixo) {
-    // OS numérica ou com sufixo: upsert garante uma única relação por chave exata
     relacao = await prisma.relacaoOS.upsert({
       where:  { numeroOS },
       create: { numeroOS, status: 'EM_ANDAMENTO' },
       update: {},
     });
   } else {
-    // OS textual sem sufixo: tenta reutilizar RelacaoOS EM_ANDAMENTO existente
-    // (inclui a OS com o nome exato OU com sufixo de data do dia de hoje)
     const _d   = new Date();
-    const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`; // "DD-MM-YYYY"
+    const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`;
 
     const relacaoAberta = await prisma.relacaoOS.findFirst({
       where: {
@@ -117,10 +99,8 @@ async function registrarMovimentacao({
     });
 
     if (relacaoAberta) {
-      // Já existe uma OS aberta com esse nome (ou com sufixo de data de hoje) — reutiliza
       relacao = relacaoAberta;
     } else {
-      // Não existe nenhuma aberta: cria nova com sufixo de data (mesmo padrão do producao_service)
       let candidato  = `${numeroOS}-${hoje}`;
       let sufixoSeq  = 1;
 
@@ -141,21 +121,6 @@ async function registrarMovimentacao({
   }
   const precoUnitarioFinal = precoUnitario ?? null;
 
-  // ── Custo proporcional por dimensão usada ─────────────────────────────────
-  // Apenas para materiais UNIDADE (chapa/peça) com dimensões cadastradas,
-  // quando o usuário informa larguraUsada × comprimentoUsado.
-  //
-  // Materiais metro linear (m, m/l…) NÃO passam por aqui: o front já envia
-  // precoM2 = custoM2 × largura (custo por metro linear), e o relatório calcula
-  // custo total = quantidade(metros) × precoM2. Não há segunda multiplicação.
-  //
-  // Para chapas, a fórmula é:
-  //   areaUsada     = larguraUsada × comprimentoUsado
-  //   custoM2       = precoM2 do material (R$/m²)
-  //   precoM2Final  = custoM2 × areaUsada   (custo total desta saída)
-  //
-  // Como a quantidade é sempre 1 UNIDADE, salvar o custo total como precoM2
-  // garante que quantidade(1) × precoM2Final = custo real no relatório.
   const _unidadeMat = (material.unidade ?? '').toLowerCase().trim();
   const _eMetroLinear = ['m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'].includes(_unidadeMat);
 
@@ -174,27 +139,22 @@ async function registrarMovimentacao({
     if (larg > 0 && comp > 0 && largTotal > 0 && compTotal > 0) {
       const areaUsada = larg * comp;
       const areaTotal = largTotal * compTotal;
-      // Custo por m²: usa precoM2 enviado, senão deriva do precoUnitario ÷ areaTotal
       const custoM2 = precoM2 != null
         ? Number(precoM2)
         : (precoUnitario != null && areaTotal > 0
             ? Number(precoUnitario) / areaTotal
             : null);
       if (custoM2 != null) {
-        // Arredonda para 6 casas decimais (precisão do campo Decimal(15,6))
         precoM2Final = Math.round(custoM2 * areaUsada * 1000000) / 1000000;
       }
     }
   }
 
-  // Monta observação: a mensagem automática (tipo + usuário) sempre aparece;
-  // se o usuário preencher uma observação, ela é adicionada abaixo, não substitui.
   const obsAutomatica = `${tipo === 'SAIDA' ? 'Saída' : 'Entrada'} via controle de estoque – ${usuarioNome ?? 'Usuário'}`;
   const obsFinal = (observacao && observacao.trim())
     ? `${obsAutomatica}\n${observacao.trim()}`
     : obsAutomatica;
 
-  // Cria a movimentação
   const [movimentacao] = await prisma.$transaction([
     prisma.movimentacaoEstoque.create({
       data: {
@@ -217,26 +177,17 @@ async function registrarMovimentacao({
       where: { id: materialId },
       data:  { quantidade: { increment: delta } },
     }),
-    // Toca explicitamente atualizadoEm da RelacaoOS: o upsert/findFirst acima
-    // não conta como "update" da relação para fins de @updatedAt, então sem
-    // isso a OS continuava ordenada pela data de criação mesmo após receber
-    // novas movimentações (ex.: saída registrada dias depois da OS criada).
     prisma.relacaoOS.update({
       where: { id: relacao.id },
       data:  { atualizadoEm: new Date() },
     }),
   ]);
 
-  // Recalcula status do material
   const atualizado = await prisma.material.findUnique({ where: { id: materialId } });
   const novoStatus = _calcularStatus(atualizado.quantidade, atualizado.estoqueMinimo, atualizado.ativo);
   await prisma.material.update({ where: { id: materialId }, data: { status: novoStatus } });
+  materialSvc.notificarSeCritico(material.status, { ...atualizado, status: novoStatus });
 
-  // ── Retalho ───────────────────────────────────────────────────────────────
-  // Quando o usuário informa dimensão usada numa saída de material UNIDADE,
-  // a área restante (areaTotal − areaUsada) é creditada diretamente no
-  // cadastro do material retalho — sem criar movimentação de estoque.
-  // O retalho é identificado por: mesmo nome + identificador 'RETALHO' + espessura.
   if (
     tipo === 'SAIDA' &&
     larguraUsada != null && comprimentoUsado != null &&
@@ -253,7 +204,6 @@ async function registrarMovimentacao({
       const areaRetalho = Math.round((areaTotal - areaUsada) * 10000) / 10000;
 
       if (areaRetalho > 0.0001) {
-        // Busca material retalho existente: mesmo nome + 'RETALHO' + espessura
         let retalhoMat = await prisma.material.findFirst({
           where: {
             nome:          { equals: material.nome, mode: 'insensitive' },
@@ -264,37 +214,24 @@ async function registrarMovimentacao({
           },
         });
 
-        // Custo por m² do retalho:
-        // Se o material tem precoM2 enviado na movimentação → usa direto.
-        // Caso contrário, deriva do preço unitário ÷ área total da chapa.
-        // O retalho é sempre em M2, portanto NÃO copia ultimoValorPago (unitário).
         const custoM2Retalho = (() => {
-          // precoM2 no escopo desta saída (calculado acima)
           if (precoM2Final != null && precoM2Final > 0) {
-            // precoM2Final já é o custo proporcional da área usada —
-            // precisamos do custo *por m²*, não do total da saída.
-            // Como precoM2Final = custoM2 × areaUsada, revertemos:
             const areaUsada = Number(larguraUsada) * Number(comprimentoUsado);
             if (areaUsada > 0) return precoM2Final / areaUsada;
           }
-          // Tenta derivar do precoUnitario ÷ areaTotal
           const pu = precoUnitario != null ? Number(precoUnitario) : null;
           const areaT = Number(material.largura) * Number(material.comprimento);
           if (pu != null && pu > 0 && areaT > 0) return pu / areaT;
-          // Último recurso: valor já gravado no material
           return material.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null;
         })();
 
         if (!retalhoMat) {
-          // Cria o material retalho — a quantidade já nasce com areaRetalho
           try {
             retalhoMat = await prisma.material.create({
               data: {
                 nome:              material.nome,
-                unidade:           'M2',
+                unidade:           'M²',
                 categoria:         material.categoria   ?? null,
-                // Retalho não herda a medida da chapa de origem (ex.: "2X1"):
-                // a medida representa o tamanho da chapa inteira, não da sobra.
                 medida:            null,
                 espessura:         material.espessura   ?? null,
                 identificador:     'RETALHO',
@@ -303,15 +240,11 @@ async function registrarMovimentacao({
                 status:            _calcularStatus(areaRetalho, 0, true),
                 estoqueConfirmado: false,
                 ativo:             true,
-                // Retalho é medido em M2: apenas custo/m² faz sentido
                 ultimoValorPago:   null,
                 ultimoValorPagoM2: custoM2Retalho,
               },
             });
           } catch (err) {
-            // Unique constraint [nome, medida, espessura]: já existe material com
-            // esse nome/medida/espessura mas identificador diferente de 'RETALHO'.
-            // Recupera e incrementa a quantidade nele.
             if (err?.code === 'P2002') {
               retalhoMat = await prisma.material.findFirst({
                 where: {
@@ -336,15 +269,13 @@ async function registrarMovimentacao({
             }
           }
         } else {
-          // Retalho já existe — incrementa quantidade, recalcula status
-          // e atualiza custo/m² se temos um valor calculado
           const novaQtd = Number(retalhoMat.quantidade) + areaRetalho;
           await prisma.material.update({
             where: { id: retalhoMat.id },
             data: {
               quantidade:        novaQtd,
               status:            _calcularStatus(novaQtd, Number(retalhoMat.estoqueMinimo), retalhoMat.ativo),
-              ultimoValorPago:   null, // retalho é M2, não tem custo unitário
+              ultimoValorPago:   null,
               ...(custoM2Retalho != null ? { ultimoValorPagoM2: custoM2Retalho } : {}),
             },
           });
@@ -360,7 +291,6 @@ async function removerMovimentacao(movimentacaoId) {
   const mov = await prisma.movimentacaoEstoque.findUnique({ where: { id: movimentacaoId } });
   if (!mov) throw { status: 404, message: 'Movimentação não encontrada' };
 
-  // Busca a relação pelo id que está na própria movimentação (sempre preciso)
   const relacao = await prisma.relacaoOS.findUnique({ where: { id: mov.relacaoOSId } });
   if (relacao?.status === 'FECHADA') {
     throw { status: 400, message: 'Não é possível remover movimentações de uma OS fechada' };
@@ -368,8 +298,45 @@ async function removerMovimentacao(movimentacaoId) {
 
   const material = await prisma.material.findUnique({ where: { id: mov.materialId } });
 
-  // Reverte o delta
   const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
+
+  // Se esta SAÍDA usou o modo dimensional (larguraUsada/comprimentoUsado),
+  // ela pode ter gerado/incrementado um material RETALHO com a área
+  // sobrante (ver registrarMovimentacao). Ao excluir a movimentação,
+  // essa área precisa ser revertida do retalho também — senão o retalho
+  // fica com uma quantidade "fantasma" que nunca existiu.
+  let retalhoParaReverter = null;
+  if (
+    mov.tipo === 'SAIDA' &&
+    mov.larguraUsada != null && mov.comprimentoUsado != null &&
+    material?.largura != null && material?.comprimento != null
+  ) {
+    const larg      = Number(mov.larguraUsada);
+    const comp      = Number(mov.comprimentoUsado);
+    const largTotal = Number(material.largura);
+    const compTotal = Number(material.comprimento);
+
+    if (larg > 0 && comp > 0 && largTotal > 0 && compTotal > 0) {
+      const areaTotal   = largTotal * compTotal;
+      const areaUsada   = larg * comp;
+      const areaRetalho = Math.round((areaTotal - areaUsada) * 10000) / 10000;
+
+      if (areaRetalho > 0.0001) {
+        const retalhoMat = await prisma.material.findFirst({
+          where: {
+            nome:          { equals: material.nome, mode: 'insensitive' },
+            identificador: { equals: 'RETALHO',    mode: 'insensitive' },
+            espessura:     material.espessura
+              ? { equals: material.espessura, mode: 'insensitive' }
+              : null,
+          },
+        });
+        if (retalhoMat) {
+          retalhoParaReverter = { id: retalhoMat.id, areaRetalho };
+        }
+      }
+    }
+  }
 
   await prisma.$transaction([
     prisma.movimentacaoEstoque.delete({ where: { id: movimentacaoId } }),
@@ -377,21 +344,38 @@ async function removerMovimentacao(movimentacaoId) {
       where: { id: mov.materialId },
       data:  { quantidade: { increment: delta } },
     }),
+    ...(retalhoParaReverter
+      ? [prisma.material.update({
+          where: { id: retalhoParaReverter.id },
+          data:  { quantidade: { decrement: retalhoParaReverter.areaRetalho } },
+        })]
+      : []),
   ]);
 
   const mat      = await prisma.material.findUnique({ where: { id: mov.materialId } });
   const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
   await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
+  materialSvc.notificarSeCritico(material.status, { ...mat, status: novoStatus });
 
-  // Se a RelacaoOS ficou sem movimentações, exclui ela
+  if (retalhoParaReverter) {
+    const retalhoMatAntes = await prisma.material.findUnique({ where: { id: retalhoParaReverter.id } });
+    // Protege contra quantidade negativa caso o retalho já tenha sido
+    // parcialmente consumido por outras movimentações antes da exclusão.
+    const qtdFinal = Math.max(0, Number(retalhoMatAntes.quantidade));
+    const statusRetalho = _calcularStatus(qtdFinal, Number(retalhoMatAntes.estoqueMinimo), retalhoMatAntes.ativo);
+    await prisma.material.update({
+      where: { id: retalhoParaReverter.id },
+      data:  { quantidade: qtdFinal, status: statusRetalho },
+    });
+    materialSvc.notificarSeCritico(retalhoMatAntes.status, { ...retalhoMatAntes, quantidade: qtdFinal, status: statusRetalho });
+  }
+
   const count = await prisma.movimentacaoEstoque.count({ where: { relacaoOSId: relacao.id } });
   if (count === 0) {
     await prisma.relacaoOS.delete({ where: { id: relacao.id } });
     return { relacaoExcluida: true };
   }
 
-  // Remoção também é uma alteração da OS — sem isso a remoção da última
-  // saída de um material, por exemplo, não refletiria em atualizadoEm.
   await prisma.relacaoOS.update({
     where: { id: relacao.id },
     data:  { atualizadoEm: new Date() },
@@ -400,9 +384,6 @@ async function removerMovimentacao(movimentacaoId) {
   return { relacaoExcluida: false };
 }
 
-// ── Excluir RelacaoOS inteira ─────────────────────────────────────────────────
-// Recebe o id da RelacaoOS (não o numeroOS) para identificar unicamente a relação,
-// já que OS textuais podem ter múltiplas relações com o mesmo numeroOS.
 async function excluirRelacaoOS(relacaoOSId) {
   const relacao = await prisma.relacaoOS.findUnique({
     where:   { id: relacaoOSId },
@@ -413,9 +394,11 @@ async function excluirRelacaoOS(relacaoOSId) {
     throw { status: 400, message: 'Não é possível excluir uma OS fechada' };
   }
 
-  // Reverte todas as movimentações
   for (const mov of relacao.movimentacoes) {
     const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
+
+    const statusAntes = mov.material?.status
+      ?? (await prisma.material.findUnique({ where: { id: mov.materialId } }))?.status;
 
     await prisma.material.update({
       where: { id: mov.materialId },
@@ -424,14 +407,13 @@ async function excluirRelacaoOS(relacaoOSId) {
     const mat = await prisma.material.findUnique({ where: { id: mov.materialId } });
     const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
     await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
+    materialSvc.notificarSeCritico(statusAntes, { ...mat, status: novoStatus });
   }
 
   await prisma.movimentacaoEstoque.deleteMany({ where: { relacaoOSId: relacao.id } });
   await prisma.relacaoOS.delete({ where: { id: relacao.id } });
 }
 
-// ── Fechar OS ─────────────────────────────────────────────────────────────────
-// Recebe o id da RelacaoOS para identificar unicamente a relação.
 async function fecharOS(relacaoOSId) {
   const relacao = await prisma.relacaoOS.findUnique({ where: { id: relacaoOSId } });
   if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
@@ -446,7 +428,6 @@ async function fecharOS(relacaoOSId) {
   });
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function _calcularStatus(quantidade, estoqueMinimo, ativo) {
   if (!ativo) return 'INATIVO';
   const q   = Number(quantidade);
@@ -467,11 +448,6 @@ async function listarTodas(busca) {
   });
 }
 
-// ── Atualizar preço de uma movimentação existente ─────────────────────────────
-// Permite corrigir o custo de uma movimentação sem precisar removê-la e
-// recriá-la. A OS deve estar EM_ANDAMENTO.
-// Registra um AuditLogMaterial com acao='CUSTO_MANUAL' para cada campo alterado,
-// incluindo quem fez a alteração (usuario.id / usuario.nome) e a data (automática).
 async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, precoM2 }, usuario) {
   const mov = await prisma.movimentacaoEstoque.findUnique({
     where:   { id: movimentacaoId },
@@ -490,7 +466,6 @@ async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, preco
     throw { status: 400, message: 'Nenhum campo de preço informado' };
   }
 
-  // ── Monta entradas de audit (captura valorAntes antes de atualizar) ──────────
   const _fmt = (v) => v != null ? `R$ ${Number(v).toFixed(6)}` : null;
 
   const auditEntries = [];
@@ -519,7 +494,6 @@ async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, preco
     });
   }
 
-  // ── Persiste atualização + audit logs em uma única transação ─────────────────
   const [movimentacaoAtualizada] = await prisma.$transaction([
     prisma.movimentacaoEstoque.update({
       where: { id: movimentacaoId },
@@ -534,7 +508,6 @@ async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, preco
       },
     }),
     ...auditEntries.map((entry) => prisma.auditLogMaterial.create({ data: entry })),
-    // Correção de custo também é uma alteração da OS.
     prisma.relacaoOS.update({
       where: { id: mov.relacaoOSId },
       data:  { atualizadoEm: new Date() },
@@ -544,7 +517,6 @@ async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, preco
   return movimentacaoAtualizada;
 }
 
-// ── Renomear OS ───────────────────────────────────────────────────────────────
 async function renomearOS(id, novoNumeroOS) {
   const novoNome = (novoNumeroOS ?? '').trim().toUpperCase();
   if (!novoNome) throw { status: 400, message: 'Nome da OS não pode ser vazio' };
@@ -552,20 +524,17 @@ async function renomearOS(id, novoNumeroOS) {
   const relacao = await prisma.relacaoOS.findUnique({ where: { id } });
   if (!relacao) throw { status: 404, message: 'OS não encontrada' };
 
-  // Garante que não existe outra RelacaoOS com o mesmo nome
   const conflito = await prisma.relacaoOS.findUnique({ where: { numeroOS: novoNome } });
   if (conflito && conflito.id !== id) {
     throw { status: 409, message: `Já existe uma OS com o nome "${novoNome}"` };
   }
 
-  // Atualiza o nome na RelacaoOS
   const atualizada = await prisma.relacaoOS.update({
     where: { id },
     data:  { numeroOS: novoNome },
     include: _includeMovimentacoes,
   });
 
-  // Sincroniza o campo numeroOS em todas as movimentações vinculadas
   await prisma.movimentacaoEstoque.updateMany({
     where: { relacaoOSId: id },
     data:  { numeroOS: novoNome },

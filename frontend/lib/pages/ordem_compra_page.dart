@@ -261,14 +261,17 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                   ],
                 ),
                 const Spacer(),
-                FilledButton.icon(
-                  onPressed: _abrirCriacaoOC,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Nova OC'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                Tooltip(
+                  message: 'Criar nova ordem de compra',
+                  child: FilledButton.icon(
+                    onPressed: _abrirCriacaoOC,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Nova OC'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                   ),
                 ),
                 SizedBox(width: 12),
@@ -280,7 +283,7 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                  ),
+                  ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                 ),
               ],
             ),
@@ -1061,54 +1064,66 @@ class _OcCardState extends State<_OcCard> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  OutlinedButton.icon(
-                    onPressed: widget.onAbrirPdf,
-                    icon: Icon(Icons.picture_as_pdf_outlined, size: 16),
-                    label: Text('PDF'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      textStyle: const TextStyle(fontSize: 13),
+                  Tooltip(
+                    message: 'Abrir PDF da ordem',
+                    child: OutlinedButton.icon(
+                      onPressed: widget.onAbrirPdf,
+                      icon: Icon(Icons.picture_as_pdf_outlined, size: 16),
+                      label: Text('PDF'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: widget.onEditar,
-                    icon: const Icon(Icons.edit_outlined, size: 16),
-                    label: const Text('Editar'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.primary,
-                      side: const BorderSide(color: AppTheme.primary),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      textStyle: const TextStyle(fontSize: 13),
+                  Tooltip(
+                    message: 'Editar ordem de compra',
+                    child: OutlinedButton.icon(
+                      onPressed: widget.onEditar,
+                      icon: const Icon(Icons.edit_outlined, size: 16),
+                      label: const Text('Editar'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primary,
+                        side: const BorderSide(color: AppTheme.primary),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: widget.onCancelar,
-                    icon: const Icon(Icons.close, size: 16),
-                    label: const Text('Cancelar'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.error,
-                      side: const BorderSide(color: AppTheme.error),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      textStyle: const TextStyle(fontSize: 13),
+                  Tooltip(
+                    message: 'Cancelar ordem de compra',
+                    child: OutlinedButton.icon(
+                      onPressed: widget.onCancelar,
+                      icon: const Icon(Icons.close, size: 16),
+                      label: const Text('Cancelar'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.error,
+                        side: const BorderSide(color: AppTheme.error),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: widget.onFinalizar,
-                    icon: const Icon(Icons.check, size: 16),
-                    label: const Text('Finalizar'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.success,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      textStyle: const TextStyle(fontSize: 13),
+                  Tooltip(
+                    message: 'Finalizar ordem de compra',
+                    child: FilledButton.icon(
+                      onPressed: widget.onFinalizar,
+                      icon: const Icon(Icons.check, size: 16),
+                      label: const Text('Finalizar'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.success,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ),
                 ],
@@ -1119,29 +1134,35 @@ class _OcCardState extends State<_OcCard> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  OutlinedButton.icon(
-                    onPressed: widget.onAbrirPdf,
-                    icon: Icon(Icons.picture_as_pdf_outlined, size: 16),
-                    label: Text('PDF'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      textStyle: const TextStyle(fontSize: 13),
+                  Tooltip(
+                    message: 'Abrir PDF da ordem',
+                    child: OutlinedButton.icon(
+                      onPressed: widget.onAbrirPdf,
+                      icon: Icon(Icons.picture_as_pdf_outlined, size: 16),
+                      label: Text('PDF'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: widget.onReverter,
-                    icon: const Icon(Icons.undo, size: 16),
-                    label: const Text('Reverter'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFB45309),
-                      side: const BorderSide(color: Color(0xFFB45309)),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      textStyle: const TextStyle(fontSize: 13),
+                  Tooltip(
+                    message: 'Reverter ordem finalizada',
+                    child: OutlinedButton.icon(
+                      onPressed: widget.onReverter,
+                      icon: const Icon(Icons.undo, size: 16),
+                      label: const Text('Reverter'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFB45309),
+                        side: const BorderSide(color: Color(0xFFB45309)),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ),
                 ],
@@ -1361,9 +1382,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
         final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
         return m.id == _ordem.id;
       }, orElse: () => _ordem);
-      final atualizado = raw is OrdemCompraModel
-          ? raw
-          : OrdemCompraModel.fromJson(raw as Map<String, dynamic>);
+      final atualizado = raw;
       if (mounted) setState(() { _ordem = atualizado; });
     }
   }
@@ -1422,24 +1441,10 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
             // ── Cabeçalho ──────────────────────────────────────────────────
             Row(
               children: [
-                InkWell(
+                _BotaoVoltar(
+                  label: 'Ordens de Compra',
+                  tooltip: 'Voltar para a lista de ordens de compra',
                   onTap: () => Navigator.of(context).pop(),
-                  borderRadius: BorderRadius.circular(10),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        SizedBox(width: 6),
-                        Text('Ordens de Compra', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.w500)),
-                      ],
-                    ),
-                  ),
                 ),
                 SizedBox(width: 16),
                 Text('OC #${_ordem.id}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: Theme.of(context).colorScheme.onSurface)),
@@ -1451,6 +1456,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                   label: 'PDF',
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                   onPressed: _abrirPdf,
+                  tooltip: 'Gerar e abrir PDF desta ordem',
                 ),
                 if (emAndamento) ...[
                   const SizedBox(width: 8),
@@ -1459,6 +1465,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                     label: 'Cancelar',
                     color: AppTheme.error,
                     onPressed: _processando ? null : _confirmarCancelar,
+                    tooltip: 'Cancelar esta ordem de compra',
                   ),
                   const SizedBox(width: 8),
                   _headerActionButton(
@@ -1466,6 +1473,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                     label: 'Editar',
                     color: AppTheme.primary,
                     onPressed: _processando ? null : _abrirEdicao,
+                    tooltip: 'Editar dados da ordem de compra',
                   ),
                   const SizedBox(width: 8),
                   _headerActionButton(
@@ -1474,6 +1482,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                     color: AppTheme.success,
                     filled: true,
                     onPressed: _processando ? null : _confirmarFinalizar,
+                    tooltip: 'Finalizar e dar entrada no estoque',
                   ),
                 ],
                 if (_ordem.status == 'FINALIZADO') ...[
@@ -1483,17 +1492,22 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                     label: 'Reverter',
                     color: Color(0xFFB45309),
                     onPressed: _processando ? null : _confirmarReverter,
+                    tooltip: 'Reverter finalização desta ordem',
                   ),
                 ],
                 SizedBox(width: 8),
-                IconButton(
-                  onPressed: _recarregar,
-                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  tooltip: 'Atualizar',
-                  style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                Tooltip(
+                  message: 'Atualizar dados da ordem',
+                  child: IconButton(
+                    onPressed: _recarregar,
+                    icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.surface,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    ).copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ),
               ],
@@ -1732,32 +1746,37 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
     required Color color,
     bool filled = false,
     VoidCallback? onPressed,
+    String? tooltip,
   }) {
-    if (filled) {
-      return FilledButton.icon(
-        onPressed: onPressed,
-        icon: Icon(icon, size: 16),
-        label: Text(label),
-        style: FilledButton.styleFrom(
-          backgroundColor: color,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      );
-    }
-    return OutlinedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 16),
-      label: Text(label),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: color,
-        side: BorderSide(color: color),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
+    final button = filled
+        ? FilledButton.icon(
+            onPressed: onPressed,
+            icon: Icon(icon, size: 16),
+            label: Text(label),
+            style: FilledButton.styleFrom(
+              backgroundColor: color,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          )
+        : OutlinedButton.icon(
+            onPressed: onPressed,
+            icon: Icon(icon, size: 16),
+            label: Text(label),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: color,
+              side: BorderSide(color: color),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          );
+
+    return Tooltip(
+      message: tooltip ?? label,
+      child: button,
     );
   }
 
@@ -1778,6 +1797,23 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
 // PÁGINA DE EDIÇÃO DA OC
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Rola a tela até o widget referenciado por [key], usado para guiar o
+/// usuário até o campo que falhou na validação (chamado logo após um
+/// setState que define a flag de erro correspondente).
+void _scrollToKey(GlobalKey key) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final ctx = key.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+        alignment: 0.1,
+      );
+    }
+  });
+}
+
 class _EditarOrdemCompraPage extends StatefulWidget {
   final OrdemCompraModel ordem;
   const _EditarOrdemCompraPage({required this.ordem});
@@ -1796,6 +1832,16 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
   late List<_ItemRascunho> _itens;
   FornecedorModel? _fornecedor;
   bool _salvando = false;
+
+  // ── Chaves e flags de erro (trim vermelho + rolagem até o campo) ─────────
+  final GlobalKey _fornecedorKey = GlobalKey();
+  final GlobalKey _empresaKey = GlobalKey();
+  final GlobalKey _itensKey = GlobalKey();
+  final GlobalKey _osSectionKey = GlobalKey();
+  bool _erroFornecedor = false;
+  bool _erroEmpresa = false;
+  bool _erroItensVazio = false;
+  bool _erroOS = false;
 
   List<FornecedorMaterialVinculoModel> get _materiaisDoFornecedor =>
       _fornecedor?.materiais ?? [];
@@ -1893,6 +1939,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       if (mounted) {
         setState(() {
           _fornecedor = completo ?? selected;
+          _erroFornecedor = false;
           final novosFornecedorMateriais = _fornecedor?.materiais ?? [];
           for (final item in _itens) {
             final vinculo = novosFornecedorMateriais
@@ -1926,6 +1973,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
   void _adicionarItem(FornecedorMaterialVinculoModel vinculo) {
     final osAuto = _numerosOS.length == 1 ? _numerosOS.first : '';
     setState(() {
+      _erroItensVazio = false;
       _itens.add(_ItemRascunho(
         materialId:             vinculo.materialId,
         materialNome:           vinculo.descricaoCompleta,
@@ -1936,7 +1984,8 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         materialLargura:        vinculo.materialLargura,
         materialComprimento:    vinculo.materialComprimento,
         numeroOS:               osAuto,
-        quantidade:             1,
+        // Começa vazio: usuário deve preencher a quantidade manualmente.
+        quantidade:             0,
         precoUnitario:          vinculo.preco,
         precoMetroQuadrado:
             vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
@@ -1946,14 +1995,49 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 
   void _removerItem(int idx) => setState(() => _itens.removeAt(idx));
 
+  /// Limpa todas as flags de erro (trim vermelho) antes de revalidar.
+  void _limparErros() {
+    _erroFornecedor = false;
+    _erroEmpresa = false;
+    _erroItensVazio = false;
+    _erroOS = false;
+    for (final item in _itens) {
+      item.erroOS = false;
+      item.erroQtd = false;
+      item.erroQtdUnidade = false;
+      item.erroPreco = false;
+    }
+  }
+
   Future<void> _salvar() async {
+    setState(_limparErros);
+
     if (_fornecedor == null) {
+      setState(() => _erroFornecedor = true);
+      _scrollToKey(_fornecedorKey);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um fornecedor.'), backgroundColor: AppTheme.error));
       return;
     }
+    if (_empresa == null) {
+      setState(() => _erroEmpresa = true);
+      _scrollToKey(_empresaKey);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione a empresa.'), backgroundColor: AppTheme.error));
+      return;
+    }
     if (_itens.isEmpty) {
+      setState(() => _erroItensVazio = true);
+      _scrollToKey(_itensKey);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Adicione pelo menos um item à ordem de compra.'),
+        backgroundColor: AppTheme.error,
+      ));
+      return;
+    }
+    if (_numerosOS.isEmpty) {
+      setState(() => _erroOS = true);
+      _scrollToKey(_osSectionKey);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Preencha ao menos um número de OS.'),
         backgroundColor: AppTheme.error,
       ));
       return;
@@ -1964,6 +2048,8 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         (l) => l.os.isNotEmpty && _numerosOS.contains(l.os),
       );
       if (!temOSSelecionada) {
+        setState(() => item.erroOS = true);
+        _scrollToKey(item.cardKey);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Selecione a OS para o item "${item.materialNome}".'),
           backgroundColor: AppTheme.error,
@@ -1975,6 +2061,8 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         (l) => l.os.isNotEmpty && _numerosOS.contains(l.os) && l.quantidade <= 0,
       );
       if (linhaComZero) {
+        setState(() => item.erroQtd = true);
+        _scrollToKey(item.cardKey);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('A quantidade deve ser maior que 0 para todos os itens da distribuição em "${item.materialNome}".'),
           backgroundColor: AppTheme.error,
@@ -1985,6 +2073,8 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       final totalDistribuido = item.distribuicao.fold(0.0, (s, l) => s + l.quantidade);
       final diff = totalDistribuido - item.quantidade;
       if (diff > 0.0001) {
+        setState(() => item.erroQtd = true);
+        _scrollToKey(item.cardKey);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('A quantidade distribuída (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) excede a quantidade do item "${item.materialNome}" (${item.quantidade % 1 == 0 ? item.quantidade.toInt() : item.quantidade}).'),
           backgroundColor: AppTheme.error,
@@ -1992,6 +2082,8 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         return;
       }
       if (diff < -0.0001) {
+        setState(() => item.erroQtd = true);
+        _scrollToKey(item.cardKey);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
             'A soma das quantidades distribuídas (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) '
@@ -2007,6 +2099,8 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     for (final item in _itens) {
       {
         if (item.precoUnitario <= 0) {
+          setState(() => item.erroPreco = true);
+          _scrollToKey(item.cardKey);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Preencha o preço unitário de todos os itens.'),
@@ -2015,6 +2109,19 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           );
           return;
         }
+      }
+    }
+    for (final item in _itens) {
+      if (item.precisaQtdUnidade && (item.qtdUnidade == null || item.qtdUnidade! <= 0)) {
+        setState(() => item.erroQtdUnidade = true);
+        _scrollToKey(item.cardKey);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Preencha o campo "${item.labelQtdUnidade}" do item "${item.materialNome}".'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+        return;
       }
     }
     setState(() => _salvando = true);
@@ -2050,14 +2157,16 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     }
   }
 
-  InputDecoration _deco(String hint) => InputDecoration(
+  InputDecoration _deco(String hint, {bool hasError = false}) => InputDecoration(
     hintText: hint,
     hintStyle: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 14),
     filled: true, fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
     contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
-    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
-    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: AppTheme.primary, width: 1.5)),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: hasError ? AppTheme.error : Theme.of(context).colorScheme.outlineVariant)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: hasError ? AppTheme.error : Theme.of(context).colorScheme.outlineVariant, width: hasError ? 1.5 : 1)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: hasError ? AppTheme.error : AppTheme.primary, width: 1.5)),
+    errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppTheme.error, width: 1.5)),
+    focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppTheme.error, width: 1.5)),
   );
 
   Widget _label(String text) => Text(
@@ -2079,9 +2188,14 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     child: Text(msg, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13)),
   );
 
-  Widget _card({ required String titulo, String? subtitulo, required List<Widget> children, Widget? trailing }) {
+  Widget _card({ Key? key, required String titulo, String? subtitulo, required List<Widget> children, Widget? trailing, bool hasError = false }) {
     return Container(
-      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: Theme.of(context).colorScheme.outlineVariant)),
+      key: key,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: hasError ? AppTheme.error : Theme.of(context).colorScheme.outlineVariant, width: hasError ? 1.5 : 1),
+      ),
       padding: EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
@@ -2102,21 +2216,30 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
   Widget _empresaOption(String value, String label) {
     final selected = _empresa == value;
     return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _empresa = value),
-        child: AnimatedContainer(
-          duration: Duration(milliseconds: 150),
-          padding: EdgeInsets.symmetric(vertical: 16),
-          decoration: BoxDecoration(
-            color: selected ? AppTheme.primary.withValues(alpha: 0.06) : Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant, width: selected ? 1.5 : 1),
+      child: Tooltip(
+        message: 'Selecionar $label como empresa emissora',
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+          onTap: () => setState(() {
+            _empresa = value;
+            _erroEmpresa = false;
+          }),
+          child: AnimatedContainer(
+            duration: Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(vertical: 16),
+            decoration: BoxDecoration(
+              color: selected ? AppTheme.primary.withValues(alpha: 0.06) : Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant, width: selected ? 1.5 : 1),
+            ),
+            child: Column(children: [
+              Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: selected ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant)),
+              SizedBox(height: 6),
+              Icon(selected ? Icons.check_circle : Icons.radio_button_unchecked, color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outline, size: 20),
+            ]),
           ),
-          child: Column(children: [
-            Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: selected ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant)),
-            SizedBox(height: 6),
-            Icon(selected ? Icons.check_circle : Icons.radio_button_unchecked, color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outline, size: 20),
-          ]),
+          ),
         ),
       ),
     );
@@ -2130,13 +2253,30 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         scrolledUnderElevation: 1,
-        leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: () => Navigator.of(context).pop()),
-        title: Text('Editar OC #${widget.ordem.id}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: Theme.of(context).colorScheme.onSurface)),
+        automaticallyImplyLeading: false,
+        titleSpacing: 16,
+        title: Row(
+          children: [
+            _BotaoVoltar(
+              label: 'Voltar',
+              tooltip: 'Voltar',
+              onTap: () => Navigator.of(context).pop(),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text('Editar OC #${widget.ordem.id}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: Theme.of(context).colorScheme.onSurface)),
+            ),
+          ],
+        ),
         actions: [
-          Padding(padding: const EdgeInsets.only(right: 16), child: FilledButton(
-            onPressed: _salvando ? null : _salvar,
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-            child: _salvando ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Salvar', style: TextStyle(fontWeight: FontWeight.w700)),
+          Padding(padding: const EdgeInsets.only(right: 16), child: Tooltip(
+            message: 'Salvar alterações da ordem de compra',
+            child: FilledButton(
+              onPressed: _salvando ? null : _salvar,
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)))
+                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              child: _salvando ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Salvar', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
           )),
         ],
       ),
@@ -2161,6 +2301,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
               _label('Data'),
               InkWell(
                 onTap: _selecionarData,
+                mouseCursor: SystemMouseCursors.click,
                 borderRadius: BorderRadius.circular(8),
                 child: InputDecorator(
                   decoration: _deco('').copyWith(suffixIcon: Icon(Icons.calendar_today_outlined, size: 18, color: Theme.of(context).colorScheme.outline)),
@@ -2176,10 +2317,12 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 
           _label('Fornecedor'),
           InkWell(
+            key: _fornecedorKey,
             onTap: _selecionarFornecedor,
+            mouseCursor: SystemMouseCursors.click,
             borderRadius: BorderRadius.circular(8),
             child: InputDecorator(
-              decoration: _deco('Buscar fornecedor...').copyWith(prefixIcon: Icon(Icons.search, size: 18, color: Theme.of(context).colorScheme.outline)),
+              decoration: _deco('Buscar fornecedor...', hasError: _erroFornecedor).copyWith(prefixIcon: Icon(Icons.search, size: 18, color: Theme.of(context).colorScheme.outline)),
               child: Text(
                 _fornecedor?.nomeFantasia ?? widget.ordem.fornecedorNome ?? '',
                 style: TextStyle(fontSize: 14, color: _fornecedor == null ? Theme.of(context).colorScheme.outline : Theme.of(context).colorScheme.onSurface),
@@ -2244,23 +2387,32 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 
         // ── Empresa ──────────────────────────────────────────────────────────
         _card(
+          key: _empresaKey,
           titulo: 'Empresa',
           subtitulo: 'Selecione a empresa que irá efetuar a ordem de compra.',
+          hasError: _erroEmpresa,
           children: [
             Row(children: [
               _empresaOption('VISUAL PREMIUM', 'Visual Premium'),
               const SizedBox(width: 12),
               _empresaOption('VISUAL GUINDASTE', 'Visual Guindaste'),
             ]),
+            if (_erroEmpresa) ...[
+              const SizedBox(height: 8),
+              Text('Selecione a empresa.', style: TextStyle(color: AppTheme.error, fontSize: 12, fontWeight: FontWeight.w600)),
+            ],
           ],
         ),
         const SizedBox(height: 16),
 
         // ── Números de OS ─────────────────────────────────────────────────────
         _OsInputSection(
+          key: _osSectionKey,
           numerosOS: _numerosOS,
+          hasError: _erroOS,
           onChanged: () {
             setState(() {
+              _erroOS = false;
               // Se agora não há exatamente 1 OS (0 ou 2+),
               // limpa a OS atribuída aos itens para forçar
               // o usuário a selecionar novamente
@@ -2279,39 +2431,60 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 
         // ── Itens ─────────────────────────────────────────────────────────────
         _card(
+          key: _itensKey,
           titulo: 'Itens (${_itens.length})',
+          hasError: _erroItensVazio && _itens.isEmpty,
           children: [
+            if (_erroItensVazio && _itens.isEmpty) ...[
+              Container(
+                padding: EdgeInsets.all(10),
+                margin: EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.error.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.error),
+                ),
+                child: Row(children: [
+                  Icon(Icons.error_outline, color: AppTheme.error, size: 16),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('Nenhum item adicionado.', style: TextStyle(color: AppTheme.error, fontSize: 12, fontWeight: FontWeight.w600))),
+                ]),
+              ),
+            ],
             if (_fornecedor == null)
               _aviso('Selecione um fornecedor para ver os materiais disponíveis.')
             else ...[
               SizedBox(
                 width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (_) => _AdicionarItemDialog(
-                        materiais: _materiaisDoFornecedor,
-                        fornecedorId: _fornecedor!.id,
-                        materiaisJaAdicionados: _itens.map((i) => i.materialId).toSet(),
-                        onConfirmar: (lista) {
-                          for (final v in lista) {
-                            _adicionarItem(v);
-                          }
-                        },
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Adicionar Item'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.primary,
-                    side: const BorderSide(color: AppTheme.primary),
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                    textStyle: TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600),
+                child: Tooltip(
+                  message: 'Adicionar item à ordem de compra',
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (_) => _AdicionarItemDialog(
+                          materiais: _materiaisDoFornecedor,
+                          fornecedorId: _fornecedor!.id,
+                          materiaisJaAdicionados: _itens.map((i) => i.materialId).toSet(),
+                          onConfirmar: (lista) {
+                            for (final v in lista) {
+                              _adicionarItem(v);
+                            }
+                          },
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Adicionar Item'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primary,
+                      side: const BorderSide(color: AppTheme.primary),
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      textStyle: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w600),
+                    ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                   ),
                 ),
               ),
@@ -2354,12 +2527,16 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 
         SizedBox(
           width: double.infinity,
-          child: FilledButton(
-            onPressed: _salvando ? null : _salvar,
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-            child: _salvando
-                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('Salvar Alterações', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          child: Tooltip(
+            message: 'Salvar as alterações desta ordem de compra',
+            child: FilledButton(
+              onPressed: _salvando ? null : _salvar,
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)))
+                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              child: _salvando
+                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Salvar Alterações', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            ),
           ),
         ),
         const SizedBox(height: 16),
@@ -2423,6 +2600,16 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   bool _salvando = false;
   int? _proximoId;
 
+  // ── Chaves e flags de erro (trim vermelho + rolagem até o campo) ─────────
+  final GlobalKey _fornecedorKey = GlobalKey();
+  final GlobalKey _empresaKey = GlobalKey();
+  final GlobalKey _itensKey = GlobalKey();
+  final GlobalKey _osSectionKey = GlobalKey();
+  bool _erroFornecedor = false;
+  bool _erroEmpresa = false;
+  bool _erroItensVazio = false;
+  bool _erroOS = false;
+
   List<FornecedorMaterialVinculoModel> get _materiaisDoFornecedor =>
       _fornecedor?.materiais ?? [];
 
@@ -2462,19 +2649,48 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
     super.dispose();
   }
 
+  /// Limpa todas as flags de erro (trim vermelho) antes de revalidar.
+  void _limparErros() {
+    _erroFornecedor = false;
+    _erroEmpresa = false;
+    _erroItensVazio = false;
+    _erroOS = false;
+    for (final item in _itens) {
+      item.erroOS = false;
+      item.erroQtd = false;
+      item.erroQtdUnidade = false;
+      item.erroPreco = false;
+    }
+  }
+
   Future<void> _salvar() async {
     if (!_formKey.currentState!.validate()) return;
+    setState(_limparErros);
+
     if (_fornecedor == null) {
+      setState(() => _erroFornecedor = true);
+      _scrollToKey(_fornecedorKey);
       _showErro('Selecione um fornecedor.');
       return;
     }
     if (_empresa == null) {
+      setState(() => _erroEmpresa = true);
+      _scrollToKey(_empresaKey);
       _showErro('Selecione a empresa.');
       return;
     }
 
     if (_itens.isEmpty) {
+      setState(() => _erroItensVazio = true);
+      _scrollToKey(_itensKey);
       _showErro('Adicione pelo menos um item à ordem de compra.');
+      return;
+    }
+
+    if (_numerosOS.isEmpty) {
+      setState(() => _erroOS = true);
+      _scrollToKey(_osSectionKey);
+      _showErro('Preencha ao menos um número de OS.');
       return;
     }
 
@@ -2484,6 +2700,8 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         (l) => l.os.isNotEmpty && _numerosOS.contains(l.os),
       );
       if (!temOSSelecionada) {
+        setState(() => item.erroOS = true);
+        _scrollToKey(item.cardKey);
         _showErro('Selecione a OS para o item "${item.materialNome}".');
         return;
       }
@@ -2492,6 +2710,8 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         (l) => l.os.isNotEmpty && _numerosOS.contains(l.os) && l.quantidade <= 0,
       );
       if (linhaComZero) {
+        setState(() => item.erroQtd = true);
+        _scrollToKey(item.cardKey);
         _showErro('A quantidade deve ser maior que 0 para todos os itens da distribuição em "${item.materialNome}".');
         return;
       }
@@ -2499,10 +2719,14 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       final totalDistribuido = item.distribuicao.fold(0.0, (s, l) => s + l.quantidade);
       final diff = totalDistribuido - item.quantidade;
       if (diff > 0.0001) {
+        setState(() => item.erroQtd = true);
+        _scrollToKey(item.cardKey);
         _showErro('A quantidade distribuída (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) excede a quantidade do item "${item.materialNome}" (${item.quantidade % 1 == 0 ? item.quantidade.toInt() : item.quantidade}).');
         return;
       }
       if (diff < -0.0001) {
+        setState(() => item.erroQtd = true);
+        _scrollToKey(item.cardKey);
         _showErro(
           'A soma das quantidades distribuídas (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) '
           'está abaixo da quantidade do item "${item.materialNome}" '
@@ -2515,9 +2739,19 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
     for (final item in _itens) {
       {
         if (item.precoUnitario <= 0) {
+          setState(() => item.erroPreco = true);
+          _scrollToKey(item.cardKey);
           _showErro('Preencha o preço unitário de todos os itens.');
           return;
         }
+      }
+    }
+    for (final item in _itens) {
+      if (item.precisaQtdUnidade && (item.qtdUnidade == null || item.qtdUnidade! <= 0)) {
+        setState(() => item.erroQtdUnidade = true);
+        _scrollToKey(item.cardKey);
+        _showErro('Preencha o campo "${item.labelQtdUnidade}" do item "${item.materialNome}".');
+        return;
       }
     }
 
@@ -2609,6 +2843,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
     // Se há exatamente 1 OS cadastrada, preenche automaticamente
     final osAuto = _numerosOS.length == 1 ? _numerosOS.first : '';
     setState(() {
+      _erroItensVazio = false;
       _itens.add(_ItemRascunho(
         materialId:             vinculo.materialId,
         materialNome:           vinculo.descricaoCompleta,
@@ -2619,7 +2854,8 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         materialLargura:        vinculo.materialLargura,
         materialComprimento:    vinculo.materialComprimento,
         numeroOS:               osAuto,
-        quantidade:             1,
+        // Começa vazio: usuário deve preencher a quantidade manualmente.
+        quantidade:             0,
         precoUnitario:          vinculo.preco,
         precoMetroQuadrado:
             vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
@@ -2642,6 +2878,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       if (mounted) {
         setState(() {
           _fornecedor = completo ?? selected;
+          _erroFornecedor = false;
           _itens.clear();
         });
       }
@@ -2666,41 +2903,54 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         scrolledUnderElevation: 1,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Text(
-          widget.itensPreCarregados.isNotEmpty
-              ? 'Nova OC — do Orçamento'
-              : 'Nova Ordem de Compra',
-          style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 18,
-              color: Theme.of(context).colorScheme.onSurface),
+        automaticallyImplyLeading: false,
+        titleSpacing: 16,
+        title: Row(
+          children: [
+            _BotaoVoltar(
+              label: 'Voltar',
+              tooltip: 'Voltar',
+              onTap: () => Navigator.of(context).pop(),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                widget.itensPreCarregados.isNotEmpty
+                    ? 'Nova OC — do Orçamento'
+                    : 'Nova Ordem de Compra',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                    color: Theme.of(context).colorScheme.onSurface),
+              ),
+            ),
+          ],
         ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: FilledButton(
-              onPressed: _salvando ? null : _salvar,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
+            child: Tooltip(
+              message: 'Criar esta ordem de compra',
+              child: FilledButton(
+                onPressed: _salvando ? null : _salvar,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                child: _salvando
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Criar OC',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
               ),
-              child: _salvando
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Text('Criar OC',
-                      style: TextStyle(fontWeight: FontWeight.w700)),
             ),
           ),
         ],
@@ -2778,6 +3028,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                           _label('Data'),
                           InkWell(
                             onTap: _selecionarData,
+                            mouseCursor: SystemMouseCursors.click,
                             borderRadius: BorderRadius.circular(8),
                             child: InputDecorator(
                               decoration: _deco('').copyWith(
@@ -2804,10 +3055,12 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                 // Fornecedor
                 _label('Fornecedor principal'),
                 InkWell(
+                  key: _fornecedorKey,
                   onTap: _selecionarFornecedor,
+                  mouseCursor: SystemMouseCursors.click,
                   borderRadius: BorderRadius.circular(8),
                   child: InputDecorator(
-                    decoration: _deco('Buscar fornecedor...').copyWith(
+                    decoration: _deco('Buscar fornecedor...', hasError: _erroFornecedor).copyWith(
                       prefixIcon: Icon(Icons.search,
                           size: 18, color: Theme.of(context).colorScheme.outline),
                     ),
@@ -2891,9 +3144,11 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
 
             // ── Empresa ────────────────────────────────────────────────────
             _card(
+              key: _empresaKey,
               titulo: 'Empresa',
               subtitulo:
                   'Selecione a empresa que aparecerá no cabeçalho da Ordem de Compra:',
+              hasError: _erroEmpresa,
               children: [
                 Row(
                   children: [
@@ -2902,15 +3157,22 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                     _empresaOption('VISUAL GUINDASTE', 'Visual Guindaste'),
                   ],
                 ),
+                if (_erroEmpresa) ...[
+                  const SizedBox(height: 8),
+                  Text('Selecione a empresa.', style: TextStyle(color: AppTheme.error, fontSize: 12, fontWeight: FontWeight.w600)),
+                ],
               ],
             ),
             const SizedBox(height: 16),
 
             // ── Números de OS ──────────────────────────────────────────────
             _OsInputSection(
+              key: _osSectionKey,
               numerosOS: _numerosOS,
+              hasError: _erroOS,
               onChanged: () {
                 setState(() {
+                  _erroOS = false;
                   // Se agora não há exatamente 1 OS (0 ou 2+),
                   // limpa a OS atribuída aos itens para forçar
                   // o usuário a selecionar novamente
@@ -2929,40 +3191,61 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
 
             // ── Itens ──────────────────────────────────────────────────────
             _card(
+              key: _itensKey,
               titulo: 'Itens (${_itens.length})',
+              hasError: _erroItensVazio && _itens.isEmpty,
               children: [
+                if (_erroItensVazio && _itens.isEmpty) ...[
+                  Container(
+                    padding: EdgeInsets.all(10),
+                    margin: EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.error.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppTheme.error),
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.error_outline, color: AppTheme.error, size: 16),
+                      SizedBox(width: 8),
+                      Expanded(child: Text('Nenhum item adicionado.', style: TextStyle(color: AppTheme.error, fontSize: 12, fontWeight: FontWeight.w600))),
+                    ]),
+                  ),
+                ],
                 if (_fornecedor == null)
                   _aviso(
                       'Selecione um fornecedor para ver os materiais disponíveis.')
                 else ...[
                   SizedBox(
                     width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        showDialog(
-                          context: context,
-                          builder: (_) => _AdicionarItemDialog(
-                            materiais: _materiaisDoFornecedor,
-                            fornecedorId: _fornecedor!.id,
-                            materiaisJaAdicionados: _itens.map((i) => i.materialId).toSet(),
-                            onConfirmar: (lista) {
-                              for (final v in lista) {
-                                _adicionarItem(v);
-                              }
-                            },
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Adicionar Item'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.primary,
-                        side: const BorderSide(color: AppTheme.primary),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                        textStyle: TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w600),
+                    child: Tooltip(
+                      message: 'Adicionar item à ordem de compra',
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (_) => _AdicionarItemDialog(
+                              materiais: _materiaisDoFornecedor,
+                              fornecedorId: _fornecedor!.id,
+                              materiaisJaAdicionados: _itens.map((i) => i.materialId).toSet(),
+                              onConfirmar: (lista) {
+                                for (final v in lista) {
+                                  _adicionarItem(v);
+                                }
+                              },
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Adicionar Item'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.primary,
+                          side: const BorderSide(color: AppTheme.primary),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                          textStyle: TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.w600),
+                        ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                       ),
                     ),
                   ),
@@ -3013,27 +3296,42 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
             ),
             const SizedBox(height: 32),
 
-            // ── Botão salvar (rodapé) ──────────────────────────────────────
             SizedBox(
               width: double.infinity,
-              child: FilledButton(
-                onPressed: _salvando ? null : _salvar,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
+              height: 52,
+              child: Tooltip(
+                message: 'Criar esta ordem de compra',
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: _salvando ? null : _salvar,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      alignment: Alignment.center,
+                      child: _salvando
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'Criar Ordem de Compra',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                    ),
+                  ),
                 ),
-                child: _salvando
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Text('Criar Ordem de Compra',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w700)),
               ),
             ),
             SizedBox(height: 16),
@@ -3046,16 +3344,19 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   Widget _card({
+    Key? key,
     required String titulo,
     String? subtitulo,
     required List<Widget> children,
     Widget? trailing,
+    bool hasError = false,
   }) {
     return Container(
+      key: key,
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        border: Border.all(color: hasError ? AppTheme.error : Theme.of(context).colorScheme.outlineVariant, width: hasError ? 1.5 : 1),
       ),
       padding: EdgeInsets.all(16),
       child: Column(
@@ -3096,40 +3397,49 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   Widget _empresaOption(String value, String label) {
     final selected = _empresa == value;
     return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _empresa = value),
-        child: AnimatedContainer(
-          duration: Duration(milliseconds: 150),
-          padding: EdgeInsets.symmetric(vertical: 16),
-          decoration: BoxDecoration(
-            color: selected
-                ? AppTheme.primary.withValues(alpha: 0.06)
-                : Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
-              width: selected ? 1.5 : 1,
+      child: Tooltip(
+        message: 'Selecionar $label como empresa emissora',
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+          onTap: () => setState(() {
+            _empresa = value;
+            _erroEmpresa = false;
+          }),
+          child: AnimatedContainer(
+            duration: Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(vertical: 16),
+            decoration: BoxDecoration(
+              color: selected
+                  ? AppTheme.primary.withValues(alpha: 0.06)
+                  : Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+                width: selected ? 1.5 : 1,
+              ),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    color: selected ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                SizedBox(height: 6),
+                Icon(
+                  selected
+                      ? Icons.check_circle
+                      : Icons.radio_button_unchecked,
+                  color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outline,
+                  size: 20,
+                ),
+              ],
             ),
           ),
-          child: Column(
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                  color: selected ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              SizedBox(height: 6),
-              Icon(
-                selected
-                    ? Icons.check_circle
-                    : Icons.radio_button_unchecked,
-                color: selected ? AppTheme.primary : Theme.of(context).colorScheme.outline,
-                size: 20,
-              ),
-            ],
           ),
         ),
       ),
@@ -3157,7 +3467,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
     ),
   );
 
-  InputDecoration _deco(String hint) => InputDecoration(
+  InputDecoration _deco(String hint, {bool hasError = false}) => InputDecoration(
         hintText: hint,
         hintStyle:
             TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 14),
@@ -3165,15 +3475,23 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          borderSide: BorderSide(color: hasError ? AppTheme.error : Theme.of(context).colorScheme.outlineVariant),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          borderSide: BorderSide(color: hasError ? AppTheme.error : Theme.of(context).colorScheme.outlineVariant, width: hasError ? 1.5 : 1),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.primary, width: 1.5),
+          borderSide: BorderSide(color: hasError ? AppTheme.error : AppTheme.primary, width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: AppTheme.error, width: 1.5),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: AppTheme.error, width: 1.5),
         ),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -3187,8 +3505,9 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
 class _OsInputSection extends StatefulWidget {
   final List<String> numerosOS;
   final VoidCallback onChanged;
+  final bool hasError;
 
-  const _OsInputSection({required this.numerosOS, required this.onChanged});
+  const _OsInputSection({super.key, required this.numerosOS, required this.onChanged, this.hasError = false});
 
   @override
   State<_OsInputSection> createState() => _OsInputSectionState();
@@ -3281,8 +3600,10 @@ class _OsInputSectionState extends State<_OsInputSection> {
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: !hasValue ? AppTheme.primary.withValues(alpha: 0.5) : Theme.of(context).colorScheme.outlineVariant,
-          width: !hasValue ? 1.5 : 1,
+          color: widget.hasError
+              ? AppTheme.error
+              : (!hasValue ? AppTheme.primary.withValues(alpha: 0.5) : Theme.of(context).colorScheme.outlineVariant),
+          width: widget.hasError || !hasValue ? 1.5 : 1,
         ),
       ),
       padding: EdgeInsets.all(16),
@@ -3305,25 +3626,31 @@ class _OsInputSectionState extends State<_OsInputSection> {
           Wrap(
             spacing: 8,
             children: [
-              _atalho('Empresa', () {
-                // Preenche o primeiro campo vazio ou adiciona
-                final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
-                if (idx != -1) {
-                  setState(() => _controllers[idx].text = 'EMPRESA');
-                } else {
-                  setState(() => _controllers.add(TextEditingController(text: 'EMPRESA')));
-                }
-                _sincronizar();
-              }),
-              _atalho('Outros', () {
-                final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
-                if (idx != -1) {
-                  setState(() => _controllers[idx].text = 'OUTROS');
-                } else {
-                  setState(() => _controllers.add(TextEditingController(text: 'OUTROS')));
-                }
-                _sincronizar();
-              }),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: _atalho('Empresa', () {
+                  // Preenche o primeiro campo vazio ou adiciona
+                  final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
+                  if (idx != -1) {
+                    setState(() => _controllers[idx].text = 'EMPRESA');
+                  } else {
+                    setState(() => _controllers.add(TextEditingController(text: 'EMPRESA')));
+                  }
+                  _sincronizar();
+                }),
+              ),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: _atalho('Outros', () {
+                  final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
+                  if (idx != -1) {
+                    setState(() => _controllers[idx].text = 'OUTROS');
+                  } else {
+                    setState(() => _controllers.add(TextEditingController(text: 'OUTROS')));
+                  }
+                  _sincronizar();
+                }),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -3345,10 +3672,17 @@ class _OsInputSectionState extends State<_OsInputSection> {
                     const SizedBox(width: 6),
                     IconButton(
                       onPressed: () => _removerCampo(i),
-                      icon: const Icon(Icons.remove_circle_outline, color: AppTheme.error, size: 20),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       tooltip: 'Remover campo',
+                      icon: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: const Icon(
+                          Icons.remove_circle_outline,
+                          color: AppTheme.error,
+                          size: 20,
+                        ),
+                      ),
                     ),
                   ],
                 ],
@@ -3356,34 +3690,65 @@ class _OsInputSectionState extends State<_OsInputSection> {
             );
           }),
 
-          // Botão adicionar campo
-          TextButton.icon(
-            onPressed: _adicionarCampo,
-            icon: const Icon(Icons.add, size: 18, color: AppTheme.primary),
-            label: const Text('Adicionar campo de OS', style: TextStyle(color: AppTheme.primary, fontSize: 13)),
-            style: TextButton.styleFrom(padding: EdgeInsets.zero),
+         Tooltip(
+          message: 'Adicionar mais um campo para informar outra OS',
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: _adicionarCampo,
+              mouseCursor: SystemMouseCursors.click,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(
+                      Icons.add,
+                      size: 18,
+                      color: AppTheme.primary,
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      'Adicionar campo de OS',
+                      style: TextStyle(
+                        color: AppTheme.primary,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
+        ),
+          if (widget.hasError) ...[
+            const SizedBox(height: 8),
+            Text('Preencha ao menos um número de OS.', style: TextStyle(color: AppTheme.error, fontSize: 12, fontWeight: FontWeight.w600)),
+          ],
         ],
       ),
     );
   }
 
-  Widget _atalho(String label, VoidCallback onTap) => OutlinedButton(
-    onPressed: onTap,
-    style: OutlinedButton.styleFrom(
-      foregroundColor: AppTheme.primary,
-      side: const BorderSide(color: AppTheme.primary),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-    ),
-    child: Text(label),
-  );
+  Widget _atalho(String label, VoidCallback onTap) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      opaque: false,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            border: Border.all(color: AppTheme.primary),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(label),
+        ),
+      ),
+    );
+  }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LINHA DE DISTRIBUIÇÃO POR OS
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _DistribuicaoLinha {
   String os;
@@ -3391,14 +3756,9 @@ class _DistribuicaoLinha {
   _DistribuicaoLinha({this.os = '', this.quantidade = 0});
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RASCUNHO DE ITEM
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _ItemRascunho {
   int materialId;
   String materialNome;
-  /// Unidade de medida do material no estoque (ex: "UNIDADE", "ML", "M/L", "KG").
   String? materialUnidade;
   String? materialMedida;
   String? materialEspessura;
@@ -3412,6 +3772,13 @@ class _ItemRascunho {
   double precoUnitario;
   double? precoMetroQuadrado;
   List<_DistribuicaoLinha> distribuicao;
+
+  final GlobalKey cardKey = GlobalKey();
+
+  bool erroOS = false;
+  bool erroQtd = false;
+  bool erroQtdUnidade = false;
+  bool erroPreco = false;
 
   _ItemRascunho({
     required this.materialId,
@@ -3431,13 +3798,10 @@ class _ItemRascunho {
     List<_DistribuicaoLinha>? distribuicao,
   }) : distribuicao = distribuicao ?? [_DistribuicaoLinha(os: numeroOS, quantidade: quantidade)];
 
-  /// True quando o material tem dimensões cadastradas e o modo não é m².
-  /// Nesses casos o preço m² é calculado automaticamente — não editável.
   bool get temDimensoes =>
       materialLargura != null && materialLargura! > 0 &&
       materialComprimento != null && materialComprimento! > 0;
 
-  /// Custo/m² automático: precoUnitario / (largura × comprimento).
   double? get precoM2Calculado {
     if (!temDimensoes || precoUnitario <= 0) return null;
     return precoUnitario / (materialLargura! * materialComprimento!);
@@ -3463,14 +3827,11 @@ class _ItemRascunho {
     }
   }
 
-  /// Quantidade real que irá para o estoque: quantidade × qtdUnidade (quando aplicável).
   double get quantidadeEstoque {
     if (qtdUnidade != null && qtdUnidade! > 0) return quantidade * qtdUnidade!;
     return quantidade;
   }
 
-  /// Preço total: quantidade × qtdUnidade × precoUnitario quando qtdUnidade está preenchido.
-  /// Sem qtdUnidade: quantidade × precoUnitario (comportamento legado).
   double get precoTotal {
     if (precisaQtdUnidade && qtdUnidade != null && qtdUnidade! > 0) {
       return quantidade * qtdUnidade! * precoUnitario;
@@ -3478,10 +3839,6 @@ class _ItemRascunho {
     return quantidade * precoUnitario;
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ITEM FORM CARD
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _ItemFormCard extends StatefulWidget {
   final _ItemRascunho item;
@@ -3509,9 +3866,6 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   late TextEditingController _descricaoCtrl;
   
   bool _ignorarCalculo = false;
-  // ← NOVO: rastreia qual campo tem prioridade
-  // 'unitario' = mantém o preço unitário fixo e recalcula o total
-  // 'total' = mantém o total fixo e recalcula o preço unitário
   String _campoEditado = 'unitario';
 
   @override
@@ -3567,7 +3921,6 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     return qtd * preco;
   }
   
-  // ← MODIFICADO: marca que o usuário editou o preço unitário
   void _onPrecoUnitarioChanged() {
     if (_ignorarCalculo) return;
     
@@ -3581,7 +3934,6 @@ class _ItemFormCardState extends State<_ItemFormCard> {
       return;
     }
     
-    // ← NOVO: marca que o unitário foi editado
     _campoEditado = 'unitario';
     
     final total = _calcularPrecoTotal();
@@ -3595,7 +3947,6 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     }
   }
 
-  // ← MODIFICADO: marca que o usuário editou o total
   void _onPrecoTotalChanged() {
     if (_ignorarCalculo) return;
     
@@ -3604,7 +3955,6 @@ class _ItemFormCardState extends State<_ItemFormCard> {
       return;
     }
     
-    // ← NOVO: marca que o total foi editado
     _campoEditado = 'total';
     
     final qtd = double.tryParse(_qtdCtrl.text) ?? 0;
@@ -3630,10 +3980,8 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     }
   }
   
-  // ← NOVO: método chamado quando quantidade ou qtdUnidade muda
   void _recalcularComBaseNaPrioridade() {
     if (_campoEditado == 'total') {
-      // Total tem prioridade: recalcula o unitário mantendo o total fixo
       final total = double.tryParse(_precoTotalCtrl.text);
       if (total != null && total > 0) {
         final qtd = double.tryParse(_qtdCtrl.text) ?? 0;
@@ -3654,7 +4002,6 @@ class _ItemFormCardState extends State<_ItemFormCard> {
         }
       }
     } else {
-      // Unitário tem prioridade: recalcula o total mantendo o unitário fixo
       final preco = double.tryParse(_precoCtrl.text);
       if (preco != null && preco > 0) {
         final total = _calcularPrecoTotal();
@@ -3667,7 +4014,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     }
   }
 
-  InputDecoration _deco(String hint) => InputDecoration(
+  InputDecoration _deco(String hint, {bool hasError = false}) => InputDecoration(
         hintText: hint,
         hintStyle:
             TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
@@ -3675,15 +4022,23 @@ class _ItemFormCardState extends State<_ItemFormCard> {
         fillColor: Theme.of(context).colorScheme.surface,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          borderSide: BorderSide(color: hasError ? AppTheme.error : Theme.of(context).colorScheme.outlineVariant),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          borderSide: BorderSide(color: hasError ? AppTheme.error : Theme.of(context).colorScheme.outlineVariant, width: hasError ? 1.5 : 1),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: BorderSide(color: AppTheme.primary),
+          borderSide: BorderSide(color: hasError ? AppTheme.error : AppTheme.primary),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: AppTheme.error, width: 1.5),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: AppTheme.error, width: 1.5),
         ),
         contentPadding:
             EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -3698,6 +4053,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     final labelQtd = 'Quantidade';
 
     return Container(
+      key: item.cardKey,
       margin: EdgeInsets.only(bottom: 10),
       padding: EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -3735,12 +4091,16 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                   ],
                 ),
               ),
-              IconButton(
-                onPressed: widget.onRemover,
-                icon: const Icon(Icons.delete_outline,
-                    color: AppTheme.error, size: 20),
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints(),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: IconButton(
+                  onPressed: widget.onRemover,
+                  icon: const Icon(Icons.delete_outline,
+                      color: AppTheme.error, size: 20),
+                  tooltip: 'Excluir item',
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(),
+                ),
               ),
             ],
           ),
@@ -3773,16 +4133,16 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       const SizedBox(height: 4),
                       TextFormField(
                         controller: _qtdCtrl,
-                        decoration: _deco('0'),
+                        decoration: _deco('0', hasError: item.erroQtd),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))],
                         onChanged: (v) {
                           item.quantidade = double.tryParse(v) ?? 0;
+                          item.erroQtd = false;
                           if (widget.numerosOS.length == 1 && item.distribuicao.length == 1) {
                             item.distribuicao[0].os = widget.numerosOS.first;
                             item.distribuicao[0].quantidade = item.quantidade;
                           }
-                          // ← MODIFICADO: usa o novo método de recálculo baseado em prioridade
                           _recalcularComBaseNaPrioridade();
                           widget.onChanged();
                           setState(() {});
@@ -3796,22 +4156,39 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(item.labelQtdUnidade,
+                      RichText(
+                        text: TextSpan(
+                          text: item.labelQtdUnidade,
                           style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                              color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          children: const [
+                            TextSpan(
+                                text: ' *',
+                                style: TextStyle(color: AppTheme.error, fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 4),
                       TextFormField(
                         controller: _qtdUnidadeCtrl,
-                        decoration: _deco('0.000'),
+                        decoration: _deco('0.000', hasError: item.erroQtdUnidade),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: [
                           FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,6}'))
                         ],
                         onChanged: (v) {
                           item.qtdUnidade = double.tryParse(v);
-                          // ← MODIFICADO: usa o novo método de recálculo baseado em prioridade
+                          item.erroQtdUnidade = false;
+                          // Se o valor total já estiver preenchido, ele tem
+                          // prioridade: alterar a qtd/unidade não deve mudar
+                          // o total, e sim recalcular o valor por unidade
+                          // para que quantidade × qtdUnidade × valor
+                          // continue batendo com o total já informado.
+                          final totalJaPreenchido =
+                              (double.tryParse(_precoTotalCtrl.text) ?? 0) > 0;
+                          if (totalJaPreenchido) _campoEditado = 'total';
                           _recalcularComBaseNaPrioridade();
                           widget.onChanged();
                           setState(() {});
@@ -3833,13 +4210,14 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       const SizedBox(height: 4),
                       TextFormField(
                         controller: _precoCtrl,
-                        decoration: _deco('0.000000'),
+                        decoration: _deco('0.000000', hasError: item.erroPreco),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: [
                           FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,6}'))
                         ],
                         onChanged: (v) {
                           item.precoUnitario = double.tryParse(v.trim().isEmpty ? '0' : v) ?? 0;
+                          item.erroPreco = false;
                           widget.onChanged();
                           setState(() {});
                         },
@@ -3913,11 +4291,12 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       const SizedBox(height: 4),
                       TextFormField(
                         controller: _qtdCtrl,
-                        decoration: _deco('0'),
+                        decoration: _deco('0', hasError: item.erroQtd),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))],
                         onChanged: (v) {
                           item.quantidade = double.tryParse(v) ?? 0;
+                          item.erroQtd = false;
                           if (widget.numerosOS.length == 1 && item.distribuicao.length == 1) {
                             item.distribuicao[0].os = widget.numerosOS.first;
                             item.distribuicao[0].quantidade = item.quantidade;
@@ -3948,11 +4327,12 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       SizedBox(height: 4),
                       TextFormField(
                         controller: _precoCtrl,
-                        decoration: _deco('0.00'),
+                        decoration: _deco('0.00', hasError: item.erroPreco),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))],
                         onChanged: (v) {
                           item.precoUnitario = double.tryParse(v.trim().isEmpty ? '0' : v) ?? 0;
+                          item.erroPreco = false;
                           widget.onChanged();
                           setState(() {});
                         },
@@ -4289,9 +4669,9 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
                                   hintStyle: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
                                   filled: true,
                                   fillColor: Theme.of(context).colorScheme.surface,
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
-                                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
-                                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: AppTheme.primary)),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: widget.item.erroOS ? AppTheme.error : Theme.of(context).colorScheme.outlineVariant)),
+                                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: widget.item.erroOS ? AppTheme.error : Theme.of(context).colorScheme.outlineVariant, width: widget.item.erroOS ? 1.5 : 1)),
+                                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: widget.item.erroOS ? AppTheme.error : AppTheme.primary)),
                                   contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                                   isDense: true,
                                 ),
@@ -4301,7 +4681,10 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
                                     .toList(),
                                 onChanged: (v) {
                                   if (v != null) {
-                                    setState(() => linha.os = v);
+                                    setState(() {
+                                      linha.os = v;
+                                      widget.item.erroOS = false;
+                                    });
                                     widget.onChanged();
                                   }
                                 },
@@ -4328,9 +4711,15 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
                       SizedBox(
                         width: 24,
                         child: widget.item.distribuicao.length > 1
-                            ? GestureDetector(
-                                onTap: () => _removerLinha(idx),
-                                child: const Icon(Icons.remove_circle_outline, size: 18, color: AppTheme.error),
+                            ? Tooltip(
+                                message: 'Remover esta linha de distribuição',
+                                child: MouseRegion(
+                                  cursor: SystemMouseCursors.click,
+                                  child: GestureDetector(
+                                    onTap: () => _removerLinha(idx),
+                                    child: const Icon(Icons.remove_circle_outline, size: 18, color: AppTheme.error),
+                                  ),
+                                ),
                               )
                             : const SizedBox.shrink(),
                       ),
@@ -4346,18 +4735,30 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
             padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
             child: Row(
               children: [
-                TextButton.icon(
-                  onPressed: _adicionarLinha,
-                  icon: const Icon(Icons.add, size: 14, color: AppTheme.primary),
-                  label: Text('Adicionar OS', style: TextStyle(fontSize: 12, color: AppTheme.primary)),
-                  style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                Tooltip(
+                  message: 'Adicionar nova linha de distribuição por OS',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: TextButton.icon(
+                      onPressed: _adicionarLinha,
+                      icon: const Icon(Icons.add, size: 14, color: AppTheme.primary),
+                      label: Text('Adicionar OS', style: TextStyle(fontSize: 12, color: AppTheme.primary)),
+                      style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    ),
+                  ),
                 ),
                 SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _limpar,
-                  icon: Icon(Icons.close, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  label: Text('Limpar distribuição', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                  style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                Tooltip(
+                  message: 'Limpar toda a distribuição de OS deste item',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: TextButton.icon(
+                      onPressed: _limpar,
+                      icon: Icon(Icons.close, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      label: Text('Limpar distribuição', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -4443,6 +4844,7 @@ class _FornecedorPickerState extends State<_FornecedorPicker> {
                                   style: TextStyle(
                                       color: Theme.of(context).colorScheme.onSurfaceVariant))
                               : null,
+                          mouseCursor: SystemMouseCursors.click,
                           onTap: () => Navigator.pop(context, f),
                         );
                       },
@@ -4452,10 +4854,16 @@ class _FornecedorPickerState extends State<_FornecedorPicker> {
         ),
       ),
       actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancelar',
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
+        Tooltip(
+          message: 'Fechar sem selecionar fornecedor',
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancelar',
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
+          ),
+        ),
       ],
     );
   }
@@ -4732,23 +5140,30 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
               child: Icon(Icons.check_circle, size: 22, color: Theme.of(context).colorScheme.outline),
             )
           else
-            IconButton(
-              onPressed: () => setState(() {
-                if (selecionado) {
-                  _quantidades.remove(materialId);
-                } else {
-                  _quantidades[materialId] = 1;
-                }
-              }),
-              icon: Icon(
-                selecionado ? Icons.remove_circle_outline : Icons.add_circle_outline,
-                size: 22,
+            Tooltip(
+              message: selecionado ? 'Remover' : 'Adicionar',
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      if (selecionado) {
+                        _quantidades.remove(materialId);
+                      } else {
+                        _quantidades[materialId] = 1;
+                      }
+                    });
+                  },
+                  child: Icon(
+                    selecionado
+                        ? Icons.remove_circle_outline
+                        : Icons.add_circle_outline,
+                    size: 22,
+                    color: selecionado ? AppTheme.error : AppTheme.primary,
+                  ),
+                ),
               ),
-              color: selecionado ? AppTheme.error : AppTheme.primary,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-              tooltip: selecionado ? 'Remover' : 'Adicionar',
-            ),
+            )
         ],
       ),
     );
@@ -4868,16 +5283,19 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                   ),
                 ),
                 SizedBox(width: 4),
-                IconButton(
-                  onPressed: _temFiltro ? _limparFiltros : null,
-                  icon: Icon(
-                    Icons.filter_alt_off,
-                    size: 18,
-                    color: _temFiltro ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
+                MouseRegion(
+                  cursor: _temFiltro ? SystemMouseCursors.click : SystemMouseCursors.basic,
+                  child: IconButton(
+                    onPressed: _temFiltro ? _limparFiltros : null,
+                    icon: Icon(
+                      Icons.filter_alt_off,
+                      size: 18,
+                      color: _temFiltro ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
+                    ),
+                    tooltip: 'Limpar filtros',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
                   ),
-                  tooltip: 'Limpar filtros',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
                 ),
               ],
             ),
@@ -4977,19 +5395,101 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text('Cancelar',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        Tooltip(
+          message: 'Fechar sem adicionar itens',
+          child: TextButton(
+            onPressed: () => Navigator.pop(context),
+            style: TextButton.styleFrom()
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: Text('Cancelar',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ),
         ),
-        FilledButton(
-          onPressed: _totalItens == 0 ? null : _confirmar,
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-          child: Text(
-            _totalItens == 0 ? 'Adicionar' : 'Adicionar ($_totalItens)',
+        Tooltip(
+          message: _totalItens == 0 ? 'Selecione ao menos um item' : 'Adicionar os itens selecionados à ordem de compra',
+          child: FilledButton(
+            onPressed: _totalItens == 0 ? null : _confirmar,
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: Text(
+              _totalItens == 0 ? 'Adicionar' : 'Adicionar ($_totalItens)',
+            ),
           ),
         ),
       ],
+    );
+  }
+}
+// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
+// Mesmo padrão usado no cabeçalho das páginas de estoque / histórico / orçamento.
+class _BotaoVoltar extends StatefulWidget {
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _BotaoVoltar({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_BotaoVoltar> createState() => _BotaoVoltarState();
+}
+
+class _BotaoVoltarState extends State<_BotaoVoltar> {
+  bool _hovered = false;
+  static const _accent = Color(0xFFF59E0B);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        child: InkWell(
+          onTap: widget.onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? _accent.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              border: Border.all(
+                color: _hovered
+                    ? _accent.withValues(alpha: 0.6)
+                    : scheme.outlineVariant,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _hovered ? _accent : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

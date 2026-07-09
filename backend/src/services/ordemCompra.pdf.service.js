@@ -6,6 +6,15 @@ function formatCurrency(value) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value ?? 0);
 }
 
+function formatCurrencyPreciso(value) {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6,
+  }).format(value ?? 0);
+}
+
 function formatDate(date) {
   if (!date) return '—';
   return new Date(date).toLocaleDateString('pt-BR');
@@ -140,7 +149,6 @@ function drawAvisoNotaFiscal(doc, y) {
   const blockH = 52;
   const padH   = 14;
 
-  // Fundo destacado com borda colorida nas duas laterais
   fillRect(doc, MARGIN, y, CONTENT_W, blockH, '#FFF1E6');
   doc.rect(MARGIN, y, CONTENT_W, blockH).strokeColor(C.accent).lineWidth(1.2).stroke();
   fillRect(doc, MARGIN, y, 5, blockH, C.accent);
@@ -152,13 +160,11 @@ function drawAvisoNotaFiscal(doc, y) {
   doc.font('Helvetica-Bold').fontSize(8.5).fillColor(C.accent)
      .text('ATENÇÃO — ENVIO DA NOTA FISCAL', textX, y + 8, { width: textW, lineBreak: false });
 
-  // Coluna esquerda: e-mail
   doc.font('Helvetica').fontSize(7.5).fillColor(C.black)
      .text('Enviar a nota fiscal para o e-mail:', textX, y + 23, { width: halfW, lineBreak: false });
   doc.font('Helvetica-Bold').fontSize(10).fillColor(C.black)
      .text('financeiro@visualpremium.com.br', textX, y + 34, { width: halfW, lineBreak: false });
 
-  // Coluna direita: whatsapp
   const rightX = textX + halfW + 20;
   doc.font('Helvetica').fontSize(7.5).fillColor(C.black)
      .text('e também para o WhatsApp:', rightX, y + 23, { width: halfW, align: 'right', lineBreak: false });
@@ -206,21 +212,33 @@ function drawTotalBox(doc, y, valorTotal) {
 }
 
 function drawItensTable(doc, itens, startY) {
-  // Detecta quais colunas de preco sao necessarias baseado no usarM2 de cada item
   const temUnitario = itens.some(i => !i.usarM2);
   const temM2       = itens.some(i =>  i.usarM2);
 
-  // Se so um tipo existe, a largura da coluna omitida e redistribuida
+  const itensComQtdUnidade  = itens.filter(i => !i.usarM2 && i.qtdUnidade != null && Number(i.qtdUnidade) > 0);
+  const temQtdUnidadeGlobal = itensComQtdUnidade.length > 0;
+
+  const unidadesQtdUnidade = new Set(itensComQtdUnidade.map(i => (i.material?.unidade ?? '').toUpperCase().trim()));
+  const unidadeQtdUnidadeUnica = unidadesQtdUnidade.size === 1 ? [...unidadesQtdUnidade][0] : null;
+  const labelQtdPorUnid = unidadeQtdUnidadeUnica ? `${unidadeQtdUnidadeUnica} POR UNIDADE` : 'QTD/UNID.';
+
+  const unidadesPrecoUnit = new Set(
+    itens.filter(i => !i.usarM2).map(i => (i.material?.unidade ?? '').toUpperCase().trim())
+  );
+  const unidadePrecoUnitUnica = unidadesPrecoUnit.size === 1 ? [...unidadesPrecoUnit][0] : null;
+  const labelPrecoUnit = unidadePrecoUnitUnica ? `VALOR/${unidadePrecoUnitUnica}` : 'PREÇO UNIT.';
+
   const extraUnit = !temUnitario ? 78 : 0;
   const extraM2   = !temM2       ? 68 : 0;
 
   const cols = [
-    { key: 'material',   label: 'MATERIAL',    w: 155,                hAlign: 'left',   cAlign: 'left',   pad: 5 },
-    { key: 'qtd',        label: 'QTD',         w: 100,                hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'unidade',    label: 'UNIDADE',     w: 44,                 hAlign: 'center', cAlign: 'center', pad: 3 },
-    ...(temUnitario ? [{ key: 'precoUnit',  label: 'PREÇO UNIT.', w: 78 + extraM2, hAlign: 'center', cAlign: 'center', pad: 3 }] : []),
+    { key: 'material',   label: 'MATERIAL',      w: temQtdUnidadeGlobal ? 120 : 190, hAlign: 'left',   cAlign: 'left',   pad: 5 },
+    { key: 'qtd',        label: 'QTD',           w: 55,                 hAlign: 'center', cAlign: 'center', pad: 3 },
+    ...(temQtdUnidadeGlobal ? [{ key: 'qtdPorUnid', label: labelQtdPorUnid, w: 70, hAlign: 'center', cAlign: 'center', pad: 3 }] : []),
+    { key: 'unidade',    label: 'UNIDADE',       w: 44,                 hAlign: 'center', cAlign: 'center', pad: 3 },
+    ...(temUnitario ? [{ key: 'precoUnit',  label: labelPrecoUnit, w: 78 + extraM2, hAlign: 'center', cAlign: 'center', pad: 3 }] : []),
     ...(temM2       ? [{ key: 'precoM2',    label: 'PREÇO M²',    w: 68 + extraUnit, hAlign: 'center', cAlign: 'center', pad: 3 }] : []),
-    { key: 'precoTotal', label: 'TOTAL',       w: 78,                 hAlign: 'center', cAlign: 'right',  pad: 5 },
+    { key: 'precoTotal', label: 'VALOR TOTAL (R$)', w: 88,             hAlign: 'center', cAlign: 'center', pad: 5 },
   ];
 
   let cx = MARGIN;
@@ -247,10 +265,17 @@ function drawItensTable(doc, itens, startY) {
     doc.strokeColor('#D1D5DB').lineWidth(0.8)
        .moveTo(MARGIN, y + HEADER_H).lineTo(PAGE_W - MARGIN, y + HEADER_H).stroke();
 
-    doc.font('Helvetica-Bold').fontSize(7).fillColor(C.gray);
+    doc.fillColor(C.gray);
     for (const col of cols) {
-      doc.text(col.label, col.x + col.pad, y + (HEADER_H - 7) / 2,
-               { width: col.w - col.pad * 2, align: col.hAlign, lineBreak: false });
+      const availW = col.w - col.pad * 2;
+      let hSz = 7;
+      doc.font('Helvetica-Bold').fontSize(hSz);
+      while (hSz > 5 && doc.widthOfString(col.label) > availW) {
+        hSz -= 0.5;
+        doc.fontSize(hSz);
+      }
+      doc.text(col.label, col.x + col.pad, y + (HEADER_H - hSz) / 2,
+               { width: availW, align: col.hAlign, lineBreak: false });
     }
     drawColDividers(y, HEADER_H);
     y += HEADER_H;
@@ -263,11 +288,33 @@ function drawItensTable(doc, itens, startY) {
     const unidade = item.material?.unidade ?? '—';
     const descricao = item.descricaoItem?.trim() || null;
 
-    // Monta linha de especificações técnicas do material (medida / espessura / identificador)
+    const qtdUnidadeNum = item.qtdUnidade != null ? Number(item.qtdUnidade) : null;
+    const temQtdUnidade  = !item.usarM2 && qtdUnidadeNum != null && qtdUnidadeNum > 0;
+
+    const temMedida = item.material?.medida && item.material.medida.trim().length > 0;
+
+    // Construir dimensão no formato "2X1M"
+    let dimensao = null;
+    if (!temMedida) {
+      const comp = item.material?.comprimento;
+      const larg = item.material?.largura;
+      
+      if (comp && larg) {
+        // Ambos preenchidos: "2X1M"
+        dimensao = `${comp}X${larg}M`;
+      } else if (comp) {
+        // Só comprimento: "2M (C)"
+        dimensao = `${comp}M`;
+      } else if (larg) {
+        // Só largura: "1M (L)"
+        dimensao = `${larg}M`;
+      }
+    }
+
     const especParts = [
-      item.material?.medida        ? `${item.material.medida}`             : null,
-      item.material?.espessura     ? `${item.material.espessura}`            : null,
-      item.material?.identificador ? `${item.material.identificador}`        : null,
+      temMedida ? `${item.material.medida}` : dimensao,
+      item.material?.espessura     ? `${item.material.espessura}`      : null,
+      item.material?.identificador ? `${item.material.identificador}`  : null,
     ].filter(Boolean);
     const especLine = especParts.length > 0 ? especParts.join('  •  ') : null;
 
@@ -295,6 +342,7 @@ function drawItensTable(doc, itens, startY) {
 
     const C0 = cols.find(c => c.key === 'material');
     const C1 = cols.find(c => c.key === 'qtd');
+    const Cqu = cols.find(c => c.key === 'qtdPorUnid');
     const C2 = cols.find(c => c.key === 'unidade');
     const C3 = cols.find(c => c.key === 'precoUnit');
     const C4 = cols.find(c => c.key === 'precoM2');
@@ -319,28 +367,32 @@ function drawItensTable(doc, itens, startY) {
        .text(formatNumber(item.quantidade), C1.x + C1.pad, tySingle,
              { width: C1.w - C1.pad * 2, align: 'center', lineBreak: false });
 
+    if (Cqu) {
+      doc.font('Helvetica').fontSize(FONT_SZ).fillColor(temQtdUnidade ? C.black : C.lightGray)
+         .text(temQtdUnidade ? formatNumber(qtdUnidadeNum) : '—', Cqu.x + Cqu.pad, tySingle,
+               { width: Cqu.w - Cqu.pad * 2, align: 'center', lineBreak: false });
+    }
+
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.black)
        .text(unidade, C2.x + C2.pad, tySingle,
              { width: C2.w - C2.pad * 2, align: 'center', lineBreak: false });
 
-    // Coluna PRECO UNIT. — renderiza so se o item for unitario (e a coluna existir)
     if (C3 && !item.usarM2) {
       doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-         .text(formatCurrency(item.precoUnitario), C3.x + C3.pad, tySingle,
+         .text(formatCurrencyPreciso(item.precoUnitario), C3.x + C3.pad, tySingle,
                { width: C3.w - C3.pad * 2, align: 'center', lineBreak: false });
     }
 
-    // Coluna PRECO M2 — renderiza so se o item for m2 (e a coluna existir)
     if (C4 && item.usarM2) {
       doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-         .text(item.precoMetroQuadrado != null ? formatCurrency(item.precoMetroQuadrado) : '—',
+         .text(item.precoMetroQuadrado != null ? formatCurrencyPreciso(item.precoMetroQuadrado) : '—',
                C4.x + C4.pad, tySingle,
                { width: C4.w - C4.pad * 2, align: 'center', lineBreak: false });
     }
 
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
        .text(formatCurrency(item.precoTotal), C5.x + C5.pad, tySingle,
-             { width: C5.w - C5.pad * 2, align: 'right', lineBreak: false });
+             { width: C5.w - C5.pad * 2, align: 'center', lineBreak: false });
 
     drawColDividers(y, rowH);
     y += rowH;
@@ -362,7 +414,6 @@ function drawObservacoes(doc, observacoes) {
 
   const textW = maxW - padH * 2;
 
-  // Calcula a altura necessária para o texto
   doc.font('Helvetica').fontSize(7);
 
   const textoFormatado = observacoes

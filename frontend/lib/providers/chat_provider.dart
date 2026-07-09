@@ -40,6 +40,60 @@ class ChatProvider extends ChangeNotifier {
   int _minimizarTrigger = 0;
   int              get minimizarTrigger   => _minimizarTrigger;
 
+  // Contrapartida do trigger acima: pede para o mini-chat flutuante
+  // EXPANDIR (em vez de recolher) já com uma conversa específica aberta.
+  // Usado após encaminhar uma solicitação/material — a UI
+  // (ChatFloatingWidget) observa `abrirConversaTrigger` e, ao mudar, se
+  // expande e confia em `usuarioAtivoId` (já setado por `abrirConversa`
+  // abaixo) para saber qual conversa mostrar.
+  int _abrirConversaTrigger = 0;
+  int              get abrirConversaTrigger => _abrirConversaTrigger;
+
+  // ── Indicador de "digitando..." ──────────────────────────────────────
+  // Guarda, por id de usuário, um Timer que expira o indicador se nenhum
+  // novo ping SSE chegar em _digitandoExpira. O evento é só um "ping"
+  // repassado pelo servidor (não fica persistido), então quem decide
+  // quando o indicador some é sempre o lado que recebe.
+  static const _digitandoExpira = Duration(seconds: 3);
+  final Map<int, Timer> _digitandoTimers = {};
+  final Set<int> _usuariosDigitando = {};
+
+  bool estaDigitando(int usuarioId) => _usuariosDigitando.contains(usuarioId);
+
+  void _marcarDigitando(int usuarioId) {
+    _usuariosDigitando.add(usuarioId);
+    _digitandoTimers[usuarioId]?.cancel();
+    _digitandoTimers[usuarioId] = Timer(_digitandoExpira, () {
+      _usuariosDigitando.remove(usuarioId);
+      notifyListeners();
+    });
+    notifyListeners();
+  }
+
+  // Throttle do lado de quem digita: evita disparar um POST a cada tecla.
+  // Reenvia o ping no máximo 1x a cada 2s enquanto o campo continua sendo
+  // editado, o que é suficiente pro timer de 3s do lado receptor nunca
+  // expirar entre uma tecla e outra.
+  DateTime? _ultimoPingDigitando;
+  Future<void> notificarDigitando() async {
+    if (_usuarioAtivoId == null) return;
+    final agora = DateTime.now();
+    if (_ultimoPingDigitando != null &&
+        agora.difference(_ultimoPingDigitando!) < const Duration(seconds: 2)) {
+      return;
+    }
+    _ultimoPingDigitando = agora;
+    try {
+      await ApiClient.post('/chat/typing', {
+        'destinatarioId': _usuarioAtivoId,
+      });
+    } catch (e) {
+      // Falha aqui é inofensiva (o indicador só deixa de aparecer), então
+      // não vale a pena mostrar erro pro usuário nem tentar de novo.
+      debugPrint('ChatProvider.notificarDigitando erro: $e');
+    }
+  }
+
   /// Pede para o mini-chat flutuante (bolha) recolher, se estiver expandido.
   /// Usado, por exemplo, ao trocar de usuário logado, para não deixar a
   /// conversa de um usuário aberta na tela depois da troca.
@@ -48,9 +102,27 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Pede para o mini-chat flutuante expandir já com a conversa de
+  /// `usuarioId` aberta (carregando as mensagens, se necessário). Usado após
+  /// encaminhar uma solicitação/material para alguém no chat.
+  Future<void> solicitarAberturaConversa(int usuarioId) async {
+    await abrirConversa(usuarioId);
+    _abrirConversaTrigger++;
+    notifyListeners();
+  }
+
   List<MensagemChat> conversaAtual() {
     if (_usuarioAtivoId == null) return [];
     return _conversas[_usuarioAtivoId] ?? [];
+  }
+
+  /// Busca um usuário da lista pelo id — usado pela UI para exibir o
+  /// indicador de presença (online/offline) do usuário da conversa aberta.
+  UsuarioChat? usuarioPorId(int id) {
+    for (final u in _usuarios) {
+      if (u.id == id) return u;
+    }
+    return null;
   }
 
   // ApiClient já injeta o header Authorization a partir do token logado;
@@ -130,7 +202,9 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> enviarMensagem(String conteudo) async {
+  /// Se `respondendoA` for informada, a mensagem é enviada como resposta
+  /// (citação) àquela mensagem — ver feature "responder mensagem".
+  Future<void> enviarMensagem(String conteudo, {MensagemChat? respondendoA}) async {
     if (_usuarioAtivoId == null || conteudo.trim().isEmpty) return;
     final destinatarioId = _usuarioAtivoId!;
     final texto = conteudo.trim();
@@ -147,6 +221,11 @@ class ChatProvider extends ChangeNotifier {
       lida: false,
       criadoEm: DateTime.now(),
       pendente: true,
+      respondendoAId: respondendoA?.id,
+      respondendoAConteudo: respondendoA?.conteudo,
+      respondendoARemetenteNome: respondendoA?.remetenteId == _meuId
+          ? 'Você'
+          : respondendoA?.remetenteNome,
     );
     _adicionarMensagem(otimista);
 
@@ -154,6 +233,7 @@ class ChatProvider extends ChangeNotifier {
       final data = await ApiClient.post('/chat/mensagem', {
         'destinatarioId': destinatarioId,
         'conteudo':       texto,
+        if (respondendoA != null) 'respondendoAId': respondendoA.id,
       });
       final msg = MensagemChat.fromJson(data);
       _removerMensagem(destinatarioId, tempId);
@@ -163,6 +243,43 @@ class ChatProvider extends ChangeNotifier {
       // Remove a mensagem otimista que falhou para não ficar presa
       // mostrando 1 risquinho para sempre.
       _removerMensagem(destinatarioId, tempId);
+    }
+  }
+
+  /// Envia uma solicitação ou material "encaminhado" para `destinatarioId`,
+  /// que não precisa ser a conversa atualmente aberta (diferente de
+  /// `enviarMensagem`, que sempre manda para `_usuarioAtivoId`).
+  Future<void> enviarEncaminhamento({
+    required int destinatarioId,
+    required String tipo,
+    required Map<String, dynamic> dados,
+  }) async {
+    final conteudo = MensagemChat.codificarEncaminhamento(tipo: tipo, dados: dados);
+
+    final tempId = -DateTime.now().millisecondsSinceEpoch;
+    final otimista = MensagemChat(
+      id: tempId,
+      remetenteId: _meuId ?? 0,
+      destinatarioId: destinatarioId,
+      conteudo: conteudo,
+      lida: false,
+      criadoEm: DateTime.now(),
+      pendente: true,
+    );
+    _adicionarMensagem(otimista);
+
+    try {
+      final data = await ApiClient.post('/chat/mensagem', {
+        'destinatarioId': destinatarioId,
+        'conteudo':       conteudo,
+      });
+      final msg = MensagemChat.fromJson(data);
+      _removerMensagem(destinatarioId, tempId);
+      _adicionarMensagem(msg);
+    } catch (e) {
+      debugPrint('ChatProvider.enviarEncaminhamento erro: $e');
+      _removerMensagem(destinatarioId, tempId);
+      rethrow;
     }
   }
 
@@ -299,6 +416,31 @@ class ChatProvider extends ChangeNotifier {
               notifyListeners();
             }
           }
+        } else if (tipo == 'digitando') {
+          final remetenteId = data['remetenteId'] as int?;
+          if (remetenteId != null) _marcarDigitando(remetenteId);
+        } else if (tipo == 'usuario_online') {
+          final uid = data['usuarioId'] as int?;
+          if (uid != null) {
+            final idx = _usuarios.indexWhere((u) => u.id == uid);
+            if (idx != -1) {
+              _usuarios[idx].online = true;
+              notifyListeners();
+            }
+          }
+        } else if (tipo == 'usuario_offline') {
+          final uid = data['usuarioId'] as int?;
+          if (uid != null) {
+            final idx = _usuarios.indexWhere((u) => u.id == uid);
+            if (idx != -1) {
+              _usuarios[idx].online = false;
+              final ultimo = data['ultimoAcesso'] as String?;
+              if (ultimo != null) {
+                _usuarios[idx].ultimoAcesso = DateTime.parse(ultimo).toLocal();
+              }
+              notifyListeners();
+            }
+          }
         } else if (tipo == 'reacao_atualizada') {
           final msg = MensagemChat.fromJson(
               data['mensagem'] as Map<String, dynamic>);
@@ -323,11 +465,19 @@ class ChatProvider extends ChangeNotifier {
     _conversas.clear();
     _usuarioAtivoId = null;
     _totalNaoLidas = 0;
+    for (final t in _digitandoTimers.values) {
+      t.cancel();
+    }
+    _digitandoTimers.clear();
+    _usuariosDigitando.clear();
   }
 
   @override
   void dispose() {
     _sseSub?.cancel();
+    for (final t in _digitandoTimers.values) {
+      t.cancel();
+    }
     super.dispose();
   }
 }

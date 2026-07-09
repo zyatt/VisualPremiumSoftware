@@ -145,7 +145,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
   bool _buscando = false;
   bool _mostrarResultados = false;
   bool _salvando = false;
-  String _ordemTotais = 'unitario';
 
   final Set<String> _itensSelecionados = {};
   final Set<String> _materiaisParaBulk = {};
@@ -306,7 +305,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       precos[fm.fornecedorId] = PrecoFornecedorData(
         fornecedorNome: fm.fornecedorNome,
         preco: fm.preco > 0 ? fm.preco : null,
-        precoM2: fm.precoMetroQuadrado > 0 ? fm.precoMetroQuadrado : null,
       );
     }
     provider.adicionarItem(ItemOrcamentoData(
@@ -445,7 +443,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     novosPrecos[fornecedorId] = PrecoFornecedorData(
       fornecedorNome: pf.fornecedorNome,
       preco: result['preco'] as double?,
-      precoM2: pf.precoM2, // mantém o precoM2 existente intocado
       observacao: result['observacao'] as String?,
     );
     provider.atualizarItemParcial(item.itemId, precos: novosPrecos);
@@ -537,10 +534,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       await _sincronizarFornecedoresOcultos(orcId, tabAtualizado);
       for (final item in tabAtualizado.itens) {
         if (item.precos.isEmpty) {
-          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
+          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
       }
@@ -615,10 +612,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       await _sincronizarFornecedoresOcultos(orcId, tab);
       for (final item in tab.itens) {
         if (item.precos.isEmpty) {
-          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
+          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
       }
@@ -627,7 +624,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Orçamento #$orcId enviado para aprovação com sucesso!'), backgroundColor: AppTheme.success));
       provider.atualizarFlagsTab(aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
-      Navigator.of(context).pop();
+      // Retorna um sinal para a OrcamentoPage saber que deve abrir/focar
+      // a aba "Aguardando Aprovação" ao voltar.
+      Navigator.of(context).pop('enviadoParaAprovacao');
     } catch (e) {
       if (mounted) {
         if (_isErroDeStatusDesatualizado(e)) {
@@ -676,10 +675,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         _logOrc('aprovarOrcamento: regravando ${tab.itens.length} itens orcamentoId=$id');
         for (final item in tab.itens) {
          if (item.precos.isEmpty) {
-          await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
+          await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+            await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
         }
@@ -696,7 +695,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       provider.atualizarFlagsTab(aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
       provider.fecharAbaAposOperacao();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Orçamento #$id aprovado com sucesso!'), backgroundColor: AppTheme.success));
-      Navigator.of(context).pop();
+      // Retorna um sinal para a OrcamentoPage saber que deve abrir/focar
+      // a aba "Aprovados" ao voltar.
+      Navigator.of(context).pop('aprovado');
     } catch (e, st) {
       _logOrc('aprovarOrcamento: ERRO após ${DateTime.now().difference(inicio).inMilliseconds}ms orcamentoId=$id',
           erro: e, stack: st, level: 1000);
@@ -778,8 +779,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               'fornecedorId': null,
               'quantidade': item.quantidade,
               'precoUnitario': null,
-              'precoM2': null,
-              'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado,
               'selecionado': false,
             });
           } else {
@@ -789,8 +788,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 'fornecedorId': entry.key,
                 'quantidade': item.quantidade,
                 'precoUnitario': entry.value.preco,
-                'precoM2': entry.value.precoM2,
-                'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado,
                 'selecionado': item.fornecedorSelecionado == entry.key,
                 'observacao': entry.value.observacao,
               });
@@ -942,10 +939,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         await repo.limparItens(orcId);
         for (final item in tab.itens) {
         if (item.precos.isEmpty) {
-          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
+          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
         }
@@ -956,10 +953,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         await _sincronizarFornecedoresOcultos(orcId, tab);
         for (final item in tab.itens) {
           if (item.precos.isEmpty) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'precoM2': null, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': false});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'selecionado': false});
           } else {
             for (final entry in item.precos.entries) {
-              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'precoM2': entry.value.precoM2, 'usarM2': item.modoOrcamento == ModoOrcamento.metroQuadrado, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
             }
           }
         }
@@ -1139,19 +1136,14 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
   void _aplicarSugestaoOtimizada(List<ItemOrcamentoData> itens) {
     final provider = context.read<OrcamentoProvider>();
     final ocultos = provider.tabAtual?.fornecedoresOcultos.toSet() ?? const <int>{};
-    final ordenarPorM2 = _ordemTotais == 'm2';
     for (final item in itens) {
       if (item.precos.isEmpty) continue;
-      double? menorValor; int? fornEscolhido; ModoOrcamento? modoEscolhido;
+      double? menorValor; int? fornEscolhido;
       for (final entry in item.precos.entries) {
         if (ocultos.contains(entry.key)) continue;
-        if (ordenarPorM2) {
-          if (entry.value.precoM2 != null && (menorValor == null || entry.value.precoM2! < menorValor)) { menorValor = entry.value.precoM2; fornEscolhido = entry.key; modoEscolhido = ModoOrcamento.metroQuadrado; }
-        } else {
-          if (entry.value.preco != null && (menorValor == null || entry.value.preco! < menorValor)) { menorValor = entry.value.preco; fornEscolhido = entry.key; modoEscolhido = ModoOrcamento.unitario; }
-        }
+        if (entry.value.preco != null && (menorValor == null || entry.value.preco! < menorValor)) { menorValor = entry.value.preco; fornEscolhido = entry.key; }
       }
-      if (fornEscolhido != null && modoEscolhido != null) provider.atualizarItemParcial(item.itemId, fornecedorSelecionado: fornEscolhido, modoOrcamento: modoEscolhido);
+      if (fornEscolhido != null) provider.atualizarItemParcial(item.itemId, fornecedorSelecionado: fornEscolhido);
     }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sugestão de orçamento otimizado aplicada!'), backgroundColor: AppTheme.success));
   }
@@ -1171,13 +1163,15 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
             backgroundColor: Theme.of(context).colorScheme.surface,
             elevation: 0,
             automaticallyImplyLeading: false,
-            leading: IconButton(
-              onPressed: () => Navigator.of(context).pop(),
-              icon: Icon(Icons.arrow_back_ios_new, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              tooltip: 'Voltar',
-            ),
+            titleSpacing: 16,
             title: Row(
               children: [
+                _BotaoVoltar(
+                  label: 'Voltar',
+                  tooltip: 'Voltar',
+                  onTap: () => Navigator.of(context).pop(),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: ScrollConfiguration(
                     behavior: _HorizontalScrollBehavior(),
@@ -1240,32 +1234,44 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                                       ),
                                     ),
                                     SizedBox(width: 6),
-                                    GestureDetector(
-                                      onTap: () async {
-                                        await _salvarAoFecharAba(i);
-                                        if (provider.abas.isEmpty) Navigator.of(context).pop();
-                                      },
-                                      child: Icon(Icons.close, size: 13, color: ativa ? Colors.white.withValues(alpha: 0.8) : Theme.of(context).colorScheme.outline),
+                                    Tooltip(
+                                      message: 'Fechar guia',
+                                      child: MouseRegion(
+                                        cursor: SystemMouseCursors.click,
+                                        child: GestureDetector(
+                                          onTap: () async {
+                                            await _salvarAoFecharAba(i);
+                                            if (context.mounted && provider.abas.isEmpty) Navigator.of(context).pop();
+                                          },
+                                          child: Icon(Icons.close, size: 13, color: ativa ? Colors.white.withValues(alpha: 0.8) : Theme.of(context).colorScheme.outline),
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
                               ),
                             );
                           }),
-                          GestureDetector(
-                            onTap: () {
-                              provider.adicionarAba();
-                              provider.atualizarFlagsTab(modoEdicao: true);
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                if (mounted && _abasScrollCtrl.hasClients) _abasScrollHintNotifier.update(_abasScrollCtrl);
-                                if (mounted) setState(() {});
-                              });
-                            },
-                            child: Container(
-                              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              margin: EdgeInsets.only(left: 2),
-                              decoration: BoxDecoration(color: Theme.of(context).scaffoldBackgroundColor, borderRadius: BorderRadius.circular(8), border: Border.all(color: Theme.of(context).colorScheme.outlineVariant)),
-                              child: Icon(Icons.add, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          Tooltip(
+                            message: 'Adicionar nova guia',
+                            child: MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: GestureDetector(
+                                onTap: () {
+                                  provider.adicionarAba();
+                                  provider.atualizarFlagsTab(modoEdicao: true);
+                                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                                    if (mounted && _abasScrollCtrl.hasClients) _abasScrollHintNotifier.update(_abasScrollCtrl);
+                                    if (mounted) setState(() {});
+                                  });
+                                },
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  margin: EdgeInsets.only(left: 2),
+                                  decoration: BoxDecoration(color: Theme.of(context).scaffoldBackgroundColor, borderRadius: BorderRadius.circular(8), border: Border.all(color: Theme.of(context).colorScheme.outlineVariant)),
+                                  child: Icon(Icons.add, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -1344,34 +1350,49 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               Text('${itens.length} mat. · $fornsSel forn.', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ],
           ),
-          OutlinedButton.icon(onPressed: _salvarOrcamento, icon: Icon(Icons.save_outlined, size: iconSize), label: Text('Salvar', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: AppTheme.success, side: const BorderSide(color: AppTheme.success), padding: btnPad)),
-          OutlinedButton.icon(onPressed: _cancelarOrcamento, icon: Icon(Icons.delete_outline, size: iconSize), label: Text('Cancelar', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: BorderSide(color: AppTheme.error), padding: btnPad)),
-          OutlinedButton.icon(onPressed: itens.isEmpty ? null : _exportarPdf, icon: Icon(Icons.picture_as_pdf_outlined, size: iconSize), label: Text('PDF', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant, side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant), padding: btnPad)),
-          OutlinedButton.icon(
-            onPressed: () => _sincronizarStatusServidor(origem: 'botaoAtualizarManual'),
-            icon: Icon(Icons.refresh, size: iconSize),
-            label: Text('Atualizar', style: btnStyle12),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-              padding: btnPad,
+          Tooltip(
+            message: 'Salvar orçamento',
+            child: OutlinedButton.icon(onPressed: _salvarOrcamento, icon: Icon(Icons.save_outlined, size: iconSize), label: Text('Salvar', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: AppTheme.success, side: const BorderSide(color: AppTheme.success), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click))),
+          ),
+          Tooltip(
+            message: 'Cancelar orçamento',
+            child: OutlinedButton.icon(onPressed: _cancelarOrcamento, icon: Icon(Icons.delete_outline, size: iconSize), label: Text('Cancelar', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: BorderSide(color: AppTheme.error), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click))),
+          ),
+          Tooltip(
+            message: 'Baixar PDF do orçamento',
+            child: OutlinedButton.icon(onPressed: itens.isEmpty ? null : _exportarPdf, icon: Icon(Icons.picture_as_pdf_outlined, size: iconSize), label: Text('PDF', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant, side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click))),
+          ),
+          Tooltip(
+            message: 'Atualizar dados do orçamento',
+            child: OutlinedButton.icon(
+              onPressed: () => _sincronizarStatusServidor(origem: 'botaoAtualizarManual'),
+              icon: Icon(Icons.refresh, size: iconSize),
+              label: Text('Atualizar', style: btnStyle12),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                padding: btnPad,
+              ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             ),
           ),
           if (mostrarBotaoAprovar)
-            OutlinedButton.icon(
-              onPressed: itens.isEmpty ? null : () async { final sid = provider.tabAtual?.servidorId; if (sid == null) return; await _aprovarOrcamento(sid, provider.tabAtual?.titulo ?? ''); },
-              icon: Icon(Icons.check_circle_outline, size: iconSize),
-              label: Text('Aprovar', style: btnStyle12),
-              style: OutlinedButton.styleFrom(foregroundColor: AppTheme.success, side: const BorderSide(color: AppTheme.success), padding: btnPad),
+            Tooltip(
+              message: 'Aprovar orçamento',
+              child: OutlinedButton.icon(
+                onPressed: itens.isEmpty ? null : () async { final sid = provider.tabAtual?.servidorId; if (sid == null) return; await _aprovarOrcamento(sid, provider.tabAtual?.titulo ?? ''); },
+                icon: Icon(Icons.check_circle_outline, size: iconSize),
+                label: Text('Aprovar', style: btnStyle12),
+                style: OutlinedButton.styleFrom(foregroundColor: AppTheme.success, side: const BorderSide(color: AppTheme.success), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              ),
             )
           else if (!tab.modoGerarOC)
             Tooltip(
-              message: tab.jaFinalizado ? 'Orçamento já aprovado/não aprovado. Reabra para reenviar.' : '',
+              message: tab.jaFinalizado ? 'Orçamento já aprovado/não aprovado. Reabra para reenviar.' : 'Enviar orçamento para aprovação',
               child: OutlinedButton.icon(
                 onPressed: (itens.isEmpty || tab.jaFinalizado) ? null : _enviarParaAprovacao,
                 icon: Icon(Icons.send_outlined, size: iconSize),
                 label: Text('Enviar para aprovação', style: btnStyle12),
-                style: OutlinedButton.styleFrom(foregroundColor: tab.jaFinalizado ? Theme.of(context).colorScheme.outline : AppTheme.warning, side: BorderSide(color: tab.jaFinalizado ? Theme.of(context).colorScheme.outlineVariant : AppTheme.warning), padding: btnPad),
+                style: OutlinedButton.styleFrom(foregroundColor: tab.jaFinalizado ? Theme.of(context).colorScheme.outline : AppTheme.warning, side: BorderSide(color: tab.jaFinalizado ? Theme.of(context).colorScheme.outlineVariant : AppTheme.warning), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
               ),
             ),
           if (tab.modoGerarOC)
@@ -1381,7 +1402,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 onPressed: podeGerar ? () => _gerarOrdemCompra(itens) : null,
                 icon: const Icon(Icons.shopping_cart_checkout, size: iconSize),
                 label: Text('Gerar OC (${_fornecedoresSelecionados(itens)})', style: btnStyle12),
-                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, padding: btnPad),
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
               ),
             ),
         ],
@@ -1459,22 +1480,25 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               ],
               const Spacer(),
               if (itens.isNotEmpty)
-                TextButton.icon(
-                  onPressed: () {
-                    for (final item in List.from(itens)) {
-                      provider.removerItem(item.itemId);
-                    }
-                  },
-                  icon: const Icon(Icons.close, size: 13),
-                  label: const Text(
-                    'Limpar',
-                    style: TextStyle(fontSize: 11),
-                  ),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
+                Tooltip(
+                  message: 'Limpar materiais selecionados',
+                  child: TextButton.icon(
+                    onPressed: () {
+                      for (final item in List.from(itens)) {
+                        provider.removerItem(item.itemId);
+                      }
+                    },
+                    icon: const Icon(Icons.close, size: 13),
+                    label: const Text(
+                      'Limpar',
+                      style: TextStyle(fontSize: 11),
                     ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                    ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                   ),
                 ),
             ],
@@ -1695,7 +1719,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       if (mounted && _tabelaHScrollCtrl.hasClients) _tabelaHScrollHintNotifier.update(_tabelaHScrollCtrl);
     });
     final fornIdsRaw = _todosFornecedoresIds(itens).toList();
-    final usarM2 = _ordemTotais == 'm2';
 
     Map<int, double> totaisForn = {};
     Map<int, int> cobertura = {};
@@ -1705,7 +1728,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       for (final item in itens) {
         final pf = item.precos[fId];
         if (pf != null) {
-          final preco = usarM2 ? (pf.precoM2 ?? pf.preco) : pf.preco;
+          final preco = pf.preco;
           if (preco != null) {
             soma += preco * item.quantidade;
             cnt++;
@@ -1716,22 +1739,26 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       cobertura[fId] = cnt;
     }
 
+    // Nome de cada fornecedor (usado apenas para ordenação alfabética das colunas).
+    Map<int, String> nomesForn = {};
+    for (final fId in fornIdsRaw) {
+      final nome = itens
+          .expand((i) => i.precos.entries)
+          .where((e) => e.key == fId)
+          .map((e) => e.value.fornecedorNome)
+          .firstOrNull;
+      nomesForn[fId] = nome ?? 'Fornecedor #$fId';
+    }
+
     final todosFornIds = List<int>.from(fornIdsRaw)
-      ..sort((a, b) {
-        final ta = totaisForn[a] ?? 0;
-        final tb = totaisForn[b] ?? 0;
-        if (ta == 0 && tb == 0) return 0;
-        if (ta == 0) return 1;
-        if (tb == 0) return -1;
-        return ta.compareTo(tb);
-      });
+      ..sort((a, b) => nomesForn[a]!.toLowerCase().compareTo(nomesForn[b]!.toLowerCase()));
 
     List<double?> melhorPorMaterial = itens.map((item) {
       double? menor;
       for (final fId in todosFornIds) {
         final pf = item.precos[fId];
         if (pf == null) continue;
-        final preco = usarM2 ? (pf.precoM2 ?? pf.preco) : pf.preco;
+        final preco = pf.preco;
         if (preco != null && (menor == null || preco < menor)) menor = preco;
       }
       return menor;
@@ -1904,16 +1931,22 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
-                      child: GestureDetector(
-                        onTap: () => _vincularFornecedores(idx),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
-                          decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(5), border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3))),
-                          child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(Icons.person_add_outlined, size: 11, color: AppTheme.primary),
-                            SizedBox(width: 3),
-                            Text('Adicionar Fornecedor', style: TextStyle(fontSize: 9, color: AppTheme.primary, fontWeight: FontWeight.w600)),
-                          ]),
+                      child: Tooltip(
+                        message: 'Adicionar fornecedor a este material',
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: GestureDetector(
+                            onTap: () => _vincularFornecedores(idx),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+                              decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(5), border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3))),
+                              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                                Icon(Icons.person_add_outlined, size: 11, color: AppTheme.primary),
+                                SizedBox(width: 3),
+                                Text('Adicionar Fornecedor', style: TextStyle(fontSize: 9, color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                              ]),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -1957,7 +1990,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 if (!isLast) Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
               ]);
             }
-            final preco = usarM2 ? (pf.precoM2 ?? pf.preco) : pf.preco;
+            final preco = pf.preco;
             final total = preco != null ? preco * item.quantidade : null;
             final isMenorNaLinha = melhor != null && preco != null && preco == melhor;
             final isSelectedForn = item.fornecedorSelecionado == fId;
@@ -1979,7 +2012,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                     preco != null
                         ? Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                             if (isMenorNaLinha) const Padding(padding: EdgeInsets.only(right: 2), child: Icon(Icons.arrow_downward, size: 9, color: AppTheme.success)),
-                            Flexible(child: Text(usarM2 ? '${_brl(preco)}/m²' : _brl(preco), style: TextStyle(fontSize: 11, fontWeight: isMenorNaLinha ? FontWeight.w700 : FontWeight.w500, color: isMenorNaLinha ? AppTheme.success : Theme.of(context).colorScheme.onSurface), overflow: TextOverflow.ellipsis, textAlign: TextAlign.center)),
+                            Flexible(child: Text(_brl(preco), style: TextStyle(fontSize: 11, fontWeight: isMenorNaLinha ? FontWeight.w700 : FontWeight.w500, color: isMenorNaLinha ? AppTheme.success : Theme.of(context).colorScheme.onSurface), overflow: TextOverflow.ellipsis, textAlign: TextAlign.center)),
                           ])
                         : Text('Sem preço', style: TextStyle(fontSize: 9, color: AppTheme.warning, fontStyle: FontStyle.italic, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
                     if (total != null) Text(_brl(total), style: TextStyle(fontSize: 10, color: isMenorNaLinha ? AppTheme.success.withValues(alpha: 0.8) : Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
@@ -1988,7 +2021,21 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(pf.observacao!, style: TextStyle(fontSize: 8, color: AppTheme.warning, fontStyle: FontStyle.italic), textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
                       ),
-                    GestureDetector(onTap: () => _editarPreco(idx, fId), child: const Text('editar', style: TextStyle(fontSize: 9, color: AppTheme.primary, decoration: TextDecoration.underline), textAlign: TextAlign.center)),
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => _editarPreco(idx, fId),
+                        child: const Text(
+                          'editar',
+                          style: TextStyle(
+                            fontSize: 9,
+                            color: AppTheme.primary,
+                            decoration: TextDecoration.underline,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
                     if (isSelectedForn) const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.check_circle, size: 9, color: AppTheme.primary), SizedBox(width: 2), Text('Escolhido', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700, color: AppTheme.primary))]),
                   ]),
                 ))),
@@ -2025,46 +2072,51 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
             children: [
               Text('Comparativo de Preços', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
               if (_materiaisParaBulk.isNotEmpty) ...[
-                FilledButton.icon(
-                  onPressed: _adicionarFornecedoresBulk,
-                  icon: const Icon(Icons.add_business, size: 12),
-                  label: Text('Adicionar Fornecedores (${_materiaisParaBulk.length})', style: TextStyle(fontSize: 10)),
-                  style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
+                Tooltip(
+                  message: 'Adicionar fornecedores aos materiais selecionados',
+                  child: FilledButton.icon(
+                    onPressed: _adicionarFornecedoresBulk,
+                    icon: const Icon(Icons.add_business, size: 12),
+                    label: Text('Adicionar Fornecedores (${_materiaisParaBulk.length})', style: TextStyle(fontSize: 10)),
+                    style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4)).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                  ),
                 ),
-                TextButton(
-                  onPressed: () => setState(() => _materiaisParaBulk.clear()),
-                  style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4)),
-                  child: Text('Limpar', style: TextStyle(fontSize: 10)),
+                Tooltip(
+                  message: 'Limpar seleção de materiais',
+                  child: TextButton(
+                    onPressed: () => setState(() => _materiaisParaBulk.clear()),
+                    style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4)).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                    child: Text('Limpar', style: TextStyle(fontSize: 10)),
+                  ),
                 ),
               ],
               if (_itensSelecionados.isNotEmpty) ...[
-                FilledButton.icon(
-                  onPressed: () => _copiarSelecionados(itens),
-                  icon: const Icon(Icons.copy_all, size: 12),
-                  label: Text('Copiar ${_itensSelecionados.length}', style: TextStyle(fontSize: 10)),
-                  style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
+                Tooltip(
+                  message: 'Copiar itens selecionados',
+                  child: FilledButton.icon(
+                    onPressed: () => _copiarSelecionados(itens),
+                    icon: const Icon(Icons.copy_all, size: 12),
+                    label: Text('Copiar ${_itensSelecionados.length}', style: TextStyle(fontSize: 10)),
+                    style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4)).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                  ),
                 ),
-                TextButton(
-                  onPressed: () => setState(() => _itensSelecionados.clear()),
-                  style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4)),
-                  child: Text('Limpar', style: TextStyle(fontSize: 10)),
+                Tooltip(
+                  message: 'Limpar seleção de itens',
+                  child: TextButton(
+                    onPressed: () => setState(() => _itensSelecionados.clear()),
+                    style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4)).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                    child: Text('Limpar', style: TextStyle(fontSize: 10)),
+                  ),
                 ),
               ],
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Orçar por', style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                  const SizedBox(width: 4),
-                  _OrdemTotaisBtn(label: 'Unit.', icon: Icons.straighten, ativo: _ordemTotais == 'unitario', onTap: () => setState(() => _ordemTotais = 'unitario')),
-                  const SizedBox(width: 3),
-                  _OrdemTotaisBtn(label: 'M²', icon: Icons.grid_4x4, ativo: _ordemTotais == 'm2', onTap: () => setState(() => _ordemTotais = 'm2')),
-                ],
-              ),
-              OutlinedButton.icon(
-                onPressed: () => _aplicarSugestaoOtimizada(itens),
-                icon: const Icon(Icons.auto_awesome, size: 12),
-                label: const Text('Sugestão', style: TextStyle(fontSize: 10)),
-                style: OutlinedButton.styleFrom(foregroundColor: AppTheme.primary, side: const BorderSide(color: AppTheme.primary), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
+              Tooltip(
+                message: 'Aplicar sugestão de orçamento otimizado',
+                child: OutlinedButton.icon(
+                  onPressed: () => _aplicarSugestaoOtimizada(itens),
+                  icon: const Icon(Icons.auto_awesome, size: 12),
+                  label: const Text('Sugestão de melhor preço', style: TextStyle(fontSize: 10)),
+                  style: OutlinedButton.styleFrom(foregroundColor: AppTheme.primary, side: const BorderSide(color: AppTheme.primary), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                ),
               ),
               if (provider.tabAtual?.fornecedoresOcultos.isNotEmpty ?? false)
                 OutlinedButton.icon(
@@ -2567,39 +2619,6 @@ class _DialogDescartarOrcamentoState extends State<_DialogDescartarOrcamento> {
   }
 }
 
-class _OrdemTotaisBtn extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool ativo;
-  final VoidCallback onTap;
-
-  const _OrdemTotaisBtn({required this.label, required this.icon, required this.ativo, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: AnimatedContainer(
-        duration: Duration(milliseconds: 150),
-        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: ativo ? AppTheme.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 13, color: ativo ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant),
-            SizedBox(width: 3),
-            Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: ativo ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _TabNavBtn extends StatelessWidget {
   final IconData icon;
   final bool enabled;
@@ -2620,6 +2639,79 @@ class _TabNavBtn extends StatelessWidget {
           border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         child: Icon(icon, size: 14, color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline),
+      ),
+    );
+  }
+}
+// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
+// Mesmo padrão usado no cabeçalho das páginas de estoque / histórico.
+class _BotaoVoltar extends StatefulWidget {
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _BotaoVoltar({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_BotaoVoltar> createState() => _BotaoVoltarState();
+}
+
+class _BotaoVoltarState extends State<_BotaoVoltar> {
+  bool _hovered = false;
+  static const _accent = Color(0xFFF59E0B);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        child: InkWell(
+          onTap: widget.onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? _accent.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              border: Border.all(
+                color: _hovered
+                    ? _accent.withValues(alpha: 0.6)
+                    : scheme.outlineVariant,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _hovered ? _accent : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

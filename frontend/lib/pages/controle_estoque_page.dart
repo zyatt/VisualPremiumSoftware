@@ -6,6 +6,7 @@ import '../models/estoque_model.dart';
 import '../models/material_model.dart';
 import '../providers/estoque_provider.dart';
 import '../providers/material_provider.dart';
+import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 import 'historico_movimentacoes_page.dart';
 
@@ -61,6 +62,118 @@ class _UpperCaseFormatter extends TextInputFormatter {
       extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
     );
     return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
+// ── Diálogo: Renomear OS ───────────────────────────────────────────────────
+// Controller próprio gerenciado pelo ciclo de vida do State, evitando o uso
+// do controller após dispose quando o diálogo é fechado via ESC (a
+// animação de saída ainda reconstrói o TextField por um frame a mais do
+// que o Future de showDialog leva para completar).
+class _RenomearOSDialog extends StatefulWidget {
+  final String nomeAtual;
+  const _RenomearOSDialog({required this.nomeAtual});
+
+  @override
+  State<_RenomearOSDialog> createState() => _RenomearOSDialogState();
+}
+
+class _RenomearOSDialogState extends State<_RenomearOSDialog> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.nomeAtual);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _confirmar() {
+    final nome = _ctrl.text.trim();
+    if (nome.isEmpty) return;
+    if (nome == widget.nomeAtual) {
+      Navigator.of(context).pop();
+      return;
+    }
+    Navigator.of(context).pop(nome);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.edit_outlined,
+                color: AppTheme.primary, size: 20),
+          ),
+          const SizedBox(width: 12),
+          const Text('Renomear OS'),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Novo número / nome da OS:',
+            style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [_UpperCaseFormatter()],
+            decoration: const InputDecoration(
+              hintText: 'Ex: 1234 ou MANUTENCAO',
+              isDense: true,
+            ),
+            onSubmitted: (v) {
+              final nome = v.trim();
+              if (nome.isNotEmpty && nome != widget.nomeAtual) {
+                Navigator.of(context).pop(nome);
+              }
+            },
+          ),
+        ],
+      ),
+      actions: [
+        Tooltip(
+          message: 'Cancelar sem alterar o nome',
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: TextButton.styleFrom().copyWith(
+                mouseCursor:
+                    WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: const Text('Cancelar'),
+          ),
+        ),
+        Tooltip(
+          message: 'Salvar o novo nome da OS',
+          child: FilledButton.icon(
+            onPressed: _confirmar,
+            style: FilledButton.styleFrom().copyWith(
+                mouseCursor:
+                    WidgetStateProperty.all(SystemMouseCursors.click)),
+            icon: const Icon(Icons.check, size: 16),
+            label: const Text('Renomear'),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -403,61 +516,90 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   ],
                 ),
                 const Spacer(),
-                FilledButton.icon(
-                  onPressed: _abrirCadastroMaterial,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Novo Material'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
+                Tooltip(
+                  message: 'Cadastrar um novo material no estoque',
+                  child: FilledButton.icon(
+                    onPressed: _abrirCadastroMaterial,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Novo Material'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                    ).copyWith(
+                      mouseCursor:
+                          WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
-                FilledButton.icon(
-                  onPressed: () => _abrirMovimentacaoGlobal('ENTRADA'),
-                  icon: const Icon(Icons.add_circle_outline, size: 18),
-                  label: const Text('Entrada'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.success,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
+                Tooltip(
+                  message: 'Registrar entrada ou reentrada de material no estoque',
+                  child: FilledButton.icon(
+                    onPressed: () => _abrirMovimentacaoGlobal('ENTRADA'),
+                    icon: const Icon(Icons.add_circle_outline, size: 18),
+                    label: const Text('Entrada/Reentrada'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.success,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                    ).copyWith(
+                      mouseCursor:
+                          WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
-                FilledButton.icon(
-                  onPressed: () => _abrirMovimentacaoGlobal('SAIDA'),
-                  icon: const Icon(Icons.remove_circle_outline, size: 18),
-                  label: const Text('Saída'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.error,
-                    foregroundColor: Colors.white,
-                    padding: EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
+                Tooltip(
+                  message: 'Registrar saída de material do estoque',
+                  child: FilledButton.icon(
+                    onPressed: () => _abrirMovimentacaoGlobal('SAIDA'),
+                    icon: const Icon(Icons.remove_circle_outline, size: 18),
+                    label: const Text('Saída'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.error,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                    ).copyWith(
+                      mouseCursor:
+                          WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ),
                 SizedBox(width: 10),
-                OutlinedButton.icon(
-                  onPressed: _abrirHistoricoMovimentacoes,
-                  icon: const Icon(Icons.history, size: 18),
-                  label: const Text('Histórico'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Theme.of(context).colorScheme.onSurface,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                Tooltip(
+                  message: 'Ver histórico de movimentações',
+                  child: OutlinedButton.icon(
+                    onPressed: _abrirHistoricoMovimentacoes,
+                    icon: const Icon(Icons.history, size: 18),
+                    label: const Text('Histórico'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.onSurface,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    ).copyWith(
+                      mouseCursor:
+                          WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
-                IconButton(
-                  onPressed: () => context.read<EstoqueProvider>().carregarRelacoesOS(),
-                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  tooltip: 'Atualizar',
-                  style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                Tooltip(
+                  message: 'Atualizar lista de ordens de serviço',
+                  child: IconButton(
+                    onPressed: () => context.read<EstoqueProvider>().carregarRelacoesOS(),
+                    icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.surface,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    ).copyWith(
+                      mouseCursor:
+                          WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ),
               ],
@@ -783,6 +925,31 @@ class _DatePickerField extends StatelessWidget {
       initialDate: initial,
       firstDate:   firstDate,
       lastDate:    lastDate,
+      builder: (context, child) {
+        final base = Theme.of(context);
+        final clickCursor = WidgetStateProperty.resolveWith<MouseCursor>(
+          (states) => states.contains(WidgetState.disabled)
+              ? SystemMouseCursors.basic
+              : SystemMouseCursors.click,
+        );
+        return Theme(
+          data: base.copyWith(
+            textButtonTheme: TextButtonThemeData(
+              style: (base.textButtonTheme.style ?? const ButtonStyle())
+                  .copyWith(mouseCursor: clickCursor),
+            ),
+            iconButtonTheme: IconButtonThemeData(
+              style: (base.iconButtonTheme.style ?? const ButtonStyle())
+                  .copyWith(mouseCursor: clickCursor),
+            ),
+            outlinedButtonTheme: OutlinedButtonThemeData(
+              style: (base.outlinedButtonTheme.style ?? const ButtonStyle())
+                  .copyWith(mouseCursor: clickCursor),
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
     if (picked != null) onPicked(picked);
   }
@@ -790,43 +957,55 @@ class _DatePickerField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasValue = value != null;
-    return InkWell(
-      onTap: () => _pick(context),
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color:  Theme.of(context).colorScheme.surface,
-          border: Border.all(
-            color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+    return Tooltip(
+      message: hasValue
+          ? 'Alterar data ($label)'
+          : 'Selecionar data ($label)',
+      child: InkWell(
+        onTap: () => _pick(context),
+        borderRadius: BorderRadius.circular(8),
+        mouseCursor: SystemMouseCursors.click,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color:  Theme.of(context).colorScheme.surface,
+            border: Border.all(
+              color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+            ),
+            borderRadius: BorderRadius.circular(8),
           ),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.calendar_today,
-              size:  16,
-              color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              hasValue ? '$label: ${_fmtData(value)}' : label,
-              style: TextStyle(
-                fontSize:   13,
-                color:      hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
-                fontWeight: hasValue ? FontWeight.w600 : FontWeight.normal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.calendar_today,
+                size:  16,
+                color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
               ),
-            ),
-            if (hasValue) ...[
               const SizedBox(width: 6),
-              GestureDetector(
-                onTap: onCleared,
-                child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
+              Text(
+                hasValue ? '$label: ${_fmtData(value)}' : label,
+                style: TextStyle(
+                  fontSize:   13,
+                  color:      hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
+                  fontWeight: hasValue ? FontWeight.w600 : FontWeight.normal,
+                ),
               ),
+              if (hasValue) ...[
+                const SizedBox(width: 6),
+                Tooltip(
+                  message: 'Limpar data',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: onCleared,
+                      child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
+                    ),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -853,47 +1032,54 @@ class _OrdenacaoControl extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          height: 40,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<_OrdenacaoOS>(
-              value: ordenacao,
-              isDense: true,
-              icon: Icon(Icons.arrow_drop_down,
-                  size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurface,
+        Tooltip(
+          message: 'Ordenar lista de ordens de serviço',
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: Container(
+              height: 40,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                borderRadius: BorderRadius.circular(8),
               ),
-              items: _OrdenacaoOS.values
-                  .map((o) => DropdownMenuItem(
-                        value: o,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(o.icon, size: 15, color: AppTheme.primary),
-                            const SizedBox(width: 8),
-                            Text('Ordenar: ${o.label}'),
-                          ],
-                        ),
-                      ))
-                  .toList(),
-              onChanged: (o) {
-                if (o != null) onOrdenacaoChanged(o);
-              },
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<_OrdenacaoOS>(
+                  value: ordenacao,
+                  isDense: true,
+                  mouseCursor: SystemMouseCursors.click,
+                  icon: Icon(Icons.arrow_drop_down,
+                      size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                  items: _OrdenacaoOS.values
+                      .map((o) => DropdownMenuItem(
+                            value: o,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(o.icon, size: 15, color: AppTheme.primary),
+                                const SizedBox(width: 8),
+                                Text('Ordenar: ${o.label}'),
+                              ],
+                            ),
+                          ))
+                      .toList(),
+                  onChanged: (o) {
+                    if (o != null) onOrdenacaoChanged(o);
+                  },
+                ),
+              ),
             ),
           ),
         ),
         const SizedBox(width: 8),
         IconButton(
-          tooltip: decrescente ? 'Decrescente' : 'Crescente',
+          tooltip: decrescente ? 'Ordem decrescente (clique para inverter)' : 'Ordem crescente (clique para inverter)',
           onPressed: onDirecaoToggled,
           icon: Icon(
             decrescente ? Icons.arrow_downward : Icons.arrow_upward,
@@ -904,6 +1090,8 @@ class _OrdenacaoControl extends StatelessWidget {
             backgroundColor: Theme.of(context).colorScheme.surface,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          ).copyWith(
+            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
           ),
         ),
       ],
@@ -1192,7 +1380,11 @@ class _CategoriaEmpresaCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final habilitado = onTap != null;
-    return Card(
+    return Tooltip(
+      message: habilitado
+          ? (selecionado ? 'Recolher ${info.label}' : 'Ver ordens de ${info.label}')
+          : 'Nenhuma ordem em ${info.label}',
+      child: Card(
       elevation: selecionado ? 2 : 1,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
@@ -1204,6 +1396,9 @@ class _CategoriaEmpresaCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
+        mouseCursor: habilitado
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
         child: Opacity(
           opacity: habilitado ? 1 : 0.45,
           child: Padding(
@@ -1257,6 +1452,7 @@ class _CategoriaEmpresaCard extends StatelessWidget {
           ),
         ),
       ),
+      ),
     );
   }
 }
@@ -1274,8 +1470,8 @@ class _RelacaoOSCard extends StatelessWidget {
     final foiAlterada = relacao.atualizadoEm != null &&
         relacao.criadoEm != null &&
         relacao.atualizadoEm!.difference(relacao.criadoEm!).inMinutes.abs() > 1;
-    final data = relacao.atualizadoEm ?? relacao.criadoEm;
-    final dataStr = _fmtData(data);
+    final dataStr = _fmtData(relacao.atualizadoEm ?? relacao.criadoEm);
+    final criadoEmStr = _fmtData(relacao.criadoEm);
 
     // Remove sufixo interno "#OCx" / "#Sx" / "#Ex" de OS textuais antes de exibir
     final numeroOSRaw = relacao.numeroOS;
@@ -1293,11 +1489,18 @@ class _RelacaoOSCard extends StatelessWidget {
 
     final corSt = _corStatus(relacao.status);
 
-    return Card(
+    final tituloCard = int.tryParse(numeroOSDisplay) != null
+        ? 'OS $numeroOSDisplay'
+        : numeroOSDisplay;
+
+    return Tooltip(
+      message: 'Abrir $tituloCard',
+      child: Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
+        mouseCursor: SystemMouseCursors.click,
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
@@ -1364,29 +1567,45 @@ class _RelacaoOSCard extends StatelessWidget {
                   ),
                   Row(
                     children: [
-                      if (foiAlterada)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 3),
-                          child: Icon(Icons.update, size: 11, color: AppTheme.primary),
-                        ),
+                      Icon(Icons.calendar_today_outlined, size: 11,
+                          color: Theme.of(context).colorScheme.outline),
+                      const SizedBox(width: 3),
                       Text(
-                        foiAlterada ? 'Alterada em $dataStr' : dataStr,
+                        'Criado em $criadoEmStr',
                         style: TextStyle(
                           fontSize: 11,
-                          color: foiAlterada
-                              ? AppTheme.primary
-                              : Theme.of(context).colorScheme.outline,
-                          fontWeight: foiAlterada ? FontWeight.w600 : FontWeight.normal,
+                          color: Theme.of(context).colorScheme.outline,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
+                  if (foiAlterada) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(right: 3),
+                          child: Icon(Icons.update, size: 11, color: AppTheme.primary),
+                        ),
+                        Text(
+                          'Alterada em $dataStr',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -1429,22 +1648,6 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
     });
   }
 
-  // ── Abrir movimentação vinculada a esta OS ────────────────────────────────
-  void _abrirMovimentacaoOS(BuildContext context, String tipo) {
-    showDialog(
-      context: context,
-      builder: (_) => _MovimentacaoGlobalDialog(
-        tipo: tipo,
-        numeroOSFixo: widget.numeroOS, // passa o numeroOS real (com sufixo) para vincular
-      ),
-    ).then((_) {
-      // Recarrega o detalhe da OS após fechar o dialog
-      if (context.mounted) {
-        context.read<EstoqueProvider>().selecionarRelacaoOS(widget.numeroOS);
-      }
-    });
-  }
-
   // ── Reverter OS ────────────────────────────────────────────────────────────
   Future<void> _confirmarReverterOS() async {
     const corReverter = Color(0xFFED6C02);
@@ -1477,14 +1680,26 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(false),
-            child: const Text('Cancelar'),
+          Tooltip(
+            message: 'Cancelar e manter a OS fechada',
+            child: TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(false),
+              style: TextButton.styleFrom().copyWith(
+                  mouseCursor:
+                      WidgetStateProperty.all(SystemMouseCursors.click)),
+              child: const Text('Cancelar'),
+            ),
           ),
-          FilledButton.icon(
-            onPressed: () => Navigator.of(dialogCtx).pop(true),
-            icon: const Icon(Icons.undo_rounded, size: 16),
-            label: const Text('Reverter OS'),
+          Tooltip(
+            message: 'Reverter OS para Em Andamento',
+            child: FilledButton.icon(
+              onPressed: () => Navigator.of(dialogCtx).pop(true),
+              style: FilledButton.styleFrom().copyWith(
+                  mouseCursor:
+                      WidgetStateProperty.all(SystemMouseCursors.click)),
+              icon: const Icon(Icons.undo_rounded, size: 16),
+              label: const Text('Reverter OS'),
+            ),
           ),
         ],
       ),
@@ -1575,17 +1790,28 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(false),
-            child: const Text('Cancelar'),
+          Tooltip(
+            message: 'Cancelar e manter a OS em andamento',
+            child: TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(false),
+              style: TextButton.styleFrom().copyWith(
+                  mouseCursor:
+                      WidgetStateProperty.all(SystemMouseCursors.click)),
+              child: const Text('Cancelar'),
+            ),
           ),
-          FilledButton.icon(
-            onPressed: () => Navigator.of(dialogCtx).pop(true),
-            icon: const Icon(Icons.lock_outline, size: 16),
-            label: const Text('Fechar OS'),
-            style: FilledButton.styleFrom(
-              backgroundColor: _corEmAndamento,
-              foregroundColor: Colors.white,
+          Tooltip(
+            message: 'Fechar esta ordem de serviço',
+            child: FilledButton.icon(
+              onPressed: () => Navigator.of(dialogCtx).pop(true),
+              icon: const Icon(Icons.lock_outline, size: 16),
+              label: const Text('Fechar OS'),
+              style: FilledButton.styleFrom(
+                backgroundColor: _corEmAndamento,
+                foregroundColor: Colors.white,
+              ).copyWith(
+                  mouseCursor:
+                      WidgetStateProperty.all(SystemMouseCursors.click)),
             ),
           ),
         ],
@@ -1629,14 +1855,26 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
           'movimentações? Esta ação não pode ser desfeita.',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(false),
-            child: const Text('Cancelar'),
+          Tooltip(
+            message: 'Cancelar e manter a OS',
+            child: TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(false),
+              style: TextButton.styleFrom().copyWith(
+                  mouseCursor:
+                      WidgetStateProperty.all(SystemMouseCursors.click)),
+              child: const Text('Cancelar'),
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
-            child: const Text('Excluir'),
+          Tooltip(
+            message: 'Excluir permanentemente esta OS',
+            child: FilledButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(true),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.error)
+                  .copyWith(
+                      mouseCursor:
+                          WidgetStateProperty.all(SystemMouseCursors.click)),
+              child: const Text('Excluir'),
+            ),
           ),
         ],
       ),
@@ -1672,80 +1910,12 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
 
     // Remove sufixo interno antes de exibir no campo
     final nomeAtual = _numeroOSDisplay;
-    final ctrl = TextEditingController(text: nomeAtual);
 
     final novoNome = await showDialog<String>(
       context: context,
-      builder: (dialogCtx) {
-        return StatefulBuilder(
-          builder: (ctx, setDlg) => AlertDialog(
-            title: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.edit_outlined,
-                      color: AppTheme.primary, size: 20),
-                ),
-                SizedBox(width: 12),
-                Text('Renomear OS'),
-              ],
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Novo número / nome da OS:',
-                  style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: ctrl,
-                  autofocus: true,
-                  textCapitalization: TextCapitalization.characters,
-                  inputFormatters: [_UpperCaseFormatter()],
-                  decoration: const InputDecoration(
-                    hintText: 'Ex: 1234 ou MANUTENCAO',
-                    isDense: true,
-                  ),
-                  onSubmitted: (v) {
-                    final nome = v.trim();
-                    if (nome.isNotEmpty && nome != nomeAtual) {
-                      Navigator.of(dialogCtx).pop(nome);
-                    }
-                  },
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogCtx).pop(),
-                child: const Text('Cancelar'),
-              ),
-              FilledButton.icon(
-                onPressed: () {
-                        final nome = ctrl.text.trim();
-                        if (nome.isEmpty) return;
-                        if (nome == nomeAtual) {
-                          Navigator.of(dialogCtx).pop();
-                          return;
-                        }
-                        Navigator.of(dialogCtx).pop(nome);
-                      },
-                icon: const Icon(Icons.check, size: 16),
-                label: const Text('Renomear'),
-              ),
-            ],
-          ),
-        );
-      },
+      builder: (dialogCtx) => _RenomearOSDialog(nomeAtual: nomeAtual),
     );
 
-    ctrl.dispose();
     if (novoNome == null || novoNome.isEmpty || novoNome == nomeAtual) return;
     if (!mounted) return;
 
@@ -1777,16 +1947,20 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            provider.limparSelecao();
-            Navigator.of(context).pop();
-          },
-        ),
+        automaticallyImplyLeading: false,
+        titleSpacing: 16,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _BotaoVoltar(
+              label: 'Voltar',
+              tooltip: 'Voltar para a lista de ordens de serviço',
+              onTap: () {
+                provider.limparSelecao();
+                Navigator.of(context).pop();
+              },
+            ),
+            const SizedBox(width: 12),
             Text(_tituloOS),
             if (rel != null) ...[
               const SizedBox(width: 10),
@@ -1807,82 +1981,83 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
                           strokeWidth: 2, color: Color(0xFFED6C02)),
                     ),
                   )
-                : TextButton.icon(
-                    onPressed: _confirmarReverterOS,
-                    icon: const Icon(Icons.undo_rounded,
-                        size: 18, color: Color(0xFFED6C02)),
-                    label: const Text(
-                      'Reverter OS',
-                      style: TextStyle(
-                        color: Color(0xFFED6C02),
-                        fontWeight: FontWeight.w600,
+                : Tooltip(
+                    message: 'Reabrir esta OS para novas movimentações',
+                    child: TextButton.icon(
+                      onPressed: _confirmarReverterOS,
+                      icon: const Icon(Icons.undo_rounded,
+                          size: 18, color: Color(0xFFED6C02)),
+                      label: const Text(
+                        'Reverter OS',
+                        style: TextStyle(
+                          color: Color(0xFFED6C02),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      style: TextButton.styleFrom().copyWith(
+                        mouseCursor:
+                            WidgetStateProperty.all(SystemMouseCursors.click),
                       ),
                     ),
                   ),
-          // Botões Entrada / Saída (só para OS em andamento)
-          if (rel != null && !rel.estaFechada) ...[
-            FilledButton.icon(
-              onPressed: () => _abrirMovimentacaoOS(context, 'ENTRADA'),
-              icon: const Icon(Icons.add_circle_outline, size: 16),
-              label: const Text('Entrada'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.success,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-            const SizedBox(width: 8),
-            FilledButton.icon(
-              onPressed: () => _abrirMovimentacaoOS(context, 'SAIDA'),
-              icon: const Icon(Icons.remove_circle_outline, size: 16),
-              label: const Text('Saída'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.error,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
+          // Botões Entrada / Saída por OS foram removidos deste local: o
+          // registro de movimentação agora é feito sempre a partir do card
+          // do material (ver diálogo do material), evitando ambiguidade
+          // sobre a que estoque/OS a ação se refere.
           // Botão Fechar OS (só exibe se EM_ANDAMENTO)
           if (rel != null && !rel.estaFechada)
-            TextButton.icon(
-              onPressed: provider.fechandoOS
-                  ? null
-                  : () => _confirmarFecharOS(context),
-              icon: provider.fechandoOS
-                  ? SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: _corEmAndamento))
-                  : Icon(Icons.lock_outline,
-                      size: 18, color: _corEmAndamento),
-              label: Text(
-                'Finalizar OS',
-                style: TextStyle(
-                  color: provider.fechandoOS
-                      ? Theme.of(context).colorScheme.outline
-                      : _corEmAndamento,
-                  fontWeight: FontWeight.w600,
+            Tooltip(
+              message: 'Finalizar e fechar esta ordem de serviço',
+              child: TextButton.icon(
+                onPressed: provider.fechandoOS
+                    ? null
+                    : () => _confirmarFecharOS(context),
+                icon: provider.fechandoOS
+                    ? SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: _corEmAndamento))
+                    : Icon(Icons.lock_outline,
+                        size: 18, color: _corEmAndamento),
+                label: Text(
+                  'Finalizar OS',
+                  style: TextStyle(
+                    color: provider.fechandoOS
+                        ? Theme.of(context).colorScheme.outline
+                        : _corEmAndamento,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                style: TextButton.styleFrom().copyWith(
+                  mouseCursor:
+                      WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+              ),
+            ),
+          // Botão renomear (só para OS em andamento)
+          if (rel != null && !rel.estaFechada)
+            Tooltip(
+              message: 'Renomear esta ordem de serviço',
+              child: IconButton(
+                icon: Icon(Icons.edit_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                onPressed: () => _abrirRenomearOS(context, rel),
+                style: IconButton.styleFrom().copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                 ),
               ),
             ),
           // Botão excluir (só para OS em andamento)
           if (rel != null && !rel.estaFechada)
-            IconButton(
-              icon: Icon(Icons.delete_outline, color: AppTheme.error),
-              tooltip: 'Excluir OS',
-              onPressed: () => _confirmarExcluirOS(context),
-            ),
-          // Botão renomear (só para OS em andamento)
-          if (rel != null && !rel.estaFechada)
-            IconButton(
-              icon: Icon(Icons.edit_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              tooltip: 'Renomear OS',
-              onPressed: () => _abrirRenomearOS(context, rel),
+            Tooltip(
+              message: 'Excluir esta ordem de serviço',
+              child: IconButton(
+                icon: Icon(Icons.delete_outline, color: AppTheme.error),
+                onPressed: () => _confirmarExcluirOS(context),
+                style: IconButton.styleFrom().copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+              ),
             ),
         ],
       ),
@@ -2954,11 +3129,18 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                             ],
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: () {
-                            Navigator.of(ctx).pop();
-                          },
+                        Tooltip(
+                          message: 'Fechar',
+                          child: IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              Navigator.of(ctx).pop();
+                            },
+                            style: IconButton.styleFrom().copyWith(
+                              mouseCursor: WidgetStateProperty.all(
+                                  SystemMouseCursors.click),
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -2981,39 +3163,51 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                       Row(
                         children: [
                           Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () {
-                                Navigator.of(ctx).pop();
-                                _abrirMovimentacao(context, 'ENTRADA');
-                              },
-                              icon: const Icon(Icons.add,
-                                  size: 16, color: AppTheme.success),
-                              label: const Text('Entrada',
-                                  style: TextStyle(color: AppTheme.success)),
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(
-                                    color: AppTheme.success),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8)),
+                            child: Tooltip(
+                              message: 'Registrar entrada deste material',
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  Navigator.of(ctx).pop();
+                                  _abrirMovimentacao(context, 'ENTRADA');
+                                },
+                                icon: const Icon(Icons.add,
+                                    size: 16, color: AppTheme.success),
+                                label: const Text('Entrada para o estoque',
+                                    style: TextStyle(color: AppTheme.success)),
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(
+                                      color: AppTheme.success),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8)),
+                                ).copyWith(
+                                  mouseCursor: WidgetStateProperty.all(
+                                      SystemMouseCursors.click),
+                                ),
                               ),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () {
-                                Navigator.of(ctx).pop();
-                                _abrirMovimentacao(context, 'SAIDA');
-                              },
-                              icon: const Icon(Icons.remove,
-                                  size: 16, color: AppTheme.error),
-                              label: const Text('Saída',
-                                  style: TextStyle(color: AppTheme.error)),
-                              style: OutlinedButton.styleFrom(
-                                side:
-                                    const BorderSide(color: AppTheme.error),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8)),
+                            child: Tooltip(
+                              message: 'Registrar saída deste material',
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  Navigator.of(ctx).pop();
+                                  _abrirMovimentacao(context, 'SAIDA');
+                                },
+                                icon: const Icon(Icons.remove,
+                                    size: 16, color: AppTheme.error),
+                                label: const Text('Saída para a OS',
+                                    style: TextStyle(color: AppTheme.error)),
+                                style: OutlinedButton.styleFrom(
+                                  side:
+                                      const BorderSide(color: AppTheme.error),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8)),
+                                ).copyWith(
+                                  mouseCursor: WidgetStateProperty.all(
+                                      SystemMouseCursors.click),
+                                ),
                               ),
                             ),
                           ),
@@ -3023,21 +3217,27 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                       // ── Atualizar custo da última compra ─────────────────
                       SizedBox(
                         width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.of(ctx).pop();
-                            _abrirAtualizarCusto(context);
-                          },
-                          icon: Icon(Icons.price_change_outlined,
-                              size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                          label: Text(
-                            'Atualizar custo (última compra)',
-                            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
+                        child: Tooltip(
+                          message: 'Atualizar o custo com base na última compra',
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(ctx).pop();
+                              _abrirAtualizarCusto(context);
+                            },
+                            icon: Icon(Icons.price_change_outlined,
+                                size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            label: Text(
+                              'Atualizar custo (última compra)',
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                            ).copyWith(
+                              mouseCursor: WidgetStateProperty.all(
+                                  SystemMouseCursors.click),
+                            ),
                           ),
                         ),
                       ),
@@ -3639,6 +3839,8 @@ class _MovimentacaoRow extends StatelessWidget {
                 padding: EdgeInsets.zero,
                 minimumSize: const Size(28, 28),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ).copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
               ),
               tooltip: 'Remover movimentação',
             )
@@ -3842,20 +4044,33 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
+        Tooltip(
+          message: 'Cancelar',
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: TextButton.styleFrom().copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: const Text('Cancelar'),
+          ),
         ),
-        FilledButton(
-          onPressed: _enviando ? null : _confirmar,
-          style: FilledButton.styleFrom(backgroundColor: cor),
-          child: _enviando
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-              : Text(isEntrada ? 'Confirmar Entrada' : 'Confirmar Saída'),
+        Tooltip(
+          message: isEntrada
+              ? 'Confirmar entrada de material'
+              : 'Confirmar saída de material',
+          child: FilledButton(
+            onPressed: _enviando ? null : _confirmar,
+            style: FilledButton.styleFrom(backgroundColor: cor).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: _enviando
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : Text(isEntrada ? 'Confirmar Entrada' : 'Confirmar Saída'),
+          ),
         ),
       ],
     );
@@ -3866,7 +4081,7 @@ class _MovimentacaoGlobalDialog extends StatefulWidget {
   final String tipo;
   final String? numeroOSFixo;
 
-  const _MovimentacaoGlobalDialog({required this.tipo, this.numeroOSFixo});
+  const _MovimentacaoGlobalDialog({required this.tipo}) : numeroOSFixo = null;
 
   @override
   State<_MovimentacaoGlobalDialog> createState() =>
@@ -4157,27 +4372,39 @@ class _MovimentacaoGlobalDialogState
                     ),
                     if (widget.numeroOSFixo == null) ...[
                       const SizedBox(width: 8),
-                      TextButton.icon(
-                        onPressed: () {
-                          _numeroOSCtrl.text = 'INVESTIMENTO';
-                        },
-                        icon: const Icon(Icons.south_west, size: 14),
-                        label: const Text('INVESTIMENTO'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppTheme.primary,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      Tooltip(
+                        message: 'Preencher OS como Investimento',
+                        child: TextButton.icon(
+                          onPressed: () {
+                            _numeroOSCtrl.text = 'INVESTIMENTO';
+                          },
+                          icon: const Icon(Icons.south_west, size: 14),
+                          label: const Text('INVESTIMENTO'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppTheme.primary,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ).copyWith(
+                            mouseCursor:
+                                WidgetStateProperty.all(SystemMouseCursors.click),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 4),
-                      TextButton.icon(
-                        onPressed: () {
-                          _numeroOSCtrl.text = 'EMPRESA';
-                        },
-                        icon: const Icon(Icons.business, size: 14),
-                        label: const Text('EMPRESA'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppTheme.primary,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      Tooltip(
+                        message: 'Preencher OS como Empresa',
+                        child: TextButton.icon(
+                          onPressed: () {
+                            _numeroOSCtrl.text = 'EMPRESA';
+                          },
+                          icon: const Icon(Icons.business, size: 14),
+                          label: const Text('EMPRESA'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppTheme.primary,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ).copyWith(
+                            mouseCursor:
+                                WidgetStateProperty.all(SystemMouseCursors.click),
+                          ),
                         ),
                       ),
                     ],
@@ -4464,26 +4691,42 @@ class _MovimentacaoGlobalDialogState
                             Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                TextButton(
-                                  onPressed: () =>
-                                      Navigator.of(context).pop(),
-                                  child: const Text('Cancelar'),
+                                Tooltip(
+                                  message: 'Cancelar',
+                                  child: TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(),
+                                    style: TextButton.styleFrom().copyWith(
+                                      mouseCursor: WidgetStateProperty.all(
+                                          SystemMouseCursors.click),
+                                    ),
+                                    child: const Text('Cancelar'),
+                                  ),
                                 ),
                                 const SizedBox(width: 8),
-                                FilledButton(
-                                  onPressed: _enviando ? null : _confirmar,
-                                  style: FilledButton.styleFrom(
-                                      backgroundColor: cor),
-                                  child: _enviando
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.white))
-                                      : Text(isEntrada
-                                          ? 'Confirmar Entrada'
-                                          : 'Confirmar Saída'),
+                                Tooltip(
+                                  message: isEntrada
+                                      ? 'Confirmar entrada de materiais'
+                                      : 'Confirmar saída de materiais',
+                                  child: FilledButton(
+                                    onPressed: _enviando ? null : _confirmar,
+                                    style: FilledButton.styleFrom(
+                                            backgroundColor: cor)
+                                        .copyWith(
+                                      mouseCursor: WidgetStateProperty.all(
+                                          SystemMouseCursors.click),
+                                    ),
+                                    child: _enviando
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white))
+                                        : Text(isEntrada
+                                            ? 'Confirmar Entrada'
+                                            : 'Confirmar Saída'),
+                                  ),
                                 ),
                               ],
                             ),
@@ -4520,6 +4763,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
 
   // ── Modo Retalho ──────────────────────────────────────────────────────
   bool _modoRetalho = false;
+  bool _hoverRetalho = false;
 
   // ── Detecção de possível material duplicado ───────────────────────────
   Timer? _debounceDuplicata;
@@ -4536,6 +4780,18 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
   late final TextEditingController _comprimento;
   late final TextEditingController _estoqueMinimo;
   late final TextEditingController _custoCtrl;
+
+  /// COMPRAS não pode definir o estoque mínimo no cadastro — essa definição
+  /// fica a cargo de quem faz a entrada real de estoque (Controle de
+  /// Estoque / OS), garantindo rastreabilidade. Mesma regra usada no
+  /// cadastro de materiais em Estoque.
+  bool get _bloquearEstoqueMinimo =>
+      context.watch<UsuarioProvider>().usuarioLogado?.role == 'COMPRAS';
+
+  /// Versão `context.read` de [_bloquearEstoqueMinimo], para uso fora do
+  /// build (ex.: dentro de `_salvar`).
+  bool get _bloquearEstoqueMinimoAtual =>
+      context.read<UsuarioProvider>().usuarioLogado?.role == 'COMPRAS';
 
   @override
   void initState() {
@@ -4681,7 +4937,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
       'largura':       _modoRetalho ? null : (_largura.text.trim().isEmpty ? null : double.tryParse(_largura.text.trim())),
       'comprimento':   _modoRetalho ? null : (_comprimento.text.trim().isEmpty ? null : double.tryParse(_comprimento.text.trim())),
       'quantidade':    0.0,
-      'estoqueMinimo': _modoRetalho ? 0.0 : (double.tryParse(_estoqueMinimo.text) ?? 0),
+      'estoqueMinimo': (_modoRetalho || _bloquearEstoqueMinimoAtual) ? 0.0 : (double.tryParse(_estoqueMinimo.text) ?? 0),
       'estoqueConfirmado': false,
       if (_modoRetalho) 'ultimoValorPagoM2': custoValor
       else 'ultimoValorPago': custoValor,
@@ -4725,50 +4981,64 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                   ),
                   const SizedBox(width: 12),
                   // ── Atalho RETALHO ────────────────────────────────────
-                  GestureDetector(
-                    onTap: _modoRetalho ? _desativarModoRetalho : _ativarModoRetalho,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: _modoRetalho
-                            ? AppTheme.primary.withValues(alpha: 0.15)
-                            : Theme.of(context).colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: _modoRetalho
-                              ? AppTheme.primary
-                              : Theme.of(context).colorScheme.outlineVariant,
-                          width: _modoRetalho ? 1.5 : 1,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.content_cut,
-                            size: 13,
+                  Tooltip(
+                    message: _modoRetalho
+                        ? 'Desmarcar como retalho'
+                        : 'Marcar como retalho (sobra de material)',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      onEnter: (_) => setState(() => _hoverRetalho = true),
+                      onExit:  (_) => setState(() => _hoverRetalho = false),
+                      child: GestureDetector(
+                        onTap: _modoRetalho ? _desativarModoRetalho : _ativarModoRetalho,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
                             color: _modoRetalho
-                                ? AppTheme.primary
-                                : Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            'RETALHO',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.5,
+                                ? AppTheme.primary.withValues(alpha: 0.15)
+                                : _hoverRetalho
+                                    ? AppTheme.primary.withValues(alpha: 0.08)
+                                    : Theme.of(context).colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
                               color: _modoRetalho
                                   ? AppTheme.primary
-                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                                  : _hoverRetalho
+                                      ? AppTheme.primary.withValues(alpha: 0.6)
+                                      : Theme.of(context).colorScheme.outlineVariant,
+                              width: _modoRetalho ? 1.5 : 1,
                             ),
                           ),
-                          if (_modoRetalho) ...[
-                            const SizedBox(width: 4),
-                            Icon(Icons.check_circle, size: 13, color: AppTheme.primary),
-                          ],
-                        ],
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.content_cut,
+                                size: 13,
+                                color: _modoRetalho || _hoverRetalho
+                                    ? AppTheme.primary
+                                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                'RETALHO',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.5,
+                                  color: _modoRetalho || _hoverRetalho
+                                      ? AppTheme.primary
+                                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              if (_modoRetalho) ...[
+                                const SizedBox(width: 4),
+                                Icon(Icons.check_circle, size: 13, color: AppTheme.primary),
+                              ],
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -4777,6 +5047,10 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close, size: 20),
                     tooltip: 'Fechar',
+                    style: IconButton.styleFrom().copyWith(
+                      mouseCursor:
+                          WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ],
               ),
@@ -4972,7 +5246,9 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                       const SizedBox(height: 10),
                       Row(children: [
                         Expanded(
-                          child: TextFormField(
+                          child: _bloquearEstoqueMinimo
+                              ? const _EstoqueMinimoBloqueadoInfo()
+                              : TextFormField(
                             controller: _estoqueMinimo,
                             readOnly: _modoRetalho,
                             decoration: InputDecoration(
@@ -5044,22 +5320,36 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: _salvando ? null : () => Navigator.pop(context),
-                    child: const Text('Cancelar'),
+                  Tooltip(
+                    message: 'Cancelar cadastro',
+                    child: TextButton(
+                      onPressed: _salvando ? null : () => Navigator.pop(context),
+                      style: TextButton.styleFrom().copyWith(
+                        mouseCursor:
+                            WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                      child: const Text('Cancelar'),
+                    ),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: _salvando ? null : _salvar,
-                    style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-                    child: _salvando
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Text('Criar'),
+                  Tooltip(
+                    message: 'Criar material',
+                    child: FilledButton(
+                      onPressed: _salvando ? null : _salvar,
+                      style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                          .copyWith(
+                        mouseCursor:
+                            WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                      child: _salvando
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('Criar'),
+                    ),
                   ),
                 ],
               ),
@@ -5157,6 +5447,41 @@ class _ItemMovimentacao {
     obsCtrl.dispose();
     larguraUsadaCtrl.dispose();
     alturaUsadaCtrl.dispose();
+  }
+}
+
+/// Substitui o campo "Estoque mínimo" no cadastro quando o usuário é COMPRAS.
+/// A definição do estoque mínimo deve ser feita por quem tem acesso à
+/// entrada real de estoque (Controle de Estoque / OS vinculada).
+class _EstoqueMinimoBloqueadoInfo extends StatelessWidget {
+  const _EstoqueMinimoBloqueadoInfo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.warning.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.warning.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline, color: AppTheme.warning, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Estoque mínimo bloqueado.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -5917,6 +6242,79 @@ class _AvisoPossivelDuplicataCE extends StatelessWidget {
             style: TextStyle(fontSize: 10.5, color: Theme.of(context).colorScheme.outline),
           ),
         ],
+      ),
+    );
+  }
+}
+// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
+// Mesmo padrão usado no cabeçalho das outras páginas do sistema.
+class _BotaoVoltar extends StatefulWidget {
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _BotaoVoltar({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_BotaoVoltar> createState() => _BotaoVoltarState();
+}
+
+class _BotaoVoltarState extends State<_BotaoVoltar> {
+  bool _hovered = false;
+  static const _accent = Color(0xFFF59E0B);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        child: InkWell(
+          onTap: widget.onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? _accent.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              border: Border.all(
+                color: _hovered
+                    ? _accent.withValues(alpha: 0.6)
+                    : scheme.outlineVariant,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _hovered ? _accent : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

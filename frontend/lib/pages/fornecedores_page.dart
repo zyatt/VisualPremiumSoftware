@@ -172,14 +172,29 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
           'Deseja remover "${f.nomeFantasia}"? Esta ação desativará o registro.',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(false),
-            child: const Text('Cancelar'),
+          Tooltip(
+            message: 'Cancelar e fechar sem remover',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(false),
+                style: TextButton.styleFrom()
+                    .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                child: const Text('Cancelar'),
+              ),
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
-            child: const Text('Remover'),
+          Tooltip(
+            message: 'Confirmar remoção do fornecedor',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: FilledButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(true),
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.error)
+                    .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                child: const Text('Remover'),
+              ),
+            ),
           ),
         ],
       ),
@@ -203,7 +218,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -232,27 +247,33 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                   ],
                 ),
                 const Spacer(),
-                OutlinedButton.icon(
-                  onPressed: _abrirVincularPorMaterial,
-                  icon: const Icon(Icons.category_outlined, size: 18),
-                  label: const Text('Vincular por Material'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.primary,
-                    side: const BorderSide(color: AppTheme.primary),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
+                Tooltip(
+                  message: 'Vincular vários fornecedores a um material de uma vez',
+                  child: OutlinedButton.icon(
+                    onPressed: _abrirVincularPorMaterial,
+                    icon: const Icon(Icons.category_outlined, size: 18),
+                    label: const Text('Vincular por Material'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primary,
+                      side: const BorderSide(color: AppTheme.primary),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                    ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                   ),
                 ),
                 const SizedBox(width: 12),
-                FilledButton.icon(
-                  onPressed: () => _abrirFormulario(),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Novo Fornecedor'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
+                Tooltip(
+                  message: 'Cadastrar um novo fornecedor',
+                  child: FilledButton.icon(
+                    onPressed: () => _abrirFormulario(),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Novo Fornecedor'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                    ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                   ),
                 ),
                 SizedBox(width: 10),
@@ -264,7 +285,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                  ),
+                  ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                 ),
               ],
             ),
@@ -887,16 +908,23 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                     ),
                   ),
                   if (_editando && widget.onRemover != null)
-                    TextButton.icon(
-                      onPressed: _salvando
-                          ? null
-                          : () {
-                              Navigator.of(context).pop(false);
-                              widget.onRemover!(widget.fornecedor!);
-                            },
-                      icon: const Icon(Icons.delete_outline, size: 16),
-                      label: const Text('Remover'),
-                      style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+                    Tooltip(
+                      message: 'Remover este fornecedor',
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: TextButton.icon(
+                          onPressed: _salvando
+                              ? null
+                              : () {
+                                  Navigator.of(context).pop(false);
+                                  widget.onRemover!(widget.fornecedor!);
+                                },
+                          icon: const Icon(Icons.delete_outline, size: 16),
+                          label: const Text('Remover'),
+                          style: TextButton.styleFrom(foregroundColor: AppTheme.error)
+                              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                        ),
+                      ),
                     ),
                 ],
               ),
@@ -1040,23 +1068,45 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: _salvando ? null : () => Navigator.pop(context),
-                    child: const Text('Cancelar'),
+                  Tooltip(
+                    message: 'Cancelar e fechar sem salvar',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: TextButton(
+                        onPressed: _salvando ? null : () => Navigator.pop(context),
+                        style: TextButton.styleFrom().copyWith(
+                          mouseCursor:
+                              WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                        child: const Text('Cancelar'),
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: _salvando ? null : _salvar,
-                    style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary),
-                    child: _salvando
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
-                        : Text(_editando ? 'Salvar' : 'Criar'),
+                  Tooltip(
+                    message: _editando
+                        ? 'Salvar alterações do fornecedor'
+                        : 'Criar novo fornecedor',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: FilledButton(
+                        onPressed: _salvando ? null : _salvar,
+                        style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.primary)
+                            .copyWith(
+                          mouseCursor:
+                              WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                        child: _salvando
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : Text(_editando ? 'Salvar' : 'Criar'),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1190,14 +1240,30 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
         content: Text(
             'Remover "${m.materialNome ?? 'material'}" deste fornecedor?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(false),
-            child: const Text('Cancelar'),
+          Tooltip(
+            message: 'Cancelar e fechar sem desvincular',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(false),
+                style: TextButton.styleFrom().copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                child: const Text('Cancelar'),
+              ),
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
-            child: const Text('Desvincular'),
+          Tooltip(
+            message: 'Confirmar desvínculo do material',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: FilledButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(true),
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.error)
+                    .copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                child: const Text('Desvincular'),
+              ),
+            ),
           ),
         ],
       ),
@@ -1273,21 +1339,40 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                       ],
                     ),
                   ),
-                  FilledButton.icon(
-                    onPressed: () => _abrirVincularOuEditar(),
-                    icon: const Icon(Icons.add, size: 16),
-                    label: const Text('Vincular'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
+                  Tooltip(
+                    message: 'Vincular novo material a este fornecedor',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: FilledButton.icon(
+                        onPressed: () => _abrirVincularOuEditar(),
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('Vincular'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                        ).copyWith(
+                          mouseCursor:
+                              WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                      ),
                     ),
                   ),
                   SizedBox(width: 8),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: Icon(Icons.close),
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  Tooltip(
+                    message: 'Fechar',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icon(Icons.close),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        style: IconButton.styleFrom().copyWith(
+                          mouseCursor:
+                              WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -2178,21 +2263,39 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
+        Tooltip(
+          message: 'Cancelar e fechar sem salvar',
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: TextButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: const Text('Cancelar'),
+            ),
+          ),
         ),
-        FilledButton(
-          onPressed: _salvando ? null : _salvar,
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-          child: _salvando
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Text('Salvar'),
+        Tooltip(
+          message: 'Salvar vínculo do material',
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: FilledButton(
+              onPressed: _salvando ? null : _salvar,
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                  .copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: _salvando
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Salvar'),
+            ),
+          ),
         ),
       ],
     );
@@ -2733,10 +2836,20 @@ class _VincularPorMaterialDialogState
                       ],
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: Icon(Icons.close),
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  Tooltip(
+                    message: 'Fechar',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icon(Icons.close),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        style: IconButton.styleFrom().copyWith(
+                          mouseCursor:
+                              WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -3097,27 +3210,51 @@ class _VincularPorMaterialDialogState
                       ),
                     ),
                   const Spacer(),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Cancelar'),
+                  Tooltip(
+                    message: 'Cancelar e fechar sem salvar',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: TextButton.styleFrom().copyWith(
+                          mouseCursor:
+                              WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                        child: const Text('Cancelar'),
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: (_salvando ||
-                            _materialIdSelecionado == null ||
-                            _entradas.isEmpty)
-                        ? null
-                        : _salvar,
-                    style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary),
-                    child: _salvando
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Text('Salvar vínculos'),
+                  Tooltip(
+                    message: 'Salvar vínculos deste material com os fornecedores selecionados',
+                    child: MouseRegion(
+                      cursor: (_salvando ||
+                              _materialIdSelecionado == null ||
+                              _entradas.isEmpty)
+                          ? SystemMouseCursors.basic
+                          : SystemMouseCursors.click,
+                      child: FilledButton(
+                        onPressed: (_salvando ||
+                                _materialIdSelecionado == null ||
+                                _entradas.isEmpty)
+                            ? null
+                            : _salvar,
+                        style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.primary)
+                            .copyWith(
+                          mouseCursor:
+                              WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                        child: _salvando
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Text('Salvar vínculos'),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -3379,13 +3516,20 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
 
             if (widget.onRemover != null) ...[
               const SizedBox(width: 4),
-              IconButton(
-                tooltip: 'Remover',
-                icon: const Icon(Icons.remove_circle_outline, size: 18),
-                color: AppTheme.error,
-                visualDensity: VisualDensity.compact,
-                onPressed: widget.onRemover,
-              ),
+              Tooltip(
+                message: 'Remover',
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: widget.onRemover,
+                    child: const Icon(
+                      Icons.remove_circle_outline,
+                      size: 18,
+                      color: AppTheme.error,
+                    ),
+                  ),
+                ),
+              )
             ],
           ],
         ),

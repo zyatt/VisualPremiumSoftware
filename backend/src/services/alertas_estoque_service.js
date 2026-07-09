@@ -1,12 +1,5 @@
 const prisma = require('../utils/prisma');
 
-/**
- * Retorna todos os materiais ativos com status CRITICO,
- * ordenados por nome.
- *
- * Campos retornados são um subconjunto de Material para manter o payload leve,
- * alinhado com AlertaEstoqueModel no Flutter.
- */
 async function listarAlertasEstoque() {
   const materiais = await prisma.material.findMany({
     where: {

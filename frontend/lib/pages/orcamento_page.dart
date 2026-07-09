@@ -1,7 +1,9 @@
 import 'dart:developer' as dev;
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../models/fornecedor_model.dart';
@@ -76,6 +78,8 @@ class _NoCommaFormatter extends TextInputFormatter {
 class OrcamentoPage extends StatefulWidget {
   const OrcamentoPage({super.key});
 
+  static bool abrirEditorAoEntrar = false;
+
   @override
   State<OrcamentoPage> createState() => _OrcamentoPageState();
 }
@@ -118,6 +122,26 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     _logOrc('dispose');
     _mainTabController.dispose();
     super.dispose();
+  }
+
+  // ── Retorno do editor de orçamento ───────────────────────────────────────────
+  // Chamado sempre que o OrcamentoEditorPage é fechado (Navigator.pop). Se o
+  // orçamento foi enviado para aprovação, foca a aba "Aguardando Aprovação"
+  // (índice 0); se foi aprovado, foca a aba "Aprovados" (índice 1) — sempre
+  // antes de recarregar os dados do servidor, para que o usuário veja
+  // imediatamente o orçamento que acabou de mexer.
+  Future<void> _aoVoltarDoEditor(dynamic resultado) async {
+    if (!mounted) return;
+    int? abaAlvo;
+    if (resultado == 'enviadoParaAprovacao') {
+      abaAlvo = 0;
+    } else if (resultado == 'aprovado') {
+      abaAlvo = 1;
+    }
+    if (abaAlvo != null && _mainTabController.index != abaAlvo) {
+      _mainTabController.animateTo(abaAlvo);
+    }
+    await _carregarOrcamentosServidor(origem: 'voltaDoEditor');
   }
 
   // ── Carregar orçamentos do servidor ──────────────────────────────────────────
@@ -197,7 +221,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     if (confirmar != true) return;
 
     final inicio = DateTime.now();
-    setState(() => _carregandoAprovacao = true);
     try {
       _logOrc('aprovarOrcamento(lista): chamando PATCH /orcamentos/$id/aprovar');
       await OrcamentoRepository().aprovar(id);
@@ -209,6 +232,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           backgroundColor: AppTheme.success,
         ),
       );
+      if (_mainTabController.index != 1) {
+        _mainTabController.animateTo(1);
+      }
       await _carregarOrcamentosServidor(origem: 'aposAprovar');
     } catch (e, st) {
       _logOrc('aprovarOrcamento(lista): ERRO após ${DateTime.now().difference(inicio).inMilliseconds}ms orcamentoId=$id',
@@ -224,7 +250,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             backgroundColor: AppTheme.error,
           ),
         );
-        setState(() => _carregandoAprovacao = false);
         if (_isErroDeStatusDesatualizado(e)) {
           await _carregarOrcamentosServidor(origem: 'erroAprovar');
         }
@@ -293,7 +318,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     );
     if (motivo == null || motivo.isEmpty) return;
 
-    setState(() => _carregandoAprovacao = true);
     try {
       await OrcamentoRepository().rejeitar(id, motivo);
       if (!mounted) return;
@@ -316,7 +340,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             backgroundColor: AppTheme.error,
           ),
         );
-        setState(() => _carregandoAprovacao = false);
         if (_isErroDeStatusDesatualizado(e)) {
           await _carregarOrcamentosServidor();
         }
@@ -336,10 +359,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     final abaExistente = provider.ativarAbaExistente(orcId);
     if (abaExistente >= 0) {
       if (mounted) {
-        await Navigator.of(context).push(
+        final resultado = await Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
         );
-        if (mounted) _carregarOrcamentosServidor();
+        await _aoVoltarDoEditor(resultado);
       }
       return;
     }
@@ -369,9 +392,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             materialCategoria: materialData?['categoria'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             precos: {},
-            modoOrcamento: (item['usarM2'] as bool? ?? false)
-                ? ModoOrcamento.metroQuadrado
-                : ModoOrcamento.unitario,
           );
         }
 
@@ -380,9 +400,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
             preco: item['precoUnitario'] != null
                 ? double.tryParse(item['precoUnitario'].toString())
-                : null,
-            precoM2: item['precoM2'] != null
-                ? double.tryParse(item['precoM2'].toString())
                 : null,
             observacao: item['observacao'] as String?,
           );
@@ -416,10 +433,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         ),
       );
 
-      await Navigator.of(context).push(
+      final resultado = await Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
       );
-      if (mounted) _carregarOrcamentosServidor();
+      await _aoVoltarDoEditor(resultado);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -444,10 +461,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     final abaExistente = provider.ativarAbaExistente(orcId);
     if (abaExistente >= 0) {
       if (mounted) {
-        await Navigator.of(context).push(
+        final resultado = await Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
         );
-        if (mounted) _carregarOrcamentosServidor();
+        await _aoVoltarDoEditor(resultado);
       }
       return;
     }
@@ -481,9 +498,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             materialCategoria: materialData?['categoria'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             precos: {},
-            modoOrcamento: (item['usarM2'] as bool? ?? false)
-                ? ModoOrcamento.metroQuadrado
-                : ModoOrcamento.unitario,
           );
         }
 
@@ -492,9 +506,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
             preco: item['precoUnitario'] != null
                 ? double.tryParse(item['precoUnitario'].toString())
-                : null,
-            precoM2: item['precoM2'] != null
-                ? double.tryParse(item['precoM2'].toString())
                 : null,
             observacao: item['observacao'] as String?,
           );
@@ -533,10 +544,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       );
 
       // Navega para o editor
-      await Navigator.of(context).push(
+      final resultado = await Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
       );
-      if (mounted) _carregarOrcamentosServidor();
+      await _aoVoltarDoEditor(resultado);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -551,6 +562,111 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     }
   }
 
+  // ── Baixar PDF do orçamento (sem abrir o editor) ──────────────────────────────
+  // Busca o orçamento completo (mesma lógica de agrupamento de _reabrirOrcamento)
+  // e envia para o serviço de geração de PDF, abrindo o arquivo em seguida.
+
+  Future<void> _baixarPdfOrcamento(Map<String, dynamic> orc) async {
+    final orcId = orc['id'] as int;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Gerando PDF…'),
+        duration: Duration(seconds: 2),
+        backgroundColor: AppTheme.primary,
+      ),
+    );
+    try {
+      final orcamentoCompleto = await OrcamentoRepository().buscarPorId(orcId);
+      final itens = (orcamentoCompleto['itens'] as List? ?? []);
+
+      final Map<int, ItemOrcamentoData> itensPorChave = {};
+      for (final item in itens) {
+        final materialId = item['materialId'] as int;
+        final materialData = item['material'] as Map<String, dynamic>?;
+        final fornecedorId = item['fornecedorId'] as int?;
+        final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
+
+        if (!itensPorChave.containsKey(materialId)) {
+          itensPorChave[materialId] = ItemOrcamentoData(
+            materialId: materialId,
+            materialNome: materialData?['nome'] as String? ?? '',
+            materialUnidade: materialData?['unidade'] as String?,
+            materialMedida: materialData?['medida'] as String?,
+            materialEspessura: materialData?['espessura'] as String?,
+            materialIdentificador: materialData?['identificador'] as String?,
+            materialCategoria: materialData?['categoria'] as String?,
+            quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
+            precos: {},
+          );
+        }
+
+        if (fornecedorId != null && fornecedorData != null) {
+          itensPorChave[materialId]!.precos[fornecedorId] = PrecoFornecedorData(
+            fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
+            preco: item['precoUnitario'] != null
+                ? double.tryParse(item['precoUnitario'].toString())
+                : null,
+            observacao: item['observacao'] as String?,
+          );
+          if (item['selecionado'] as bool? ?? false) {
+            itensPorChave[materialId]!.fornecedorSelecionado = fornecedorId;
+          }
+        }
+      }
+
+      final fornecedoresOcultos =
+          (orcamentoCompleto['fornecedoresOcultos'] as List? ?? [])
+              .map((e) => e as int)
+              .toList();
+      final ocultosSet = fornecedoresOcultos.toSet();
+
+      // Remove preços de fornecedores ocultos, mesmo tratamento do editor
+      // (_itensParaPdf), para que o PDF reflita o que o usuário está vendo.
+      final itensParaPdf = itensPorChave.values.map((item) {
+        final json = item.toJson();
+        if (ocultosSet.isNotEmpty) {
+          final precos = Map<String, dynamic>.from(json['precos'] as Map);
+          precos.removeWhere((fIdStr, _) => ocultosSet.contains(int.parse(fIdStr)));
+          json['precos'] = precos;
+          if (item.fornecedorSelecionado != null &&
+              ocultosSet.contains(item.fornecedorSelecionado)) {
+            json['fornecedorSelecionado'] = null;
+          }
+        }
+        return json;
+      }).toList();
+
+      final pdfBytes = await OrcamentoRepository().gerarPdf({
+        'titulo': orcamentoCompleto['titulo'] as String? ?? 'Orçamento #$orcId',
+        'itens': itensParaPdf,
+        'fornecedoresOcultos': fornecedoresOcultos,
+      });
+
+      final hoje = DateTime.now();
+      final dataStr = '${hoje.day.toString().padLeft(2, '0')}-${hoje.month.toString().padLeft(2, '0')}-${hoje.year}';
+      final file = File(
+          '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}orcamento_${orcId}_($dataStr).pdf');
+      await file.writeAsBytes(pdfBytes, flush: true);
+
+      if (Platform.isWindows) {
+        await Process.run('explorer', [file.path]);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', [file.path]);
+      } else {
+        await Process.run('xdg-open', [file.path]);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao gerar PDF: $e'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<OrcamentoProvider>(
@@ -560,6 +676,22 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             body: Center(
                 child: CircularProgressIndicator(color: AppTheme.primary)),
           );
+        }
+
+        // ── Abertura automática do editor (orçamento criado pelo Estoque) ──
+        // Se alguém sinalizou abrirEditorAoEntrar (ex.: Estoque acabou de
+        // chamar adicionarItensEmLote e navegou para /orcamento), e já existe
+        // pelo menos uma aba aberta, pula direto para o editor em vez de
+        // mostrar a lista de aprovação.
+        if (OrcamentoPage.abrirEditorAoEntrar && provider.abas.isNotEmpty) {
+          OrcamentoPage.abrirEditorAoEntrar = false;
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            if (!mounted) return;
+            final resultado = await Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+            );
+            await _aoVoltarDoEditor(resultado);
+          });
         }
 
         return Scaffold(
@@ -699,55 +831,62 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         Consumer<OrcamentoProvider>(
           builder: (context, provider, _) {
             final temAbas = provider.abas.isNotEmpty;
-            return OutlinedButton.icon(
-              onPressed: temAbas
-                  ? () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const OrcamentoEditorPage()),
-                      );
-                      if (mounted) _carregarOrcamentosServidor();
-                    }
-                  : null,
-              icon: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  const Icon(Icons.edit_note, size: 16),
-                  if (temAbas)
-                    Positioned(
-                      right: -4,
-                      top: -4,
-                      child: Container(
-                        width: 14,
-                        height: 14,
-                        decoration: const BoxDecoration(
-                          color: AppTheme.warning,
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          '${provider.abas.length}',
-                          style: const TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
+            return Tooltip(
+              message: temAbas
+                  ? 'Ver orçamentos abertos em edição'
+                  : 'Nenhum orçamento aberto no momento',
+              child: OutlinedButton.icon(
+                onPressed: temAbas
+                    ? () async {
+                        final resultado = await Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const OrcamentoEditorPage()),
+                        );
+                        await _aoVoltarDoEditor(resultado);
+                      }
+                    : null,
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.edit_note, size: 16),
+                    if (temAbas)
+                      Positioned(
+                        right: -4,
+                        top: -4,
+                        child: Container(
+                          width: 14,
+                          height: 14,
+                          decoration: const BoxDecoration(
+                            color: AppTheme.warning,
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            '${provider.abas.length}',
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                ],
-              ),
-              label: Text(
-                'Aberto',
-                style: TextStyle(fontSize: 13),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: temAbas ? AppTheme.warning : Theme.of(context).colorScheme.outline,
-                side: BorderSide(
-                    color: temAbas ? AppTheme.warning : Theme.of(context).colorScheme.outlineVariant),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
+                  ],
+                ),
+                label: Text(
+                  'Aberto',
+                  style: TextStyle(fontSize: 13),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: temAbas ? AppTheme.warning : Theme.of(context).colorScheme.outline,
+                  side: BorderSide(
+                      color: temAbas ? AppTheme.warning : Theme.of(context).colorScheme.outlineVariant),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                ).copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                 ),
               ),
             );
@@ -756,58 +895,68 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
         const SizedBox(width: 12),
 
-        FilledButton.icon(
-          onPressed: () async {
-            final p = context.read<OrcamentoProvider>();
-            p.adicionarAba();
-            p.atualizarFlagsTab(modoEdicao: true);
-            await Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
-            );
-            if (mounted) _carregarOrcamentosServidor();
-          },
-          icon: const Icon(Icons.add, size: 16),
-          label: const Text(
-            'Novo Orçamento',
-            style: TextStyle(fontSize: 13),
-          ),
-          style: FilledButton.styleFrom(
-            backgroundColor: AppTheme.primary,
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 12,
+        Tooltip(
+          message: 'Criar um novo orçamento de compra',
+          child: FilledButton.icon(
+            onPressed: () async {
+              final p = context.read<OrcamentoProvider>();
+              p.adicionarAba();
+              p.atualizarFlagsTab(modoEdicao: true);
+              final resultado = await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+              );
+              await _aoVoltarDoEditor(resultado);
+            },
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text(
+              'Novo Orçamento',
+              style: TextStyle(fontSize: 13),
+            ),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+            ).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
             ),
           ),
         ),
 
         const SizedBox(width: 12),
 
-        OutlinedButton.icon(
-          onPressed: () async {
-            final resultado = await Navigator.of(context).push<dynamic>(
-              MaterialPageRoute(
-                builder: (_) => const OrcamentoHistoricoPage(),
+        Tooltip(
+          message: 'Ver histórico de orçamentos finalizados',
+          child: OutlinedButton.icon(
+            onPressed: () async {
+              final resultado = await Navigator.of(context).push<dynamic>(
+                MaterialPageRoute(
+                  builder: (_) => const OrcamentoHistoricoPage(),
+                ),
+              );
+
+              if (!mounted) return;
+
+              if (resultado is Map &&
+                  resultado['reabrirServidorId'] != null) {
+                // A reabertura já configura a aba no provider via _reabrirOrcamento
+              }
+            },
+            icon: Icon(Icons.history, size: 16),
+            label: Text(
+              'Histórico',
+              style: TextStyle(fontSize: 13),
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+              padding: EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 10,
               ),
-            );
-
-            if (!mounted) return;
-
-            if (resultado is Map &&
-                resultado['reabrirServidorId'] != null) {
-              // A reabertura já configura a aba no provider via _reabrirOrcamento
-            }
-          },
-          icon: Icon(Icons.history, size: 16),
-          label: Text(
-            'Histórico',
-            style: TextStyle(fontSize: 13),
-          ),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-            padding: EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 10,
+            ).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
             ),
           ),
         ),
@@ -821,13 +970,15 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             size: 18,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
-          tooltip: 'Atualizar',
+          tooltip: 'Atualizar lista de orçamentos',
           style: IconButton.styleFrom(
             backgroundColor: Theme.of(context).colorScheme.surface,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
             ),
             side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          ).copyWith(
+            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
           ),
         ),
 
@@ -970,11 +1121,17 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                   ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
             ),
             const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: () => _carregarOrcamentosServidor(origem: 'botaoAtualizarManual'),
-              icon: const Icon(Icons.refresh, size: 15),
-              label: const Text('Atualizar'),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
+            Tooltip(
+              message: 'Atualizar lista de orçamentos',
+              child: TextButton.icon(
+                onPressed: () => _carregarOrcamentosServidor(origem: 'botaoAtualizarManual'),
+                icon: const Icon(Icons.refresh, size: 15),
+                label: const Text('Atualizar'),
+                style: TextButton.styleFrom(foregroundColor: AppTheme.primary)
+                    .copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+              ),
             ),
           ],
         ),
@@ -986,11 +1143,17 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
-            TextButton.icon(
-              onPressed: () => _carregarOrcamentosServidor(origem: 'botaoAtualizarManual'),
-              icon: Icon(Icons.refresh, size: 15),
-              label: Text('Atualizar', style: TextStyle(fontSize: 12)),
-              style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant),
+            Tooltip(
+              message: 'Atualizar lista de orçamentos',
+              child: TextButton.icon(
+                onPressed: () => _carregarOrcamentosServidor(origem: 'botaoAtualizarManual'),
+                icon: Icon(Icons.refresh, size: 15),
+                label: Text('Atualizar', style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant)
+                    .copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+              ),
             ),
           ],
         ),
@@ -1005,6 +1168,8 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                 orcamento: orc,
                 statusColor: statusColor,
                 mostrarAcoes: mostrarAcoes,
+                onTap: () => _reabrirOrcamento(orc),
+                onAbrirPdf: () => _baixarPdfOrcamento(orc),
                 onAprovar: mostrarAcoes
                     ? () => _aprovarOrcamento(orc['id'] as int, orc['titulo'] as String? ?? '')
                     : null,
@@ -1082,10 +1247,12 @@ class _DescricaoFieldState extends State<_DescricaoField> {
 
 // ─── Card de orçamento para aprovação ────────────────────────────────────────
 
-class _OrcamentoAprovacaoCard extends StatelessWidget {
+class _OrcamentoAprovacaoCard extends StatefulWidget {
   final Map<String, dynamic> orcamento;
   final Color statusColor;
   final bool mostrarAcoes;
+  final VoidCallback? onTap;
+  final VoidCallback? onAbrirPdf;
   final VoidCallback? onAprovar;
   final VoidCallback? onRejeitar;
   final VoidCallback? onReabrir;
@@ -1095,6 +1262,8 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
     required this.orcamento,
     required this.statusColor,
     this.mostrarAcoes = false,
+    this.onTap,
+    this.onAbrirPdf,
     this.onAprovar,
     this.onRejeitar,
     this.onReabrir,
@@ -1102,15 +1271,51 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
   });
 
   @override
+  State<_OrcamentoAprovacaoCard> createState() => _OrcamentoAprovacaoCardState();
+}
+
+class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
+  bool _hovered = false;
+
+  void _onHover(PointerHoverEvent _) {
+    if (!_hovered) setState(() => _hovered = true);
+  }
+
+  void _onExit(PointerExitEvent _) {
+    if (_hovered) setState(() => _hovered = false);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final orcamento = widget.orcamento;
+    final statusColor = widget.statusColor;
+    final mostrarAcoes = widget.mostrarAcoes;
+    final onAprovar = widget.onAprovar;
+    final onRejeitar = widget.onRejeitar;
+    final onReabrir = widget.onReabrir;
+    final onGerarOC = widget.onGerarOC;
+    final onAbrirPdf = widget.onAbrirPdf;
     final titulo = orcamento['titulo'] as String? ?? 'Orçamento';
     final itens = (orcamento['itens'] as List? ?? []);
     
-    // Conta materiais únicos (não duplicados por fornecedor)
-    final materiaisUnicos = <int>{};
+    // Materiais únicos (não duplicados por fornecedor), com descrição para
+    // exibição na lista (nome + medida/espessura/identificador), no mesmo
+    // padrão usado no card de Ordem de Compra.
+    final Map<int, String> materiaisUnicos = {};
     for (final item in itens) {
       final materialId = item['materialId'] as int?;
-      if (materialId != null) materiaisUnicos.add(materialId);
+      if (materialId == null || materiaisUnicos.containsKey(materialId)) continue;
+      final materialData = item['material'] as Map<String, dynamic>?;
+      final nomeBase = (materialData?['nome'] as String? ?? '').isNotEmpty
+          ? materialData!['nome'] as String
+          : 'Material excluído';
+      final partes = <String>[
+        if ((materialData?['medida'] as String? ?? '').isNotEmpty) materialData!['medida'] as String,
+        if ((materialData?['espessura'] as String? ?? '').isNotEmpty) materialData!['espessura'] as String,
+        if ((materialData?['identificador'] as String? ?? '').isNotEmpty) materialData!['identificador'] as String,
+      ];
+      materiaisUnicos[materialId] =
+          partes.isEmpty ? nomeBase : '$nomeBase · ${partes.join(' · ')}';
     }
     
     final criadoEm = orcamento['criadoEm'] != null
@@ -1123,112 +1328,86 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
     final aprovadorNome = orcamento['aprovador']?['nome'] as String?;
     final motivoRejeicao = orcamento['motivoRejeicao'] as String?;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-            decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.05),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-              border: Border(
-                bottom: BorderSide(color: statusColor.withValues(alpha: 0.15)),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onHover: _onHover,
+      onExit: _onExit,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: _hovered
+                ? Color(0xFFFF9800).withValues(alpha: 0.06)
+                : Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+          ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(11),
+          child: Stack(
+            children: [
+              // Barra colorida lateral esquerda (mesmo padrão do card de OC)
+              Positioned(
+                left: 0, top: 0, bottom: 0, width: 4,
+                child: ColoredBox(color: statusColor),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(left: 20, right: 16, top: 16, bottom: 16),
+                child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '#${orcamento['id']} — $titulo',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
-            child: Row(
+            SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
               children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
+                if (criadoEm != null)
+                  _chip(
+                    Icons.calendar_today_outlined,
+                    [
+                      'Criado em ${_formatDataCard(criadoEm)}',
+                      if (criadorNome != null) 'por $criadorNome',
+                    ].join(' '),
+                    Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                  child: Icon(Icons.description_outlined,
-                      size: 18, color: statusColor),
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        titulo,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                      ),
-                      if (criadoEm != null)
-                        Text(
-                          [
-                            'Criado em ${criadoEm.day.toString().padLeft(2, '0')}/${criadoEm.month.toString().padLeft(2, '0')}/${criadoEm.year}',
-                            if (criadorNome != null) 'por $criadorNome',
-                          ].join(' '),
-                          style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                        ),
-                      if (aprovadoEm != null)                                      // ← adicionar bloco
-                        Text(
-                          [
-                            'Aprovado em ${aprovadoEm.day.toString().padLeft(2, '0')}/${aprovadoEm.month.toString().padLeft(2, '0')}/${aprovadoEm.year}',
-                            if (aprovadorNome != null) 'por $aprovadorNome',
-                          ].join(' '),
-                          style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                        ),
-                    ],
+                if (aprovadoEm != null)
+                  _chip(
+                    Icons.check_circle_outline,
+                    [
+                      'Aprovado em ${_formatDataCard(aprovadoEm)}',
+                      if (aprovadorNome != null) 'por $aprovadorNome',
+                    ].join(' '),
+                    Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                ),
-                Text(
-                  '#${orcamento['id']}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
               ],
             ),
-          ),
-
-          Padding(
-            padding: EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.inventory_2_outlined,
-                        size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    SizedBox(width: 6),
-                    Text(
-                      '${materiaisUnicos.length} ${materiaisUnicos.length == 1 ? 'material' : 'materiais'}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    if (aprovadorNome != null) ...[
-                      SizedBox(width: 16),
-                      Icon(Icons.person_outline,
-                          size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      SizedBox(width: 4),
-                      Text(
-                        aprovadorNome,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+            if (materiaisUnicos.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: materiaisUnicos.values
+                    .map((desc) => Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Text(
+                            desc,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ))
+                    .toList(),
+              ),
+            ],
 
                 if (motivoRejeicao != null) ...[
                   const SizedBox(height: 12),
@@ -1279,83 +1458,190 @@ class _OrcamentoAprovacaoCard extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    // Aba "Aguardando Aprovação": Reabrir + Rejeitar + Aprovar
+                    // Aba "Aguardando Aprovação": PDF + Reabrir + Rejeitar + Aprovar
                     if (mostrarAcoes) ...[
-                      OutlinedButton.icon(
-                        onPressed: onReabrir,
-                        icon: const Icon(Icons.edit_outlined, size: 14),
-                        label: const Text('Reabrir', style: TextStyle(fontSize: 12)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTheme.primary,
-                          side: const BorderSide(color: AppTheme.primary),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
+                      if (onAbrirPdf != null) ...[
+                        Tooltip(
+                          message: 'Baixar PDF do orçamento',
+                          child: OutlinedButton.icon(
+                            onPressed: onAbrirPdf,
+                            icon: const Icon(Icons.picture_as_pdf_outlined, size: 14),
+                            label: const Text('PDF', style: TextStyle(fontSize: 12)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
+                            ).copyWith(
+                              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Tooltip(
+                        message: 'Reabrir orçamento para edição',
+                        child: OutlinedButton.icon(
+                          onPressed: onReabrir,
+                          icon: const Icon(Icons.edit_outlined, size: 14),
+                          label: const Text('Reabrir', style: TextStyle(fontSize: 12)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primary,
+                            side: const BorderSide(color: AppTheme.primary),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                          ).copyWith(
+                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        onPressed: onRejeitar,
-                        icon: const Icon(Icons.close, size: 14),
-                        label: const Text('Rejeitar',
-                            style: TextStyle(fontSize: 12)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTheme.error,
-                          side: const BorderSide(color: AppTheme.error),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
+                      Tooltip(
+                        message: 'Rejeitar orçamento',
+                        child: OutlinedButton.icon(
+                          onPressed: onRejeitar,
+                          icon: const Icon(Icons.close, size: 14),
+                          label: const Text('Rejeitar',
+                              style: TextStyle(fontSize: 12)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.error,
+                            side: const BorderSide(color: AppTheme.error),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                          ).copyWith(
+                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      FilledButton.icon(
-                        onPressed: onAprovar,
-                        icon: const Icon(Icons.check, size: 14),
-                        label: const Text('Aprovar',
-                            style: TextStyle(fontSize: 12)),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.success,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
+                      Tooltip(
+                        message: 'Aprovar orçamento',
+                        child: FilledButton.icon(
+                          onPressed: onAprovar,
+                          icon: const Icon(Icons.check, size: 14),
+                          label: const Text('Aprovar',
+                              style: TextStyle(fontSize: 12)),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.success,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                          ).copyWith(
+                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                          ),
                         ),
                       ),
                     ]
-                    // Aba "Aprovados": apenas Gerar OC
+                    // Aba "Aprovados": PDF + Gerar OC
                     else if (onGerarOC != null) ...[
-                      FilledButton.icon(
-                        onPressed: onGerarOC,
-                        icon: const Icon(Icons.shopping_cart_checkout, size: 14),
-                        label: const Text('Gerar OC',
-                            style: TextStyle(fontSize: 12)),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
+                      if (onAbrirPdf != null) ...[
+                        Tooltip(
+                          message: 'Baixar PDF do orçamento',
+                          child: OutlinedButton.icon(
+                            onPressed: onAbrirPdf,
+                            icon: const Icon(Icons.picture_as_pdf_outlined, size: 14),
+                            label: const Text('PDF', style: TextStyle(fontSize: 12)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
+                            ).copyWith(
+                              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Tooltip(
+                        message: 'Gerar Ordem de Compra a partir deste orçamento',
+                        child: FilledButton.icon(
+                          onPressed: onGerarOC,
+                          icon: const Icon(Icons.shopping_cart_checkout, size: 14),
+                          label: const Text('Gerar OC',
+                              style: TextStyle(fontSize: 12)),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                          ).copyWith(
+                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                          ),
                         ),
                       ),
                     ]
-                    // Demais abas (Não Aprovados, etc.): apenas Reabrir
-                    else
-                      FilledButton.icon(
-                        onPressed: onReabrir,
-                        icon: const Icon(Icons.edit_outlined, size: 14),
-                        label: const Text('Reabrir', style: TextStyle(fontSize: 12)),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
+                    // Demais abas (Não Aprovados, etc.): PDF + Reabrir
+                    else ...[
+                      if (onAbrirPdf != null) ...[
+                        Tooltip(
+                          message: 'Baixar PDF do orçamento',
+                          child: OutlinedButton.icon(
+                            onPressed: onAbrirPdf,
+                            icon: const Icon(Icons.picture_as_pdf_outlined, size: 14),
+                            label: const Text('PDF', style: TextStyle(fontSize: 12)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
+                            ).copyWith(
+                              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Tooltip(
+                        message: 'Reabrir orçamento para edição',
+                        child: FilledButton.icon(
+                          onPressed: onReabrir,
+                          icon: const Icon(Icons.edit_outlined, size: 14),
+                          label: const Text('Reabrir', style: TextStyle(fontSize: 12)),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                          ).copyWith(
+                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                          ),
                         ),
                       ),
+                    ],
                   ],
                 ),
               ],
             ),
           ),
-        ],
+            ],
+          ),
+        ),
+      ),
       ),
     );
   }
+
+  Widget _chip(IconData icon, String label, Color color) {
+    if (label.isEmpty) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 3),
+        Flexible(
+          child: Text(
+            label,
+            style: TextStyle(fontSize: 12, color: color),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _formatDataCard(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 }
 
 // ─── Sub-widgets (reutilizados) ───────────────────────────────────────────────
@@ -1570,12 +1856,11 @@ class _DialogEditarPreco extends StatefulWidget {
   final String fornecedorNome;
   final String materialNome;
   final double? precoAtual;
-  final double? precoM2Atual;
 
   const _DialogEditarPreco({
     required this.fornecedorNome,
     required this.materialNome,
-  }) : precoAtual = null, precoM2Atual = null;
+  }) : precoAtual = null;
 
   @override
   State<_DialogEditarPreco> createState() => _DialogEditarPrecoState();
@@ -1583,7 +1868,6 @@ class _DialogEditarPreco extends StatefulWidget {
 
 class _DialogEditarPrecoState extends State<_DialogEditarPreco> {
   late final TextEditingController _precoCtrl;
-  late final TextEditingController _precoM2Ctrl;
 
   @override
   void initState() {
@@ -1592,16 +1876,11 @@ class _DialogEditarPrecoState extends State<_DialogEditarPreco> {
         text: widget.precoAtual != null
             ? widget.precoAtual!.toStringAsFixed(2)
             : '');
-    _precoM2Ctrl = TextEditingController(
-        text: widget.precoM2Atual != null
-            ? widget.precoM2Atual!.toStringAsFixed(2)
-            : '');
   }
 
   @override
   void dispose() {
     _precoCtrl.dispose();
-    _precoM2Ctrl.dispose();
     super.dispose();
   }
 
@@ -1635,20 +1914,6 @@ class _DialogEditarPrecoState extends State<_DialogEditarPreco> {
                 isDense: true,
               ),
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _precoM2Ctrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))
-              ],
-              decoration: const InputDecoration(
-                labelText: 'Preço por m² (R\$)',
-                prefixText: 'R\$ ',
-                isDense: true,
-              ),
-            ),
           ],
         ),
       ),
@@ -1661,11 +1926,8 @@ class _DialogEditarPrecoState extends State<_DialogEditarPreco> {
           onPressed: () {
             final preco = double.tryParse(
                 _precoCtrl.text.replaceAll(',', '.'));
-            final precoM2 = double.tryParse(
-                _precoM2Ctrl.text.replaceAll(',', '.'));
             Navigator.pop(context, {
               'preco': preco,
-              'precoM2': precoM2,
             });
           },
           child: const Text('Salvar'),

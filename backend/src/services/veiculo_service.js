@@ -77,6 +77,21 @@ async function deletarManutencao(id) {
   return prisma.manutencaoVeiculo.delete({ where: { id } });
 }
 
+/**
+ * Marca (ou desmarca) o serviço como finalizado manualmente, sem depender
+ * da dataRetirada. Ao finalizar, some do "Em andamento" e da notificação
+ * de retirada imediatamente, sem esperar a virada do dia.
+ */
+async function finalizarManutencao(id, { finalizada = true } = {}) {
+  return prisma.manutencaoVeiculo.update({
+    where: { id },
+    data: {
+      finalizada,
+      finalizadaEm: finalizada ? new Date() : null,
+    },
+  });
+}
+
 // ─── Gastos (para a página de gastos) ────────────────────────────────────────
 
 /**
@@ -176,6 +191,7 @@ module.exports = {
   criarManutencao,
   atualizarManutencao,
   deletarManutencao,
+  finalizarManutencao,
   gastosPorVeiculo,
   resumoGastosVeiculo,
 };

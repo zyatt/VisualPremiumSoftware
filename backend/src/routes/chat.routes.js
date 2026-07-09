@@ -1,13 +1,10 @@
-// routes/chat.routes.js
 const express = require('express');
 const router = express.Router();
 const prisma = require('../utils/prisma');
 const { authMiddleware: autenticar } = require('../middlewares/auth.middleware');
 
-// SSE clients map: userId -> res
 const sseClients = new Map();
 
-// GET /api/chat/sse - Server-Sent Events stream para mensagens em tempo real
 router.get('/sse', autenticar, (req, res) => {
   const userId = req.usuario.id;
 
@@ -25,9 +22,28 @@ router.get('/sse', autenticar, (req, res) => {
 
   sseClients.set(userId, res);
 
+  // A conexão SSE só existe enquanto o app está aberto/em primeiro plano,
+  // então ela serve como sinal de presença: conectou = está online.
+  broadcastTodos({ tipo: 'usuario_online', usuarioId: userId });
+
   req.on('close', () => {
     clearInterval(heartbeat);
     sseClients.delete(userId);
+
+    // Ao desconectar (app fechado, aba fechada, perda de rede etc.),
+    // registra o momento como "último acesso" e avisa os demais usuários
+    // conectados para que atualizem o indicador de status na hora.
+    const agora = new Date();
+    prisma.usuario
+      .update({ where: { id: userId }, data: { ultimoAcesso: agora } })
+      .then(() => {
+        broadcastTodos({
+          tipo: 'usuario_offline',
+          usuarioId: userId,
+          ultimoAcesso: agora,
+        });
+      })
+      .catch((err) => console.error('Erro ao registrar último acesso:', err));
   });
 });
 
@@ -38,23 +54,46 @@ function notificarUsuario(destinatarioId, evento) {
   }
 }
 
-// GET /api/chat/usuarios - Lista todos os usuários ativos (exceto o próprio)
+// Envia um evento para TODOS os usuários conectados via SSE no momento —
+// usado pelos eventos de presença (online/offline), que interessam a
+// qualquer um que tenha a lista de usuários do chat aberta, não só ao
+// remetente/destinatário de uma mensagem específica.
+function broadcastTodos(evento) {
+  for (const client of sseClients.values()) {
+    client.write(`data: ${JSON.stringify(evento)}\n\n`);
+  }
+}
+
+router.post('/typing', autenticar, (req, res) => {
+  const remetenteId = req.usuario.id;
+  const { destinatarioId } = req.body;
+  if (!destinatarioId) {
+    return res.status(400).json({ error: 'destinatarioId é obrigatório' });
+  }
+  notificarUsuario(parseInt(destinatarioId), {
+    tipo: 'digitando',
+    remetenteId,
+  });
+  res.json({ ok: true });
+});
+
 router.get('/usuarios', autenticar, async (req, res) => {
   try {
     const meuId = req.usuario.id;
     const usuarios = await prisma.usuario.findMany({
       where: { ativo: true, id: { not: meuId } },
-      select: { id: true, nome: true, role: true },
+      select: { id: true, nome: true, role: true, ultimoAcesso: true },
       orderBy: { nome: 'asc' },
     });
 
-    // Para cada usuário, conta mensagens não lidas enviadas por ele para mim
     const comNaoLidas = await Promise.all(
       usuarios.map(async (u) => {
         const naoLidas = await prisma.mensagemChat.count({
           where: { remetenteId: u.id, destinatarioId: meuId, lida: false },
         });
-        return { ...u, naoLidas };
+        // "Online" = tem uma conexão SSE ativa neste momento (app aberto
+        // em primeiro plano). Não depende de nenhum campo no banco.
+        return { ...u, naoLidas, online: sseClients.has(u.id) };
       })
     );
 
@@ -65,7 +104,6 @@ router.get('/usuarios', autenticar, async (req, res) => {
   }
 });
 
-// GET /api/chat/conversa/:outroId - Histórico de conversa entre dois usuários
 router.get('/conversa/:outroId', autenticar, async (req, res) => {
   try {
     const meuId   = req.usuario.id;
@@ -88,10 +126,12 @@ router.get('/conversa/:outroId', autenticar, async (req, res) => {
       include: {
         remetente:    { select: { id: true, nome: true } },
         destinatario: { select: { id: true, nome: true } },
+        respondendoA: {
+          select: { id: true, conteudo: true, remetente: { select: { nome: true } } },
+        },
       },
     });
 
-    // Marca como lidas as mensagens do outro para mim
     await prisma.mensagemChat.updateMany({
       where: { remetenteId: outroId, destinatarioId: meuId, lida: false },
       data:  { lida: true },
@@ -104,14 +144,25 @@ router.get('/conversa/:outroId', autenticar, async (req, res) => {
   }
 });
 
-// POST /api/chat/mensagem - Envia uma mensagem
 router.post('/mensagem', autenticar, async (req, res) => {
   try {
     const remetenteId    = req.usuario.id;
-    const { destinatarioId, conteudo } = req.body;
+    const { destinatarioId, conteudo, respondendoAId } = req.body;
 
     if (!destinatarioId || !conteudo?.trim()) {
       return res.status(400).json({ error: 'destinatarioId e conteudo são obrigatórios' });
+    }
+
+    let respondendoAIdValido = undefined;
+    if (respondendoAId) {
+      const citada = await prisma.mensagemChat.findUnique({
+        where: { id: parseInt(respondendoAId) },
+      });
+      const mesmaConversa = citada && (
+        (citada.remetenteId === remetenteId && citada.destinatarioId === parseInt(destinatarioId)) ||
+        (citada.destinatarioId === remetenteId && citada.remetenteId === parseInt(destinatarioId))
+      );
+      if (mesmaConversa) respondendoAIdValido = citada.id;
     }
 
     const mensagem = await prisma.mensagemChat.create({
@@ -119,20 +170,22 @@ router.post('/mensagem', autenticar, async (req, res) => {
         remetenteId,
         destinatarioId: parseInt(destinatarioId),
         conteudo: conteudo.trim(),
+        ...(respondendoAIdValido ? { respondendoAId: respondendoAIdValido } : {}),
       },
       include: {
         remetente:    { select: { id: true, nome: true } },
         destinatario: { select: { id: true, nome: true } },
+        respondendoA: {
+          select: { id: true, conteudo: true, remetente: { select: { nome: true } } },
+        },
       },
     });
 
-    // Notifica destinatário via SSE
     notificarUsuario(parseInt(destinatarioId), {
       tipo: 'nova_mensagem',
       mensagem,
     });
 
-    // Notifica o próprio remetente (para sync multi-dispositivo)
     notificarUsuario(remetenteId, {
       tipo: 'mensagem_enviada',
       mensagem,
@@ -145,7 +198,6 @@ router.post('/mensagem', autenticar, async (req, res) => {
   }
 });
 
-// PATCH /api/chat/lidas/:outroId - Marca todas as mensagens de outroId para mim como lidas
 router.patch('/lidas/:outroId', autenticar, async (req, res) => {
   try {
     const meuId   = req.usuario.id;
@@ -161,14 +213,6 @@ router.patch('/lidas/:outroId', autenticar, async (req, res) => {
   }
 });
 
-// PATCH /api/chat/mensagem/:id/reacao - Define (ou remove) a reação do
-// usuário logado a uma mensagem.
-// Body: { emoji: "👍" }  -> define/atualiza a reação do usuário logado
-// Body: { emoji: null }  -> remove a reação do usuário logado
-//
-// Depende do campo `reacoes Json @default("{}")` no model MensagemChat
-// (schema.prisma). Lembre de rodar `npx prisma migrate dev` (ou
-// `db push`) depois de atualizar o schema, para criar a coluna no banco.
 router.patch('/mensagem/:id/reacao', autenticar, async (req, res) => {
   try {
     const meuId       = req.usuario.id;
@@ -181,7 +225,6 @@ router.patch('/mensagem/:id/reacao', autenticar, async (req, res) => {
     if (!mensagem) {
       return res.status(404).json({ error: 'Mensagem não encontrada' });
     }
-    // Só quem participa da conversa pode reagir
     if (mensagem.remetenteId !== meuId && mensagem.destinatarioId !== meuId) {
       return res.status(403).json({ error: 'Sem permissão para reagir a esta mensagem' });
     }
@@ -202,13 +245,14 @@ router.patch('/mensagem/:id/reacao', autenticar, async (req, res) => {
       include: {
         remetente:    { select: { id: true, nome: true } },
         destinatario: { select: { id: true, nome: true } },
+        respondendoA: {
+          select: { id: true, conteudo: true, remetente: { select: { nome: true } } },
+        },
       },
     });
 
     const evento = { tipo: 'reacao_atualizada', mensagem: atualizada };
-    // Notifica os dois participantes da conversa para sincronizar em
-    // tempo real (inclusive em outras abas/dispositivos do próprio
-    // usuário que reagiu).
+
     notificarUsuario(atualizada.remetenteId, evento);
     notificarUsuario(atualizada.destinatarioId, evento);
 
@@ -219,7 +263,6 @@ router.patch('/mensagem/:id/reacao', autenticar, async (req, res) => {
   }
 });
 
-// GET /api/chat/nao-lidas - Total de mensagens não lidas para o usuário logado
 router.get('/nao-lidas', autenticar, async (req, res) => {
   try {
     const meuId = req.usuario.id;
@@ -235,3 +278,4 @@ router.get('/nao-lidas', autenticar, async (req, res) => {
 
 module.exports = router;
 module.exports.notificarUsuario = notificarUsuario;
+module.exports.broadcastTodos = broadcastTodos;

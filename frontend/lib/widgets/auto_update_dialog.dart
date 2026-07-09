@@ -108,6 +108,9 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
                     icon: Icon(Icons.close_rounded, size: 20),
                     color: Theme.of(context).colorScheme.outline,
                     onPressed: () => Navigator.pop(context),
+                    style: IconButton.styleFrom().copyWith(
+                        mouseCursor: WidgetStateProperty.all(
+                            SystemMouseCursors.click)),
                   ),
               ],
             ),
@@ -232,6 +235,9 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
                 children: [
                   OutlinedButton(
                     onPressed: () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom().copyWith(
+                        mouseCursor: WidgetStateProperty.all(
+                            SystemMouseCursors.click)),
                     child: const Text('Mais tarde'),
                   ),
                   const SizedBox(width: 12),
@@ -239,6 +245,9 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
                     onPressed: _startUpdate,
                     icon: const Icon(Icons.download_rounded, size: 18),
                     label: Text(_error != null ? 'Tentar novamente' : 'Atualizar agora'),
+                    style: ElevatedButton.styleFrom().copyWith(
+                        mouseCursor: WidgetStateProperty.all(
+                            SystemMouseCursors.click)),
                   ),
                 ],
               ),

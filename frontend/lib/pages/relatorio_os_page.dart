@@ -291,6 +291,8 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                  ).copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                   ),
                 ),
               ],
@@ -855,7 +857,11 @@ class _CategoriaEmpresaCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final habilitado = onTap != null;
-    return Card(
+    return Tooltip(
+      message: habilitado
+          ? (selecionado ? 'Recolher ${info.label}' : 'Ver ordens de ${info.label}')
+          : 'Nenhuma ordem em ${info.label}',
+      child: Card(
       elevation: selecionado ? 2 : 1,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
@@ -867,6 +873,9 @@ class _CategoriaEmpresaCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
+        mouseCursor: habilitado
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
         child: Opacity(
           opacity: habilitado ? 1 : 0.45,
           child: Padding(
@@ -920,6 +929,7 @@ class _CategoriaEmpresaCard extends StatelessWidget {
           ),
         ),
       ),
+      ),
     );
   }
 }
@@ -957,11 +967,14 @@ class _RelatorioOSCard extends StatelessWidget {
     final materiaisUnicos =
         relatorio.movimentacoes.map((m) => m.materialNome).toSet().length;
 
-    return Card(
+    return Tooltip(
+      message: 'Abrir ${_tituloOS(relatorio.numeroOS)}',
+      child: Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
+        mouseCursor: SystemMouseCursors.click,
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
@@ -1049,6 +1062,7 @@ class _RelatorioOSCard extends StatelessWidget {
           ),
         ),
       ),
+      ),
     );
   }
 }
@@ -1115,14 +1129,26 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
         ],
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dialogCtx).pop(false),
-          child: const Text('Cancelar'),
+        Tooltip(
+          message: 'Cancelar e manter a OS fechada',
+          child: TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            style: TextButton.styleFrom().copyWith(
+                mouseCursor:
+                    WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: const Text('Cancelar'),
+          ),
         ),
-        FilledButton.icon(
-          onPressed: () => Navigator.of(dialogCtx).pop(true),
-          icon: const Icon(Icons.undo_rounded, size: 16),
-          label: const Text('Reverter OS'),
+        Tooltip(
+          message: 'Reverter OS para Em Andamento',
+          child: FilledButton.icon(
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            style: FilledButton.styleFrom().copyWith(
+                mouseCursor:
+                    WidgetStateProperty.all(SystemMouseCursors.click)),
+            icon: const Icon(Icons.undo_rounded, size: 16),
+            label: const Text('Reverter OS'),
+          ),
         ),
       ],
     ),
@@ -1234,16 +1260,20 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            provider.limparSelecao();
-            Navigator.of(context).pop();
-          },
-        ),
+        automaticallyImplyLeading: false,
+        titleSpacing: 16,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _BotaoVoltar(
+              label: 'Voltar',
+              tooltip: 'Voltar para a lista de relatórios',
+              onTap: () {
+                provider.limparSelecao();
+                Navigator.of(context).pop();
+              },
+            ),
+            const SizedBox(width: 12),
             Text(_titulo),
             const SizedBox(width: 10),
             Container(
@@ -1279,15 +1309,22 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
                           strokeWidth: 2, color: Color(0xFFED6C02)),
                     ),
                   )
-                : TextButton.icon(
-                    onPressed: _confirmarReverterOS,
-                    icon: const Icon(Icons.undo_rounded,
-                        size: 18, color: Color(0xFFED6C02)),
-                    label: const Text(
-                      'Reverter OS',
-                      style: TextStyle(
-                        color: Color(0xFFED6C02),
-                        fontWeight: FontWeight.w600,
+                : Tooltip(
+                    message: 'Reverter OS para Em Andamento',
+                    child: TextButton.icon(
+                      onPressed: _confirmarReverterOS,
+                      icon: const Icon(Icons.undo_rounded,
+                          size: 18, color: Color(0xFFED6C02)),
+                      label: const Text(
+                        'Reverter OS',
+                        style: TextStyle(
+                          color: Color(0xFFED6C02),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      style: TextButton.styleFrom().copyWith(
+                        mouseCursor: WidgetStateProperty.all(
+                            SystemMouseCursors.click),
                       ),
                     ),
                   ),
@@ -1304,15 +1341,22 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
                           strokeWidth: 2, color: _corFechada),
                     ),
                   )
-                : TextButton.icon(
-                    onPressed: _gerarPDF,
-                    icon: const Icon(Icons.picture_as_pdf_outlined,
-                        size: 18, color: _corFechada),
-                    label: const Text(
-                      'Gerar PDF',
-                      style: TextStyle(
-                        color: _corFechada,
-                        fontWeight: FontWeight.w600,
+                : Tooltip(
+                    message: 'Gerar PDF desta OS',
+                    child: TextButton.icon(
+                      onPressed: _gerarPDF,
+                      icon: const Icon(Icons.picture_as_pdf_outlined,
+                          size: 18, color: _corFechada),
+                      label: const Text(
+                        'Gerar PDF',
+                        style: TextStyle(
+                          color: _corFechada,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      style: TextButton.styleFrom().copyWith(
+                        mouseCursor: WidgetStateProperty.all(
+                            SystemMouseCursors.click),
                       ),
                     ),
                   ),
@@ -1883,6 +1927,31 @@ class _DatePickerField extends StatelessWidget {
       initialDate: initial,
       firstDate:   firstDate,
       lastDate:    lastDate,
+      builder: (context, child) {
+        final base = Theme.of(context);
+        final clickCursor = WidgetStateProperty.resolveWith<MouseCursor>(
+          (states) => states.contains(WidgetState.disabled)
+              ? SystemMouseCursors.basic
+              : SystemMouseCursors.click,
+        );
+        return Theme(
+          data: base.copyWith(
+            textButtonTheme: TextButtonThemeData(
+              style: (base.textButtonTheme.style ?? const ButtonStyle())
+                  .copyWith(mouseCursor: clickCursor),
+            ),
+            iconButtonTheme: IconButtonThemeData(
+              style: (base.iconButtonTheme.style ?? const ButtonStyle())
+                  .copyWith(mouseCursor: clickCursor),
+            ),
+            outlinedButtonTheme: OutlinedButtonThemeData(
+              style: (base.outlinedButtonTheme.style ?? const ButtonStyle())
+                  .copyWith(mouseCursor: clickCursor),
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
     if (picked != null) onPicked(picked);
   }
@@ -1890,43 +1959,128 @@ class _DatePickerField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasValue = value != null;
-    return InkWell(
-      onTap: () => _pick(context),
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color:  Theme.of(context).colorScheme.surface,
-          border: Border.all(
-            color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+    return Tooltip(
+      message: hasValue
+          ? 'Alterar data ($label)'
+          : 'Selecionar data ($label)',
+      child: InkWell(
+        onTap: () => _pick(context),
+        borderRadius: BorderRadius.circular(8),
+        mouseCursor: SystemMouseCursors.click,
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color:  Theme.of(context).colorScheme.surface,
+            border: Border.all(
+              color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+            ),
+            borderRadius: BorderRadius.circular(8),
           ),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.calendar_today,
-              size:  16,
-              color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
-            ),
-            SizedBox(width: 6),
-            Text(
-              hasValue ? '$label: ${_fmtData(value)}' : label,
-              style: TextStyle(
-                fontSize:   13,
-                color:      hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
-                fontWeight: hasValue ? FontWeight.w600 : FontWeight.normal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.calendar_today,
+                size:  16,
+                color: hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
               ),
-            ),
-            if (hasValue) ...[
               SizedBox(width: 6),
-              GestureDetector(
-                onTap: onCleared,
-                child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
+              Text(
+                hasValue ? '$label: ${_fmtData(value)}' : label,
+                style: TextStyle(
+                  fontSize:   13,
+                  color:      hasValue ? AppTheme.primary : Theme.of(context).colorScheme.outline,
+                  fontWeight: hasValue ? FontWeight.w600 : FontWeight.normal,
+                ),
               ),
+              if (hasValue) ...[
+                SizedBox(width: 6),
+                Tooltip(
+                  message: 'Limpar data',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: onCleared,
+                      child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
+                    ),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
+// Mesmo padrão usado no cabeçalho das outras páginas do sistema.
+class _BotaoVoltar extends StatefulWidget {
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _BotaoVoltar({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_BotaoVoltar> createState() => _BotaoVoltarState();
+}
+
+class _BotaoVoltarState extends State<_BotaoVoltar> {
+  bool _hovered = false;
+  static const _accent = Color(0xFFF59E0B);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        child: InkWell(
+          onTap: widget.onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? _accent.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              border: Border.all(
+                color: _hovered
+                    ? _accent.withValues(alpha: 0.6)
+                    : scheme.outlineVariant,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _hovered ? _accent : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

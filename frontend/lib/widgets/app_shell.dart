@@ -10,11 +10,16 @@ import '../providers/alertas_estoque_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/veiculo_provider.dart';
 import '../providers/solicitacao_material_provider.dart';
+import '../providers/material_provider.dart';
 import '../providers/chat_provider.dart';
 import 'chat_floating_widget.dart';
 import '../models/veiculo_model.dart';
 import '../theme/app_theme.dart';
 import 'welcome_banner.dart';
+import 'nova_solicitacao_banner.dart';
+import 'solicitacao_alterada_banner.dart';
+import 'material_critico_banner.dart';
+import 'theme_transition.dart';
 
 /// Controle de estado de sessão para evitar exibir o banner mais de uma vez.
 class SessionState {
@@ -46,6 +51,14 @@ class AppShell extends StatefulWidget {
     return r == 'PRODUÇÃO' || r == 'PRODUCAO';
   }
 
+  /// Somente estes cargos devem ver o banner flutuante de nova solicitação
+  /// de material — o autor da solicitação nunca recebe o evento (o backend
+  /// já o exclui do broadcast), então não é preciso filtrar isso aqui.
+  static bool podeReceberNotificacaoSolicitacao(String? role) {
+    final r = role?.trim().toUpperCase() ?? '';
+    return r == 'ADMIN' || r == 'GERENTE' || r == 'COMPRAS';
+  }
+
   static List<AppMenuItem> getMenuForRole(String? role) {
     final r = role?.trim().toUpperCase() ?? '';
 
@@ -73,7 +86,6 @@ class AppShell extends StatefulWidget {
       const AppMenuItem(icon: Icons.sell_rounded,                    label: 'Orç. Vendas',        route: '/orcamento-venda',       color: Color(0xFF22C55E)),
       const AppMenuItem(icon: Icons.shopping_cart_rounded,           label: 'Ordem de Compra',    route: '/ordem-compra',          color: Color(0xFF4CAF50)),
       const AppMenuItem(icon: Icons.sync_alt_rounded,                label: 'Controle Estoque',   route: '/controle-estoque',      color: Color(0xFFE91E63)),
-      const AppMenuItem(icon: Icons.history_rounded,                 label: 'Histórico de OC',    route: '/historico',             color: Color(0xFF9C27B0)),
       const AppMenuItem(icon: Icons.description_rounded,             label: 'Relatório OS',       route: '/relatorio-os',          color: Color(0xFF2196F3)),
       const AppMenuItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção',           route: '/producao',              color: Color(0xFF00BCD4)),
       const AppMenuItem(icon: Icons.pie_chart_rounded,               label: 'Gastos',             route: '/gastos-categoria',      color: Color(0xFFFF7043)),
@@ -134,6 +146,9 @@ class _AppShellState extends State<AppShell> {
     // Conecta (ou reconecta) ao stream SSE de novas solicitações
     context.read<SolicitacaoMaterialProvider>().conectarNotificacoes();
 
+    // Conecta (ou reconecta) ao stream SSE de atualizações de materiais
+    context.read<MaterialProvider>().conectarNotificacoes();
+
     // Trocar de usuário não deve deixar a conversa do usuário anterior
     // aberta na tela: recolhe o mini-chat flutuante (se estiver expandido)
     // antes de inicializar o chat do novo usuário.
@@ -169,6 +184,24 @@ class _AppShellState extends State<AppShell> {
     // de verdade é o AppShell, que reconstrói a cada troca de rota.
     context.read<ChatProvider>().definirPaginaVisivel(location.startsWith('/chat'));
 
+    // ── Visibilidade real da tela de Solicitações de Material ─────────────
+    // Mesmo motivo do Chat: a página vive dentro de um StatefulShellBranch
+    // (IndexedStack) e seu dispose() não é chamado ao trocar de aba, então
+    // quem sabe se ela está realmente visível é o AppShell, não a própria
+    // página.
+    context
+        .read<SolicitacaoMaterialProvider>()
+        .definirPaginaVisivel(location.startsWith('/solicitacoes-material'));
+
+    // ── Visibilidade real da tela de Estoque (Materiais) ───────────────────
+    // Mesmo motivo do Chat e Solicitações: a página vive dentro de um
+    // StatefulShellBranch (IndexedStack) e seu dispose() não é chamado ao
+    // trocar de aba, então quem sabe se ela está realmente visível é o
+    // AppShell, não a própria página.
+    context
+        .read<MaterialProvider>()
+        .definirPaginaVisivel(location.startsWith('/estoque'));
+
     // ── Banner de boas-vindas (global — funciona para qualquer role) ──────────
     // Roda uma única vez por sessão, independente da rota inicial do usuário.
     final nome = usuario?.nome ?? '';
@@ -177,6 +210,84 @@ class _AppShellState extends State<AppShell> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (context.mounted) WelcomeBanner.show(context, nome);
       });
+    }
+
+    // ── Banner flutuante de nova solicitação de material ──────────────────
+    // Aparece uma única vez por evento SSE recebido, e somente para quem
+    // pode agir sobre solicitações (ADMIN, GERENTE, COMPRAS). O autor da
+    // solicitação nunca chega a receber o evento (o backend já o exclui do
+    // broadcast), então não precisamos checar "é o autor?" aqui.
+    final notificacaoSolicitacao =
+        context.watch<SolicitacaoMaterialProvider>().notificacaoPendente;
+    if (notificacaoSolicitacao != null) {
+      final solProvRead = context.read<SolicitacaoMaterialProvider>();
+      if (AppShell.podeReceberNotificacaoSolicitacao(usuario?.role)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (context.mounted) {
+            NovaSolicitacaoBanner.show(
+              context,
+              notificacaoSolicitacao,
+              onTap: () => context.go('/solicitacoes-material'),
+            );
+          }
+        });
+      }
+      // Consome de qualquer forma (mostrando ou não), garantindo exibição
+      // única e evitando reprocessar o mesmo evento em rebuilds futuros.
+      solProvRead.consumirNotificacaoPendente();
+    }
+
+    // ── Banner flutuante de solicitação alterada ───────────────────────────
+    // Mesmo padrão do banner de nova solicitação, mas para edição/adição/
+    // exclusão de materiais ou dados de uma solicitação já existente. O
+    // autor da alteração nunca recebe este evento via SSE (o backend o
+    // exclui do broadcast), então este banner só aparece para outros
+    // usuários com permissão sobre solicitações.
+    final notificacaoAlterada =
+        context.watch<SolicitacaoMaterialProvider>().notificacaoAlteradaPendente;
+    if (notificacaoAlterada != null) {
+      final solProvReadAlterada = context.read<SolicitacaoMaterialProvider>();
+      if (AppShell.podeReceberNotificacaoSolicitacao(usuario?.role)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (context.mounted) {
+            SolicitacaoAlteradaBanner.show(
+              context,
+              notificacaoAlterada,
+              onTap: () => context.go('/solicitacoes-material'),
+            );
+          }
+        });
+      }
+      solProvReadAlterada.consumirNotificacaoAlteradaPendente();
+    }
+
+    // ── Banner flutuante de material em estoque crítico ────────────────────
+    // Aparece uma única vez por evento SSE 'material_critico', disparado pelo
+    // backend somente na transição para CRITICO (não repete enquanto o
+    // material permanece crítico). Mesmo público-alvo do banner de
+    // solicitações: quem pode agir sobre compras/estoque.
+    final notificacaoCritica =
+        context.watch<MaterialProvider>().notificacaoCriticaPendente;
+    if (notificacaoCritica != null) {
+      final matProvRead = context.read<MaterialProvider>();
+      if (AppShell.podeReceberNotificacaoSolicitacao(usuario?.role)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (context.mounted) {
+            MaterialCriticoBanner.show(
+              context,
+              notificacaoCritica,
+              onTap: () {
+                // Guarda os dados do material para a EstoquePage abrir
+                // automaticamente a categoria certa já filtrada (nome,
+                // identificador, medida, espessura).
+                matProvRead.solicitarNavegacaoParaMaterial(notificacaoCritica);
+                context.go('/estoque');
+              },
+            );
+          }
+        });
+      }
+      matProvRead.consumirNotificacaoCriticaPendente();
     }
 
     final items = AppShell.getMenuForRole(usuario?.role)
@@ -426,11 +537,14 @@ class _SidebarContentState extends State<_SidebarContent> {
               child: Row(
                 children: [
                   Expanded(
-                    child: Material(
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Material(
                       color: Colors.transparent,
                       borderRadius: BorderRadius.circular(8),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(8),
+                        mouseCursor: SystemMouseCursors.click,
                         onTap: () => _abrirTrocaUsuario(context),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
@@ -482,12 +596,16 @@ class _SidebarContentState extends State<_SidebarContent> {
                         ),
                       ),
                     ),
+                    ),
                   ),
                   IconButton(
                     tooltip: 'Configurações',
                     icon: const Icon(Icons.settings_rounded,
                         size: 18, color: Colors.white38),
                     onPressed: () => _abrirConfiguracoes(context),
+                    style: IconButton.styleFrom()
+                        .copyWith(mouseCursor: WidgetStateProperty.all(
+                            SystemMouseCursors.click)),
                   ),
                 ],
               ),
@@ -551,6 +669,7 @@ class _SidebarTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
+          mouseCursor: SystemMouseCursors.click,
           onTap: () => context.go(item.route),
           child: Container(
             padding:
@@ -677,11 +796,15 @@ class _ConfiguracoesDialog extends StatelessWidget {
                     ),
                     const Spacer(),
                     IconButton(
+                      tooltip: 'Fechar',
                       icon: Icon(Icons.close_rounded,
                           size: 18,
                           color: colorScheme.onSurfaceVariant),
                       onPressed: () => Navigator.of(context).pop(),
                       visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom().copyWith(
+                          mouseCursor: WidgetStateProperty.all(
+                              SystemMouseCursors.click)),
                     ),
                   ],
                 ),
@@ -703,75 +826,101 @@ class _ConfiguracoesDialog extends StatelessWidget {
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Material(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(12),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () =>
-                        context.read<ThemeProvider>().toggle(),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                      child: Row(
-                        children: [
-                          AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 250),
-                            transitionBuilder: (child, anim) =>
-                                ScaleTransition(
-                                    scale: anim, child: child),
-                            child: Icon(
-                              isDark
-                                  ? Icons.dark_mode_rounded
-                                  : Icons.light_mode_rounded,
-                              key: ValueKey(isDark),
-                              color: isDark
-                                  ? const Color(0xFF93C5FD)
-                                  : const Color(0x0fffbf24),
-                              size: 20,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
+                child: Builder(
+                  builder: (rowContext) {
+                    // Guarda o ponto onde o dedo/mouse tocou para usar como
+                    // origem do efeito de revelação circular. É atualizado
+                    // no pointer-down, que dispara antes do onTap/onChanged.
+                    Offset? tapOrigin;
+
+                    void trocarTema() {
+                      final box =
+                          rowContext.findRenderObject() as RenderBox?;
+                      final fallback = box != null
+                          ? box.localToGlobal(
+                              Offset(box.size.width - 24, box.size.height / 2))
+                          : const Offset(24, 24);
+                      ThemeTransitionOverlay.of(rowContext)?.switchTheme(
+                            origin: tapOrigin ?? fallback,
+                            onSwitch: () =>
+                                rowContext.read<ThemeProvider>().toggle(),
+                          ) ??
+                          rowContext.read<ThemeProvider>().toggle();
+                    }
+
+                    return Listener(
+                      onPointerDown: (event) => tapOrigin = event.position,
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(12),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: trocarTema,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            child: Row(
                               children: [
-                                Text(
-                                  'Modo de exibição',
-                                  style: GoogleFonts.nunito(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: colorScheme.onSurface,
+                                AnimatedSwitcher(
+                                  duration:
+                                      const Duration(milliseconds: 250),
+                                  transitionBuilder: (child, anim) =>
+                                      ScaleTransition(
+                                          scale: anim, child: child),
+                                  child: Icon(
+                                    isDark
+                                        ? Icons.dark_mode_rounded
+                                        : Icons.light_mode_rounded,
+                                    key: ValueKey(isDark),
+                                    color: isDark
+                                        ? const Color(0xFF93C5FD)
+                                        : const Color(0x0fffbf24),
+                                    size: 20,
                                   ),
                                 ),
-                                Text(
-                                  isDark ? 'Escuro' : 'Claro',
-                                  style: GoogleFonts.nunito(
-                                    fontSize: 11,
-                                    color:
-                                        colorScheme.onSurfaceVariant,
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Modo de exibição',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: colorScheme.onSurface,
+                                        ),
+                                      ),
+                                      Text(
+                                        isDark ? 'Escuro' : 'Claro',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 11,
+                                          color: colorScheme
+                                              .onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
                                   ),
+                                ),
+                                Switch(
+                                  value: isDark,
+                                  onChanged: (_) => trocarTema(),
+                                  activeThumbColor: AppTheme.primary,
+                                  activeTrackColor: AppTheme.primary
+                                      .withValues(alpha: 0.3),
+                                  inactiveThumbColor:
+                                      colorScheme.onSurfaceVariant,
+                                  inactiveTrackColor: colorScheme.outline
+                                      .withValues(alpha: 0.3),
                                 ),
                               ],
                             ),
                           ),
-                          Switch(
-                            value: isDark,
-                            onChanged: (_) =>
-                                context.read<ThemeProvider>().toggle(),
-                            activeThumbColor: AppTheme.primary,
-                            activeTrackColor:
-                                AppTheme.primary.withValues(alpha: 0.3),
-                            inactiveThumbColor:
-                                colorScheme.onSurfaceVariant,
-                            inactiveTrackColor: colorScheme.outline
-                                .withValues(alpha: 0.3),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 ),
               ),
               const SizedBox(height: 8),
@@ -793,11 +942,14 @@ class _ConfiguracoesDialog extends StatelessWidget {
               // ── Trocar usuário ──────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Material(
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Material(
                   color: Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
+                    mouseCursor: SystemMouseCursors.click,
                     onTap: () {
                       Navigator.of(context).pop();
                       final usuarioProvider =
@@ -851,16 +1003,20 @@ class _ConfiguracoesDialog extends StatelessWidget {
                       ),
                     ),
                   ),
+                  ),
                 ),
               ),
               const SizedBox(height: 4),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Material(
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Material(
                   color: Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
+                    mouseCursor: SystemMouseCursors.click,
                     onTap: () {
                       Navigator.of(context).pop();
                       context.read<UsuarioProvider>().logout();
@@ -900,6 +1056,7 @@ class _ConfiguracoesDialog extends StatelessWidget {
                         ],
                       ),
                     ),
+                  ),
                   ),
                 ),
               ),
@@ -1032,11 +1189,15 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
                     ),
                     const Spacer(),
                     IconButton(
+                      tooltip: 'Fechar',
                       icon: Icon(Icons.close_rounded,
                           size: 18,
                           color: colorScheme.onSurfaceVariant),
                       onPressed: () => Navigator.of(context).pop(),
                       visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom().copyWith(
+                          mouseCursor: WidgetStateProperty.all(
+                              SystemMouseCursors.click)),
                     ),
                   ],
                 ),
@@ -1152,11 +1313,14 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
                 ...usuariosSalvos.map((u) => Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 2),
-                      child: Material(
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: Material(
                         color: Colors.transparent,
                         borderRadius: BorderRadius.circular(12),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
+                          mouseCursor: SystemMouseCursors.click,
                           onTap: () async {
                             Navigator.of(context).pop();
                             final provider = context.read<UsuarioProvider>();
@@ -1231,6 +1395,9 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
                                   tooltip: 'Remover desta lista',
                                   visualDensity: VisualDensity.compact,
                                   onPressed: () => _confirmarRemocao(u),
+                                  style: IconButton.styleFrom().copyWith(
+                                      mouseCursor: WidgetStateProperty.all(
+                                          SystemMouseCursors.click)),
                                 ),
                                 Icon(
                                   Icons.login_rounded,
@@ -1242,6 +1409,7 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
                             ),
                           ),
                         ),
+                      ),
                       ),
                     )),
               ] else if (usuarioAtual != null) ...[
@@ -1288,7 +1456,9 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
                           fontWeight: FontWeight.w600)),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
+                  ).copyWith(
+                      mouseCursor: WidgetStateProperty.all(
+                          SystemMouseCursors.click)),
                 ),
               ),
             ],
@@ -1321,6 +1491,7 @@ class _AlertasSidebarBanner extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: onTap,
+        mouseCursor: SystemMouseCursors.click,
         child: Padding(
           padding:
               const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -1456,86 +1627,156 @@ class _PainelAlertasDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final itens = alertas.alertas;
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return AlertDialog(
-      title: Row(
-        children: [
-          const Icon(Icons.error_outline_rounded,
-              color: Color(0xFFDC2626), size: 20),
-          const SizedBox(width: 8),
-          const Text('Alertas de Estoque'),
-          const Spacer(),
-          Text(
-            '${alertas.totalAlertas} itens',
-            style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding:
+          const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: Container(
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: colorScheme.outline.withValues(alpha: 0.5),
+              width: 1,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black
+                    .withValues(alpha: isDark ? 0.5 : 0.12),
+                blurRadius: 32,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
-        ],
-      ),
-      content: SizedBox(
-        width: 440,
-        height: 400,
-        child: itens.isEmpty
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 12, 16),
+                child: Row(
                   children: [
-                    Icon(Icons.check_circle_outline,
-                        size: 48,
-                        color: Theme.of(context).colorScheme.outline),
-                    const SizedBox(height: 12),
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDC2626)
+                            .withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.error_outline_rounded,
+                          color: Color(0xFFDC2626), size: 18),
+                    ),
+                    const SizedBox(width: 12),
                     Text(
-                      'Nenhum material em alerta',
-                      style: GoogleFonts.nunito(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurfaceVariant,
-                        fontSize: 14,
+                      'Alertas de Estoque',
+                      style: GoogleFonts.raleway(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: colorScheme.onSurface,
                       ),
                     ),
-                  ],
-                ),
-              )
-            : SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _AlertaSecaoHeader(
-                      label: 'Críticos — abaixo do mínimo',
-                      count: itens.length,
-                      cor: const Color(0xFFDC2626),
-                      icone: Icons.error_outline_rounded,
+                    const Spacer(),
+                    Text(
+                      '${alertas.totalAlertas} itens',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                    const SizedBox(height: 6),
-                    ...itens.map((a) => _AlertaItemTile(alerta: a)),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      tooltip: 'Fechar',
+                      icon: Icon(Icons.close_rounded,
+                          size: 18,
+                          color: colorScheme.onSurfaceVariant),
+                      onPressed: () => Navigator.of(context).pop(),
+                      visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom().copyWith(
+                          mouseCursor: WidgetStateProperty.all(
+                              SystemMouseCursors.click)),
+                    ),
                   ],
                 ),
               ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text('Fechar',
-              style: GoogleFonts.nunito(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onSurfaceVariant)),
-        ),
-        FilledButton.icon(
-          onPressed: () {
-            Navigator.of(context).pop();
-            context.go('/estoque');
-          },
-          icon: const Icon(Icons.inventory_2_rounded, size: 15),
-          label: Text('Ir para Estoque', style: GoogleFonts.nunito()),
-          style: FilledButton.styleFrom(
-            backgroundColor: AppTheme.primary,
-            foregroundColor: Colors.white,
+              Divider(
+                  color: colorScheme.outline.withValues(alpha: 0.4),
+                  height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: SizedBox(
+                  width: 400,
+                  height: 360,
+                  child: itens.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_circle_outline,
+                                  size: 48, color: colorScheme.outline),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Nenhum material em alerta',
+                                style: GoogleFonts.nunito(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _AlertaSecaoHeader(
+                                label: 'Críticos — abaixo do mínimo',
+                                count: itens.length,
+                                cor: const Color(0xFFDC2626),
+                                icone: Icons.error_outline_rounded,
+                              ),
+                              const SizedBox(height: 6),
+                              ...itens.map((a) => _AlertaItemTile(alerta: a)),
+                            ],
+                          ),
+                        ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        context
+                            .read<MaterialProvider>()
+                            .definirFiltroStatusPendente('CRITICO');
+                        context.go('/estoque');
+                      },
+                      icon: const Icon(Icons.inventory_2_rounded, size: 15),
+                      label:
+                          Text('Ir para Estoque', style: GoogleFonts.nunito()),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                      ).copyWith(
+                          mouseCursor: WidgetStateProperty.all(
+                              SystemMouseCursors.click)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 }

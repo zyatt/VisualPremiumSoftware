@@ -1,7 +1,5 @@
-// producao.controller.js
 const svc = require('../services/producao.service');
 
-// GET /producao/materiais?busca=&categoria=&status=&id=&identificador=&medida=&espessura=
 const listarMateriais = async (req, res, next) => {
   try {
     const { busca, categoria, status, id, identificador, medida, espessura } = req.query;
@@ -9,14 +7,12 @@ const listarMateriais = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-// GET /producao/categorias
 const listarCategorias = async (req, res, next) => {
   try {
     res.json(await svc.listarCategorias());
   } catch (e) { next(e); }
 };
 
-// GET /producao/solicitacoes?status=ABERTA,EM_USO&busca=
 const listarSolicitacoes = async (req, res, next) => {
   try {
     const { status, busca } = req.query;
@@ -34,14 +30,12 @@ const listarHistorico = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-// GET /producao/solicitacoes/:id
 const buscarSolicitacao = async (req, res, next) => {
   try {
     res.json(await svc.buscarSolicitacao(Number(req.params.id)));
   } catch (e) { next(e); }
 };
 
-// POST /producao/solicitacoes
 const criarSolicitacao = async (req, res, next) => {
   try {
     const { materialId, descricaoItem, quantidadeReservada, numeroOS, larguraUsada, comprimentoUsado } = req.body;
@@ -58,7 +52,6 @@ const criarSolicitacao = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-// POST /producao/solicitacoes/:id/baixa
 const registrarBaixa = async (req, res, next) => {
   try {
     const { quantidade, observacao } = req.body;
@@ -71,7 +64,6 @@ const registrarBaixa = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-// POST /producao/solicitacoes/:id/finalizar
 const finalizarSolicitacao = async (req, res, next) => {
   try {
     const sol = await svc.finalizarSolicitacao({ solicitacaoId: Number(req.params.id) });
@@ -79,7 +71,6 @@ const finalizarSolicitacao = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-// DELETE /producao/historico/:id
 const excluirHistorico = async (req, res, next) => {
   try {
     await svc.excluirHistorico(Number(req.params.id));

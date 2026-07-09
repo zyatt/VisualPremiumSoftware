@@ -4,15 +4,11 @@ const { authMiddleware, roleMiddleware } = require('../middlewares/auth.middlewa
 
 const ACESSO = ['ADMIN', 'GERENTE', 'COMPRAS'];
 
-// ─── SSE ─────────────────────────────────────────────────────────────────────
 router.get('/notificacoes', authMiddleware, ctrl.notificacoes);
 
-// ─── Contagem e visualização ──────────────────────────────────────────────────
 router.get('/novas/count',        authMiddleware, ctrl.contarNovas);
 router.post('/marcar-visualizadas', authMiddleware, ctrl.marcarVisualizadas);
 
-// ─── Comprado: itens originais ────────────────────────────────────────────────
-// Qualquer usuário ACESSO pode marcar; só ADMIN pode desmarcar (validação no service).
 router.patch(
   '/itens/:itemId/comprado',
   authMiddleware,
@@ -20,7 +16,6 @@ router.patch(
   ctrl.marcarItemComprado,
 );
 
-// ─── Comprado: adicionais ─────────────────────────────────────────────────────
 router.patch(
   '/adicionais/:adicionalId/comprado',
   authMiddleware,
@@ -28,11 +23,44 @@ router.patch(
   ctrl.marcarAdicionalComprado,
 );
 
-// ─── CRUD ─────────────────────────────────────────────────────────────────────
+router.patch(
+  '/itens/:itemId',
+  authMiddleware,
+  roleMiddleware(ACESSO),
+  ctrl.atualizarItem,
+);
+
+router.delete(
+  '/itens/:itemId',
+  authMiddleware,
+  roleMiddleware(ACESSO),
+  ctrl.excluirItem,
+);
+
+router.patch(
+  '/adicionais/:adicionalId',
+  authMiddleware,
+  roleMiddleware(ACESSO),
+  ctrl.atualizarAdicional,
+);
+
+router.delete(
+  '/adicionais/:adicionalId',
+  authMiddleware,
+  roleMiddleware(ACESSO),
+  ctrl.excluirAdicional,
+);
+
+router.get(
+  '/verificar-os/:numeroOS',
+  authMiddleware,
+  roleMiddleware(ACESSO),
+  ctrl.verificarOS,
+);
+
 router.get('/',    authMiddleware, roleMiddleware(ACESSO), ctrl.listar);
 router.get('/:id', authMiddleware, roleMiddleware(ACESSO), ctrl.buscarPorId);
 
-// Criar: aceita múltiplos arquivos (imagens[0], imagens[1], …)
 router.post(
   '/',
   authMiddleware,
@@ -41,7 +69,6 @@ router.post(
   ctrl.criar,
 );
 
-// Atualizar cabeçalho (somente ADMIN — validação no service)
 router.put(
   '/:id',
   authMiddleware,
@@ -49,7 +76,6 @@ router.put(
   ctrl.atualizar,
 );
 
-// Adicionar materiais extras
 router.post(
   '/:id/adicionais',
   authMiddleware,
@@ -60,7 +86,6 @@ router.post(
 
 router.delete('/:id', authMiddleware, roleMiddleware(ACESSO), ctrl.excluir);
 
-// ─── Logs ─────────────────────────────────────────────────────────────────────
 router.get('/:id/logs', authMiddleware, roleMiddleware(ACESSO), ctrl.listarLogs);
 
 module.exports = router;

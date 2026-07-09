@@ -137,6 +137,8 @@ class _ProducaoPageState extends State<ProducaoPage>
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                  ).copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                   ),
                 ),
               ],
@@ -640,31 +642,10 @@ class _ProducaoIdentificadorPageState extends State<_ProducaoIdentificadorPage> 
             // ── Cabeçalho ────────────────────────────────────────────────────
             Row(
               children: [
-                InkWell(
+                _BotaoVoltar(
+                  label: 'Categorias',
+                  tooltip: 'Voltar para a lista de categorias',
                   onTap: () => Navigator.of(context).pop(),
-                  borderRadius: BorderRadius.circular(10),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        SizedBox(width: 6),
-                        Text(
-                          'Categorias',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
                 const SizedBox(width: 16),
                 Container(
@@ -706,6 +687,8 @@ class _ProducaoIdentificadorPageState extends State<_ProducaoIdentificadorPage> 
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                  ).copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                   ),
                 ),
               ],
@@ -1013,33 +996,12 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
           children: [
             Row(
               children: [
-                InkWell(
+                _BotaoVoltar(
+                  label: widget.mostrarBotaoIdentificadores
+                      ? widget.categoriaLabel
+                      : 'Categorias',
+                  tooltip: 'Voltar para a lista de categorias',
                   onTap: () => Navigator.of(context).pop(),
-                  borderRadius: BorderRadius.circular(10),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        SizedBox(width: 6),
-                        Text(
-                          widget.mostrarBotaoIdentificadores
-                              ? widget.categoriaLabel
-                              : 'Categorias',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
                 if (widget.mostrarBotaoIdentificadores && widget.identificadorLabel != null) ...[
                   Padding(
@@ -1095,6 +1057,8 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                  ).copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                   ),
                 ),
               ],
@@ -1318,8 +1282,9 @@ class _TabelaMateriais extends StatelessWidget {
     _ColDef(label: 'Unidade',       flex: 0.9),
     _ColDef(label: 'Medida',        flex: 0.8),
     _ColDef(label: 'Espessura',     flex: 0.7),
+    _ColDef(label: 'Comprimento',   flex: 0.8),
+    _ColDef(label: 'Largura',       flex: 0.8),
     _ColDef(label: 'Estoque atual', flex: 0.7),
-    _ColDef(label: 'Disponível',    flex: 0.7),
     _ColDef(label: 'Status',        flex: 0.8),
   ];
 
@@ -1423,11 +1388,15 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
     );
   }
 
+  static String _fmtDim(double? v) {
+    if (v == null) return '—';
+    return v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+  }
+
   @override
   Widget build(BuildContext context) {
     final m          = widget.material;
     final cols       = widget.cols;
-    final disponivel = m.quantidade + m.emUso;
 
     final role       = context.watch<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
     final podeOperar = role != 'COMPRAS';
@@ -1435,6 +1404,11 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
     final bgColor = _hovered && podeOperar
         ? Color(0xFF009800).withValues(alpha: 0.10)
         : Theme.of(context).colorScheme.surface;
+
+    // Índice incremental — evita erros de offset manual quando a coluna
+    // "Categoria" é ocultada (widget.mostrarCategoria == false).
+    var i = 0;
+    Widget nextCol(Widget child) => _colWrap(cols[i++], child);
 
     return MouseRegion(
       cursor: podeOperar ? SystemMouseCursors.click : SystemMouseCursors.basic,
@@ -1450,7 +1424,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                _colWrap(cols[0], Padding(
+                nextCol(Padding(
                   padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
                     '${m.id}',
@@ -1464,10 +1438,10 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 )),
                 _vDivider(),
 
-                _colWrap(cols[1], _cell(m.identificador?.isNotEmpty == true ? m.identificador! : '—')),
+                nextCol(_cell(m.identificador?.isNotEmpty == true ? m.identificador! : '—')),
                 _vDivider(),
 
-                _colWrap(cols[2], Padding(
+                nextCol(Padding(
                   padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
                     m.nome,
@@ -1482,39 +1456,31 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _vDivider(),
 
                 if (widget.mostrarCategoria) ...[
-                  _colWrap(cols[3], _cell(m.categoria ?? '—')),
+                  nextCol(_cell(m.categoria ?? '—')),
                   _vDivider(),
                 ],
 
-                _colWrap(cols[widget.mostrarCategoria ? 4 : 3], _cell(m.unidade ?? '—')),
+                nextCol(_cell(m.unidade ?? '—')),
                 _vDivider(),
 
-                _colWrap(cols[widget.mostrarCategoria ? 5 : 4], _cell(m.medida ?? '—')),
+                nextCol(_cell(m.medida ?? '—')),
                 _vDivider(),
 
-                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], _cell(m.espessura ?? '—')),
+                nextCol(_cell(m.espessura ?? '—')),
                 _vDivider(),
 
-                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], _cell(
+                nextCol(_cell(_fmtDim(m.comprimento))),
+                _vDivider(),
+
+                nextCol(_cell(_fmtDim(m.largura))),
+                _vDivider(),
+
+                nextCol(_cell(
                   m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2),
                 )),
                 _vDivider(),
 
-                _colWrap(cols[widget.mostrarCategoria ? 8 : 7], Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                  child: Text(
-                    disponivel.toStringAsFixed(disponivel % 1 == 0 ? 0 : 2),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: _corStatus(context, m.statusReal),
-                    ),
-                  ),
-                )),
-                _vDivider(),
-
-                _colWrap(cols[widget.mostrarCategoria ? 9 : 8], Center(
+                nextCol(Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                     child: _StatusBadge(status: m.statusReal),
@@ -1528,14 +1494,6 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
     );
   }
 
-  Color _corStatus(BuildContext context, String status) {
-    switch (status) {
-      case 'OK':      return AppTheme.statusOk;
-      case 'LIMITE':  return AppTheme.statusBaixo;
-      case 'CRITICO': return AppTheme.statusCritico;
-      default:        return Theme.of(context).colorScheme.outline;
-    }
-  }
 }
 
 class _StatusBadge extends StatelessWidget {
@@ -1729,7 +1687,6 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
 
               TextFormField(
                 controller: _osCtrl,
-                autofocus: true,
                 decoration: const InputDecoration(
                   labelText: 'Número da OS *',
                   isDense:   true,
@@ -1751,62 +1708,68 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    InkWell(
-                      onTap: () => setState(() {
-                        _modoDimensional = !_modoDimensional;
-                        if (_modoDimensional) {
-                          _qtdCtrl.text = '1';
-                          _larguraCtrl.clear();
-                          _alturaCtrl.clear();
-                        } else {
-                          _larguraCtrl.clear();
-                          _alturaCtrl.clear();
-                          _qtdCtrl.clear();
-                        }
-                      }),
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _modoDimensional
-                                  ? Icons.toggle_on
-                                  : Icons.toggle_off_outlined,
-                              size: 20,
-                              color: _modoDimensional
-                                  ? AppTheme.primary
-                                  : Theme.of(context).colorScheme.outline,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Informar dimensão usada',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
+                    Tooltip(
+                      message: _modoDimensional
+                          ? 'Desativar e informar a quantidade diretamente'
+                          : 'Ativar para calcular pela dimensão usada da chapa',
+                      child: InkWell(
+                        onTap: () => setState(() {
+                          _modoDimensional = !_modoDimensional;
+                          if (_modoDimensional) {
+                            _qtdCtrl.text = '1';
+                            _larguraCtrl.clear();
+                            _alturaCtrl.clear();
+                          } else {
+                            _larguraCtrl.clear();
+                            _alturaCtrl.clear();
+                            _qtdCtrl.clear();
+                          }
+                        }),
+                        borderRadius: BorderRadius.circular(6),
+                        mouseCursor: SystemMouseCursors.click,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _modoDimensional
+                                    ? Icons.toggle_on
+                                    : Icons.toggle_off_outlined,
+                                size: 20,
                                 color: _modoDimensional
                                     ? AppTheme.primary
-                                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                                    : Theme.of(context).colorScheme.outline,
                               ),
-                            ),
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 5, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primary.withValues(alpha: 0.10),
-                                borderRadius: BorderRadius.circular(4),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Informar dimensão usada',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: _modoDimensional
+                                      ? AppTheme.primary
+                                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
                               ),
-                              child: Text(
-                                'Chapa ${_fmt(comprimento)}×${_fmt(largura)} m',
-                                style: const TextStyle(
-                                    fontSize: 10,
-                                    color: AppTheme.primary,
-                                    fontWeight: FontWeight.w600),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primary.withValues(alpha: 0.10),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'Chapa ${_fmt(comprimento)}×${_fmt(largura)} m',
+                                  style: const TextStyle(
+                                      fontSize: 10,
+                                      color: AppTheme.primary,
+                                      fontWeight: FontWeight.w600),
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -1993,20 +1956,32 @@ class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
+        Tooltip(
+          message: 'Cancelar e fechar sem enviar',
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: TextButton.styleFrom().copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: const Text('Cancelar'),
+          ),
         ),
-        FilledButton(
-          onPressed: _enviando ? null : _confirmar,
-          child: _enviando
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Text('Confirmar Saída'),
+        Tooltip(
+          message: 'Confirmar a saída deste material',
+          child: FilledButton(
+            onPressed: _enviando ? null : _confirmar,
+            style: ButtonStyle(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: _enviando
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  )
+                : const Text('Confirmar Saída'),
+          ),
         ),
       ],
     );
@@ -2132,10 +2107,16 @@ class _HistoricoCard extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom().copyWith(
+                mouseCursor:
+                    WidgetStateProperty.all(SystemMouseCursors.click)),
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error)
+                .copyWith(
+                    mouseCursor: WidgetStateProperty.all(
+                        SystemMouseCursors.click)),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Excluir'),
           ),
@@ -2273,25 +2254,34 @@ class _HistoricoCard extends StatelessWidget {
                 ),
                 if (podeExcluir) ...[
                   const SizedBox(height: 4),
-                  Tooltip(
-                    message: 'Excluir registro',
-                    child: InkWell(
-                      onTap: () => _confirmarExclusao(context),
-                      borderRadius: BorderRadius.circular(6),
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: AppTheme.error.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: AppTheme.error.withValues(alpha: 0.25),
+                  SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: Tooltip(
+                      message: 'Excluir registro',
+                      child: IconButton(
+                        onPressed: () => _confirmarExclusao(context),
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(),
+                        icon: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: AppTheme.error.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: AppTheme.error.withValues(alpha: 0.25),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.delete_outline,
+                            size: 16,
+                            color: AppTheme.error,
                           ),
                         ),
-                        child: const Icon(
-                          Icons.delete_outline,
-                          size: 16,
-                          color: AppTheme.error,
-                        ),
+                        style: IconButton.styleFrom().copyWith(
+                            mouseCursor: WidgetStateProperty.all(
+                                SystemMouseCursors.click)),
                       ),
                     ),
                   ),
@@ -2464,6 +2454,76 @@ class _BotaoNumeroPagina extends StatelessWidget {
             fontSize: 13,
             fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
             color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
+class _BotaoVoltar extends StatefulWidget {
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _BotaoVoltar({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_BotaoVoltar> createState() => _BotaoVoltarState();
+}
+
+class _BotaoVoltarState extends State<_BotaoVoltar> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        child: InkWell(
+          onTap: widget.onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? AppTheme.primary.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              border: Border.all(
+                color: _hovered
+                    ? AppTheme.primary.withValues(alpha: 0.6)
+                    : scheme.outlineVariant,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: _hovered ? AppTheme.primary : scheme.onSurfaceVariant,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _hovered ? AppTheme.primary : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

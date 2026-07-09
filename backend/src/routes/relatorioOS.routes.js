@@ -9,7 +9,6 @@ const RELATORIO = ['ADMIN', 'GERENTE', 'COMPRAS'];
 router.get('/',                          authMiddleware, roleMiddleware(LEITURA),   ctrl.listar);
 router.get('/:numeroOS',                 authMiddleware, roleMiddleware(LEITURA),   ctrl.buscarPorNumeroOS);
 
-// ↓ Rota de PDF — mesmo padrão do estoque: retorna buffer inline para abrir no navegador/SO
 router.get('/:numeroOS/pdf',             authMiddleware, roleMiddleware(RELATORIO), pdfCtrl.gerarPdf);
 
 router.get('/:numeroOS/pdf-data',        authMiddleware, roleMiddleware(RELATORIO), ctrl.dadosParaPDF);

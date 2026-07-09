@@ -1,5 +1,7 @@
 // lib/models/mensagem_chat_model.dart
 
+import 'dart:convert';
+
 class MensagemChat {
   final int id;
   final int remetenteId;
@@ -20,6 +22,49 @@ class MensagemChat {
   // decidir entre 1 risquinho (enviando) e 2 risquinhos (confirmada).
   final bool pendente;
 
+  // Dados (achatados/denormalizados) da mensagem citada, quando esta é uma
+  // resposta a outra mensagem da conversa. Vêm prontos do backend dentro de
+  // `respondendoA` (ver include no chat.routes.js) — guardamos só o
+  // necessário pra exibir a citação na bolha, sem montar um MensagemChat
+  // aninhado completo.
+  final int? respondendoAId;
+  final String? respondendoAConteudo;
+  final String? respondendoARemetenteNome;
+
+  bool get ehResposta => respondendoAId != null;
+
+  // ── Encaminhamento de solicitação/material (ver feature "enviar para chat") ─
+  // Aproveita o campo `conteudo` (String livre) para carregar um payload JSON
+  // prefixado, evitando qualquer alteração de schema no backend. Se o parse
+  // falhar por algum motivo, `ehEncaminhamento` continua true mas os getters
+  // de dados retornam null — a UI cai de volta pro texto cru.
+  static const _prefixoEncaminhamento = '§FWD§';
+
+  bool get ehEncaminhamento => conteudo.startsWith(_prefixoEncaminhamento);
+
+  Map<String, dynamic>? get _payloadEncaminhamento {
+    if (!ehEncaminhamento) return null;
+    try {
+      return jsonDecode(conteudo.substring(_prefixoEncaminhamento.length))
+          as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 'solicitacao' ou 'material'.
+  String? get tipoEncaminhamento => _payloadEncaminhamento?['tipo'] as String?;
+
+  Map<String, dynamic>? get dadosEncaminhados =>
+      _payloadEncaminhamento?['dados'] as Map<String, dynamic>?;
+
+  static String codificarEncaminhamento({
+    required String tipo,
+    required Map<String, dynamic> dados,
+  }) {
+    return '$_prefixoEncaminhamento${jsonEncode({'tipo': tipo, 'dados': dados})}';
+  }
+
   const MensagemChat({
     required this.id,
     required this.remetenteId,
@@ -31,9 +76,13 @@ class MensagemChat {
     this.destinatarioNome,
     this.reacoes = const {},
     this.pendente = false,
+    this.respondendoAId,
+    this.respondendoAConteudo,
+    this.respondendoARemetenteNome,
   });
 
   factory MensagemChat.fromJson(Map<String, dynamic> json) {
+    final respondendoA = json['respondendoA'] as Map<String, dynamic>?;
     return MensagemChat(
       id:              json['id'] as int,
       remetenteId:     json['remetenteId'] as int,
@@ -46,6 +95,10 @@ class MensagemChat {
       reacoes: (json['reacoes'] as Map<String, dynamic>?)
               ?.map((k, v) => MapEntry(k, v as String)) ??
           const {},
+      respondendoAId:            respondendoA?['id'] as int?,
+      respondendoAConteudo:      respondendoA?['conteudo'] as String?,
+      respondendoARemetenteNome:
+          (respondendoA?['remetente'] as Map<String, dynamic>?)?['nome'] as String?,
     );
   }
 
@@ -57,6 +110,7 @@ class MensagemChat {
     'lida':           lida,
     'criadoEm':       criadoEm.toIso8601String(),
     'reacoes':        reacoes,
+    if (respondendoAId != null) 'respondendoAId': respondendoAId,
   };
 
   /// Retorna uma cópia da mensagem com o mapa de reações substituído.
@@ -74,6 +128,9 @@ class MensagemChat {
       destinatarioNome: destinatarioNome,
       reacoes: novasReacoes,
       pendente: pendente,
+      respondendoAId: respondendoAId,
+      respondendoAConteudo: respondendoAConteudo,
+      respondendoARemetenteNome: respondendoARemetenteNome,
     );
   }
 }
@@ -83,20 +140,34 @@ class UsuarioChat {
   final String nome;
   final String role;
   int naoLidas;
+  // Presença: `online` reflete se o usuário tem uma conexão SSE ativa
+  // agora (app aberto em primeiro plano); `ultimoAcesso` é o momento em
+  // que a conexão anterior caiu (app fechado/minimizado/perda de rede) —
+  // só faz sentido mostrar quando `online` é false. Ambos chegam prontos
+  // do backend em /chat/usuarios e são atualizados em tempo real pelos
+  // eventos SSE 'usuario_online'/'usuario_offline' (ver ChatProvider).
+  bool online;
+  DateTime? ultimoAcesso;
 
   UsuarioChat({
     required this.id,
     required this.nome,
     required this.role,
     this.naoLidas = 0,
+    this.online = false,
+    this.ultimoAcesso,
   });
 
   factory UsuarioChat.fromJson(Map<String, dynamic> json) {
     return UsuarioChat(
-      id:       json['id'] as int,
-      nome:     json['nome'] as String,
-      role:     json['role'] as String,
-      naoLidas: json['naoLidas'] as int? ?? 0,
+      id:           json['id'] as int,
+      nome:         json['nome'] as String,
+      role:         json['role'] as String,
+      naoLidas:     json['naoLidas'] as int? ?? 0,
+      online:       json['online'] as bool? ?? false,
+      ultimoAcesso: json['ultimoAcesso'] != null
+          ? DateTime.parse(json['ultimoAcesso'] as String).toLocal()
+          : null,
     );
   }
 }

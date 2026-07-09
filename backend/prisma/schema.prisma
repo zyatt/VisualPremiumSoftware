@@ -7,25 +7,25 @@ datasource db {
 }
 
 model Usuario {
-  id                     Int                   @id @default(autoincrement())
-  nome                   String
-  username               String                @unique
-  senha                  String
-  role                   Role                  @default(COMPRAS)
-  ativo                  Boolean               @default(true)
-  criadoEm               DateTime              @default(now())
-  atualizadoEm           DateTime              @updatedAt
-  orcamentosAprovados    Orcamento[]           @relation("AprovadorOrcamento")
-  orcamentosCriados      Orcamento[]           @relation("OrcamentoCriador")
-  ordens_compra          OrdemCompra[]
-  solicitacoesProducao   SolicitacaoProducao[]
-  orcamentosVendaCriados OrcamentoVenda[]      @relation("OrcamentoVendaCriador")
-  solicitacoesMaterial   SolicitacaoMaterial[] @relation("SolicitacoesMaterial")
-  logsEdicaoSolicitacao  LogEdicaoSolicitacao[] @relation("LogEdicaoEditor")
-  mensagensEnviadas      MensagemChat[] @relation("MensagemRemetente")
-  mensagensRecebidas     MensagemChat[] @relation("MensagemDestinatario")
+  id                       Int                   @id @default(autoincrement())
+  nome                     String
+  username                 String                @unique
+  senha                    String
+  role                     Role                  @default(COMPRAS)
+  ativo                    Boolean               @default(true)
+  criadoEm                 DateTime              @default(now())
+  atualizadoEm             DateTime              @updatedAt
+  orcamentosAprovados      Orcamento[]           @relation("AprovadorOrcamento")
+  orcamentosCriados        Orcamento[]           @relation("OrcamentoCriador")
+  ordens_compra            OrdemCompra[]
+  solicitacoesProducao     SolicitacaoProducao[]
+  orcamentosVendaCriados   OrcamentoVenda[]      @relation("OrcamentoVendaCriador")
+  solicitacoesMaterial     SolicitacaoMaterial[] @relation("SolicitacoesMaterial")
+  logsEdicaoSolicitacao    LogEdicaoSolicitacao[] @relation("LogEdicaoEditor")
+  mensagensEnviadas        MensagemChat[] @relation("MensagemRemetente")
+  mensagensRecebidas       MensagemChat[] @relation("MensagemDestinatario")
   visualizacoesSolicitacao VisualizacaoSolicitacao[]
-  
+  ultimoAcesso             DateTime?
   @@map("usuarios")
 }
 
@@ -39,6 +39,12 @@ model MensagemChat {
   // idUsuario (string) -> emoji. Uma reação por usuário por mensagem;
   // reagir de novo com outro emoji substitui a anterior.
   reacoes        Json     @default("{}")
+  // Mensagem original citada, quando esta é uma resposta a outra mensagem
+  // da mesma conversa (feature "responder mensagem"). Auto-relação: uma
+  // MensagemChat pode responder a outra MensagemChat.
+  respondendoAId Int?
+  respondendoA   MensagemChat?  @relation("RespostaMensagem", fields: [respondendoAId], references: [id])
+  respostas      MensagemChat[] @relation("RespostaMensagem")
   remetente      Usuario  @relation("MensagemRemetente",    fields: [remetenteId],    references: [id])
   destinatario   Usuario  @relation("MensagemDestinatario", fields: [destinatarioId], references: [id])
 
@@ -339,6 +345,10 @@ model ManutencaoVeiculo {
   valor        Decimal   @db.Decimal(10, 2)
   dataEnvio    DateTime
   dataRetirada DateTime?
+  /// Marcado manualmente pelo usuário quando o serviço é concluído/retirado,
+  /// independente da data de retirada já ter chegado ou não.
+  finalizada   Boolean   @default(false)
+  finalizadaEm DateTime?
   criadoEm     DateTime  @default(now())
   veiculo      Veiculo   @relation(fields: [veiculoId], references: [id])
 
@@ -401,6 +411,10 @@ model ItemSolicitacaoMaterial {
   compradoPorNome String?
  
   criadoEm        DateTime             @default(now())
+
+  /// Se editado (quantidade/observação), registra quando e por quem.
+  editadoEm       DateTime?
+  editadoPorNome  String?
  
   solicitacao     SolicitacaoMaterial  @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
   material        Material             @relation(fields: [materialId], references: [id])
@@ -428,6 +442,10 @@ model AdicionalSolicitacaoMaterial {
   compradoEm      DateTime?
   compradoPorId   Int?
   compradoPorNome String?
+
+  /// Se editado (quantidade/observação), registra quando e por quem.
+  editadoEm       DateTime?
+  editadoPorNome  String?
  
   solicitacao     SolicitacaoMaterial  @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
   material        Material             @relation(fields: [materialId], references: [id])
@@ -460,6 +478,9 @@ model LogEdicaoSolicitacao {
   /// Snapshot JSON dos campos DEPOIS da edição.
   depois          Json
   editadoEm       DateTime            @default(now())
+  /// Contexto opcional: nome do material editado, quando o log se refere a
+  /// um item/adicional em vez dos dados do cabeçalho da solicitação.
+  item            String?
   solicitacao     SolicitacaoMaterial @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
   editor          Usuario             @relation("LogEdicaoEditor", fields: [editorId], references: [id])
 

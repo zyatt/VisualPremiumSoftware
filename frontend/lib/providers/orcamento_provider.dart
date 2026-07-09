@@ -4,15 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../models/material_model.dart';
 
-// ─── Enums ────────────────────────────────────
-
-enum ModoOrcamento { unitario, metroQuadrado }
-
 // ─── Data classes ─────────────────────────────────────────────────────────────
 
 class PrecoFornecedorData {
   double? preco;
-  double? precoM2;
   String fornecedorNome;
   /// Observação de disponibilidade digitada pelo usuário para este
   /// material × fornecedor (ex: "Em falta", "Prazo 5 dias").
@@ -21,14 +16,12 @@ class PrecoFornecedorData {
   PrecoFornecedorData({
     required this.fornecedorNome,
     this.preco,
-    this.precoM2,
     this.observacao,
   });
 
   Map<String, dynamic> toJson() => {
         'fornecedorNome': fornecedorNome,
         'preco': preco,
-        'precoM2': precoM2,
         'observacao': observacao,
       };
 
@@ -36,7 +29,6 @@ class PrecoFornecedorData {
       PrecoFornecedorData(
         fornecedorNome: j['fornecedorNome'] as String,
         preco: (j['preco'] as num?)?.toDouble(),
-        precoM2: (j['precoM2'] as num?)?.toDouble(),
         observacao: j['observacao'] as String?,
       );
 }
@@ -54,7 +46,6 @@ class ItemOrcamentoData {
   double quantidade;
   Map<int, PrecoFornecedorData> precos;
   int? fornecedorSelecionado;
-  ModoOrcamento? modoOrcamento;
 
   ItemOrcamentoData({
     String? itemId,
@@ -69,7 +60,6 @@ class ItemOrcamentoData {
     this.quantidade = 1,
     Map<int, PrecoFornecedorData>? precos,
     this.fornecedorSelecionado,
-    this.modoOrcamento,
   }) : itemId = itemId ?? const Uuid().v4(),
        precos = precos ?? {};
 
@@ -86,7 +76,6 @@ class ItemOrcamentoData {
         'quantidade': quantidade,
         'precos': precos.map((k, v) => MapEntry(k.toString(), v.toJson())),
         'fornecedorSelecionado': fornecedorSelecionado,
-        'modoOrcamento': modoOrcamento?.name,
       };
 
   factory ItemOrcamentoData.fromJson(Map<String, dynamic> j) =>
@@ -108,9 +97,6 @@ class ItemOrcamentoData {
           ),
         ),
         fornecedorSelecionado: j['fornecedorSelecionado'] as int?,
-        modoOrcamento: j['modoOrcamento'] != null
-            ? ModoOrcamento.values.byName(j['modoOrcamento'] as String)
-            : null,
       );
 }
 
@@ -397,7 +383,6 @@ class OrcamentoProvider extends ChangeNotifier {
     double? quantidade,
     int? fornecedorSelecionado,
     bool clearFornecedor = false,
-    ModoOrcamento? modoOrcamento,
     Map<int, PrecoFornecedorData>? precos,
   }) {
     if (tabAtual == null) return;
@@ -419,7 +404,6 @@ class OrcamentoProvider extends ChangeNotifier {
       fornecedorSelecionado: clearFornecedor
           ? null
           : (fornecedorSelecionado ?? old.fornecedorSelecionado),
-      modoOrcamento: modoOrcamento ?? old.modoOrcamento,
     );
     _salvarAbas();
     notifyListeners();
@@ -494,7 +478,6 @@ class OrcamentoProvider extends ChangeNotifier {
       precos[fm.fornecedorId] = PrecoFornecedorData(
         fornecedorNome: fm.fornecedorNome,
         preco:   fm.preco > 0 ? fm.preco : null,
-        precoM2: fm.precoMetroQuadrado > 0 ? fm.precoMetroQuadrado : null,
       );
     }
 

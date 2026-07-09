@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:provider/provider.dart';
 
 import '../models/veiculo_model.dart';
@@ -84,17 +85,29 @@ class _VeiculoPageState extends State<VeiculoPage> {
           style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
-              child: const Text('Cancelar')),
-          TextButton(
-            onPressed: () async {
-              final provider = context.read<VeiculoProvider>();
-              Navigator.of(context, rootNavigator: true).pop();
-              await provider.desativarVeiculo(veiculo.id);
-            },
-            child:
-                const Text('Desativar', style: TextStyle(color: AppTheme.error)),
+          Tooltip(
+            message: 'Fechar sem desativar o veículo',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: TextButton(
+                  onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
+                  child: const Text('Cancelar')),
+            ),
+          ),
+          Tooltip(
+            message: 'Confirmar desativação do veículo',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: TextButton(
+                onPressed: () async {
+                  final provider = context.read<VeiculoProvider>();
+                  Navigator.of(context, rootNavigator: true).pop();
+                  await provider.desativarVeiculo(veiculo.id);
+                },
+                child:
+                    const Text('Desativar', style: TextStyle(color: AppTheme.error)),
+              ),
+            ),
           ),
         ],
       ),
@@ -102,7 +115,7 @@ class _VeiculoPageState extends State<VeiculoPage> {
   }
 
   void _abrirHistorico(VeiculoModel veiculo, Color cor) {
-    Navigator.of(context, rootNavigator: true).push(
+    Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => VeiculoServicosPage(veiculoId: veiculo.id, cor: cor),
       ),
@@ -172,27 +185,40 @@ class _VeiculoPageState extends State<VeiculoPage> {
                   ],
                 ),
                 const Spacer(),
-                FilledButton.icon(
-                  onPressed: () => _abrirFormVeiculo(),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Novo Veículo'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                Tooltip(
+                  message: 'Cadastrar um novo veículo',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: FilledButton.icon(
+                      onPressed: () => _abrirFormVeiculo(),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Novo Veículo'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                    ),
                   ),
                 ),
                 SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => provider.carregarVeiculos(),
-                  icon: Icon(Icons.refresh,
-                      size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  tooltip: 'Atualizar',
-                  style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: IconButton(
+                    onPressed: () => provider.carregarVeiculos(),
+                    icon: Icon(Icons.refresh,
+                        size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    tooltip: 'Atualizar lista de veículos',
+                    style: IconButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.surface,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    ).copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ),
               ],
@@ -630,31 +656,10 @@ class _VeiculoServicosPageState extends State<VeiculoServicosPage> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                InkWell(
-                  onTap: () => Navigator.of(context, rootNavigator: true).pop(),
-                  borderRadius: BorderRadius.circular(10),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Veículos',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                _BotaoVoltar(
+                  label: 'Veículos',
+                  tooltip: 'Voltar para a lista de veículos',
+                  onTap: () => Navigator.of(context).pop(),
                 ),
                 const SizedBox(width: 16),
                 Container(
@@ -711,24 +716,37 @@ class _VeiculoServicosPageState extends State<VeiculoServicosPage> {
                   ],
                 ),
                 const Spacer(),
-                FilledButton.icon(
-                  onPressed: _novoServico,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Novo Serviço'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                Tooltip(
+                  message: 'Registrar um novo serviço para este veículo',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: FilledButton.icon(
+                      onPressed: _novoServico,
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Novo Serviço'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => context.read<VeiculoProvider>().carregarManutencoes(widget.veiculoId),
-                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  tooltip: 'Atualizar',
-                  style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: IconButton(
+                    onPressed: () => context.read<VeiculoProvider>().carregarManutencoes(widget.veiculoId),
+                    icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    tooltip: 'Atualizar histórico de serviços',
+                    style: IconButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.surface,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    ).copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ),
               ],
@@ -826,7 +844,7 @@ class _VeiculoServicosPageState extends State<VeiculoServicosPage> {
 // Linha de uma manutenção dentro do histórico
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _LinhaManutencao extends StatelessWidget {
+class _LinhaManutencao extends StatefulWidget {
   final ManutencaoModel manutencao;
   final Color           cor;
   final bool            ultimo;
@@ -839,15 +857,41 @@ class _LinhaManutencao extends StatelessWidget {
     required this.veiculoId,
   });
 
+  @override
+  State<_LinhaManutencao> createState() => _LinhaManutencaoState();
+}
+
+class _LinhaManutencaoState extends State<_LinhaManutencao> {
+  bool _hovered = false;
+  bool _finalizando = false;
+
+  void _onHover(PointerHoverEvent _) {
+    if (!_hovered) setState(() => _hovered = true);
+  }
+
+  void _onExit(PointerExitEvent _) {
+    if (_hovered) setState(() => _hovered = false);
+  }
+
+  Future<void> _finalizarServico(BuildContext context) async {
+    if (_finalizando) return;
+    setState(() => _finalizando = true);
+    final provider = context.read<VeiculoProvider>();
+    await provider.finalizarManutencao(widget.manutencao.id, widget.veiculoId);
+    if (mounted) setState(() => _finalizando = false);
+  }
+
   void _editarManutencao(BuildContext context) {
     showDialog(
       context: context,
       builder: (_) => _FormManutencaoDialog(
-          veiculoId: veiculoId, manutencao: manutencao),
+          veiculoId: widget.veiculoId, manutencao: widget.manutencao),
     );
   }
 
   void _confirmarDeletar(BuildContext context) {
+    final manutencao = widget.manutencao;
+    final veiculoId  = widget.veiculoId;
     showDialog(
       context: context,
       builder: (dialogCtx) => AlertDialog(
@@ -859,17 +903,29 @@ class _LinhaManutencao extends StatelessWidget {
           style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
-              child: const Text('Cancelar')),
-          TextButton(
-            onPressed: () async {
-              final provider = context.read<VeiculoProvider>();
-              Navigator.of(dialogCtx, rootNavigator: true).pop();
-              await provider.deletarManutencao(manutencao.id, veiculoId);
-            },
-            child: const Text('Remover',
-                style: TextStyle(color: AppTheme.error)),
+          Tooltip(
+            message: 'Fechar sem remover o serviço',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: TextButton(
+                  onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
+                  child: const Text('Cancelar')),
+            ),
+          ),
+          Tooltip(
+            message: 'Confirmar remoção do serviço',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: TextButton(
+                onPressed: () async {
+                  final provider = context.read<VeiculoProvider>();
+                  Navigator.of(dialogCtx, rootNavigator: true).pop();
+                  await provider.deletarManutencao(manutencao.id, veiculoId);
+                },
+                child: const Text('Remover',
+                    style: TextStyle(color: AppTheme.error)),
+              ),
+            ),
           ),
         ],
       ),
@@ -878,104 +934,131 @@ class _LinhaManutencao extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final m = manutencao;
+    final m   = widget.manutencao;
+    final cor = widget.cor;
+
+    final bgColor = _hovered ? cor.withValues(alpha: 0.08) : Colors.transparent;
+
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(
-            children: [
-              // Ícone do tipo
-              Container(
-                width: 36, height: 36,
-                decoration: BoxDecoration(
-                  color:        cor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(_iconeTipo(m.tipo), color: cor, size: 18),
-              ),
-              const SizedBox(width: 12),
-
-              // Tipo + descrição + datas
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        MouseRegion(
+          cursor:  SystemMouseCursors.click,
+          onHover: _onHover,
+          onExit:  _onExit,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _editarManutencao(context),
+            child: ColoredBox(
+              color: bgColor,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+                child: Row(
                   children: [
-                    Row(
-                      children: [
-                        Text(labelTipo(m.tipo),
-                            style: TextStyle(
-                              fontSize:   13,
-                              fontWeight: FontWeight.w600,
-                              color:      Theme.of(context).colorScheme.onSurface,
-                            )),
-                        if (m.emAndamento) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFFB300)
-                                  .withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text('Em andamento',
+                    // Ícone do tipo
+                    Container(
+                      width: 36, height: 36,
+                      decoration: BoxDecoration(
+                        color:        cor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(_iconeTipo(m.tipo), color: cor, size: 18),
+                    ),
+                    const SizedBox(width: 12),
+
+                    // Tipo + descrição + datas
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(labelTipo(m.tipo),
+                                  style: TextStyle(
+                                    fontSize:   13,
+                                    fontWeight: FontWeight.w600,
+                                    color:      Theme.of(context).colorScheme.onSurface,
+                                  )),
+                              if (m.emAndamento) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFB300)
+                                        .withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: const Text('Em andamento',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          color:    Color(0xFFFFB300),
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                              ],
+                            ],
+                          ),
+                          if (m.descricao != null && m.descricao!.isNotEmpty)
+                            Text(m.descricao!,
                                 style: TextStyle(
-                                    fontSize: 10,
-                                    color:    Color(0xFFFFB300),
-                                    fontWeight: FontWeight.w600)),
+                                    fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                          SizedBox(height: 2),
+                          Text(
+                            m.dataRetirada != null
+                                ? 'Envio: ${_fmtData(m.dataEnvio)}  ·  Retirada: ${_fmtData(m.dataRetirada)}'
+                                : 'Envio: ${_fmtData(m.dataEnvio)}',
+                            style: TextStyle(
+                                fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                           ),
                         ],
-                      ],
+                      ),
                     ),
-                    if (m.descricao != null && m.descricao!.isNotEmpty)
-                      Text(m.descricao!,
-                          style: TextStyle(
-                              fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                    SizedBox(height: 2),
+
+                    // Valor
                     Text(
-                      m.dataRetirada != null
-                          ? 'Envio: ${_fmtData(m.dataEnvio)}  ·  Retirada: ${_fmtData(m.dataRetirada)}'
-                          : 'Envio: ${_fmtData(m.dataEnvio)}',
+                      _brl(m.valor),
                       style: TextStyle(
-                          fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        fontSize:   14,
+                        fontWeight: FontWeight.w700,
+                        color:      Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                    SizedBox(width: 8),
+
+                    // Ações
+                    if (m.emAndamento)
+                      _finalizando
+                          ? const SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: Padding(
+                                padding: EdgeInsets.all(6),
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            )
+                          : IconButton(
+                              onPressed: () => _finalizarServico(context),
+                              icon: const Icon(Icons.check_circle_outline,
+                                  size: 18, color: Color(0xFF43A047)),
+                              tooltip: 'Finalizar serviço',
+                              padding: EdgeInsets.zero,
+                              constraints:
+                                  BoxConstraints(minWidth: 28, minHeight: 28),
+                            ),
+                    IconButton(
+                      onPressed: () => _confirmarDeletar(context),
+                      icon: Icon(Icons.delete_outline,
+                          size: 16, color: AppTheme.error),
+                      tooltip: 'Remover',
+                      padding: EdgeInsets.zero,
+                      constraints: BoxConstraints(minWidth: 28, minHeight: 28),
                     ),
                   ],
                 ),
               ),
-
-              // Valor
-              Text(
-                _brl(m.valor),
-                style: TextStyle(
-                  fontSize:   14,
-                  fontWeight: FontWeight.w700,
-                  color:      Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-              SizedBox(width: 8),
-
-              // Ações
-              IconButton(
-                onPressed: () => _editarManutencao(context),
-                icon: Icon(Icons.edit_outlined,
-                    size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                tooltip: 'Editar',
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-              ),
-              IconButton(
-                onPressed: () => _confirmarDeletar(context),
-                icon: Icon(Icons.delete_outline,
-                    size: 16, color: AppTheme.error),
-                tooltip: 'Remover',
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints(minWidth: 28, minHeight: 28),
-              ),
-            ],
+            ),
           ),
         ),
-        if (!ultimo)
+        if (!widget.ultimo)
           Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
       ],
     );
@@ -1064,19 +1147,36 @@ class _FormVeiculoDialogState extends State<_FormVeiculoDialog> {
         ),
       ),
       actions: [
-        TextButton(
-            onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
-            child: const Text('Cancelar')),
-        FilledButton(
-          onPressed: _salvando ? null : _salvar,
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-          child: _salvando
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-              : const Text('Salvar'),
+        Tooltip(
+          message: 'Fechar sem salvar',
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: TextButton(
+                onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
+                style: TextButton.styleFrom().copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+                child: const Text('Cancelar')),
+          ),
+        ),
+        Tooltip(
+          message: widget.veiculo == null ? 'Salvar novo veículo' : 'Salvar alterações do veículo',
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: FilledButton(
+              onPressed: _salvando ? null : _salvar,
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: _salvando
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Text('Salvar'),
+            ),
+          ),
         ),
       ],
     );
@@ -1215,20 +1315,24 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
                   runSpacing: 8,
                   children: tiposManutencao.map((t) {
                     final sel = _tipo == t;
-                    return ChoiceChip(
-                      label: Text(labelTipo(t)),
-                      selected: sel,
-                      showCheckmark: false,
-                      onSelected: (_) => setState(() => _tipo = t),
-                      selectedColor: AppTheme.primary.withValues(alpha: 0.2),
-                      labelStyle: TextStyle(
-                        color: sel ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontWeight:
-                            sel ? FontWeight.w700 : FontWeight.normal,
+                    return Tooltip(
+                      message: 'Selecionar tipo de serviço: ${labelTipo(t)}',
+                      child: ChoiceChip(
+                        label: Text(labelTipo(t)),
+                        selected: sel,
+                        showCheckmark: false,
+                        mouseCursor: SystemMouseCursors.click,
+                        onSelected: (_) => setState(() => _tipo = t),
+                        selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                        labelStyle: TextStyle(
+                          color: sel ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontWeight:
+                              sel ? FontWeight.w700 : FontWeight.normal,
+                        ),
+                        side: BorderSide(
+                            color: sel ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant),
+                        backgroundColor: Theme.of(context).colorScheme.surface,
                       ),
-                      side: BorderSide(
-                          color: sel ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant),
-                      backgroundColor: Theme.of(context).colorScheme.surface,
                     );
                   }).toList(),
                 ),
@@ -1288,19 +1392,36 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
         ),
       ),
       actions: [
-        TextButton(
-            onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
-            child: const Text('Cancelar')),
-        FilledButton(
-          onPressed: _salvando ? null : _salvar,
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-          child: _salvando
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-              : const Text('Salvar'),
+        Tooltip(
+          message: 'Fechar sem salvar',
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: TextButton(
+                onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
+                style: TextButton.styleFrom().copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+                child: const Text('Cancelar')),
+          ),
+        ),
+        Tooltip(
+          message: widget.manutencao == null ? 'Salvar novo serviço' : 'Salvar alterações do serviço',
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: FilledButton(
+              onPressed: _salvando ? null : _salvar,
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: _salvando
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Text('Salvar'),
+            ),
+          ),
         ),
       ],
     );
@@ -1369,40 +1490,123 @@ class _DataBtn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasVal = valor != null;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-        decoration: BoxDecoration(
-          color:        Theme.of(context).scaffoldBackgroundColor,
-          border:       Border.all(
-              color: hasVal ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.calendar_today,
-                size:  15,
-                color: hasVal ? AppTheme.primary : Theme.of(context).colorScheme.outline),
-            SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                hasVal ? _fmt(valor!) : label,
-                style: TextStyle(
-                  fontSize:   13,
-                  color:      hasVal ? AppTheme.primary : Theme.of(context).colorScheme.outline,
-                  fontWeight: hasVal ? FontWeight.w600 : FontWeight.normal,
+    return Tooltip(
+      message: hasVal ? 'Alterar $label' : 'Selecionar $label',
+      child: InkWell(
+        onTap: onTap,
+        mouseCursor: SystemMouseCursors.click,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          decoration: BoxDecoration(
+            color:        Theme.of(context).scaffoldBackgroundColor,
+            border:       Border.all(
+                color: hasVal ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.calendar_today,
+                  size:  15,
+                  color: hasVal ? AppTheme.primary : Theme.of(context).colorScheme.outline),
+              SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  hasVal ? _fmt(valor!) : label,
+                  style: TextStyle(
+                    fontSize:   13,
+                    color:      hasVal ? AppTheme.primary : Theme.of(context).colorScheme.outline,
+                    fontWeight: hasVal ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-                overflow: TextOverflow.ellipsis,
               ),
+              if (hasVal && onClear != null)
+                Tooltip(
+                  message: 'Limpar $label',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: onClear,
+                      child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
+// Mesmo padrão usado no cabeçalho das outras páginas do sistema.
+class _BotaoVoltar extends StatefulWidget {
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _BotaoVoltar({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_BotaoVoltar> createState() => _BotaoVoltarState();
+}
+
+class _BotaoVoltarState extends State<_BotaoVoltar> {
+  bool _hovered = false;
+  static const _accent = Color(0xFFF59E0B);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        child: InkWell(
+          onTap: widget.onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? _accent.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              border: Border.all(
+                color: _hovered
+                    ? _accent.withValues(alpha: 0.6)
+                    : scheme.outlineVariant,
+              ),
+              borderRadius: BorderRadius.circular(10),
             ),
-            if (hasVal && onClear != null)
-              GestureDetector(
-                onTap: onClear,
-                child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
-              ),
-          ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _hovered ? _accent : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -1,7 +1,5 @@
 const prisma = require('../utils/prisma');
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 function _serializarFaixa(f) {
   return {
     id:          f.id,
@@ -14,20 +12,12 @@ function _serializarFaixa(f) {
   };
 }
 
-// ── Markup faixas ─────────────────────────────────────────────────────────────
-
 async function listarFaixas() {
   const faixas = await prisma.markupFaixa.findMany({ orderBy: { ordem: 'asc' } });
   return faixas.map(_serializarFaixa);
 }
 
-/**
- * Substitui TODAS as faixas de uma vez (operação atômica).
- * body: { faixas: [{ valorMin, valorMax?, percentual }] }
- * A ordem é atribuída automaticamente pela posição no array.
- */
 async function salvarFaixas(faixas = []) {
-  // Validações básicas
   for (const f of faixas) {
     if (f.valorMin == null || f.percentual == null) {
       throw { status: 400, message: 'Cada faixa precisa de valorMin e percentual.' };
@@ -40,7 +30,6 @@ async function salvarFaixas(faixas = []) {
     }
   }
 
-  // Garante que apenas a última faixa tem valorMax null (faixa aberta)
   for (let i = 0; i < faixas.length - 1; i++) {
     if (faixas[i].valorMax == null) {
       throw { status: 400, message: 'Somente a última faixa pode ter valorMax em aberto.' };
@@ -64,10 +53,6 @@ async function salvarFaixas(faixas = []) {
   return listarFaixas();
 }
 
-/**
- * Dado um valorBase (custo), retorna o percentual de markup aplicável.
- * Retorna null se não houver nenhuma faixa cadastrada.
- */
 async function percentualMarkupPara(valorBase) {
   const faixas = await listarFaixas();
   if (!faixas.length) return null;
@@ -78,11 +63,8 @@ async function percentualMarkupPara(valorBase) {
     if (acimaDaMin && abaixoDaMax) return f.percentual;
   }
 
-  // Fallback: última faixa (aberta)
   return faixas[faixas.length - 1].percentual;
 }
-
-// ── Configurações (chave/valor) ───────────────────────────────────────────────
 
 async function listarConfiguracoes() {
   const configs = await prisma.configuracaoSistema.findMany();
@@ -103,10 +85,6 @@ async function salvarConfiguracao(chave, valor) {
   return { chave, valor: String(valor) };
 }
 
-/**
- * Salva múltiplas configurações de uma vez.
- * body: { impostoSobra: 15, ... }
- */
 async function salvarConfiguracoes(dados = {}) {
   const ops = Object.entries(dados).map(([chave, valor]) =>
     prisma.configuracaoSistema.upsert({
@@ -119,13 +97,6 @@ async function salvarConfiguracoes(dados = {}) {
   return listarConfiguracoes();
 }
 
-// ── Aplicação de markup + imposto (usada no serviço de orçamento) ─────────────
-
-/**
- * Retorna { markup, impostoSobra } como números.
- * markup      = percentual a multiplicar sobre o custo base (ex: 400 → ×5)
- * impostoSobra = percentual extra sobre custo de sobra    (ex: 15  → custo_sobra × 1.15)
- */
 async function obterParametros(valorBase) {
   const [percentualMarkup, impostoStr] = await Promise.all([
     percentualMarkupPara(valorBase),

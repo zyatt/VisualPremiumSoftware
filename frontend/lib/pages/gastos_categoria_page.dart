@@ -210,6 +210,8 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
                     side: BorderSide(
                         color:
                             Theme.of(context).colorScheme.outlineVariant),
+                  ).copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                   ),
                 ),
               ],
@@ -802,11 +804,14 @@ class _EstoqueCategoriaCardState extends State<_EstoqueCategoriaCard> {
       child: Column(
         children: [
           // ── Cabeçalho da categoria ──────────────────────────────────
-          InkWell(
+          Tooltip(
+            message: _expandido ? 'Recolher categoria' : 'Expandir categoria',
+            child: InkWell(
             onTap: () => setState(() => _expandido = !_expandido),
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(12),
                 bottom: Radius.circular(12)),
+            mouseCursor: SystemMouseCursors.click,
             child: Padding(
               padding: const EdgeInsets.symmetric(
                   horizontal: 16, vertical: 14),
@@ -856,6 +861,7 @@ class _EstoqueCategoriaCardState extends State<_EstoqueCategoriaCard> {
                   ),
                 ],
               ),
+            ),
             ),
           ),
 
@@ -1387,12 +1393,15 @@ class _GastoCategoriaCardState extends State<_GastoCategoriaCard> {
       ),
       child: Column(
         children: [
-          InkWell(
+          Tooltip(
+            message: _expandido ? 'Recolher categoria' : 'Expandir categoria',
+            child: InkWell(
             onTap: () =>
                 setState(() => _expandido = !_expandido),
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(12),
                 bottom: Radius.circular(12)),
+            mouseCursor: SystemMouseCursors.click,
             child: Padding(
               padding: const EdgeInsets.symmetric(
                   horizontal: 16, vertical: 14),
@@ -1438,6 +1447,7 @@ class _GastoCategoriaCardState extends State<_GastoCategoriaCard> {
                   ),
                 ],
               ),
+            ),
             ),
           ),
           if (_expandido) ...[
@@ -2314,12 +2324,15 @@ class _GastoVeiculoCardState extends State<_GastoVeiculoCard> {
       ),
       child: Column(
         children: [
-          InkWell(
+          Tooltip(
+            message: _expandido ? 'Recolher veículo' : 'Expandir veículo',
+            child: InkWell(
             onTap: () =>
                 setState(() => _expandido = !_expandido),
             borderRadius: const BorderRadius.vertical(
                 top:    Radius.circular(12),
                 bottom: Radius.circular(12)),
+            mouseCursor: SystemMouseCursors.click,
             child: Padding(
               padding: const EdgeInsets.symmetric(
                   horizontal: 16, vertical: 14),
@@ -2378,6 +2391,7 @@ class _GastoVeiculoCardState extends State<_GastoVeiculoCard> {
                   ),
                 ],
               ),
+            ),
             ),
           ),
           if (_expandido && g.servicos.isNotEmpty) ...[
@@ -2527,6 +2541,31 @@ class _DatePickerField extends StatelessWidget {
       initialDate: initial,
       firstDate:   firstDate,
       lastDate:    lastDate,
+      builder: (context, child) {
+        final base = Theme.of(context);
+        final clickCursor = WidgetStateProperty.resolveWith<MouseCursor>(
+          (states) => states.contains(WidgetState.disabled)
+              ? SystemMouseCursors.basic
+              : SystemMouseCursors.click,
+        );
+        return Theme(
+          data: base.copyWith(
+            textButtonTheme: TextButtonThemeData(
+              style: (base.textButtonTheme.style ?? const ButtonStyle())
+                  .copyWith(mouseCursor: clickCursor),
+            ),
+            iconButtonTheme: IconButtonThemeData(
+              style: (base.iconButtonTheme.style ?? const ButtonStyle())
+                  .copyWith(mouseCursor: clickCursor),
+            ),
+            outlinedButtonTheme: OutlinedButtonThemeData(
+              style: (base.outlinedButtonTheme.style ?? const ButtonStyle())
+                  .copyWith(mouseCursor: clickCursor),
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
     if (picked != null) onPicked(picked);
   }
@@ -2534,9 +2573,14 @@ class _DatePickerField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasValue = value != null;
-    return InkWell(
+    return Tooltip(
+      message: hasValue
+          ? 'Alterar data ($label)'
+          : 'Selecionar data ($label)',
+      child: InkWell(
       onTap:        () => _pick(context),
       borderRadius: BorderRadius.circular(8),
+      mouseCursor:  SystemMouseCursors.click,
       child: Container(
         padding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 10),
@@ -2574,17 +2618,24 @@ class _DatePickerField extends StatelessWidget {
             ),
             if (hasValue) ...[
               const SizedBox(width: 6),
-              GestureDetector(
-                onTap: onCleared,
-                child: Icon(Icons.close,
-                    size: 14,
-                    color: Theme.of(context)
-                        .colorScheme
-                        .outline),
+              Tooltip(
+                message: 'Limpar data',
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: onCleared,
+                    child: Icon(Icons.close,
+                        size: 14,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .outline),
+                  ),
+                ),
               ),
             ],
           ],
         ),
+      ),
       ),
     );
   }

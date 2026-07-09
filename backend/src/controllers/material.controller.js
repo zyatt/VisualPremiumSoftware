@@ -1,6 +1,5 @@
 const svc = require('../services/material.service');
 
-// Helper: extrai usuário do token JWT (populado pelo authMiddleware)
 const _usuario = (req) => ({
   usuarioId:   req.usuario?.id,
   usuarioNome: req.usuario?.nome,
@@ -78,6 +77,32 @@ const listarHistoricoPrecos = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+const notificacoes = (req, res) => {
+  const usuarioId = req.usuario?.id;
+  console.log(`[SSE Materiais] Nova conexão do usuário ${usuarioId}`);
+
+  res.writeHead(200, {
+    'Content-Type':  'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection:      'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.flushHeaders();
+  res.write(': heartbeat\n\n');
+
+  const remover = svc.registrarSseCliente(res, usuarioId);
+
+  const heartbeat = setInterval(() => {
+    try { res.write(': heartbeat\n\n'); }
+    catch (err) {
+      console.error(`[SSE Materiais] Erro no heartbeat para ${usuarioId}: ${err.message}`);
+      clearInterval(heartbeat);
+    }
+  }, 25_000);
+
+  req.on('close', () => { clearInterval(heartbeat); remover(); });
+};
+
 module.exports = {
   listar,
   buscarPorId,
@@ -91,4 +116,5 @@ module.exports = {
   atualizarCustoManual,
   listarCategorias,
   listarHistoricoPrecos,
+  notificacoes,
 };

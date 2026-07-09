@@ -1,7 +1,5 @@
 const prisma = require('../utils/prisma');
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 function _calcularPrecoMedio(fornecedorMateriais) {
   const precos   = fornecedorMateriais.map((fm) => Number(fm.preco)).filter((p) => p > 0);
   const precosM2 = fornecedorMateriais.map((fm) => Number(fm.precoMetroQuadrado)).filter((p) => p > 0);
@@ -21,8 +19,6 @@ function _enrichMaterial(mat) {
     identificador:     mat.identificador,
     ultimoValorPago:   mat.ultimoValorPago   != null ? Number(mat.ultimoValorPago)   : null,
     ultimoValorPagoM2: mat.ultimoValorPagoM2 != null ? Number(mat.ultimoValorPagoM2) : null,
-    // Dimensões de referência da chapa — necessárias para o cálculo de custo/m²
-    // no orçamento de venda (campo Larg. × Comp.)
     largura:     mat.largura     != null ? Number(mat.largura)     : null,
     comprimento: mat.comprimento != null ? Number(mat.comprimento) : null,
     precoMedio,
@@ -43,8 +39,6 @@ function _serializarProduto(p) {
     })),
   };
 }
-
-// ── CRUD Produto ──────────────────────────────────────────────────────────────
 
 async function listar(filtros = {}) {
   const { busca, categoria, ativo } = filtros;
@@ -173,8 +167,6 @@ async function excluir(id) {
   if (produto.ativo) throw { status: 400, message: 'Desative o produto antes de excluí-lo' };
   return prisma.produto.delete({ where: { id } });
 }
-
-// ── Gerenciar materiais individualmente ──────────────────────────────────────
 
 async function adicionarMaterial(produtoId, data) {
   const { materialId, quantidade, observacao } = data;

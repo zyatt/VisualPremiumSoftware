@@ -272,12 +272,12 @@ class _HistoricoMovimentacoesPageState
             // ── Cabeçalho ──────────────────────────────────────────────────
             Row(
               children: [
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back),
+                _BotaoVoltar(
+                  label: 'Voltar',
                   tooltip: 'Voltar',
+                  onTap: () => Navigator.of(context).pop(),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -309,6 +309,8 @@ class _HistoricoMovimentacoesPageState
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                  ).copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                   ),
                 ),
               ],
@@ -381,29 +383,54 @@ class _HistoricoMovimentacoesPageState
               children: [
                 SegmentedButton<_FiltroTipo>(
                   segments: const [
-                    ButtonSegment(value: _FiltroTipo.todos, label: Text('Todos')),
-                    ButtonSegment(value: _FiltroTipo.entrada, label: Text('Entradas')),
-                    ButtonSegment(value: _FiltroTipo.saida, label: Text('Saídas')),
+                    ButtonSegment(
+                      value: _FiltroTipo.todos,
+                      label: Text('Todos'),
+                      tooltip: 'Mostrar entradas e saídas',
+                    ),
+                    ButtonSegment(
+                      value: _FiltroTipo.entrada,
+                      label: Text('Entradas'),
+                      tooltip: 'Mostrar apenas entradas',
+                    ),
+                    ButtonSegment(
+                      value: _FiltroTipo.saida,
+                      label: Text('Saídas'),
+                      tooltip: 'Mostrar apenas saídas',
+                    ),
                   ],
                   selected: {_filtroTipo},
                   onSelectionChanged: (s) => setState(() => _filtroTipo = s.first),
                   style: ButtonStyle(
                     visualDensity: VisualDensity.compact,
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                   ),
                 ),
                 const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  onPressed: () => _selecionarData(inicio: true),
-                  icon: const Icon(Icons.calendar_today, size: 14),
-                  label: Text(_dataInicio == null ? 'De' : _fmtData(_dataInicio)),
-                  style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                Tooltip(
+                  message: 'Filtrar a partir de uma data',
+                  child: OutlinedButton.icon(
+                    onPressed: () => _selecionarData(inicio: true),
+                    icon: const Icon(Icons.calendar_today, size: 14),
+                    label: Text(_dataInicio == null ? 'De' : _fmtData(_dataInicio)),
+                    style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact)
+                        .copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 6),
-                OutlinedButton.icon(
-                  onPressed: () => _selecionarData(inicio: false),
-                  icon: const Icon(Icons.calendar_today, size: 14),
-                  label: Text(_dataFim == null ? 'Até' : _fmtData(_dataFim)),
-                  style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                Tooltip(
+                  message: 'Filtrar até uma data',
+                  child: OutlinedButton.icon(
+                    onPressed: () => _selecionarData(inicio: false),
+                    icon: const Icon(Icons.calendar_today, size: 14),
+                    label: Text(_dataFim == null ? 'Até' : _fmtData(_dataFim)),
+                    style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact)
+                        .copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
+                  ),
                 ),
                 if (_dataInicio != null || _dataFim != null)
                   IconButton(
@@ -413,6 +440,9 @@ class _HistoricoMovimentacoesPageState
                       _dataInicio = null;
                       _dataFim = null;
                     }),
+                    style: IconButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 const Spacer(),
                 Row(
@@ -455,30 +485,36 @@ class _HistoricoMovimentacoesPageState
                       : _origemInfo(origem, context).cor;
                   return Padding(
                     padding: const EdgeInsets.only(right: 6),
-                    child: FilterChip(
-                      label: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(icon, size: 13,
-                              color: selecionado
-                                  ? Colors.white
-                                  : Theme.of(context).colorScheme.onSurfaceVariant),
-                          const SizedBox(width: 4),
-                          Text(label,
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  color: selecionado
-                                      ? Colors.white
-                                      : Theme.of(context).colorScheme.onSurface)),
-                        ],
+                    child: Tooltip(
+                      message: origem == null
+                          ? 'Mostrar movimentações de todas as origens'
+                          : 'Filtrar por origem: $label',
+                      child: FilterChip(
+                        label: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(icon, size: 13,
+                                color: selecionado
+                                    ? Colors.white
+                                    : Theme.of(context).colorScheme.onSurfaceVariant),
+                            const SizedBox(width: 4),
+                            Text(label,
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: selecionado
+                                        ? Colors.white
+                                        : Theme.of(context).colorScheme.onSurface)),
+                          ],
+                        ),
+                        selected: selecionado,
+                        onSelected: (_) => setState(() => _filtroOrigem = origem),
+                        selectedColor: cor,
+                        checkmarkColor: Colors.white,
+                        showCheckmark: false,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                        mouseCursor: SystemMouseCursors.click,
                       ),
-                      selected: selecionado,
-                      onSelected: (_) => setState(() => _filtroOrigem = origem),
-                      selectedColor: cor,
-                      checkmarkColor: Colors.white,
-                      showCheckmark: false,
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
                     ),
                   );
                 })),
@@ -755,6 +791,79 @@ class _LinhaHistorico extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
+// Mesmo padrão usado no cabeçalho das outras páginas do sistema.
+class _BotaoVoltar extends StatefulWidget {
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _BotaoVoltar({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_BotaoVoltar> createState() => _BotaoVoltarState();
+}
+
+class _BotaoVoltarState extends State<_BotaoVoltar> {
+  bool _hovered = false;
+  static const _accent = Color(0xFFF59E0B);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        child: InkWell(
+          onTap: widget.onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? _accent.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              border: Border.all(
+                color: _hovered
+                    ? _accent.withValues(alpha: 0.6)
+                    : scheme.outlineVariant,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _hovered ? _accent : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

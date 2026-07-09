@@ -52,6 +52,7 @@ Future<String?> mostrarSeletorReacao(
             for (final emoji in kEmojisReacao)
               InkResponse(
                 radius: 22,
+                mouseCursor: SystemMouseCursors.click,
                 onTap: () => Navigator.pop(context, emoji),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -64,6 +65,7 @@ Future<String?> mostrarSeletorReacao(
               const SizedBox(width: 4),
               InkResponse(
                 radius: 18,
+                mouseCursor: SystemMouseCursors.click,
                 onTap: () => Navigator.pop(context, removerReacaoSentinela),
                 child: Icon(Icons.close_rounded, size: 18, color: cs.onSurfaceVariant),
               ),

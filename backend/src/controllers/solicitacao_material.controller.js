@@ -3,7 +3,6 @@ const fs     = require('fs');
 const multer = require('multer');
 const svc    = require('../services/solicitacao_material.service');
 
-// ─── Multer ───────────────────────────────────────────────────────────────────
 const _uploadDir = path.join(__dirname, '..', 'uploads', 'solicitacoes');
 fs.mkdirSync(_uploadDir, { recursive: true });
 
@@ -23,9 +22,6 @@ const _fileFilter = (_req, file, cb) => {
 
 const upload = multer({ storage: _storage, fileFilter: _fileFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 
-// Envolve upload.any() para capturar erros do multer (tipo de arquivo inválido,
-// arquivo grande demais, etc.) e responder no mesmo formato { message } usado
-// pelo resto da API, em vez de deixá-los vazar para o middleware de erro global.
 const uploadAny = (req, res, next) => {
   upload.any()(req, res, (err) => {
     if (!err) return next();
@@ -35,22 +31,16 @@ const uploadAny = (req, res, next) => {
       };
       return res.status(400).json({ message: mensagens[err.code] || `Erro no upload: ${err.message}` });
     }
-    // Erro lançado pelo fileFilter (extensão não permitida)
     return res.status(400).json({ message: err.message || 'Arquivo inválido.' });
   });
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 const _usuario = (req) => ({
   usuarioId:   req.usuario?.id,
   usuarioNome: req.usuario?.nome,
   usuarioRole: req.usuario?.role,
 });
 
-// Responde um erro de forma padronizada garantindo que `message` sempre
-// chegue ao cliente, independentemente do shape do erro (Error nativo,
-// objeto simples { status, message } lançado pelo service, ou erro do multer).
-// Evita depender do comportamento do middleware de erro global.
 function _responderErro(res, e) {
   const status = e?.status && Number.isInteger(e.status) ? e.status : 500;
   const message = e?.message || 'Erro interno ao processar a solicitação.';
@@ -60,8 +50,6 @@ function _responderErro(res, e) {
   res.status(status).json({ message });
 }
 
-// Faz parse de `itens` que pode vir como JSON string (multipart) ou array (JSON body).
-// Também injeta imagemUrl nos itens quando há uploads múltiplos (req.files[]).
 function _parseItens(body, files) {
   let itens = body.itens;
   if (typeof itens === 'string') {
@@ -69,8 +57,6 @@ function _parseItens(body, files) {
   }
   if (!Array.isArray(itens)) itens = [];
 
-  // Se o frontend enviou arquivos múltiplos (campo "imagens[0]", "imagens[1]" …)
-  // injeta no item correspondente pelo índice.
   if (files && Array.isArray(files)) {
     files.forEach((file) => {
       const match = file.fieldname.match(/imagens\[(\d+)\]/);
@@ -86,8 +72,6 @@ function _parseItens(body, files) {
   return itens;
 }
 
-// ─── CRUD ─────────────────────────────────────────────────────────────────────
-
 const listar = async (req, res, next) => {
   try { res.json(await svc.listar(req.query)); }
   catch (e) { next(e); }
@@ -98,19 +82,26 @@ const buscarPorId = async (req, res, next) => {
   catch (e) { next(e); }
 };
 
+const verificarOS = async (req, res, next) => {
+  try {
+    const numeroOS = String(req.params.numeroOS || '').trim();
+    if (!numeroOS) return res.json({ existe: false });
+    const ignorarId = req.query.ignorarId ? +req.query.ignorarId : undefined;
+    res.json(await svc.verificarOSExiste(numeroOS, ignorarId));
+  } catch (e) { _responderErro(res, e); }
+};
+
 const criar = async (req, res, next) => {
   try {
     const { usuarioId, usuarioNome } = _usuario(req);
     const itens = _parseItens(req.body, req.files);
     res.status(201).json(await svc.criar({ ...req.body, itens }, usuarioId, usuarioNome));
   } catch (e) {
-    // Limpa uploads em caso de erro
     if (req.files) req.files.forEach((f) => fs.unlink(f.path, () => {}));
     _responderErro(res, e);
   }
 };
 
-// Atualiza apenas o cabeçalho da solicitação (somente ADMIN)
 const atualizar = async (req, res, next) => {
   try {
     const { usuarioId, usuarioNome, usuarioRole } = _usuario(req);
@@ -118,7 +109,6 @@ const atualizar = async (req, res, next) => {
   } catch (e) { _responderErro(res, e); }
 };
 
-// Adiciona novos materiais (adicional) a uma solicitação existente
 const adicionarMateriais = async (req, res, next) => {
   try {
     const { usuarioId, usuarioNome, usuarioRole } = _usuario(req);
@@ -130,8 +120,6 @@ const adicionarMateriais = async (req, res, next) => {
   }
 };
 
-// Marca um item original como comprado/descomprado
-// PATCH /solicitacoes-material/itens/:itemId/comprado
 const marcarItemComprado = async (req, res, next) => {
   try {
     const { usuarioId, usuarioNome, usuarioRole } = _usuario(req);
@@ -140,8 +128,6 @@ const marcarItemComprado = async (req, res, next) => {
   } catch (e) { _responderErro(res, e); }
 };
 
-// Marca um adicional como comprado/descomprado
-// PATCH /solicitacoes-material/adicionais/:adicionalId/comprado
 const marcarAdicionalComprado = async (req, res, next) => {
   try {
     const { usuarioId, usuarioNome, usuarioRole } = _usuario(req);
@@ -150,9 +136,38 @@ const marcarAdicionalComprado = async (req, res, next) => {
   } catch (e) { _responderErro(res, e); }
 };
 
+const atualizarItem = async (req, res, next) => {
+  try {
+    const { usuarioId, usuarioNome, usuarioRole } = _usuario(req);
+    res.json(await svc.atualizarItem('item', +req.params.itemId, req.body, usuarioId, usuarioNome, usuarioRole));
+  } catch (e) { _responderErro(res, e); }
+};
+
+const atualizarAdicional = async (req, res, next) => {
+  try {
+    const { usuarioId, usuarioNome, usuarioRole } = _usuario(req);
+    res.json(await svc.atualizarItem('adicional', +req.params.adicionalId, req.body, usuarioId, usuarioNome, usuarioRole));
+  } catch (e) { _responderErro(res, e); }
+};
+
+const excluirItem = async (req, res, next) => {
+  try {
+    const { usuarioId, usuarioNome, usuarioRole } = _usuario(req);
+    res.json(await svc.excluirItem('item', +req.params.itemId, usuarioId, usuarioNome, usuarioRole));
+  } catch (e) { _responderErro(res, e); }
+};
+
+const excluirAdicional = async (req, res, next) => {
+  try {
+    const { usuarioId, usuarioNome, usuarioRole } = _usuario(req);
+    res.json(await svc.excluirItem('adicional', +req.params.adicionalId, usuarioId, usuarioNome, usuarioRole));
+  } catch (e) { _responderErro(res, e); }
+};
+
 const excluir = async (req, res, next) => {
   try {
-    await svc.excluir(+req.params.id);
+    const { usuarioId, usuarioRole } = _usuario(req);
+    await svc.excluir(+req.params.id, usuarioId, usuarioRole);
     res.status(204).send();
   } catch (e) { _responderErro(res, e); }
 };
@@ -162,7 +177,6 @@ const listarLogs = async (req, res, next) => {
   catch (e) { next(e); }
 };
 
-// ─── SSE ─────────────────────────────────────────────────────────────────────
 const notificacoes = (req, res) => {
   const usuarioId = req.usuario?.id;
   console.log(`[SSE Solicitações] Nova conexão do usuário ${usuarioId}`);
@@ -204,11 +218,16 @@ module.exports = {
   uploadAny,
   listar,
   buscarPorId,
+  verificarOS,
   criar,
   atualizar,
   adicionarMateriais,
   marcarItemComprado,
   marcarAdicionalComprado,
+  atualizarItem,
+  atualizarAdicional,
+  excluirItem,
+  excluirAdicional,
   excluir,
   listarLogs,
   notificacoes,

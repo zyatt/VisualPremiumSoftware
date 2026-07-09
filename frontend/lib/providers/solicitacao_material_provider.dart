@@ -54,6 +54,30 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   int _novasSolicitacoes = 0;
   int get novasSolicitacoes => _novasSolicitacoes;
 
+  // ─── Notificação flutuante (uma única exibição por evento) ─────────────────
+  // Guarda o payload da última solicitação recebida via SSE para que a UI
+  // (AppShell) exiba um banner flutuante uma única vez. Depois de exibido,
+  // a UI chama consumirNotificacaoPendente() para limpar o estado.
+  NovaSolicitacaoNotificacao? _notificacaoPendente;
+  NovaSolicitacaoNotificacao? get notificacaoPendente => _notificacaoPendente;
+
+  void consumirNotificacaoPendente() {
+    if (_notificacaoPendente == null) return;
+    _notificacaoPendente = null;
+    // Sem notifyListeners(): já foi consumida pela UI que a exibiu; não há
+    // necessidade de disparar um novo rebuild só por causa da limpeza.
+  }
+
+  // Mesmo padrão acima, mas para alterações em solicitações já existentes
+  // (edição de dados, edição/adição/exclusão de material).
+  SolicitacaoAlteradaNotificacao? _notificacaoAlteradaPendente;
+  SolicitacaoAlteradaNotificacao? get notificacaoAlteradaPendente => _notificacaoAlteradaPendente;
+
+  void consumirNotificacaoAlteradaPendente() {
+    if (_notificacaoAlteradaPendente == null) return;
+    _notificacaoAlteradaPendente = null;
+  }
+
   bool _paginaAberta = false;
   bool _visualizacaoPersistedaNaSessao = false;
   bool _notificacoesConectadas = false;
@@ -186,6 +210,10 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
         if (tipo == 'nova_solicitacao') {
           _aoReceberNovaSolicitacao(data);
         }
+
+        if (tipo == 'solicitacao_atualizada') {
+          _aoReceberSolicitacaoAtualizada(data);
+        }
       } catch (e) {
         debugPrint('❌ [Solicitações] Erro ao processar SSE: $e, linha: $linha');
       }
@@ -195,15 +223,47 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   void _aoReceberNovaSolicitacao(Map<String, dynamic> data) {
     debugPrint('🔔 [Solicitações] Nova solicitação recebida: ${data['numeroOS']}');
 
+    // Guarda o payload para o banner flutuante (AppShell decide se e para
+    // qual role exibe). O backend já exclui o próprio autor do broadcast,
+    // então quem criou a solicitação nunca recebe este evento.
+    try {
+      _notificacaoPendente = NovaSolicitacaoNotificacao.fromJson(data);
+    } catch (e) {
+      debugPrint('⚠️ [Solicitações] Falha ao ler payload da notificação: $e');
+    }
+
     if (_paginaAberta) {
       debugPrint('ℹ️ [Solicitações] Página aberta — recarregando lista');
       carregar();
       _persistirVisualizacao();
     } else {
-      _novasSolicitacoes++;
-      debugPrint('🔔 [Solicitações] Badge atualizado: $_novasSolicitacoes');
-      notifyListeners();
+      // Ressincroniza com o servidor em vez de incrementar localmente: um
+      // contador puramente local (`_novasSolicitacoes++`) acumula para
+      // sempre e nunca se corrige — inclusive contando eventos de
+      // solicitações que já foram excluídas ou visualizadas por outro
+      // caminho. Buscar a contagem real do backend a cada evento evita o
+      // badge "travar" em um número que não bate com a realidade.
+      _carregarContagemInicial();
+      debugPrint('🔔 [Solicitações] Nova solicitação com página fechada — ressincronizando badge');
     }
+    notifyListeners();
+  }
+
+  void _aoReceberSolicitacaoAtualizada(Map<String, dynamic> data) {
+    debugPrint('✏️ [Solicitações] Solicitação alterada: OS=${data['numeroOS']} acao=${data['acao']}');
+
+    // O backend já exclui o próprio autor da alteração do broadcast, então
+    // quem editou nunca recebe seu próprio evento aqui.
+    try {
+      _notificacaoAlteradaPendente = SolicitacaoAlteradaNotificacao.fromJson(data);
+    } catch (e) {
+      debugPrint('⚠️ [Solicitações] Falha ao ler payload de alteração: $e');
+    }
+
+    if (_paginaAberta) {
+      carregar();
+    }
+    notifyListeners();
   }
 
   void _scheduleReconnect() {
@@ -243,33 +303,31 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   }
 
   // ─── Controle de página ────────────────────────────────────────────────────
-
-  void marcarPaginaAberta() {
-    if (_paginaAberta) return;
-    debugPrint('📖 [Solicitações] Página marcada como aberta');
-    _paginaAberta = true;
-
-    if (_novasSolicitacoes != 0) {
-      _novasSolicitacoes = 0;
-      notifyListeners();
+  // Chamado pelo AppShell (com base na rota atual, via GoRouterState), e não
+  // pelo initState/dispose da própria página. A página vive dentro de um
+  // StatefulShellBranch (IndexedStack), então seu dispose() NÃO é confiável
+  // para detectar "saí da tela" — o widget só fica escondido, nunca é
+  // destruído ao trocar de aba pela sidebar. O AppShell, por outro lado,
+  // reconstrói a cada mudança de rota e sabe com certeza qual tela está
+  // realmente visível (mesmo padrão já usado pro ChatProvider).
+  void definirPaginaVisivel(bool visivel) {
+    if (visivel == _paginaAberta) return;
+    _paginaAberta = visivel;
+    
+    if (visivel) {
+      if (_novasSolicitacoes != 0) {
+        _novasSolicitacoes = 0;
+        notifyListeners();
+      }
+      if (_visualizacaoPersistedaNaSessao) {
+        debugPrint('✅ [Solicitações] Visualizações já persistidas nesta sessão — pulando');
+      } else {
+        debugPrint('🧹 [Solicitações] Persistindo visualizações no banco...');
+        _persistirVisualizacao();
+      }
+    } else {
+      _visualizacaoPersistedaNaSessao = false;
     }
-  }
-
-  Future<void> limparNotificacoes() async {
-    _paginaAberta = true;
-
-    if (_novasSolicitacoes != 0) {
-      _novasSolicitacoes = 0;
-      notifyListeners();
-    }
-
-    if (_visualizacaoPersistedaNaSessao) {
-      debugPrint('✅ [Solicitações] Visualizações já persistidas nesta sessão — pulando');
-      return;
-    }
-
-    debugPrint('🧹 [Solicitações] Persistindo visualizações no banco...');
-    await _persistirVisualizacao();
   }
 
   Future<void> _persistirVisualizacao() async {
@@ -280,12 +338,6 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('⚠️ [Solicitações] Erro ao persistir visualizações: $e');
     }
-  }
-
-  void sairDaPagina() {
-    debugPrint('👋 [Solicitações] Usuário saiu da página');
-    _paginaAberta = false;
-    _visualizacaoPersistedaNaSessao = false;
   }
 
   Future<void> resetarConexao() async {
@@ -304,6 +356,8 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     _paginaAberta = false;
     _visualizacaoPersistedaNaSessao = false;
     _novasSolicitacoes = 0;
+    _notificacaoPendente = null;
+    _notificacaoAlteradaPendente = null;
     _solicitacoes = [];
     _logs = [];
     _erro = null;
@@ -417,9 +471,29 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     }
   }
 
+  // Encontra a solicitação (na lista local) que contém o item/adicional
+  // informado, para permitir recarregá-la pontualmente do backend logo após
+  // qualquer alteração — evitando que a lista em memória fique com dados
+  // obsoletos (número/quantidade antigos, itens já excluídos etc.) até a
+  // próxima chamada de carregar().
+  Future<void> _resincronizarSolicitacaoDoItem({int? itemId, int? adicionalId}) async {
+    final idx = _solicitacoes.indexWhere((s) =>
+        (itemId != null && s.itens.any((i) => i.id == itemId)) ||
+        (adicionalId != null && s.adicionais.any((a) => a.id == adicionalId)));
+    if (idx == -1) return;
+    try {
+      final atualizada = await _repo.buscarPorId(_solicitacoes[idx].id);
+      _solicitacoes[idx] = atualizada;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('⚠️ [Solicitações] Falha ao ressincronizar solicitação: $e');
+    }
+  }
+
   Future<void> marcarItemComprado(int itemId, {required bool comprado}) async {
     try {
       await _repo.marcarItemComprado(itemId, comprado: comprado);
+      await _resincronizarSolicitacaoDoItem(itemId: itemId);
       debugPrint('✅ [Solicitações] Item marcado como ${comprado ? 'comprado' : 'não comprado'}');
     } catch (e) {
       rethrow;
@@ -429,7 +503,66 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   Future<void> marcarAdicionalComprado(int adicionalId, {required bool comprado}) async {
     try {
       await _repo.marcarAdicionalComprado(adicionalId, comprado: comprado);
+      await _resincronizarSolicitacaoDoItem(adicionalId: adicionalId);
       debugPrint('✅ [Solicitações] Adicional marcado como ${comprado ? 'comprado' : 'não comprado'}');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> atualizarItem(int itemId, {required double quantidade, String? observacao}) async {
+    try {
+      await _repo.atualizarItem(itemId, quantidade: quantidade, observacao: observacao);
+      await _resincronizarSolicitacaoDoItem(itemId: itemId);
+      debugPrint('✅ [Solicitações] Item atualizado');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> atualizarAdicional(int adicionalId, {required double quantidade, String? observacao}) async {
+    try {
+      await _repo.atualizarAdicional(adicionalId, quantidade: quantidade, observacao: observacao);
+      await _resincronizarSolicitacaoDoItem(adicionalId: adicionalId);
+      debugPrint('✅ [Solicitações] Adicional atualizado');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> excluirItem(int itemId) async {
+    try {
+      final idx = _solicitacoes.indexWhere((s) => s.itens.any((i) => i.id == itemId));
+      final solicitacaoId = idx != -1 ? _solicitacoes[idx].id : null;
+      await _repo.excluirItem(itemId);
+      if (solicitacaoId != null) {
+        final atualizada = await _repo.buscarPorId(solicitacaoId);
+        final i = _solicitacoes.indexWhere((s) => s.id == solicitacaoId);
+        if (i != -1) {
+          _solicitacoes[i] = atualizada;
+          notifyListeners();
+        }
+      }
+      debugPrint('✅ [Solicitações] Item excluído');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> excluirAdicional(int adicionalId) async {
+    try {
+      final idx = _solicitacoes.indexWhere((s) => s.adicionais.any((a) => a.id == adicionalId));
+      final solicitacaoId = idx != -1 ? _solicitacoes[idx].id : null;
+      await _repo.excluirAdicional(adicionalId);
+      if (solicitacaoId != null) {
+        final atualizada = await _repo.buscarPorId(solicitacaoId);
+        final i = _solicitacoes.indexWhere((s) => s.id == solicitacaoId);
+        if (i != -1) {
+          _solicitacoes[i] = atualizada;
+          notifyListeners();
+        }
+      }
+      debugPrint('✅ [Solicitações] Adicional excluído');
     } catch (e) {
       rethrow;
     }

@@ -1,5 +1,97 @@
 // solicitacao_material_model.dart
 
+// ─── Notificação em tempo real (payload do SSE 'nova_solicitacao') ───────────
+// Não é o mesmo que SolicitacaoMaterialModel: é só o resumo enviado no evento,
+// usado para exibir o banner flutuante assim que a solicitação é criada.
+class NovaSolicitacaoNotificacao {
+  final int id;
+  final String numeroOS;
+  final String nomeCliente;
+  final String usuarioNome;
+  final String? observacao;
+  final int qtdMateriais;
+  final DateTime criadoEm;
+
+  const NovaSolicitacaoNotificacao({
+    required this.id,
+    required this.numeroOS,
+    required this.nomeCliente,
+    required this.usuarioNome,
+    this.observacao,
+    required this.qtdMateriais,
+    required this.criadoEm,
+  });
+
+  factory NovaSolicitacaoNotificacao.fromJson(Map<String, dynamic> json) {
+    return NovaSolicitacaoNotificacao(
+      id:           (json['id'] as num).toInt(),
+      numeroOS:     json['numeroOS'] ?? '',
+      nomeCliente:  json['nomeCliente'] ?? '',
+      usuarioNome:  json['usuarioNome'] ?? '',
+      observacao:   json['observacao'],
+      qtdMateriais: (json['qtdMateriais'] as num?)?.toInt() ?? 0,
+      criadoEm:     json['criadoEm'] != null
+          ? DateTime.parse(json['criadoEm']).toLocal()
+          : DateTime.now(),
+    );
+  }
+}
+
+class SolicitacaoAlteradaNotificacao {
+  final int id;
+  final String numeroOS;
+  final String nomeCliente;
+  final String editorNome;
+  final String acao;
+  final String? materialNome;
+  final String? item;
+  final Map<String, dynamic>? antes;
+  final Map<String, dynamic>? depois;
+
+  const SolicitacaoAlteradaNotificacao({
+    required this.id,
+    required this.numeroOS,
+    required this.nomeCliente,
+    required this.editorNome,
+    required this.acao,
+    this.materialNome,
+    this.item,
+    this.antes,
+    this.depois,
+  });
+
+  factory SolicitacaoAlteradaNotificacao.fromJson(Map<String, dynamic> json) {
+    return SolicitacaoAlteradaNotificacao(
+      id:           (json['id'] as num).toInt(),
+      numeroOS:     json['numeroOS'] ?? '',
+      nomeCliente:  json['nomeCliente'] ?? '',
+      editorNome:   json['editorNome'] ?? 'Desconhecido',
+      acao:         json['acao'] ?? '',
+      materialNome: json['materialNome'],
+      item:         json['item'],
+      antes:        json['antes'] != null ? Map<String, dynamic>.from(json['antes']) : null,
+      depois:       json['depois'] != null ? Map<String, dynamic>.from(json['depois']) : null,
+    );
+  }
+
+  String get descricao {
+    switch (acao) {
+      case 'edicao_dados':
+        return 'Dados da solicitação foram alterados';
+      case 'edicao_material':
+        return 'Um material foi editado';
+      case 'adicao_material':
+        return 'Novo material adicionado';
+      case 'exclusao_material':
+        return materialNome != null
+            ? '"$materialNome" foi removido'
+            : 'Um material foi removido';
+      default:
+        return 'Solicitação alterada';
+    }
+  }
+}
+
 // ─── Item original da solicitação ────────────────────────────────────────────
 class ItemSolicitacaoModel {
   final int id;
@@ -10,6 +102,8 @@ class ItemSolicitacaoModel {
   final String? materialIdentificador;
   final String? materialMedida;
   final String? materialEspessura;
+  final double? materialLargura;
+  final double? materialComprimento;
   final String? materialCategoria;
   final double materialQuantidadeEstoque;
   final double quantidade;
@@ -23,6 +117,29 @@ class ItemSolicitacaoModel {
 
   final DateTime criadoEm;
 
+  final DateTime? editadoEm;
+  final String? editadoPorNome;
+
+  /// Rótulo de dimensões do material a ser exibido ao lado do nome.
+  /// Regra: se houver [materialMedida] preenchida, mostra apenas a medida
+  /// (mesmo quando também há largura/comprimento, para evitar repetição).
+  /// Caso contrário, se houver largura e comprimento, mostra "LxCM".
+  String? get medidaOuDimensao {
+    final temMedida = materialMedida != null && materialMedida!.trim().isNotEmpty;
+    if (temMedida) return materialMedida!.trim();
+
+    final temDimensoes = materialLargura != null &&
+        materialComprimento != null &&
+        materialLargura! > 0 &&
+        materialComprimento! > 0;
+    if (temDimensoes) {
+      final l = _formatarNumero(materialComprimento!);
+      final c = _formatarNumero(materialLargura!);
+      return '${l}X${c}M';
+    }
+    return null;
+  }
+
   const ItemSolicitacaoModel({
     required this.id,
     required this.solicitacaoId,
@@ -32,6 +149,8 @@ class ItemSolicitacaoModel {
     this.materialIdentificador,
     this.materialMedida,
     this.materialEspessura,
+    this.materialLargura,
+    this.materialComprimento,
     this.materialCategoria,
     required this.materialQuantidadeEstoque,
     required this.quantidade,
@@ -42,6 +161,8 @@ class ItemSolicitacaoModel {
     this.compradoPorId,
     this.compradoPorNome,
     required this.criadoEm,
+    this.editadoEm,
+    this.editadoPorNome,
   });
 
   factory ItemSolicitacaoModel.fromJson(Map<String, dynamic> json) {
@@ -54,6 +175,12 @@ class ItemSolicitacaoModel {
       materialIdentificador: json['material']?['identificador'],
       materialMedida:        json['material']?['medida'],
       materialEspessura:     json['material']?['espessura'],
+      materialLargura:       json['material']?['largura'] != null
+          ? double.tryParse(json['material']['largura'].toString())
+          : null,
+      materialComprimento:   json['material']?['comprimento'] != null
+          ? double.tryParse(json['material']['comprimento'].toString())
+          : null,
       materialCategoria:     json['material']?['categoria'],
       materialQuantidadeEstoque:
           double.tryParse(json['material']?['quantidade']?.toString() ?? '0') ?? 0,
@@ -67,6 +194,10 @@ class ItemSolicitacaoModel {
       compradoPorId:   (json['compradoPorId'] as num?)?.toInt(),
       compradoPorNome: json['compradoPorNome'],
       criadoEm: DateTime.parse(json['criadoEm']).toLocal(),
+      editadoEm: json['editadoEm'] != null
+          ? DateTime.parse(json['editadoEm']).toLocal()
+          : null,
+      editadoPorNome: json['editadoPorNome'],
     );
   }
 
@@ -75,6 +206,8 @@ class ItemSolicitacaoModel {
     DateTime? compradoEm,
     int? compradoPorId,
     String? compradoPorNome,
+    DateTime? editadoEm,
+    String? editadoPorNome,
   }) {
     return ItemSolicitacaoModel(
       id: id,
@@ -85,6 +218,8 @@ class ItemSolicitacaoModel {
       materialIdentificador: materialIdentificador,
       materialMedida: materialMedida,
       materialEspessura: materialEspessura,
+      materialLargura: materialLargura,
+      materialComprimento: materialComprimento,
       materialCategoria: materialCategoria,
       materialQuantidadeEstoque: materialQuantidadeEstoque,
       quantidade: quantidade,
@@ -95,8 +230,20 @@ class ItemSolicitacaoModel {
       compradoPorId: compradoPorId ?? this.compradoPorId,
       compradoPorNome: compradoPorNome ?? this.compradoPorNome,
       criadoEm: criadoEm,
+      editadoEm: editadoEm ?? this.editadoEm,
+      editadoPorNome: editadoPorNome ?? this.editadoPorNome,
     );
   }
+}
+
+/// Formata um número: sem casas decimais se for inteiro, senão até 2 casas
+/// (removendo zeros à direita desnecessários). Ex: 5 -> "5", 1.20 -> "1.2".
+String _formatarNumero(double valor) {
+  if (valor % 1 == 0) return valor.toStringAsFixed(0);
+  var s = valor.toStringAsFixed(2);
+  if (s.endsWith('0')) s = s.substring(0, s.length - 1);
+  if (s.endsWith('.')) s = s.substring(0, s.length - 1);
+  return s;
 }
 
 // ─── Adicional ────────────────────────────────────────────────────────────────
@@ -109,6 +256,8 @@ class AdicionalSolicitacaoModel {
   final String? materialIdentificador;
   final String? materialMedida;
   final String? materialEspessura;
+  final double? materialLargura;
+  final double? materialComprimento;
   final String? materialCategoria;
   final double materialQuantidadeEstoque;
   final double quantidade;
@@ -124,6 +273,29 @@ class AdicionalSolicitacaoModel {
   final int? compradoPorId;
   final String? compradoPorNome;
 
+  final DateTime? editadoEm;
+  final String? editadoPorNome;
+
+  /// Rótulo de dimensões do material a ser exibido ao lado do nome.
+  /// Regra: se houver [materialMedida] preenchida, mostra apenas a medida
+  /// (mesmo quando também há largura/comprimento, para evitar repetição).
+  /// Caso contrário, se houver largura e comprimento, mostra "LxCM".
+  String? get medidaOuDimensao {
+    final temMedida = materialMedida != null && materialMedida!.trim().isNotEmpty;
+    if (temMedida) return materialMedida!.trim();
+
+    final temDimensoes = materialLargura != null &&
+        materialComprimento != null &&
+        materialLargura! > 0 &&
+        materialComprimento! > 0;
+    if (temDimensoes) {
+      final l = _formatarNumero(materialComprimento!);
+      final c = _formatarNumero(materialLargura!);
+      return '${l}X${c}M';
+    }
+    return null;
+  }
+
   const AdicionalSolicitacaoModel({
     required this.id,
     required this.solicitacaoId,
@@ -133,6 +305,8 @@ class AdicionalSolicitacaoModel {
     this.materialIdentificador,
     this.materialMedida,
     this.materialEspessura,
+    this.materialLargura,
+    this.materialComprimento,
     this.materialCategoria,
     required this.materialQuantidadeEstoque,
     required this.quantidade,
@@ -145,6 +319,8 @@ class AdicionalSolicitacaoModel {
     this.compradoEm,
     this.compradoPorId,
     this.compradoPorNome,
+    this.editadoEm,
+    this.editadoPorNome,
   });
 
   factory AdicionalSolicitacaoModel.fromJson(Map<String, dynamic> json) {
@@ -157,6 +333,12 @@ class AdicionalSolicitacaoModel {
       materialIdentificador: json['material']?['identificador'],
       materialMedida:        json['material']?['medida'],
       materialEspessura:     json['material']?['espessura'],
+      materialLargura:       json['material']?['largura'] != null
+          ? double.tryParse(json['material']['largura'].toString())
+          : null,
+      materialComprimento:   json['material']?['comprimento'] != null
+          ? double.tryParse(json['material']['comprimento'].toString())
+          : null,
       materialCategoria:     json['material']?['categoria'],
       materialQuantidadeEstoque:
           double.tryParse(json['material']?['quantidade']?.toString() ?? '0') ?? 0,
@@ -172,6 +354,10 @@ class AdicionalSolicitacaoModel {
           : null,
       compradoPorId:   (json['compradoPorId'] as num?)?.toInt(),
       compradoPorNome: json['compradoPorNome'],
+      editadoEm: json['editadoEm'] != null
+          ? DateTime.parse(json['editadoEm']).toLocal()
+          : null,
+      editadoPorNome: json['editadoPorNome'],
     );
   }
 
@@ -180,6 +366,8 @@ class AdicionalSolicitacaoModel {
     DateTime? compradoEm,
     int? compradoPorId,
     String? compradoPorNome,
+    DateTime? editadoEm,
+    String? editadoPorNome,
   }) {
     return AdicionalSolicitacaoModel(
       id: id,
@@ -190,6 +378,8 @@ class AdicionalSolicitacaoModel {
       materialIdentificador: materialIdentificador,
       materialMedida: materialMedida,
       materialEspessura: materialEspessura,
+      materialLargura: materialLargura,
+      materialComprimento: materialComprimento,
       materialCategoria: materialCategoria,
       materialQuantidadeEstoque: materialQuantidadeEstoque,
       quantidade: quantidade,
@@ -202,6 +392,8 @@ class AdicionalSolicitacaoModel {
       compradoEm: compradoEm ?? this.compradoEm,
       compradoPorId: compradoPorId ?? this.compradoPorId,
       compradoPorNome: compradoPorNome ?? this.compradoPorNome,
+      editadoEm: editadoEm ?? this.editadoEm,
+      editadoPorNome: editadoPorNome ?? this.editadoPorNome,
     );
   }
 }
@@ -311,6 +503,9 @@ class LogEdicaoSolicitacaoModel {
   final Map<String, dynamic> antes;
   final Map<String, dynamic> depois;
   final DateTime editadoEm;
+  /// Contexto opcional: nome do material editado, quando o log se refere a
+  /// um item/adicional em vez dos dados do cabeçalho da solicitação.
+  final String? item;
 
   const LogEdicaoSolicitacaoModel({
     required this.id,
@@ -320,6 +515,7 @@ class LogEdicaoSolicitacaoModel {
     required this.antes,
     required this.depois,
     required this.editadoEm,
+    this.item,
   });
 
   factory LogEdicaoSolicitacaoModel.fromJson(Map<String, dynamic> json) {
@@ -331,6 +527,7 @@ class LogEdicaoSolicitacaoModel {
       antes:         Map<String, dynamic>.from(json['antes'] ?? {}),
       depois:        Map<String, dynamic>.from(json['depois'] ?? {}),
       editadoEm:     DateTime.parse(json['editadoEm']).toLocal(),
+      item:          json['item'],
     );
   }
 }

@@ -1,8 +1,6 @@
 const prisma = require('../utils/prisma');
 const cfgSvc = require('./configuracao.service');
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 function _calcularPrecoMedio(fornecedorMateriais = []) {
   const precos   = fornecedorMateriais.map((fm) => Number(fm.preco)).filter((p) => p > 0);
   const precosM2 = fornecedorMateriais.map((fm) => Number(fm.precoMetroQuadrado)).filter((p) => p > 0);
@@ -10,10 +8,6 @@ function _calcularPrecoMedio(fornecedorMateriais = []) {
   return { precoMedio: media(precos), precoMedioM2: media(precosM2) };
 }
 
-/**
- * Calcula a área de sobra (m²) e custo de desperdício para um item de material.
- * Retorna { areaSobraM2, custoSobra } — ambos null quando não aplicável.
- */
 function _calcularSobra(m, custoPorM2) {
   const refL = m.material.largura    != null ? Number(m.material.largura)    : null;
   const refC = m.material.comprimento != null ? Number(m.material.comprimento) : null;
@@ -48,7 +42,6 @@ function _serializarItem(item) {
       const { precoMedio, precoMedioM2 } = _calcularPrecoMedio(
         m.material.fornecedorMateriais ?? [],
       );
-      // Custo por m² da chapa de referência
       const refL = m.material.largura     != null ? Number(m.material.largura)     : null;
       const refC = m.material.comprimento != null ? Number(m.material.comprimento)  : null;
       const custoChapa = m.material.ultimoValorPago != null
@@ -90,9 +83,6 @@ function _serializarItem(item) {
   };
 }
 
-/**
- * Serializa o orçamento — agora async para buscar o percentualMarkup das faixas.
- */
 async function _serializarOrcamento(ov) {
   const { custoBase, custoSobraTotal } = _decomporCustos(ov);
   const total = custoBase + custoSobraTotal;
@@ -122,7 +112,6 @@ async function _serializarOrcamento(ov) {
   };
 }
 
-/** Gera próximo número "OV-YYYY-NNNN". */
 async function _gerarNumero() {
   const ano  = new Date().getFullYear();
   const prefixo = `OV-${ano}-`;
@@ -137,7 +126,6 @@ async function _gerarNumero() {
   return `${prefixo}${String(seq).padStart(4, '0')}`;
 }
 
-/** Include padrão para buscar orçamento completo. */
 const _include = {
   cliente: true,
   criador: true,
@@ -155,8 +143,6 @@ const _include = {
     orderBy: { id: 'asc' },
   },
 };
-
-// ── CRUD OrcamentoVenda ───────────────────────────────────────────────────────
 
 async function listar(filtros = {}) {
   const { status, clienteId, busca } = filtros;
@@ -179,28 +165,6 @@ async function buscarPorId(id) {
   return await _serializarOrcamento(ov);
 }
 
-/**
- * Cria um orçamento de venda.
- * Body esperado:
- * {
- *   clienteNome: string,
- *   numero?: string,
- *   observacao?: string,
- *   margemLucro?: number,
- *   criadorId?: number,
- *   clienteId?: number,
- *   itens: [
- *     {
- *       produtoId: number,
- *       quantidade: number,
- *       observacao?: string,
- *       materiais: [
- *         { materialId, quantidade, precoUnitario?, usarM2? }
- *       ]
- *     }
- *   ]
- * }
- */
 async function criar(data) {
   const {
     numero: numeroCustom,
@@ -231,7 +195,6 @@ async function criar(data) {
     include: _include,
   });
 
-  // Calcula e persiste valorTotal (com markup + imposto sobre sobra)
   const valorTotal = await _calcularTotalFinal(ov);
   const atualizado = await prisma.orcamentoVenda.update({
     where:   { id: ov.id },
@@ -285,8 +248,6 @@ async function alterarStatus(id, novoStatus) {
     data:  { status: novoStatus },
   });
 }
-
-// ── Gerenciar itens ───────────────────────────────────────────────────────────
 
 async function adicionarItem(orcamentoVendaId, data) {
   const ov = await prisma.orcamentoVenda.findUnique({ where: { id: orcamentoVendaId } });
@@ -351,8 +312,6 @@ async function removerItem(orcamentoVendaId, itemId) {
   await _recalcularTotal(orcamentoVendaId);
 }
 
-// ── Helpers internos ──────────────────────────────────────────────────────────
-
 function _buildMaterialCreate(m) {
   return {
     materialId:    Number(m.materialId),
@@ -377,9 +336,6 @@ function _buildItemCreate(item) {
   };
 }
 
-/**
- * Retorna { custoBase, custoSobraTotal } separados.
- */
 function _decomporCustos(ov) {
   let custoBase = 0;
   let custoSobraTotal = 0;
@@ -409,15 +365,11 @@ function _decomporCustos(ov) {
   return { custoBase, custoSobraTotal };
 }
 
-// Mantido para compatibilidade interna (não aplica markup)
 function _calcularTotal(ov) {
   const { custoBase, custoSobraTotal } = _decomporCustos(ov);
   return custoBase + custoSobraTotal;
 }
 
-/**
- * Calcula o valorTotal final com markup e imposto sobre sobra aplicados.
- */
 async function _calcularTotalFinal(ov) {
   const { custoBase, custoSobraTotal } = _decomporCustos(ov);
   const total = custoBase + custoSobraTotal;
@@ -439,7 +391,6 @@ async function _recalcularTotal(orcamentoVendaId) {
       itens: {
         include: {
           materiais: {
-            // Inclui todos os campos do OrcamentoVendaItemMaterial usados em _decomporCustos
             include: {
               material: {
                 select: {
@@ -458,8 +409,6 @@ async function _recalcularTotal(orcamentoVendaId) {
   const valorTotal = await _calcularTotalFinal(ov);
   await prisma.orcamentoVenda.update({ where: { id: orcamentoVendaId }, data: { valorTotal } });
 }
-
-// ── Clientes (lookup rápido) ──────────────────────────────────────────────────
 
 async function listarClientes(busca) {
   const where = busca

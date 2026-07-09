@@ -15,8 +15,8 @@
 //     icon: const Icon(Icons.history, size: 18),
 //     label: const Text('Histórico'),
 //     style: OutlinedButton.styleFrom(
-//       foregroundColor: const Color(0xFF7C3AED),
-//       side: const BorderSide(color: Color(0xFF7C3AED)),
+//       foregroundColor: const Color(0xFFF59E0B),
+//       side: const BorderSide(color: Color(0xFFF59E0B)),
 //       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
 //     ),
 //   ),
@@ -136,6 +136,29 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
       firstDate:    DateTime(2020),
       lastDate:     DateTime.now().add(const Duration(days: 1)),
       locale:       const Locale('pt', 'BR'),
+      builder: (context, child) {
+        // Garante cursor de mão nos botões do diálogo — OK/Cancelar,
+        // alternar modo de entrada (lápis/calendário) e navegação de
+        // mês anterior/próximo — sem alterar cores/estilo já definidos
+        // pelo tema do app.
+        final baseTextStyle = Theme.of(context).textButtonTheme.style ?? const ButtonStyle();
+        final baseIconStyle = Theme.of(context).iconButtonTheme.style ?? const ButtonStyle();
+        return Theme(
+          data: Theme.of(context).copyWith(
+            textButtonTheme: TextButtonThemeData(
+              style: baseTextStyle.copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+            ),
+            iconButtonTheme: IconButtonThemeData(
+              style: baseIconStyle.copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
     if (picked == null || !mounted) return;
     setState(() {
@@ -166,41 +189,20 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
             // ── Cabeçalho ────────────────────────────────────────────────────
             Row(
               children: [
-                InkWell(
+                _BotaoVoltar(
+                  label: 'Voltar',
+                  tooltip: 'Voltar',
                   onTap: () => Navigator.of(context).pop(),
-                  borderRadius: BorderRadius.circular(10),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        SizedBox(width: 6),
-                        Text(
-                          'Voltar',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
                 const SizedBox(width: 16),
                 Container(
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF7C3AED).withValues(alpha: 0.12),
+                    color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(Icons.history, color: Color(0xFF7C3AED), size: 20),
+                  child: Icon(Icons.history, color: Color(0xFFF59E0B), size: 20),
                 ),
                 SizedBox(width: 12),
                 Column(
@@ -234,7 +236,7 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                  ),
+                  ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                 ),
               ],
             ),
@@ -301,6 +303,7 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                   label: _dataInicio != null
                       ? 'De: ${_formatarData(_dataInicio!)}'
                       : 'Data início',
+                  tooltip: 'Selecionar data de início',
                   onTap: () => _selecionarData(true),
                   onClear: _dataInicio != null
                       ? () {
@@ -316,6 +319,7 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                   label: _dataFim != null
                       ? 'Até: ${_formatarData(_dataFim!)}'
                       : 'Data fim',
+                  tooltip: 'Selecionar data de fim',
                   onTap: () => _selecionarData(false),
                   onClear: _dataFim != null
                       ? () {
@@ -337,7 +341,7 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                 builder: (_, provider, __) {
                   if (provider.carregando) {
                     return const Center(
-                      child: CircularProgressIndicator(color: Color(0xFF7C3AED)),
+                      child: CircularProgressIndicator(color: Color(0xFFF59E0B)),
                     );
                   }
                   if (provider.erro != null) {
@@ -432,46 +436,132 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
 // WIDGETS AUXILIARES
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
+// Mesmo padrão usado no cabeçalho das páginas de estoque (_BotaoVoltar).
+class _BotaoVoltar extends StatefulWidget {
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _BotaoVoltar({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_BotaoVoltar> createState() => _BotaoVoltarState();
+}
+
+class _BotaoVoltarState extends State<_BotaoVoltar> {
+  bool _hovered = false;
+  static const _accent = Color(0xFFF59E0B);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        child: InkWell(
+          onTap: widget.onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? _accent.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              border: Border.all(
+                color: _hovered
+                    ? _accent.withValues(alpha: 0.6)
+                    : scheme.outlineVariant,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _hovered ? _accent : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _BotaoData extends StatelessWidget {
   final String    label;
+  final String    tooltip;
   final VoidCallback onTap;
   final VoidCallback? onClear;
 
   const _BotaoData({
     required this.label,
+    required this.tooltip,
     required this.onTap,
     this.onClear,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap:         onTap,
-      borderRadius:  BorderRadius.circular(8),
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-          borderRadius: BorderRadius.circular(8),
-          color:        Theme.of(context).colorScheme.surface,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.calendar_today, size: 14, color: Theme.of(context).colorScheme.outline),
-            SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
-            ),
-            if (onClear != null) ...[
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap:         onTap,
+        mouseCursor:   SystemMouseCursors.click,
+        borderRadius:  BorderRadius.circular(8),
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            border:       Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(8),
+            color:        Theme.of(context).colorScheme.surface,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.calendar_today, size: 14, color: Theme.of(context).colorScheme.outline),
               SizedBox(width: 6),
-              GestureDetector(
-                onTap: onClear,
-                child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
+              Text(
+                label,
+                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
+              if (onClear != null) ...[
+                SizedBox(width: 6),
+                Tooltip(
+                  message: 'Limpar filtro',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: onClear,
+                      child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.outline),
+                    ),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -855,6 +945,7 @@ class _BotaoPagina extends StatelessWidget {
       message: tooltip,
       child: InkWell(
         onTap: enabled ? onTap : null,
+        mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
         borderRadius: BorderRadius.circular(6),
         child: Container(
           width: 32,
@@ -895,14 +986,15 @@ class _BotaoNumeroPagina extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: ativa ? null : onTap,
+      mouseCursor: ativa ? SystemMouseCursors.basic : SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(6),
       child: Container(
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: ativa ? const Color(0xFF7C3AED) : Colors.transparent,
+          color: ativa ? const Color(0xFFF59E0B) : Colors.transparent,
           border: Border.all(
-            color: ativa ? const Color(0xFF7C3AED) : Theme.of(context).colorScheme.outlineVariant,
+            color: ativa ? const Color(0xFFF59E0B) : Theme.of(context).colorScheme.outlineVariant,
           ),
           borderRadius: BorderRadius.circular(6),
         ),
@@ -912,43 +1004,10 @@ class _BotaoNumeroPagina extends StatelessWidget {
           style: TextStyle(
             fontSize: 13,
             fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
-            color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+            color: ativa ? Colors.black87 : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
       ),
     );
   }
 }
-// ─────────────────────────────────────────────────────────────────────────────
-// BOTÃO PARA INSERIR NA EstoqueCategoriaPage
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Cole este trecho NO CABEÇALHO da EstoqueCategoriaPage,
-// ANTES do Consumer<MaterialProvider> que contém o botão "Orçar filtrados":
-//
-// OutlinedButton.icon(
-//   onPressed: () => Navigator.of(context).push(
-//     MaterialPageRoute(builder: (_) => const HistoricoMaterialPage()),
-//   ),
-//   icon: const Icon(Icons.history, size: 18),
-//   label: const Text('Histórico'),
-//   style: OutlinedButton.styleFrom(
-//     foregroundColor: const Color(0xFF7C3AED),
-//     side: const BorderSide(color: Color(0xFF7C3AED)),
-//     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-//   ),
-// ),
-// const SizedBox(width: 12),
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// ABRIR O HISTÓRICO DE UM MATERIAL ESPECÍFICO (dentro de _LinhaTabela, etc.)
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Navigator.of(context).push(
-//   MaterialPageRoute(
-//     builder: (_) => HistoricoMaterialPage(
-//       materialIdInicial:    material.id,
-//       materialNomeInicial:  material.nome,
-//     ),
-//   ),
-// );

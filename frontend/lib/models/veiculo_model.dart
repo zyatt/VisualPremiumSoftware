@@ -24,6 +24,8 @@ class ManutencaoModel {
   final DateTime  dataEnvio;
   final DateTime? dataRetirada;
   final DateTime  criadoEm;
+  final bool      finalizada;
+  final DateTime? finalizadaEm;
 
   const ManutencaoModel({
     required this.id,
@@ -34,6 +36,8 @@ class ManutencaoModel {
     required this.dataEnvio,
     this.dataRetirada,
     required this.criadoEm,
+    this.finalizada = false,
+    this.finalizadaEm,
   });
 
   factory ManutencaoModel.fromJson(Map<String, dynamic> json) =>
@@ -48,20 +52,27 @@ class ManutencaoModel {
             ? DateTime.parse(json['dataRetirada'])
             : null,
         criadoEm:     DateTime.parse(json['criadoEm']),
+        finalizada:   json['finalizada'] ?? false,
+        finalizadaEm: json['finalizadaEm'] != null
+            ? DateTime.parse(json['finalizadaEm'])
+            : null,
       );
 
-  /// Em andamento enquanto não houver data de retirada OU enquanto a retirada
-  /// ainda não tiver chegado (retirada >= início do dia de hoje).
+  /// Em andamento enquanto não for finalizada manualmente E (não houver data
+  /// de retirada OU a retirada ainda não tiver chegado).
   bool get emAndamento {
+    if (finalizada) return false;
     if (dataRetirada == null) return true;
     final hoje = DateTime.now();
     final inicioDiaHoje = DateTime(hoje.year, hoje.month, hoje.day);
     return !dataRetirada!.isBefore(inicioDiaHoje);
   }
 
-  /// Verdadeiro apenas quando a data de retirada é exatamente hoje
-  /// (usado para mostrar a notificação de "pronto para retirar").
+  /// Verdadeiro apenas quando a data de retirada é exatamente hoje e o
+  /// serviço ainda não foi finalizado manualmente (usado para mostrar a
+  /// notificação de "pronto para retirar").
   bool get retiradaHoje {
+    if (finalizada) return false;
     if (dataRetirada == null) return false;
     final hoje = DateTime.now();
     return dataRetirada!.year  == hoje.year  &&

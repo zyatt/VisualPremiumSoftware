@@ -97,6 +97,47 @@ class FornecedorMaterialModel {
       );
 }
 
+/// Notificação recebida via SSE quando um material entra em status CRÍTICO
+/// (quantidade abaixo do estoque mínimo). Disparada apenas na transição para
+/// crítico (veja `notificarSeCritico` no backend) — não repete enquanto o
+/// material permanece crítico. Consumida pelo MaterialCriticoBanner.
+class MaterialCriticoNotificacao {
+  final int materialId;
+  final String nome;
+  final String? identificador;
+  final String? medida;
+  final String? espessura;
+  final String? unidade;
+  final String? categoria;
+  final double quantidade;
+  final double estoqueMinimo;
+
+  MaterialCriticoNotificacao({
+    required this.materialId,
+    required this.nome,
+    this.identificador,
+    this.medida,
+    this.espessura,
+    this.unidade,
+    this.categoria,
+    required this.quantidade,
+    required this.estoqueMinimo,
+  });
+
+  factory MaterialCriticoNotificacao.fromJson(Map<String, dynamic> json) =>
+      MaterialCriticoNotificacao(
+        materialId:    (json['materialId'] as num?)?.toInt() ?? 0,
+        nome:          json['nome'] ?? '',
+        identificador: json['identificador'],
+        medida:        json['medida'],
+        espessura:     json['espessura'],
+        unidade:       json['unidade'],
+        categoria:     json['categoria'],
+        quantidade:    double.tryParse(json['quantidade'].toString()) ?? 0,
+        estoqueMinimo: double.tryParse(json['estoqueMinimo'].toString()) ?? 0,
+      );
+}
+
 class MaterialModel {
   final int id;
   final String nome;

@@ -4,8 +4,6 @@ const prisma = require('../utils/prisma');
 const listar                = async (req, res, next) => { try { res.json(await svc.listarEmAndamento(req.query.busca)); } catch(e){next(e);} };
 const buscarPorNumeroOS     = async (req, res, next) => { try { res.json(await svc.buscarPorNumeroOS(req.params.numeroOS)); } catch(e){next(e);} };
 
-// Busca o nome real do usuário no banco (o JWT só carrega id, username e role)
-// e injeta como usuarioNome para a observação automática da movimentação.
 const registrarMovimentacao = async (req, res, next) => {
   try {
     const usuario = await prisma.usuario.findUnique({

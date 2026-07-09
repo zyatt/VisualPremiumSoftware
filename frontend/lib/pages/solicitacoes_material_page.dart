@@ -13,6 +13,7 @@ import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_client.dart';
 import '../pages/controle_estoque_page.dart' show MaterialFormDialog;
+import '../widgets/escolher_usuario_chat_dialog.dart';
 
 class SolicitacoesMaterialPage extends StatefulWidget {
   const SolicitacoesMaterialPage({super.key});
@@ -26,7 +27,6 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
   final _buscaCtrl = TextEditingController();
   String _andamentoFiltro = '';
   Timer? _debounceTimer;
-  SolicitacaoMaterialProvider? _solProvider;
 
   // ── Totais globais (sem filtro) ──────────────────────────────────────────
   // Capturados na primeira carga (sem busca/andamento) e atualizados sempre
@@ -35,18 +35,16 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
   int _totalCompradosGlobal = 0;
   bool _totaisGlobaisCarregados = false;
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _solProvider = context.read<SolicitacaoMaterialProvider>();
-    _solProvider?.marcarPaginaAberta();
-  }
-
+  // Nota: quem controla "página aberta" (badge, marcar como visualizado)
+  // é o AppShell — via SolicitacaoMaterialProvider.definirPaginaVisivel(),
+  // baseado na rota atual — e não o ciclo de vida deste State. Essa página
+  // vive dentro de um StatefulShellBranch (IndexedStack) e não é destruída
+  // ao trocar de aba, então didChangeDependencies()/dispose() aqui não são
+  // um sinal confiável de "entrei"/"saí" da tela.
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await context.read<SolicitacaoMaterialProvider>().limparNotificacoes();
       if (mounted) {
         await context.read<SolicitacaoMaterialProvider>().carregar();
         _atualizarTotaisGlobais();
@@ -58,7 +56,6 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
   void dispose() {
     _debounceTimer?.cancel();
     _buscaCtrl.dispose();
-    _solProvider?.sairDaPagina();
     super.dispose();
   }
 
@@ -134,14 +131,19 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
                   ],
                 ),
                 const Spacer(),
-                FilledButton.icon(
-                  onPressed: () => _abrirFormSolicitacao(),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Nova Solicitação'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                Tooltip(
+                  message: 'Criar uma nova solicitação de material',
+                  child: FilledButton.icon(
+                    onPressed: () => _abrirFormSolicitacao(),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Nova Solicitação'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ).copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -154,6 +156,8 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                  ).copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                   ),
                 ),
               ],
@@ -217,6 +221,9 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
                     setState(() => _andamentoFiltro = '');
                     _aplicarFiltros();
                   },
+                  style: IconButton.styleFrom().copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                  ),
                 ),
               ],
             ),
@@ -248,7 +255,10 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
                             onPressed: _aplicarFiltros,
                             icon: const Icon(Icons.refresh, size: 18),
                             label: const Text('Tentar novamente'),
-                            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                                .copyWith(
+                              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                            ),
                           ),
                         ],
                       ),
@@ -625,8 +635,73 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
 
   final List<_ItemMaterialCriacao> _itens = [];
 
+  // ── Verificação de OS em tempo real (debounce) ──────────────────────────
+  Timer? _debounceOS;
+  int _checagemOSSeq = 0;
+  bool _verificandoOS = false;
+  String? _erroOS;
+  String? _ultimaOSVerificada;
+
+  @override
+  void initState() {
+    super.initState();
+    _numeroOSCtrl.addListener(_onNumeroOSChanged);
+  }
+
+  void _onNumeroOSChanged() {
+    final texto = _numeroOSCtrl.text.trim();
+
+    _debounceOS?.cancel();
+
+    if (texto.isEmpty) {
+      setState(() {
+        _erroOS = null;
+        _verificandoOS = false;
+        _ultimaOSVerificada = null;
+      });
+      return;
+    }
+
+    if (texto == _ultimaOSVerificada) return;
+
+    setState(() => _verificandoOS = true);
+
+    _debounceOS = Timer(const Duration(milliseconds: 500), () {
+      _verificarOS(texto);
+    });
+  }
+
+  Future<void> _verificarOS(String numeroOS) async {
+    final minhaChamada = ++_checagemOSSeq;
+    try {
+      final repo = context.read<SolicitacaoMaterialProvider>().repository;
+      final resultado = await repo.verificarOSExiste(numeroOS);
+
+      // Ignora resultado se o texto já mudou ou outra checagem mais nova
+      // já foi disparada enquanto esta estava em andamento.
+      if (!mounted || minhaChamada != _checagemOSSeq) return;
+      if (_numeroOSCtrl.text.trim() != numeroOS) return;
+
+      setState(() {
+        _verificandoOS = false;
+        _ultimaOSVerificada = numeroOS;
+        _erroOS = resultado.existe
+            ? 'Já existe uma solicitação para a OS "$numeroOS"'
+                '${resultado.nomeCliente != null ? ' (${resultado.nomeCliente})' : ''}.'
+            : null;
+      });
+    } catch (_) {
+      // Falha de rede na checagem não deve travar o usuário — a validação
+      // definitiva ainda ocorre no backend ao clicar em "Criar".
+      if (!mounted || minhaChamada != _checagemOSSeq) return;
+      setState(() => _verificandoOS = false);
+    }
+  }
+
   @override
   void dispose() {
+    _debounceOS?.cancel();
+    _numeroOSCtrl.removeListener(_onNumeroOSChanged);
     _numeroOSCtrl.dispose();
     _clienteCtrl.dispose();
     _observacaoCtrl.dispose();
@@ -650,7 +725,17 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
 
   Future<void> _salvar() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    
+
+    if (_erroOS != null) {
+      setState(() => _erroDialog = _erroOS);
+      return;
+    }
+    if (_verificandoOS) {
+      // Ainda checando a OS: aguarda a checagem terminar antes de prosseguir.
+      setState(() => _erroDialog = 'Aguarde, verificando o número da OS...');
+      return;
+    }
+
     // Valida se todos os itens têm material e quantidade
     for (int i = 0; i < _itens.length; i++) {
       final item = _itens[i];
@@ -745,6 +830,9 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close, size: 20),
                     tooltip: 'Fechar',
+                    style: IconButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ],
               ),
@@ -771,7 +859,28 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                             child: TextFormField(
                               controller: _numeroOSCtrl,
                               autofocus: true,
-                              decoration: const InputDecoration(labelText: 'Número OS *'),
+                              decoration: InputDecoration(
+                                labelText: 'Número OS *',
+                                errorText: _erroOS,
+                                errorMaxLines: 2,
+                                suffixIcon: _verificandoOS
+                                    ? const Padding(
+                                        padding: EdgeInsets.all(12),
+                                        child: SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2),
+                                        ),
+                                      )
+                                    : (_erroOS == null &&
+                                            _ultimaOSVerificada != null &&
+                                            _ultimaOSVerificada ==
+                                                _numeroOSCtrl.text.trim())
+                                        ? const Icon(Icons.check_circle,
+                                            color: AppTheme.success, size: 20)
+                                        : null,
+                              ),
                               textCapitalization: TextCapitalization.characters,
                               validator: (v) => v == null || v.trim().isEmpty
                                   ? 'Número OS é obrigatório'
@@ -818,11 +927,17 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.w700)),
                           const Spacer(),
-                          TextButton.icon(
-                            onPressed: _adicionarItem,
-                            icon: const Icon(Icons.add, size: 18),
-                            label: const Text('Adicionar Material'),
-                            style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
+                          Tooltip(
+                            message: 'Adicionar um novo material à solicitação',
+                            child: TextButton.icon(
+                              onPressed: _adicionarItem,
+                              icon: const Icon(Icons.add, size: 18),
+                              label: const Text('Adicionar Material'),
+                              style: TextButton.styleFrom(foregroundColor: AppTheme.primary)
+                                  .copyWith(
+                                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -850,20 +965,31 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: _salvando ? null : () => Navigator.pop(context),
-                    child: const Text('Cancelar'),
+                  Tooltip(
+                    message: 'Cancelar e fechar sem salvar',
+                    child: TextButton(
+                      onPressed: _salvando ? null : () => Navigator.pop(context),
+                      style: TextButton.styleFrom().copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                      child: const Text('Cancelar'),
+                    ),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: _salvando ? null : _salvar,
-                    style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-                    child: _salvando
-                        ? const SizedBox(
-                            width: 18, height: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
-                        : const Text('Criar'),
+                  Tooltip(
+                    message: 'Criar a solicitação de material',
+                    child: FilledButton(
+                      onPressed: _salvando ? null : _salvar,
+                      style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                      child: _salvando
+                          ? const SizedBox(
+                              width: 18, height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : const Text('Criar'),
+                    ),
                   ),
                 ],
               ),
@@ -950,25 +1076,28 @@ class _ItemMaterialCard extends StatelessWidget {
                           fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.primary)),
                 ),
                 const Spacer(),
-                InkWell(
-                  onTap: () => _cadastrarMaterial(context),
-                  borderRadius: BorderRadius.circular(6),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.add, size: 14, color: AppTheme.primary),
-                        SizedBox(width: 4),
-                        Text(
-                          'Cadastrar material',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.primary,
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: InkWell(
+                    onTap: () => _cadastrarMaterial(context),
+                    borderRadius: BorderRadius.circular(6),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.add, size: 14, color: AppTheme.primary),
+                          SizedBox(width: 4),
+                          Text(
+                            'Cadastrar material',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.primary,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -981,6 +1110,8 @@ class _ItemMaterialCard extends StatelessWidget {
                     style: IconButton.styleFrom(
                       backgroundColor: AppTheme.error.withValues(alpha: 0.08),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ).copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                     ),
                   ),
               ],
@@ -990,7 +1121,9 @@ class _ItemMaterialCard extends StatelessWidget {
               children: [
                 Expanded(
                   flex: 3,
-                  child: InkWell(
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: InkWell(
                     onTap: () => _selecionarMaterial(context),
                     child: InputDecorator(
                       decoration: InputDecoration(
@@ -1009,6 +1142,7 @@ class _ItemMaterialCard extends StatelessWidget {
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
+                    ),
                     ),
                   ),
                 ),
@@ -1054,7 +1188,9 @@ class _ItemMaterialCard extends StatelessWidget {
                     },
                     icon: const Icon(Icons.close, size: 16),
                     label: const Text('Remover'),
-                    style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+                    style: TextButton.styleFrom(foregroundColor: AppTheme.error).copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ] else
                   Expanded(
@@ -1062,6 +1198,9 @@ class _ItemMaterialCard extends StatelessWidget {
                       onPressed: () => _selecionarImagem(context),
                       icon: const Icon(Icons.add_photo_alternate_outlined, size: 16),
                       label: const Text('Anexar imagem'),
+                      style: OutlinedButton.styleFrom().copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
                     ),
                   ),
               ],
@@ -1101,7 +1240,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
 
   bool get _temAlteracoesNaoSalvas => _comprasPendentes.isNotEmpty;
 
-  // Edição do cabeçalho (só ADMIN)
+  // Edição do cabeçalho (ADMIN ou criador da solicitação)
   late final TextEditingController _numeroOSCtrl;
   late final TextEditingController _clienteCtrl;
   late final TextEditingController _observacaoCtrl;
@@ -1136,13 +1275,31 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
 
   bool get _ehAdmin {
     final usuario = context.read<UsuarioProvider>().usuarioLogado;
-    return usuario?.role == 'ADMIN';
+    return usuario?.role.trim().toUpperCase() == 'ADMIN' || usuario?.role.trim().toUpperCase() == 'GERENTE';
+  }
+
+  // Cabeçalho (aba Dados) pode ser editado pelo ADMIN ou pelo criador da solicitação.
+  bool get _podeEditarCabecalho {
+    final usuario = context.read<UsuarioProvider>().usuarioLogado;
+    if (usuario == null) return false;
+    final ehAdmin = usuario.role.trim().toUpperCase() == 'ADMIN' || usuario.role.trim().toUpperCase() == 'GERENTE';
+    final ehCriador = usuario.id.toString() == _solicitacaoAtual.usuarioId.toString();
+    return ehAdmin || ehCriador;
   }
 
   bool get _podeAdicionarMateriais {
     final usuario = context.read<UsuarioProvider>().usuarioLogado;
     if (usuario == null) return false;
-    final ehAdmin = usuario.role.trim().toUpperCase() == 'ADMIN';
+    final ehAdmin = usuario.role.trim().toUpperCase() == 'ADMIN' || usuario.role.trim().toUpperCase() == 'GERENTE';
+    final ehCriador = usuario.id.toString() == _solicitacaoAtual.usuarioId.toString();
+    return ehAdmin || ehCriador;
+  }
+
+  // Exclusão da solicitação: ADMIN ou o próprio criador podem excluir.
+  bool get _podeExcluir {
+    final usuario = context.read<UsuarioProvider>().usuarioLogado;
+    if (usuario == null) return false;
+    final ehAdmin = usuario.role.trim().toUpperCase() == 'ADMIN' || usuario.role.trim().toUpperCase() == 'GERENTE';
     final ehCriador = usuario.id.toString() == _solicitacaoAtual.usuarioId.toString();
     return ehAdmin || ehCriador;
   }
@@ -1185,6 +1342,9 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
               actions: [
                 FilledButton(
                   onPressed: () => Navigator.pop(ctx),
+                  style: FilledButton.styleFrom().copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                  ),
                   child: const Text('OK'),
                 ),
               ],
@@ -1230,10 +1390,16 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, 'cancelar'),
+            style: TextButton.styleFrom().copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
             child: const Text('Cancelar'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, 'salvar'),
+            style: FilledButton.styleFrom().copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
             child: const Text('Salvar'),
           ),
         ],
@@ -1287,8 +1453,8 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
       }
     }
 
-    // Cabeçalho (Dados) só pode ser alterado por ADMIN.
-    if (!_ehAdmin) {
+    // Cabeçalho (Dados) só pode ser alterado por ADMIN ou pelo criador da solicitação.
+    if (!_podeEditarCabecalho) {
       if (!mounted) return;
       setState(() => _salvando = false);
       final messenger = ScaffoldMessenger.of(context);
@@ -1342,6 +1508,9 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(ctx),
+              style: FilledButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
               child: const Text('OK'),
             ),
           ],
@@ -1356,6 +1525,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
       builder: (_) => _AdicionarMateriaisDialog(solicitacao: _solicitacaoAtual),
     );
     if (salvou == true && mounted) {
+      setState(() => _houveMudanca = true);
       await _recarregarSolicitacao();
     }
   }
@@ -1369,14 +1539,25 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
           'Tem certeza que deseja excluir a solicitação OS ${_solicitacaoAtual.numeroOS}? Esta ação não pode ser desfeita.',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
+          Tooltip(
+            message: 'Cancelar e manter a solicitação',
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              style: TextButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: const Text('Cancelar'),
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
-            child: const Text('Excluir'),
+          Tooltip(
+            message: 'Excluir permanentemente esta solicitação',
+            child: FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: const Text('Excluir'),
+            ),
           ),
         ],
       ),
@@ -1437,11 +1618,155 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     }
   }
 
+  void _mostrarErro(String titulo, Object e) {
+    if (!mounted) return;
+    final mensagem = e.toString().replaceFirst('Exception: ', '');
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(titulo),
+        content: Text(mensagem),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: FilledButton.styleFrom().copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _encaminharSolicitacao() async {
+    final dados = {
+      'solicitacaoId': _solicitacaoAtual.id,
+      'numeroOS': _solicitacaoAtual.numeroOS,
+      'nomeCliente': _solicitacaoAtual.nomeCliente,
+      'dataNecessidade': _solicitacaoAtual.dataNecessidade.toIso8601String(),
+    };
+    final enviado = await encaminharParaChat(context, tipo: 'solicitacao', dados: dados);
+    if (!mounted || !enviado) return;
+    // O mini chat flutuante já foi acionado (expandido, com a conversa do
+    // destinatário aberta) por encaminharParaChat — aqui só fechamos esta
+    // solicitação para o usuário já cair direto na conversa.
+    Navigator.of(context).pop(_houveMudanca ? true : null);
+  }
+
+  Future<void> _encaminharMaterial(String tipo, int id) async {
+    final item = tipo == 'item'
+        ? _solicitacaoAtual.itens.firstWhere((i) => i.id == id)
+        : null;
+    final adicional = tipo == 'adicional'
+        ? _solicitacaoAtual.adicionais.firstWhere((a) => a.id == id)
+        : null;
+
+    final dados = {
+      'solicitacaoId': _solicitacaoAtual.id,
+      'numeroOS': _solicitacaoAtual.numeroOS,
+      'materialNome': item?.materialNome ?? adicional!.materialNome,
+      'quantidade': item?.quantidade ?? adicional!.quantidade,
+      'unidade': item?.materialUnidade ?? adicional?.materialUnidade,
+      'identificador': item?.materialIdentificador ?? adicional?.materialIdentificador,
+      'medida': item?.materialMedida ?? adicional?.materialMedida,
+      'espessura': item?.materialEspessura ?? adicional?.materialEspessura,
+      'largura': item?.materialLargura ?? adicional?.materialLargura,
+      'comprimento': item?.materialComprimento ?? adicional?.materialComprimento,
+    };
+
+    final enviado = await encaminharParaChat(context, tipo: 'material', dados: dados);
+    if (!mounted || !enviado) return;
+    Navigator.of(context).pop(_houveMudanca ? true : null);
+  }
+
+  Future<void> _editarMaterial(
+    String tipo,
+    int id,
+    double quantidadeAtual,
+    String? observacaoAtual,
+  ) async {
+    final resultado = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _EditarMaterialDialog(
+        quantidadeAtual: quantidadeAtual,
+        observacaoAtual: observacaoAtual,
+      ),
+    );
+    if (resultado == null || !mounted) return;
+
+    final provider = context.read<SolicitacaoMaterialProvider>();
+    try {
+      if (tipo == 'item') {
+        await provider.atualizarItem(
+          id,
+          quantidade: resultado['quantidade'] as double,
+          observacao: resultado['observacao'] as String?,
+        );
+      } else {
+        await provider.atualizarAdicional(
+          id,
+          quantidade: resultado['quantidade'] as double,
+          observacao: resultado['observacao'] as String?,
+        );
+      }
+      if (mounted) setState(() => _houveMudanca = true);
+      await _recarregarSolicitacao();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Solicitação atualizada'), backgroundColor: AppTheme.success),
+        );
+      }
+    } catch (e) {
+      _mostrarErro('Erro ao editar material', e);
+    }
+  }
+
+  Future<void> _excluirMaterial(String tipo, int id, String materialNome) async {
+    final confirma = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover Material'),
+        content: Text('Tem certeza que deseja remover "$materialNome" desta solicitação?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom().copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (confirma != true || !mounted) return;
+
+    final provider = context.read<SolicitacaoMaterialProvider>();
+    try {
+      if (tipo == 'item') {
+        await provider.excluirItem(id);
+      } else {
+        await provider.excluirAdicional(id);
+      }
+      if (mounted) setState(() => _houveMudanca = true);
+      await _recarregarSolicitacao();
+    } catch (e) {
+      _mostrarErro('Erro ao remover material', e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
       canPop: !_temAlteracoesNaoSalvas,
-      onPopInvoked: (didPop) {
+      onPopInvokedWithResult: (didPop, result) {
         if (!didPop) {
           _tentarFechar();
         }
@@ -1479,9 +1804,21 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
                     ),
                   ),
                   IconButton(
+                    onPressed: _encaminharSolicitacao,
+                    icon: const Icon(Icons.forward_outlined, size: 20),
+                    tooltip: 'Enviar para chat',
+                    style: IconButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
                     onPressed: _tentarFechar,
                     icon: const Icon(Icons.close, size: 20),
                     tooltip: 'Fechar',
+                    style: IconButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ],
               ),
@@ -1509,6 +1846,10 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
                     comprasPendentes: _comprasPendentes,
                     onToggleComprado: _alterarCompradoLocal,
                     onReabrirSolicitacao: _ehAdmin ? _reabrirSolicitacao : null,
+                    podeEditarMaterial: _podeEditarCabecalho,
+                    onEditarMaterial: _editarMaterial,
+                    onExcluirMaterial: _excluirMaterial,
+                    onEncaminharMaterial: _encaminharMaterial,
                   ),
                   // Aba Dados
                   _AbaDadosSolicitacao(
@@ -1520,7 +1861,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
                     andamento: _andamento,
                     onDataNecessidadeChanged: (d) => setState(() => _dataNecessidade = d),
                     onAndamentoChanged: (a) => setState(() => _andamento = a),
-                    ehAdmin: _ehAdmin,
+                    ehAdmin: _podeEditarCabecalho,
                     erroDialog: _erroDialog,
                     onDismissErro: () => setState(() => _erroDialog = null),
                   ),
@@ -1535,42 +1876,63 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
               child: Row(
                 children: [
                   if (_podeAdicionarMateriais)
-                  FilledButton.icon(
-                    onPressed: _adicionarMateriais,
-                    icon: const Icon(Icons.add, size: 16),
-                    label: const Text('Adicionar Materiais'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
+                  Tooltip(
+                    message: 'Adicionar mais materiais a esta solicitação',
+                    child: FilledButton.icon(
+                      onPressed: _adicionarMateriais,
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('Adicionar Materiais'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  if (_ehAdmin)
-                    OutlinedButton.icon(
-                      onPressed: _excluirSolicitacao,
-                      icon: const Icon(Icons.delete_outline, size: 16),
-                      label: const Text('Excluir'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.error,
-                        side: BorderSide(color: AppTheme.error.withValues(alpha: 0.5)),
+                  if (_podeExcluir)
+                    Tooltip(
+                      message: 'Excluir esta solicitação',
+                      child: OutlinedButton.icon(
+                        onPressed: _excluirSolicitacao,
+                        icon: const Icon(Icons.delete_outline, size: 16),
+                        label: const Text('Excluir'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.error,
+                          side: BorderSide(color: AppTheme.error.withValues(alpha: 0.5)),
+                        ).copyWith(
+                          mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
                       ),
                     ),
                   const Spacer(),
-                  TextButton(
-                    onPressed: _tentarFechar,
-                    child: const Text('Fechar'),
+                  Tooltip(
+                    message: 'Fechar esta solicitação',
+                    child: TextButton(
+                      onPressed: _tentarFechar,
+                      style: TextButton.styleFrom().copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                      child: const Text('Fechar'),
+                    ),
                   ),
-                  if (_ehAdmin || _temAlteracoesNaoSalvas) ...[
+                  if (_podeEditarCabecalho || _temAlteracoesNaoSalvas) ...[
                     const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: _salvando ? null : _salvarCabecalho,
-                      style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-                      child: _salvando
-                          ? const SizedBox(
-                              width: 18, height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white))
-                          : const Text('Salvar'),
+                    Tooltip(
+                      message: 'Salvar as alterações desta solicitação',
+                      child: FilledButton(
+                        onPressed: _salvando ? null : _salvarCabecalho,
+                        style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+                          mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                        child: _salvando
+                            ? const SizedBox(
+                                width: 18, height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white))
+                            : const Text('Salvar'),
+                      ),
                     ),
                   ],
                 ],
@@ -1591,12 +1953,20 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
   final Map<String, bool> comprasPendentes;
   final void Function(String tipo, int id, bool valorOriginal, bool novoValor) onToggleComprado;
   final VoidCallback? onReabrirSolicitacao;
+  final bool podeEditarMaterial;
+  final Future<void> Function(String tipo, int id, double quantidadeAtual, String? observacaoAtual) onEditarMaterial;
+  final Future<void> Function(String tipo, int id, String materialNome) onExcluirMaterial;
+  final Future<void> Function(String tipo, int id) onEncaminharMaterial;
 
   const _AbaMateriaisSolicitacao({
     required this.solicitacao,
     required this.comprasPendentes,
     required this.onToggleComprado,
     this.onReabrirSolicitacao,
+    required this.podeEditarMaterial,
+    required this.onEditarMaterial,
+    required this.onExcluirMaterial,
+    required this.onEncaminharMaterial,
   });
 
   @override
@@ -1639,6 +2009,8 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
               materialIdentificador: item.materialIdentificador,
               materialMedida: item.materialMedida,
               materialEspessura: item.materialEspessura,
+              materialLargura: item.materialLargura,
+              materialComprimento: item.materialComprimento,
               materialCategoria: item.materialCategoria,
               materialEstoque: item.materialQuantidadeEstoque,
               quantidade: item.quantidade,
@@ -1649,10 +2021,16 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
               compradoEm: item.compradoEm,
               compradoPorNome: item.compradoPorNome,
               criadoEm: item.criadoEm,
+              editadoEm: item.editadoEm,
+              editadoPorNome: item.editadoPorNome,
               andamento: solicitacao.andamento,
               onToggle: (novoValor) =>
                   onToggleComprado('item', item.id, item.comprado, novoValor),
               onReabrirSolicitacao: onReabrirSolicitacao,
+              podeEditar: podeEditarMaterial,
+              onEditar: () => onEditarMaterial('item', item.id, item.quantidade, item.observacao),
+              onExcluir: () => onExcluirMaterial('item', item.id, item.materialNome),
+              onEncaminhar: () => onEncaminharMaterial('item', item.id),
             );
           }),
         ],
@@ -1674,6 +2052,8 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
               materialIdentificador: ad.materialIdentificador,
               materialMedida: ad.materialMedida,
               materialEspessura: ad.materialEspessura,
+              materialLargura: ad.materialLargura,
+              materialComprimento: ad.materialComprimento,
               materialCategoria: ad.materialCategoria,
               materialEstoque: ad.materialQuantidadeEstoque,
               quantidade: ad.quantidade,
@@ -1685,10 +2065,16 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
               compradoPorNome: ad.compradoPorNome,
               criadoEm: ad.adicionadoEm,
               adicionadoPorNome: ad.adicionadoPorNome,
+              editadoEm: ad.editadoEm,
+              editadoPorNome: ad.editadoPorNome,
               andamento: solicitacao.andamento,
               onToggle: (novoValor) =>
                   onToggleComprado('adicional', ad.id, ad.comprado, novoValor),
               onReabrirSolicitacao: onReabrirSolicitacao,
+              podeEditar: podeEditarMaterial,
+              onEditar: () => onEditarMaterial('adicional', ad.id, ad.quantidade, ad.observacao),
+              onExcluir: () => onExcluirMaterial('adicional', ad.id, ad.materialNome),
+              onEncaminhar: () => onEncaminharMaterial('adicional', ad.id),
             );
           }),
         ],
@@ -1705,6 +2091,8 @@ class _MaterialCard extends StatelessWidget {
   final String? materialIdentificador;
   final String? materialMedida;
   final String? materialEspessura;
+  final double? materialLargura;
+  final double? materialComprimento;
   final String? materialCategoria;
   final double materialEstoque;
   final double quantidade;
@@ -1716,9 +2104,40 @@ class _MaterialCard extends StatelessWidget {
   final String? compradoPorNome;
   final DateTime criadoEm;
   final String? adicionadoPorNome;
+  final DateTime? editadoEm;
+  final String? editadoPorNome;
   final String andamento;
   final ValueChanged<bool> onToggle;
   final VoidCallback? onReabrirSolicitacao;
+  final bool podeEditar;
+  final VoidCallback onEditar;
+  final VoidCallback onExcluir;
+  final VoidCallback onEncaminhar;
+
+  /// Rótulo de medida/dimensão a ser exibido ao lado do nome.
+  /// Se houver medida cadastrada, mostra só a medida (evita repetir com
+  /// largura/comprimento). Caso contrário, se houver largura e comprimento,
+  /// mostra "COMPRIMENTOxLARGURAM" (ex.: "5X1.22M").
+  String? get _medidaOuDimensao {
+    final temMedida = materialMedida != null && materialMedida!.trim().isNotEmpty;
+    if (temMedida) return materialMedida!.trim();
+
+    final temDimensoes = materialLargura != null &&
+        materialComprimento != null &&
+        materialLargura! > 0 &&
+        materialComprimento! > 0;
+    if (temDimensoes) {
+      String fmt(double v) {
+        if (v % 1 == 0) return v.toStringAsFixed(0);
+        var s = v.toStringAsFixed(2);
+        if (s.endsWith('0')) s = s.substring(0, s.length - 1);
+        if (s.endsWith('.')) s = s.substring(0, s.length - 1);
+        return s;
+      }
+      return '${fmt(materialComprimento!)}X${fmt(materialLargura!)}M';
+    }
+    return null;
+  }
 
   const _MaterialCard({
     required this.tipo,
@@ -1728,6 +2147,8 @@ class _MaterialCard extends StatelessWidget {
     this.materialIdentificador,
     this.materialMedida,
     this.materialEspessura,
+    this.materialLargura,
+    this.materialComprimento,
     this.materialCategoria,
     required this.materialEstoque,
     required this.quantidade,
@@ -1739,43 +2160,68 @@ class _MaterialCard extends StatelessWidget {
     this.compradoPorNome,
     required this.criadoEm,
     this.adicionadoPorNome,
+    this.editadoEm,
+    this.editadoPorNome,
     required this.andamento,
     required this.onToggle,
     this.onReabrirSolicitacao,
+    required this.podeEditar,
+    required this.onEditar,
+    required this.onExcluir,
+    required this.onEncaminhar,
   });
+
+  // Mostra o aviso de solicitação finalizada (com opção de reabrir para ADMIN)
+  // e retorna true se a ação deve ser bloqueada.
+  bool _bloqueadoPorFinalizacao(BuildContext context) {
+    if (andamento != 'FINALIZADO') return false;
+
+    final usuario = context.read<UsuarioProvider>().usuarioLogado;
+    final ehAdmin = usuario?.role.trim().toUpperCase() == 'ADMIN' || usuario?.role.trim().toUpperCase() == 'GERENTE';
+
+    showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Solicitação finalizada'),
+        content: const Text(
+          'Esta solicitação está finalizada. Para alterar os itens, reabra-a primeiro.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          if (ehAdmin)
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+              child: const Text('Reabrir'),
+            ),
+        ],
+      ),
+    ).then((reabrir) {
+      if (reabrir == true) onReabrirSolicitacao?.call();
+    });
+    return true;
+  }
+
+  void _handleEditar(BuildContext context) {
+    if (_bloqueadoPorFinalizacao(context)) return;
+    onEditar();
+  }
+
+  void _handleExcluir(BuildContext context) {
+    if (_bloqueadoPorFinalizacao(context)) return;
+    onExcluir();
+  }
 
   void _handleToggle(BuildContext context) {
     final usuario = context.read<UsuarioProvider>().usuarioLogado;
-    final ehAdmin = usuario?.role.trim().toUpperCase() == 'ADMIN';
+    final ehAdmin = usuario?.role.trim().toUpperCase() == 'ADMIN' || usuario?.role.trim().toUpperCase() == 'GERENTE';
     final novoValor = !comprado;
 
     // Bloqueia qualquer alteração se a solicitação está FINALIZADA
-    if (andamento == 'FINALIZADO') {
-      showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Solicitação finalizada'),
-          content: const Text(
-            'Esta solicitação está finalizada. Para alterar os itens, reabra-a primeiro.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            if (ehAdmin)
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-                child: const Text('Reabrir'),
-              ),
-          ],
-        ),
-      ).then((reabrir) {
-        if (reabrir == true) onReabrirSolicitacao?.call();
-      });
-      return;
-    }
+    if (_bloqueadoPorFinalizacao(context)) return;
 
     // Se está tentando desmarcar e não é admin, bloqueia
     if (!novoValor && !ehAdmin) {
@@ -1816,9 +2262,55 @@ class _MaterialCard extends StatelessWidget {
                       Row(
                         children: [
                           Flexible(
-                            child: Text(materialNome,
-                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                                overflow: TextOverflow.ellipsis),
+                            child: Text.rich(
+                              TextSpan(
+                                children: [
+                                  TextSpan(
+                                    text: materialNome,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600, fontSize: 14),
+                                  ),
+                                  if (_medidaOuDimensao != null) ...[
+                                    TextSpan(
+                                      text: '  •  ',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w400,
+                                        color: Theme.of(context).colorScheme.outline,
+                                      ),
+                                    ),
+                                    TextSpan(
+                                      text: _medidaOuDimensao,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                  if (materialEspessura != null &&
+                                      materialEspessura!.trim().isNotEmpty) ...[
+                                    TextSpan(
+                                      text: '  •  ',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w400,
+                                        color: Theme.of(context).colorScheme.outline,
+                                      ),
+                                    ),
+                                    TextSpan(
+                                      text: materialEspessura!.trim(),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                           if (tipo == 'adicional') ...[
                             const SizedBox(width: 8),
@@ -1862,12 +2354,6 @@ class _MaterialCard extends StatelessWidget {
                         if (materialIdentificador != null && materialIdentificador!.isNotEmpty) {
                           atributos.add(materialIdentificador!);
                         }
-                        if (materialMedida != null && materialMedida!.isNotEmpty) {
-                          atributos.add(materialMedida!);
-                        }
-                        if (materialEspessura != null && materialEspessura!.isNotEmpty) {
-                          atributos.add(materialEspessura!);
-                        }
                         if (materialCategoria != null && materialCategoria!.isNotEmpty) {
                           atributos.add(materialCategoria!);
                         }
@@ -1901,6 +2387,32 @@ class _MaterialCard extends StatelessWidget {
                   pendente: pendente,
                   onTap: () => _handleToggle(context),
                 ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                _IconActionButton(
+                  icon: Icons.forward_outlined,
+                  tooltip: 'Encaminhar este material no chat',
+                  onTap: onEncaminhar,
+                ),
+                if (podeEditar) ...[
+                  const SizedBox(width: 8),
+                  _IconActionButton(
+                    icon: Icons.edit_outlined,
+                    tooltip: 'Editar quantidade e observação',
+                    onTap: () => _handleEditar(context),
+                  ),
+                  const SizedBox(width: 8),
+                  _IconActionButton(
+                    icon: Icons.delete_outline,
+                    tooltip: 'Remover este material',
+                    color: AppTheme.error,
+                    onTap: () => _handleExcluir(context),
+                  ),
+                ],
               ],
             ),
             if (observacao != null && observacao!.isNotEmpty) ...[
@@ -1946,6 +2458,13 @@ class _MaterialCard extends StatelessWidget {
                       label: 'Por $adicionadoPorNome',
                     ),
                 ],
+                if (editadoEm != null)
+                  _InfoChip(
+                    icon: Icons.edit_outlined,
+                    label:
+                        'Editado em ${DateFormat('dd/MM/yyyy HH:mm').format(editadoEm!)}${editadoPorNome != null ? ' por $editadoPorNome' : ''}',
+                    color: const Color(0xFFB45309),
+                  ),
                 if (comprado && compradoEm != null)
                   _InfoChip(
                     icon: Icons.shopping_cart,
@@ -1968,7 +2487,7 @@ class _MaterialCard extends StatelessWidget {
   }
 }
 
-class _CompradoToggle extends StatelessWidget {
+class _CompradoToggle extends StatefulWidget {
   final bool comprado;
   final bool pendente;
   final VoidCallback onTap;
@@ -1980,52 +2499,80 @@ class _CompradoToggle extends StatelessWidget {
   });
 
   @override
+  State<_CompradoToggle> createState() => _CompradoToggleState();
+}
+
+class _CompradoToggleState extends State<_CompradoToggle> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
+    final comprado = widget.comprado;
+    final pendente = widget.pendente;
+
+    final corBase = comprado
+        ? AppTheme.success
+        : Theme.of(context).colorScheme.outlineVariant;
+    final corFundo = comprado
+        ? AppTheme.success.withValues(alpha: _hovered ? 0.22 : 0.15)
+        : (_hovered
+            ? Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.7)
+            : Theme.of(context).colorScheme.surfaceContainerHighest);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
-        InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(20),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: comprado
-                  ? AppTheme.success.withValues(alpha: 0.15)
-                  : Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: pendente
-                    ? AppTheme.error
-                    : (comprado
-                        ? AppTheme.success
-                        : Theme.of(context).colorScheme.outlineVariant),
-                width: pendente ? 1.5 : 1,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  comprado ? Icons.check_circle : Icons.radio_button_unchecked,
-                  size: 16,
-                  color: comprado
-                      ? AppTheme.success
-                      : Theme.of(context).colorScheme.outline,
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: GestureDetector(
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: corFundo,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: pendente ? AppTheme.error : corBase,
+                  width: pendente ? 1.5 : (_hovered ? 1.5 : 1),
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  comprado ? 'COMPRADO' : 'PENDENTE',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                boxShadow: _hovered
+                    ? [
+                        BoxShadow(
+                          color: (pendente ? AppTheme.error : corBase)
+                              .withValues(alpha: 0.25),
+                          blurRadius: 6,
+                          offset: const Offset(0, 1),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    comprado ? Icons.check_circle : Icons.radio_button_unchecked,
+                    size: 16,
                     color: comprado
                         ? AppTheme.success
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                        : Theme.of(context).colorScheme.outline,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  Text(
+                    comprado ? 'COMPRADO' : 'PENDENTE',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: comprado
+                          ? AppTheme.success
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -2041,6 +2588,158 @@ class _CompradoToggle extends StatelessWidget {
             ),
           ),
         ],
+      ],
+    );
+  }
+}
+
+class _IconActionButton extends StatefulWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final Color? color;
+
+  const _IconActionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.color,
+  });
+
+  @override
+  State<_IconActionButton> createState() => _IconActionButtonState();
+}
+
+class _IconActionButtonState extends State<_IconActionButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final cor = widget.color ?? Theme.of(context).colorScheme.onSurfaceVariant;
+    return Tooltip(
+      message: widget.tooltip,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(8),
+          hoverColor: Colors.transparent,
+          mouseCursor: SystemMouseCursors.click,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: _hovered ? cor.withValues(alpha: 0.12) : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _hovered ? cor.withValues(alpha: 0.4) : Colors.transparent,
+              ),
+            ),
+            child: Icon(widget.icon, size: 16, color: cor),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Diálogo de edição de quantidade/observação de um material ──────────────
+class _EditarMaterialDialog extends StatefulWidget {
+  final double quantidadeAtual;
+  final String? observacaoAtual;
+
+  const _EditarMaterialDialog({
+    required this.quantidadeAtual,
+    this.observacaoAtual,
+  });
+
+  @override
+  State<_EditarMaterialDialog> createState() => _EditarMaterialDialogState();
+}
+
+class _EditarMaterialDialogState extends State<_EditarMaterialDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _quantidadeCtrl;
+  late final TextEditingController _observacaoCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final qtd = widget.quantidadeAtual;
+    _quantidadeCtrl = TextEditingController(
+      text: qtd % 1 == 0 ? qtd.toStringAsFixed(0) : qtd.toStringAsFixed(2),
+    );
+    _observacaoCtrl = TextEditingController(text: widget.observacaoAtual ?? '');
+  }
+
+  @override
+  void dispose() {
+    _quantidadeCtrl.dispose();
+    _observacaoCtrl.dispose();
+    super.dispose();
+  }
+
+  void _salvar() {
+    if (!_formKey.currentState!.validate()) return;
+    final quantidade = double.parse(_quantidadeCtrl.text.replaceAll(',', '.'));
+    final observacao = _observacaoCtrl.text.trim();
+    Navigator.pop(context, {
+      'quantidade': quantidade,
+      'observacao': observacao.isEmpty ? null : observacao,
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Editar Material'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: _quantidadeCtrl,
+              decoration: const InputDecoration(labelText: 'Quantidade'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              autofocus: true,
+              validator: (v) {
+                final valor = double.tryParse((v ?? '').trim().replaceAll(',', '.'));
+                if (valor == null || valor <= 0) return 'Informe uma quantidade válida';
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _observacaoCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Observação',
+                alignLabelWithHint: true,
+              ),
+              maxLines: 3,
+              textCapitalization: TextCapitalization.sentences,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          style: TextButton.styleFrom().copyWith(
+            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+          ),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _salvar,
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+          ),
+          child: const Text('Salvar'),
+        ),
       ],
     );
   }
@@ -2129,7 +2828,7 @@ class _AbaDadosSolicitacao extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Apenas administradores podem editar os dados da solicitação.',
+                      'Apenas o criador da solicitação ou um administrador pode editar os dados.',
                       style: const TextStyle(fontSize: 12, color: Color(0xFF1E88E5)),
                     ),
                   ),
@@ -2138,6 +2837,22 @@ class _AbaDadosSolicitacao extends StatelessWidget {
             ),
             const SizedBox(height: 16),
           ],
+          Consumer<SolicitacaoMaterialProvider>(
+            builder: (_, prov, __) {
+              if (prov.logs.isEmpty) return const SizedBox.shrink();
+              // Logs vêm ordenados do mais recente para o mais antigo.
+              final ultimo = prov.logs.first;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: _InfoChip(
+                  icon: Icons.edit_note,
+                  label:
+                      'Editado em ${DateFormat('dd/MM/yyyy HH:mm').format(ultimo.editadoEm)} por ${ultimo.editorNome}',
+                  color: AppTheme.primary,
+                ),
+              );
+            },
+          ),
           Row(
             children: [
               Expanded(
@@ -2268,11 +2983,14 @@ class _AbaHistorico extends StatelessWidget {
           separatorBuilder: (_, __) => const SizedBox(height: 8),
           itemBuilder: (_, i) {
             final log = prov.logs[i];
+            final excluido = log.depois['excluido'] == true;
             final campos = <String>[];
-            for (final key in log.depois.keys) {
-              final antes = log.antes[key]?.toString();
-              final depois = log.depois[key]?.toString();
-              if (antes != depois) campos.add(key);
+            if (!excluido) {
+              for (final key in log.depois.keys) {
+                final antes = log.antes[key]?.toString();
+                final depois = log.depois[key]?.toString();
+                if (antes != depois) campos.add(key);
+              }
             }
 
             return Card(
@@ -2284,7 +3002,11 @@ class _AbaHistorico extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.edit_note, size: 16, color: AppTheme.primary),
+                        Icon(
+                          excluido ? Icons.delete_outline : Icons.edit_note,
+                          size: 16,
+                          color: excluido ? AppTheme.error : AppTheme.primary,
+                        ),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(log.editorNome,
@@ -2297,6 +3019,30 @@ class _AbaHistorico extends StatelessWidget {
                                 color: Theme.of(context).colorScheme.onSurfaceVariant)),
                       ],
                     ),
+                    if (log.item != null && log.item!.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        log.item!,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontStyle: FontStyle.italic,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    if (excluido) ...[
+                      const SizedBox(height: 8),
+                      const Divider(height: 0),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Material removido da solicitação',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.error,
+                        ),
+                      ),
+                    ],
                     if (campos.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       const Divider(height: 0),
@@ -2321,33 +3067,46 @@ class _AbaHistorico extends StatelessWidget {
                                             .onSurfaceVariant)),
                               ),
                               Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                child: Wrap(
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  spacing: 10,
+                                  runSpacing: 3,
                                   children: [
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.error.withValues(alpha: 0.08),
-                                        borderRadius: BorderRadius.circular(4),
+                                    RichText(
+                                      overflow: TextOverflow.ellipsis,
+                                      text: TextSpan(
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant),
+                                        children: [
+                                          const TextSpan(
+                                              text: 'antes: ',
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppTheme.error)),
+                                          TextSpan(text: antes),
+                                        ],
                                       ),
-                                      child: Text('− $antes',
-                                          style: const TextStyle(
-                                              fontSize: 11, color: AppTheme.error),
-                                          overflow: TextOverflow.ellipsis),
                                     ),
-                                    const SizedBox(height: 3),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.success.withValues(alpha: 0.08),
-                                        borderRadius: BorderRadius.circular(4),
+                                    RichText(
+                                      overflow: TextOverflow.ellipsis,
+                                      text: TextSpan(
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant),
+                                        children: [
+                                          const TextSpan(
+                                              text: 'depois: ',
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppTheme.success)),
+                                          TextSpan(text: depois),
+                                        ],
                                       ),
-                                      child: Text('+ $depois',
-                                          style: const TextStyle(
-                                              fontSize: 11, color: AppTheme.success),
-                                          overflow: TextOverflow.ellipsis),
                                     ),
                                   ],
                                 ),
@@ -2500,6 +3259,9 @@ class _AdicionarMateriaisDialogState extends State<_AdicionarMateriaisDialog> {
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close, size: 20),
                     tooltip: 'Fechar',
+                    style: IconButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ],
               ),
@@ -2524,11 +3286,17 @@ class _AdicionarMateriaisDialogState extends State<_AdicionarMateriaisDialog> {
                             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.w700)),
                         const Spacer(),
-                        TextButton.icon(
-                          onPressed: _adicionarItem,
-                          icon: const Icon(Icons.add, size: 18),
-                          label: const Text('Adicionar Material'),
-                          style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
+                        Tooltip(
+                          message: 'Adicionar um novo material à solicitação',
+                          child: TextButton.icon(
+                            onPressed: _adicionarItem,
+                            icon: const Icon(Icons.add, size: 18),
+                            label: const Text('Adicionar Material'),
+                            style: TextButton.styleFrom(foregroundColor: AppTheme.primary)
+                                .copyWith(
+                              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -2555,20 +3323,31 @@ class _AdicionarMateriaisDialogState extends State<_AdicionarMateriaisDialog> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: _salvando ? null : () => Navigator.pop(context),
-                    child: const Text('Cancelar'),
+                  Tooltip(
+                    message: 'Cancelar e fechar sem salvar',
+                    child: TextButton(
+                      onPressed: _salvando ? null : () => Navigator.pop(context),
+                      style: TextButton.styleFrom().copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                      child: const Text('Cancelar'),
+                    ),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: _salvando ? null : _salvar,
-                    style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-                    child: _salvando
-                        ? const SizedBox(
-                            width: 18, height: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
-                        : const Text('Adicionar'),
+                  Tooltip(
+                    message: 'Adicionar os materiais à solicitação',
+                    child: FilledButton(
+                      onPressed: _salvando ? null : _salvar,
+                      style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                      child: _salvando
+                          ? const SizedBox(
+                              width: 18, height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : const Text('Adicionar'),
+                    ),
                   ),
                 ],
               ),
@@ -2777,7 +3556,7 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
       context: context,
       builder: (_) => const MaterialFormDialog(),
     );
-    if (criou == true && mounted) {
+    if (criou == true && context.mounted) {
       await context.read<MaterialProvider>().carregarCategorias();
       if (_categoriaSelecionada != null) {
         _aplicarFiltrosMateriais();

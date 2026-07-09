@@ -19,7 +19,6 @@ router.post('/movimentacoes',                    authMiddleware, roleMiddleware(
 router.delete('/movimentacoes/:movimentacaoId',  authMiddleware, roleMiddleware(ESCRITA),  ctrl.removerMovimentacao);
 router.patch('/movimentacoes/:movimentacaoId/preco', authMiddleware, roleMiddleware(ESCRITA), ctrl.atualizarPrecoMovimentacao);
 router.patch('/:id/renomear', authMiddleware, roleMiddleware(['ADMIN', 'GERENTE', 'COMPRAS']), ctrl.renomearOS);
-// ↓ Usam o id numérico da RelacaoOS (não o numeroOS) para identificar unicamente a relação
 router.delete('/:relacaoOSId',         authMiddleware, roleMiddleware(EXCLUSAO), ctrl.excluirRelacaoOS);
 router.patch('/:relacaoOSId/fechar',   authMiddleware, roleMiddleware(ESCRITA),  ctrl.fecharOS);
 

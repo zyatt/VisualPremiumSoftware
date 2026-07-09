@@ -11,7 +11,6 @@ async function authMiddleware(req, res, next) {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Busca o nome atualizado do banco (o payload do JWT pode não conter o campo nome)
     const usuario = await prisma.usuario.findUnique({
       where:  { id: decoded.id },
       select: { id: true, nome: true, role: true, ativo: true },

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'historico_material_page.dart';
+import 'orcamento_page.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +14,7 @@ import '../providers/orcamento_provider.dart';
 import '../providers/produto_provider.dart';
 import '../providers/orcamento_venda_provider.dart';
 import '../providers/alertas_estoque_provider.dart';
+import '../providers/usuario_provider.dart';
 import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
 
@@ -192,9 +194,88 @@ class _EstoquePageState extends State<EstoquePage> {
     });
   }
 
+  /// Abre a listagem de materiais direto na categoria do material informado,
+  /// já com nome/identificador/medida/espessura preenchidos — usado quando a
+  /// página é aberta a partir do MaterialCriticoBanner (SSE 'material_critico').
+  /// Pula a tela de identificadores porque já sabemos exatamente qual é.
+  void _abrirParaNotificacaoCritica(MaterialCriticoNotificacao n) {
+    final temCategoria = n.categoria != null && n.categoria!.trim().isNotEmpty;
+    final categoriaId    = temCategoria ? n.categoria! : _kCategoriaSemCategoria;
+    final categoriaLabel = temCategoria ? n.categoria! : 'Sem categoria';
+    final temIdentificador =
+        n.identificador != null && n.identificador!.trim().isNotEmpty;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EstoqueCategoriaPage(
+          categoriaId:         categoriaId,
+          categoriaLabel:      categoriaLabel,
+          cor:                 _cores.first,
+          icone:               Icons.warning_amber_rounded,
+          buscaInicial:        n.nome,
+          identificadorFiltro: temIdentificador ? n.identificador!.trim() : null,
+          medidaInicial:       n.medida,
+          espessuraInicial:    n.espessura,
+          roleUsuario:         widget.roleUsuario,
+        ),
+      ),
+    ).then((_) {
+      if (mounted) context.read<MaterialProvider>().carregarCategorias();
+    });
+  }
+
+  /// Abre a listagem "Geral" (todas as categorias) já filtrada por status —
+  /// usado quando a página é aberta a partir do diálogo de Alertas de
+  /// Estoque, clicando em "Ir para Estoque".
+  void _abrirGeralComStatus(String status) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EstoqueCategoriaPage(
+          categoriaId:    _kCategoriaGeral,
+          categoriaLabel: 'Geral',
+          cor:            const Color(0xFF5E35B1),
+          icone:          Icons.grid_view_rounded,
+          statusInicial:  status,
+          roleUsuario:    widget.roleUsuario,
+        ),
+      ),
+    ).then((_) {
+      if (mounted) context.read<MaterialProvider>().carregarCategorias();
+    });
+  }
+
   // ── BUILD ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    // ── Navegação pendente vinda do MaterialCriticoBanner ────────────────────
+    // Ao tocar no banner, o AppShell guarda os dados do material no
+    // MaterialProvider e navega para /estoque. Aqui detectamos isso e abrimos
+    // automaticamente a categoria certa já filtrada.
+    final filtroPendente =
+        context.watch<MaterialProvider>().filtroNavegacaoPendente;
+    if (filtroPendente != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.read<MaterialProvider>().consumirFiltroNavegacaoPendente();
+        _abrirParaNotificacaoCritica(filtroPendente);
+      });
+    }
+
+    // ── Navegação pendente vinda do diálogo "Alertas de Estoque" ─────────────
+    // Ao clicar em "Ir para Estoque" no diálogo aberto pelo sino de
+    // notificações, o AppShell guarda o status desejado (ex.: 'CRITICO') no
+    // MaterialProvider e navega para /estoque. Aqui abrimos a tela "Geral"
+    // já com esse status ativo no filtro.
+    final statusPendente =
+        context.watch<MaterialProvider>().filtroStatusPendente;
+    if (statusPendente != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.read<MaterialProvider>().consumirFiltroStatusPendente();
+        _abrirGeralComStatus(statusPendente);
+      });
+    }
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
@@ -452,7 +533,15 @@ class _EstoquePageState extends State<EstoquePage> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ExportarPdfDialog extends StatefulWidget {
-  const _ExportarPdfDialog();
+  final bool         mostrarSeletorCategoria;
+  final List<String> categorias;
+  final String       categoriaInicial;
+
+  const _ExportarPdfDialog({
+    this.mostrarSeletorCategoria = false,
+    this.categorias = const [],
+    this.categoriaInicial = '',
+  });
 
   @override
   State<_ExportarPdfDialog> createState() => _ExportarPdfDialogState();
@@ -460,6 +549,7 @@ class _ExportarPdfDialog extends StatefulWidget {
 
 class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
   String _statusSelecionado = 'TODOS';
+  late String _categoriaSelecionada = widget.categoriaInicial;
 
   static const _opcoes = [
     ('TODOS',   'Todos os status',   Icons.list_alt,          AppTheme.primary),
@@ -484,6 +574,22 @@ class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (widget.mostrarSeletorCategoria) ...[
+              Text(
+                'Categoria a exportar:',
+                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 8),
+              _CategoriaFiltroDropdown(
+                categorias: widget.categorias,
+                valorSelecionado: _categoriaSelecionada.isEmpty ||
+                        widget.categorias.contains(_categoriaSelecionada)
+                    ? _categoriaSelecionada
+                    : '',
+                onSelecionar: (v) => setState(() => _categoriaSelecionada = v),
+              ),
+              const SizedBox(height: 18),
+            ],
             Text(
               'Selecione quais materiais deseja incluir no relatório:',
               style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
@@ -542,7 +648,9 @@ class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
           child: const Text('Cancelar'),
         ),
         FilledButton.icon(
-          onPressed: () => Navigator.of(context).pop(_statusSelecionado),
+          onPressed: () => Navigator.of(context).pop(
+            (status: _statusSelecionado, categoria: _categoriaSelecionada),
+          ),
           icon: const Icon(Icons.download, size: 16),
           label: const Text('Exportar'),
           style: FilledButton.styleFrom(
@@ -700,34 +808,10 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
             // ── Cabeçalho ────────────────────────────────────────────────────
             Row(
               children: [
-                MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: InkWell(
+                _BotaoVoltar(
+                  label: 'Categorias',
+                  tooltip: 'Voltar para categorias',
                   onTap: () => Navigator.of(context).pop(),
-                  borderRadius: BorderRadius.circular(10),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        SizedBox(width: 6),
-                        Text(
-                          'Categorias',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  ),
                 ),
                 const SizedBox(width: 16),
                 Container(
@@ -891,6 +975,80 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
 // CARD DE IDENTIFICADOR
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
+// Usado no cabeçalho das páginas de identificadores/materiais para voltar
+// à tela anterior (categorias ou identificadores).
+class _BotaoVoltar extends StatefulWidget {
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _BotaoVoltar({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_BotaoVoltar> createState() => _BotaoVoltarState();
+}
+
+class _BotaoVoltarState extends State<_BotaoVoltar> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        child: InkWell(
+          onTap: widget.onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? AppTheme.primary.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              border: Border.all(
+                color: _hovered
+                    ? AppTheme.primary.withValues(alpha: 0.6)
+                    : scheme.outlineVariant,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: _hovered ? AppTheme.primary : scheme.onSurfaceVariant,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _hovered ? AppTheme.primary : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _IdentificadorCard extends StatefulWidget {
   final String   label;
   final int      quantidade;
@@ -1007,6 +1165,15 @@ class EstoqueCategoriaPage extends StatefulWidget {
   final Color    cor;
   final IconData icone;
   final String?  buscaInicial;
+  /// Pré-preenchem os filtros de medida/espessura — usados quando a página é
+  /// aberta a partir do MaterialCriticoBanner, que já sabe exatamente qual
+  /// medida/espessura do material crítico.
+  final String?  medidaInicial;
+  final String?  espessuraInicial;
+  /// Pré-preenche o filtro de status (ex.: 'CRITICO') — usado quando a
+  /// página é aberta a partir do diálogo de Alertas de Estoque, clicando em
+  /// "Ir para Estoque".
+  final String?  statusInicial;
   /// Quando não-null, filtra automaticamente pelo identificador escolhido na
   /// página anterior (EstoqueIdentificadorPage). String vazia = sem identificador.
   /// null especial vindo de _kIdentificadorTodos = sem filtro de identificador.
@@ -1024,6 +1191,9 @@ class EstoqueCategoriaPage extends StatefulWidget {
     required this.cor,
     required this.icone,
     this.buscaInicial,
+    this.medidaInicial,
+    this.espessuraInicial,
+    this.statusInicial,
     this.identificadorFiltro,
     this.identificadorLabel,
     this.mostrarBotaoIdentificadores = false,
@@ -1034,12 +1204,176 @@ class EstoqueCategoriaPage extends StatefulWidget {
   State<EstoqueCategoriaPage> createState() => _EstoqueCategoriaPageState();
 }
 
+// ── Dropdown de categoria com busca embutida no próprio menu ────────────────
+// Diferente de um DropdownButtonFormField comum: ao abrir, mostra um campo de
+// texto no topo do próprio dropdown para filtrar a lista em tempo real. O
+// controle fechado se parece com os demais filtros (label "Categoria" +
+// valor selecionado).
+class _CategoriaFiltroDropdown extends StatefulWidget {
+  final List<String> categorias;
+  final String valorSelecionado; // '' = TODAS
+  final ValueChanged<String> onSelecionar;
+  const _CategoriaFiltroDropdown({
+    required this.categorias,
+    required this.valorSelecionado,
+    required this.onSelecionar,
+  });
+
+  @override
+  State<_CategoriaFiltroDropdown> createState() => _CategoriaFiltroDropdownState();
+}
+
+class _CategoriaFiltroDropdownState extends State<_CategoriaFiltroDropdown> {
+  final MenuController _menuController = MenuController();
+  final TextEditingController _buscaCtrl = TextEditingController();
+  String _busca = '';
+
+  @override
+  void dispose() {
+    _buscaCtrl.dispose();
+    super.dispose();
+  }
+
+  void _abrirMenu() {
+    _buscaCtrl.clear();
+    setState(() => _busca = '');
+    _menuController.open();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return MenuAnchor(
+      controller: _menuController,
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(scheme.surface),
+        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+        elevation: const WidgetStatePropertyAll(6),
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: scheme.outlineVariant),
+          ),
+        ),
+      ),
+      menuChildren: [
+        StatefulBuilder(
+          builder: (context, setMenuState) {
+            // Recalculado a cada setMenuState (ex.: ao digitar na busca),
+            // já que _busca pode ter mudado desde o último build externo.
+            final filtradas = _busca.trim().isEmpty
+                ? widget.categorias
+                : widget.categorias
+                    .where((c) => c.toLowerCase().contains(_busca.trim().toLowerCase()))
+                    .toList();
+            return SizedBox(
+              width: 240,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+                    child: TextField(
+                      controller: _buscaCtrl,
+                      autofocus: true,
+                      inputFormatters: [_NoCommaFormatter()],
+                      decoration: InputDecoration(
+                        hintText:   'Buscar categoria...',
+                        isDense:    true,
+                        prefixIcon: Icon(Icons.search, size: 18, color: scheme.outline),
+                      ),
+                      onChanged: (v) {
+                        _busca = v;
+                        setMenuState(() {});
+                      },
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 260),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          MenuItemButton(
+                            onPressed: () {
+                              widget.onSelecionar('');
+                              _menuController.close();
+                            },
+                            trailingIcon: widget.valorSelecionado.isEmpty
+                                ? Icon(Icons.check, size: 16, color: AppTheme.primary)
+                                : null,
+                            child: const SizedBox(
+                              width: 208,
+                              child: Text('TODAS'),
+                            ),
+                          ),
+                          for (final c in filtradas)
+                            MenuItemButton(
+                              onPressed: () {
+                                widget.onSelecionar(c);
+                                _menuController.close();
+                              },
+                              trailingIcon: widget.valorSelecionado == c
+                                  ? Icon(Icons.check, size: 16, color: AppTheme.primary)
+                                  : null,
+                              child: SizedBox(
+                                width: 208,
+                                child: Text(c, overflow: TextOverflow.ellipsis),
+                              ),
+                            ),
+                          if (filtradas.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text(
+                                'Nenhuma categoria encontrada',
+                                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+      builder: (context, controller, child) {
+        return InkWell(
+          borderRadius: BorderRadius.circular(4),
+          onTap: () => controller.isOpen ? controller.close() : _abrirMenu(),
+          child: InputDecorator(
+            decoration: InputDecoration(
+              labelText: 'Categoria',
+              isDense:   true,
+              suffixIcon: Icon(
+                controller.isOpen ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            child: Text(
+              widget.valorSelecionado.isEmpty ? 'TODAS' : widget.valorSelecionado,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 14, color: scheme.onSurface),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   late final TextEditingController _buscaCtrl;
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
   final _espessuraCtrl     = TextEditingController();
   String _statusFiltro         = '';
+  String _categoriaFiltro      = ''; // só usado quando widget.categoriaId == _kCategoriaGeral
   bool   _somenteFornecedor    = false;
   Timer? _debounceTimer;
 
@@ -1049,7 +1383,12 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   bool    _crescente    = true;
 
   String? _categoriaParaProvider() {
-    if (widget.categoriaId == _kCategoriaGeral)        return null;
+    if (widget.categoriaId == _kCategoriaGeral) {
+      // Na página "Geral" (todas as categorias misturadas), o dropdown
+      // de Categoria permite restringir a uma categoria específica sem
+      // sair da tela; vazio = todas.
+      return _categoriaFiltro.isEmpty ? null : _categoriaFiltro;
+    }
     if (widget.categoriaId == _kCategoriaSemCategoria) return '';
     return widget.categoriaId;
   }
@@ -1062,7 +1401,22 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     if (widget.identificadorFiltro != null) {
       _identificadorCtrl.text = widget.identificadorFiltro!;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _aplicarFiltros());
+    if (widget.medidaInicial != null && widget.medidaInicial!.trim().isNotEmpty) {
+      _medidaCtrl.text = widget.medidaInicial!.trim();
+    }
+    if (widget.espessuraInicial != null && widget.espessuraInicial!.trim().isNotEmpty) {
+      _espessuraCtrl.text = widget.espessuraInicial!.trim();
+    }
+    if (widget.statusInicial != null && widget.statusInicial!.trim().isNotEmpty) {
+      _statusFiltro = widget.statusInicial!.trim();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _aplicarFiltros();
+      if (widget.categoriaId == _kCategoriaGeral &&
+          context.read<MaterialProvider>().categorias.isEmpty) {
+        context.read<MaterialProvider>().carregarCategorias();
+      }
+    });
   }
 
   @override
@@ -1165,7 +1519,13 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   }
 
   Future<void> _abrirFormMaterial([MaterialModel? material]) async {
-    final isCompras = widget.roleUsuario == 'COMPRAS';
+    // Lê o role sempre do UsuarioProvider (fonte da verdade), e não de
+    // widget.roleUsuario: esta página pode ter sido aberta via
+    // Navigator.push antes de uma troca de usuário ("Trocar para"), e nesse
+    // caso o valor recebido no construtor fica desatualizado — o
+    // Navigator.push não reconstrói a página quando o usuário muda.
+    final roleAtual = context.read<UsuarioProvider>().usuarioLogado?.role;
+    final isCompras = roleAtual == 'COMPRAS';
     if (isCompras && material != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1183,7 +1543,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         onDesativar: (!isCompras && material != null) ? _desativar : null,
         onReativar:  (!isCompras && material != null) ? _reativar  : null,
         onExcluir:   (!isCompras && material != null) ? _excluir   : null,
-        roleUsuario: widget.roleUsuario,
+        roleUsuario: roleAtual,
       ),
     );
     if (!mounted) return;
@@ -1301,14 +1661,20 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   }
 
   Future<void> _exportarPdf() async {
-    // ── 1. Pedir ao usuário qual status deseja exportar ─────────────────────
-    final statusEscolhido = await showDialog<String>(
+    final mostrarSeletorCategoria = widget.categoriaId == _kCategoriaGeral;
+
+    // ── 1. Pedir ao usuário qual status (e, na tela Geral, qual categoria) ──
+    final escolha = await showDialog<({String status, String categoria})>(
       context: context,
       builder: (ctx) {
-        return const _ExportarPdfDialog();
+        return _ExportarPdfDialog(
+          mostrarSeletorCategoria: mostrarSeletorCategoria,
+          categorias:              context.read<MaterialProvider>().categorias,
+          categoriaInicial:        _categoriaFiltro,
+        );
       },
     );
-    if (statusEscolhido == null) return; // cancelou
+    if (escolha == null) return; // cancelou
 
     // ── 2. Mostrar progresso ────────────────────────────────────────────────
     if (!mounted) return;
@@ -1320,15 +1686,19 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
       ),
     );
 
-    final String? catParam = widget.categoriaId == _kCategoriaGeral
-        ? null
+    // Na tela "Geral", a categoria vem da escolha feita no diálogo
+    // (pré-preenchida com o filtro já aplicado na tela, mas o usuário
+    // pode trocar sem precisar sair do diálogo). Nas demais telas, a
+    // categoria já é fixa (a da própria página).
+    final String? catParam = mostrarSeletorCategoria
+        ? (escolha.categoria.isEmpty ? null : escolha.categoria)
         : widget.categoriaId == _kCategoriaSemCategoria
             ? ''
             : widget.categoriaId;
 
     // 'TODOS' → não passa status (backend interpreta como sem filtro)
     final String? statusParam =
-        statusEscolhido == 'TODOS' ? null : statusEscolhido;
+        escolha.status == 'TODOS' ? null : escolha.status;
 
     try {
       final bytes = await EstoqueRepository().baixarPdf(
@@ -1343,11 +1713,11 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         throw Exception('O servidor não retornou um PDF válido. Verifique o console do backend.');
       }
 
-      final catLabel = widget.categoriaId == _kCategoriaGeral
+      final catLabel = catParam == null
           ? 'GERAL'
-          : widget.categoriaId == _kCategoriaSemCategoria
+          : catParam.isEmpty
               ? 'SEM_CATEGORIA'
-              : widget.categoriaId.toUpperCase().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+              : catParam.toUpperCase().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
       final stLabel  = statusParam ?? 'TODOS';
       final fileName = 'estoque_${catLabel}_$stLabel.pdf';
 
@@ -1389,7 +1759,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         precos[fm.fornecedorId] = PrecoFornecedorData(
           fornecedorNome: fm.fornecedorNome,
           preco:   fm.preco > 0 ? fm.preco : null,
-          precoM2: fm.precoMetroQuadrado > 0 ? fm.precoMetroQuadrado : null,
         );
       }
       return ItemOrcamentoData(
@@ -1410,6 +1779,8 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     if (widget.categoriaId != _kCategoriaGeral &&
         widget.categoriaId != _kCategoriaSemCategoria) {
       partes.add(widget.categoriaLabel);
+    } else if (_categoriaFiltro.isNotEmpty) {
+      partes.add(_categoriaFiltro);
     }
     if (_medidaCtrl.text.trim().isNotEmpty) {
       partes.add(_medidaCtrl.text.trim());
@@ -1427,6 +1798,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     if (!mounted) return;
     context.read<OrcamentoProvider>().adicionarItensEmLote(titulo, itens);
 
+    // Ao entrar em /orcamento, abre direto no editor (aba "abertos") com
+    // este orçamento recém-criado, em vez da lista de aprovação.
+    OrcamentoPage.abrirEditorAoEntrar = true;
     context.go('/orcamento');
   }
 
@@ -1448,36 +1822,14 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Botão voltar
-                MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: InkWell(
+                _BotaoVoltar(
+                  label: widget.mostrarBotaoIdentificadores
+                      ? widget.categoriaLabel
+                      : 'Categorias',
+                  tooltip: widget.mostrarBotaoIdentificadores
+                      ? 'Voltar para ${widget.categoriaLabel}'
+                      : 'Voltar para categorias',
                   onTap: () => Navigator.of(context).pop(),
-                  borderRadius: BorderRadius.circular(10),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.arrow_back, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        SizedBox(width: 6),
-                        Text(
-                          widget.mostrarBotaoIdentificadores
-                              ? widget.categoriaLabel
-                              : 'Categorias',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  ),
                 ),
                 const SizedBox(width: 16),
                 // Ícone da categoria
@@ -1558,8 +1910,8 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                         icon: const Icon(Icons.history, size: 18),
                         label: const Text('Histórico'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF7C3AED),
-                          side: const BorderSide(color: Color(0xFF7C3AED)),
+                          foregroundColor: const Color(0xFFF59E0B),
+                          side: const BorderSide(color: Color(0xFFF59E0B)),
                           padding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 12),
                         ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
@@ -1667,6 +2019,29 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   ),
                 ),
                 const SizedBox(width: 12),
+                if (widget.categoriaId == _kCategoriaGeral) ...[
+                  SizedBox(
+                    width: 220,
+                    child: Consumer<MaterialProvider>(
+                      builder: (_, provider, __) {
+                        final categorias = provider.categorias;
+                        // Garante que o valor selecionado ainda exista na lista
+                        // (ex.: categoria removida enquanto o filtro estava ativo).
+                        final valorValido = _categoriaFiltro.isEmpty ||
+                            categorias.contains(_categoriaFiltro);
+                        return _CategoriaFiltroDropdown(
+                          categorias: categorias,
+                          valorSelecionado: valorValido ? _categoriaFiltro : '',
+                          onSelecionar: (v) {
+                            setState(() => _categoriaFiltro = v);
+                            _aplicarFiltros();
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
                 SizedBox(
                   width: 160,
                   child: DropdownButtonFormField<String>(
@@ -1691,7 +2066,10 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                 SizedBox(width: 8),
                 MouseRegion(
                   cursor: SystemMouseCursors.click,
-                  child: FilterChip(
+                  child: Tooltip(
+                    message: 'Mostrar somente materiais com fornecedor vinculado',
+                    child: FilterChip(
+                  mouseCursor: WidgetStateMouseCursor.clickable,
                   label: Text('Com fornecedor'),
                   avatar: Icon(
                     Icons.store_outlined,
@@ -1716,6 +2094,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                         : Theme.of(context).colorScheme.outline.withValues(alpha: 0.4),
                   ),
                   ),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 IconButton.outlined(
@@ -1728,6 +2107,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     _espessuraCtrl.clear();
                     setState(() {
                       _statusFiltro      = '';
+                      _categoriaFiltro   = '';
                       _somenteFornecedor = false;
                     });
                     context.read<MaterialProvider>().carregar(
@@ -2147,6 +2527,7 @@ class _BotaoPagina extends StatelessWidget {
       message: tooltip,
       child: InkWell(
         onTap: enabled ? onTap : null,
+        mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
         borderRadius: BorderRadius.circular(6),
         child: Container(
           width: 32,
@@ -2183,6 +2564,7 @@ class _BotaoNumeroPagina extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: ativa ? null : onTap,
+      mouseCursor: ativa ? SystemMouseCursors.basic : SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(6),
       child: Container(
         width: 32,
@@ -2734,7 +3116,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                       ),
                       icon: const Icon(Icons.history, size: 18),
                       tooltip: 'Histórico deste material',
-                      color: const Color(0xFF7C3AED),
+                      color: const Color(0xFFF59E0B),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                     ),
@@ -2786,6 +3168,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
   // ── Modo Retalho (apenas no cadastro de material novo) ────────────────
   bool _modoRetalho = false;
+  bool _hoverRetalho = false;
 
   late final TextEditingController _nome;
   late final TextEditingController _identificador;
@@ -2804,8 +3187,30 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   /// COMPRAS não pode definir a quantidade no cadastro — a entrada de
   /// estoque deve ser feita pela página de Controle de Estoque (movimentação
   /// de ENTRADA vinculada a uma OS), garantindo rastreabilidade.
+  /// Lê o role sempre do UsuarioProvider (fonte da verdade) em vez de
+  /// widget.roleUsuario, que pode estar desatualizado se esta tela foi
+  /// aberta antes de uma troca de usuário ("Trocar para").
   bool get _bloquearQuantidade =>
-      widget.roleUsuario == 'COMPRAS' && !_editando;
+      (context.watch<UsuarioProvider>().usuarioLogado?.role ?? widget.roleUsuario) ==
+          'COMPRAS' &&
+      !_editando;
+
+  /// Mesma regra de [_bloquearQuantidade], mas usando `context.read` em vez
+  /// de `context.watch`. Use esta versão fora do método build (por exemplo,
+  /// dentro de handlers de evento como `_salvar`), já que `watch` só pode
+  /// ser chamado durante a construção da árvore de widgets.
+  bool get _bloquearQuantidadeAtual =>
+      (context.read<UsuarioProvider>().usuarioLogado?.role ?? widget.roleUsuario) ==
+          'COMPRAS' &&
+      !_editando;
+
+  /// Mesma regra de [_bloquearQuantidade]: COMPRAS também não pode definir o
+  /// estoque mínimo no cadastro — ambos ficam a cargo de quem faz a entrada
+  /// real de estoque (Controle de Estoque / OS).
+  bool get _bloquearEstoqueMinimo => _bloquearQuantidade;
+
+  /// Versão `context.read` de [_bloquearEstoqueMinimo], para uso fora do build.
+  bool get _bloquearEstoqueMinimoAtual => _bloquearQuantidadeAtual;
 
   /// Normaliza valores de unidade salvos com grafia antiga no banco de dados.
   /// Ex.: "M2" (sem símbolo Unicode) → "M²"
@@ -2984,8 +3389,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       'espessura':     _espessura.text.trim().isEmpty ? null : _espessura.text.trim(),
       'largura':       _modoRetalho ? null : (_largura.text.trim().isEmpty ? null : double.tryParse(_largura.text.trim())),
       'comprimento':   _modoRetalho ? null : (_comprimento.text.trim().isEmpty ? null : double.tryParse(_comprimento.text.trim())),
-      'quantidade':    _bloquearQuantidade ? 0 : (double.tryParse(_quantidade.text) ?? 0),
-      'estoqueMinimo': _modoRetalho ? 0.0 : (double.tryParse(_estoqueMinimo.text) ?? 0),
+      'quantidade':    _bloquearQuantidadeAtual ? 0 : (double.tryParse(_quantidade.text) ?? 0),
+      'estoqueMinimo': (_modoRetalho || _bloquearEstoqueMinimoAtual) ? 0.0 : (double.tryParse(_estoqueMinimo.text) ?? 0),
       'estoqueConfirmado': _estoqueConfirmado,
     };
 
@@ -3219,7 +3624,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: TextFormField(
+                child: _bloquearEstoqueMinimo
+                    ? _EstoqueMinimoBloqueadoInfo()
+                    : TextFormField(
                   controller: _estoqueMinimo,
                   readOnly: _modoRetalho,
                   decoration: InputDecoration(
@@ -3463,50 +3870,64 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   if (!_editando) ...[
                     const SizedBox(width: 12),
                     // ── Atalho RETALHO ────────────────────────────────────
-                    GestureDetector(
-                      onTap: _modoRetalho ? _desativarModoRetalho : _ativarModoRetalho,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: _modoRetalho
-                              ? AppTheme.primary.withValues(alpha: 0.15)
-                              : Theme.of(context).colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: _modoRetalho
-                                ? AppTheme.primary
-                                : Theme.of(context).colorScheme.outlineVariant,
-                            width: _modoRetalho ? 1.5 : 1,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.content_cut,
-                              size: 13,
+                    Tooltip(
+                      message: _modoRetalho
+                          ? 'Desmarcar como retalho'
+                          : 'Marcar como retalho (sobra de material)',
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        onEnter: (_) => setState(() => _hoverRetalho = true),
+                        onExit:  (_) => setState(() => _hoverRetalho = false),
+                        child: GestureDetector(
+                          onTap: _modoRetalho ? _desativarModoRetalho : _ativarModoRetalho,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
                               color: _modoRetalho
-                                  ? AppTheme.primary
-                                  : Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 5),
-                            Text(
-                              'RETALHO',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.5,
+                                  ? AppTheme.primary.withValues(alpha: 0.15)
+                                  : _hoverRetalho
+                                      ? AppTheme.primary.withValues(alpha: 0.08)
+                                      : Theme.of(context).colorScheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
                                 color: _modoRetalho
                                     ? AppTheme.primary
-                                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                                    : _hoverRetalho
+                                        ? AppTheme.primary.withValues(alpha: 0.6)
+                                        : Theme.of(context).colorScheme.outlineVariant,
+                                width: _modoRetalho ? 1.5 : 1,
                               ),
                             ),
-                            if (_modoRetalho) ...[
-                              const SizedBox(width: 4),
-                              Icon(Icons.check_circle, size: 13, color: AppTheme.primary),
-                            ],
-                          ],
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.content_cut,
+                                  size: 13,
+                                  color: _modoRetalho || _hoverRetalho
+                                      ? AppTheme.primary
+                                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  'RETALHO',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                    color: _modoRetalho || _hoverRetalho
+                                        ? AppTheme.primary
+                                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                if (_modoRetalho) ...[
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.check_circle, size: 13, color: AppTheme.primary),
+                                ],
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -3516,6 +3937,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close, size: 20),
                     tooltip: 'Fechar',
+                    style: IconButton.styleFrom()
+                        .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                   ),
                 ],
               ),
@@ -3549,19 +3972,22 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 children: [
                   if (_editando) ...[
                     if (widget.material!.ativo && widget.onDesativar != null)
-                      MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: TextButton.icon(
-                          onPressed: _salvando
-                              ? null
-                              : () {
-                                  Navigator.of(context, rootNavigator: true).pop(false);
-                                  widget.onDesativar!(widget.material!);
-                                },
-                          icon: const Icon(Icons.block, size: 16),
-                          label: const Text('Desativar'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: AppTheme.warning,
+                      Tooltip(
+                        message: 'Desativar este material (ele deixa de aparecer nas listagens ativas)',
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: TextButton.icon(
+                            onPressed: _salvando
+                                ? null
+                                : () {
+                                    Navigator.of(context, rootNavigator: true).pop(false);
+                                    widget.onDesativar!(widget.material!);
+                                  },
+                            icon: const Icon(Icons.block, size: 16),
+                            label: const Text('Desativar'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppTheme.warning,
+                            ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                           ),
                         ),
                       ),
@@ -3578,35 +4004,57 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                         style: TextButton.styleFrom(foregroundColor: AppTheme.success),
                       ),
                     if (!widget.material!.ativo && widget.onExcluir != null)
-                      TextButton.icon(
-                        onPressed: _salvando
-                            ? null
-                            : () {
-                                Navigator.of(context, rootNavigator: true).pop(false);
-                                widget.onExcluir!(widget.material!);
-                              },
-                        icon: const Icon(Icons.delete_outline, size: 16),
-                        label: const Text('Excluir'),
-                        style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+                      Tooltip(
+                        message: 'Excluir permanentemente este material',
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: TextButton.icon(
+                            onPressed: _salvando
+                                ? null
+                                : () {
+                                    Navigator.of(context, rootNavigator: true).pop(false);
+                                    widget.onExcluir!(widget.material!);
+                                  },
+                            icon: const Icon(Icons.delete_outline, size: 16),
+                            label: const Text('Excluir'),
+                            style: TextButton.styleFrom(foregroundColor: AppTheme.error)
+                                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                          ),
+                        ),
                       ),
                   ],
                   const Spacer(),
-                  TextButton(
-                    onPressed: _salvando ? null : () => Navigator.pop(context),
-                    child: const Text('Cancelar'),
+                  Tooltip(
+                    message: 'Cancelar e fechar sem salvar',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: TextButton(
+                        onPressed: _salvando ? null : () => Navigator.pop(context),
+                        style: TextButton.styleFrom()
+                            .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                        child: const Text('Cancelar'),
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: _salvando ? null : _salvar,
-                    style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-                    child: _salvando
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
-                        : Text(_editando ? 'Salvar' : 'Criar'),
+                  Tooltip(
+                    message: _editando ? 'Salvar alterações' : 'Criar este material',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: FilledButton(
+                        onPressed: _salvando ? null : _salvar,
+                        style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                            .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                        child: _salvando
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : Text(_editando ? 'Salvar' : 'Criar'),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -3827,6 +4275,41 @@ class _QuantidadeBloqueadaInfo extends StatelessWidget {
             child: Text(
               'A entrada de quantidade deve ser feita na página de '
               'Controle de Estoque, vinculada a uma OS.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Substitui o campo "Estoque mínimo" no cadastro quando o usuário é COMPRAS.
+/// Mesma lógica de [_QuantidadeBloqueadaInfo]: a definição do estoque mínimo
+/// deve ser feita por quem tem acesso à entrada real de estoque.
+class _EstoqueMinimoBloqueadoInfo extends StatelessWidget {
+  const _EstoqueMinimoBloqueadoInfo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.warning.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.warning.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline, color: AppTheme.warning, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Estoque mínimo bloqueado.',
               style: TextStyle(
                 fontSize: 12,
                 color: Theme.of(context).colorScheme.onSurface,
@@ -4515,13 +4998,139 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
 // BANNER INLINE DE ALERTAS — exibido no topo da EstoquePage
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _AlertasBannerEstoque extends StatelessWidget {
+class _AlertasBannerEstoque extends StatefulWidget {
   final AlertasEstoqueProvider provider;
   const _AlertasBannerEstoque({required this.provider});
 
   @override
+  State<_AlertasBannerEstoque> createState() => _AlertasBannerEstoqueState();
+}
+
+class _AlertasBannerEstoqueState extends State<_AlertasBannerEstoque> {
+  // Seleção por referência: os objetos de alerta vêm sempre da mesma lista
+  // do provider entre rebuilds (só mudam quando chega um novo evento SSE),
+  // então usar o próprio objeto como chave do Set é seguro aqui.
+  final Set<dynamic> _selecionados = {};
+
+  void _toggle(dynamic alerta) {
+    setState(() {
+      if (_selecionados.contains(alerta)) {
+        _selecionados.remove(alerta);
+      } else {
+        _selecionados.add(alerta);
+      }
+    });
+  }
+
+  /// Lê um campo dinâmico do alerta sem quebrar caso o modelo não o possua.
+  T? _campo<T>(dynamic obj, T Function() getter) {
+    try {
+      return getter();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _mesmo(String? a, String? b) {
+    final ta = (a ?? '').trim().toUpperCase();
+    final tb = (b ?? '').trim().toUpperCase();
+    if (ta.isEmpty || tb.isEmpty) return true; // campo não informado → não restringe
+    return ta == tb;
+  }
+
+  Future<void> _orcarSelecionados() async {
+    if (_selecionados.isEmpty) return;
+
+    final todos = context.read<MaterialProvider>().materiais;
+    final itens = <ItemOrcamentoData>[];
+    final naoEncontrados = <String>[];
+
+    for (final a in _selecionados) {
+      final nome          = _campo<String>(a, () => a.nome as String) ?? '';
+      final categoria     = _campo<String?>(a, () => a.categoria as String?);
+      final identificador = _campo<String?>(a, () => a.identificador as String?);
+      final medida        = _campo<String?>(a, () => a.medida as String?);
+      final espessura      = _campo<String?>(a, () => a.espessura as String?);
+
+      MaterialModel? encontrado;
+      for (final m in todos) {
+        final ok = _mesmo(m.nome, nome) &&
+            _mesmo(m.categoria, categoria) &&
+            _mesmo(m.identificador, identificador) &&
+            _mesmo(m.medida, medida) &&
+            _mesmo(m.espessura, espessura);
+        if (ok) {
+          encontrado = m;
+          break;
+        }
+      }
+
+      if (encontrado == null) {
+        naoEncontrados.add(nome.isNotEmpty ? nome : 'material');
+        continue;
+      }
+
+      final precos = <int, PrecoFornecedorData>{};
+      for (final fm in encontrado.fornecedorMateriais) {
+        precos[fm.fornecedorId] = PrecoFornecedorData(
+          fornecedorNome: fm.fornecedorNome,
+          preco:   fm.preco > 0 ? fm.preco : null,
+        );
+      }
+
+      itens.add(ItemOrcamentoData(
+        materialId:            encontrado.id,
+        materialNome:          encontrado.nome,
+        materialUnidade:       encontrado.unidade,
+        materialCategoria:     encontrado.categoria,
+        materialMedida:        encontrado.medida,
+        materialEspessura:     encontrado.espessura,
+        materialIdentificador: encontrado.identificador,
+        materialStatus:        encontrado.status,
+        precos:                precos,
+      ));
+    }
+
+    if (!mounted) return;
+
+    if (itens.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Não foi possível localizar os materiais selecionados.'),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+      return;
+    }
+
+    final titulo = itens.length == 1
+        ? 'Orç. ${itens.first.materialNome}'
+        : 'Orç. materiais críticos (${itens.length})';
+
+    context.read<OrcamentoProvider>().adicionarItensEmLote(titulo, itens);
+
+    if (naoEncontrados.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${naoEncontrados.length} material(is) não encontrado(s) e não foram incluídos: ${naoEncontrados.join(', ')}',
+          ),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    }
+
+    setState(() => _selecionados.clear());
+
+    // Ao entrar em /orcamento, abre direto no editor (aba "abertos") com
+    // este orçamento recém-criado, em vez da lista de aprovação.
+    OrcamentoPage.abrirEditorAoEntrar = true;
+    context.go('/orcamento');
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final criticos = provider.alertas;
+    final criticos = widget.provider.alertas;
     const cor = Color(0xFFDC2626);
 
     return Container(
@@ -4538,16 +5147,37 @@ class _AlertasBannerEstoque extends StatelessWidget {
             color: cor,
             size: 20,
           ),
-          title: RichText(
-            text: TextSpan(
-              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-              children: [
-                TextSpan(
-                  text: '${criticos.length} material${criticos.length > 1 ? 'is' : ''} com estoque crítico',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+          title: Row(
+            children: [
+              Expanded(
+                child: RichText(
+                  text: TextSpan(
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    children: [
+                      TextSpan(
+                        text: '${criticos.length} material${criticos.length > 1 ? 'is' : ''} com estoque crítico',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
                 ),
-              ],
-            ),
+              ),
+              if (_selecionados.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: OutlinedButton.icon(
+                    onPressed: _orcarSelecionados,
+                    icon: const Icon(Icons.request_quote, size: 16),
+                    label: Text('Orçar selecionados (${_selecionados.length})'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF1E88E5),
+                      side: const BorderSide(color: Color(0xFF1E88E5)),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      visualDensity: VisualDensity.compact,
+                    ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                  ),
+                ),
+            ],
           ),
           children: [
             ConstrainedBox(
@@ -4557,12 +5187,25 @@ class _AlertasBannerEstoque extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (criticos.isNotEmpty)
+                    if (criticos.isNotEmpty) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                        child: Text(
+                          'Toque em um ou mais materiais para selecioná-los e orçar.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
                       _BannerSecao(
                         label: 'CRÍTICO — abaixo do mínimo',
                         cor: cor,
                         alertas: criticos,
+                        selecionados: _selecionados,
+                        onToggle: _toggle,
                       ),
+                    ],
                   ],
                 ),
               ),
@@ -4578,7 +5221,15 @@ class _BannerSecao extends StatelessWidget {
   final String label;
   final Color cor;
   final List<dynamic> alertas;
-  const _BannerSecao({required this.label, required this.cor, required this.alertas});
+  final Set<dynamic> selecionados;
+  final void Function(dynamic alerta) onToggle;
+  const _BannerSecao({
+    required this.label,
+    required this.cor,
+    required this.alertas,
+    required this.selecionados,
+    required this.onToggle,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -4608,34 +5259,50 @@ class _BannerSecao extends StatelessWidget {
               final qtdStr  = qtd % 1 == 0
                   ? qtd.toStringAsFixed(0)
                   : qtd.toStringAsFixed(2);
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: cor.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: cor.withValues(alpha: 0.25)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      a.nome as String,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
+              final selecionado = selecionados.contains(a);
+              return InkWell(
+                onTap: () => onToggle(a),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: selecionado
+                        ? cor.withValues(alpha: 0.22)
+                        : cor.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: selecionado ? cor : cor.withValues(alpha: 0.25),
+                      width: selecionado ? 1.5 : 1,
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$qtdStr${unidade.isNotEmpty ? ' $unidade' : ''}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        selecionado ? Icons.check_circle : Icons.radio_button_unchecked,
+                        size: 14,
                         color: cor,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 6),
+                      Text(
+                        a.nome as String,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '$qtdStr${unidade.isNotEmpty ? ' $unidade' : ''}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: cor,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               );
             }).toList(),

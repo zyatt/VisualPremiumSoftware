@@ -33,7 +33,6 @@ const C = {
   statusLim: '#2563EB',
 };
 
-// A4 Landscape
 const MARGIN    = 30;
 const PAGE_W    = 841.89;
 const PAGE_H    = 595.28;
@@ -156,7 +155,6 @@ function drawSummaryBox(doc, y, totais) {
 }
 
 function drawMateriaisTable(doc, materiais, startY) {
-  // Todas as colunas do sistema — total deve somar CONTENT_W (781.89)
   const cols = [
     { key: 'id',            label: 'ID',              w: 32,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'identificador', label: 'IDENTIFICADOR',   w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
@@ -173,10 +171,9 @@ function drawMateriaisTable(doc, materiais, startY) {
     { key: 'status',        label: 'STATUS',          w: 51,  hAlign: 'center', cAlign: 'center', pad: 3 },
   ];
 
-  // Ajuste fino para que a soma bata com CONTENT_W
   const totalW = cols.reduce((s, c) => s + c.w, 0);
   const diff = CONTENT_W - totalW;
-  cols[1].w += diff; // absorve diferença na coluna Material
+  cols[1].w += diff;
 
   let cx = MARGIN;
   for (const col of cols) { col.x = cx; cx += col.w; }
@@ -231,71 +228,58 @@ function drawMateriaisTable(doc, materiais, startY) {
 
     const get = (col) => ({ x: col.x + col.pad, w: col.w - col.pad * 2 });
 
-    // ID
     const c0 = get(cols[0]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.lightGray)
        .text(String(mat.id), c0.x, tySingle, { width: c0.w, align: 'center', lineBreak: false });
 
-    // Identificador
     const c1 = get(cols[1]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(mat.identificador || '—', c1.x, tySingle, { width: c1.w, align: 'center', lineBreak: false });
 
-    // Material (nome)
     const c2 = get(cols[2]);
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
        .text(nomeBase, c2.x, tyMulti, { width: c2.w, align: 'left', lineBreak: true });
 
-    // Unidade
     const c3 = get(cols[3]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.black)
        .text(mat.unidade || '—', c3.x, tySingle, { width: c3.w, align: 'center', lineBreak: false });
 
-    // Medida
     const c4 = get(cols[4]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(mat.medida || '—', c4.x, tySingle, { width: c4.w, align: 'center', lineBreak: false });
 
-    // Espessura
     const c5 = get(cols[5]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(mat.espessura || '—', c5.x, tySingle, { width: c5.w, align: 'center', lineBreak: false });
 
-    // Estoque mínimo
     const c6 = get(cols[6]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(formatNumber(mat.estoqueMinimo), c6.x, tySingle, { width: c6.w, align: 'center', lineBreak: false });
 
-    // Quantidade atual
     const c7 = get(cols[7]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(formatNumber(mat.quantidade), c7.x, tySingle, { width: c7.w, align: 'center', lineBreak: false });
 
-    // Valor intermediário (preço mediano)
     const c8 = get(cols[8]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(mat.precoMediano != null ? formatCurrency(mat.precoMediano) : '—',
              c8.x, tySingle, { width: c8.w, align: 'center', lineBreak: false });
 
-    // Valor m² intermediário
     const c9 = get(cols[9]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(mat.precoM2Mediano != null ? formatCurrency(mat.precoM2Mediano) : '—',
              c9.x, tySingle, { width: c9.w, align: 'center', lineBreak: false });
 
-    // Custo última compra
     const c10 = get(cols[10]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(mat.custoUltimaCompra != null ? formatCurrency(mat.custoUltimaCompra) : '—',
              c10.x, tySingle, { width: c10.w, align: 'center', lineBreak: false });
 
-    // Custo m² última compra
     const c11 = get(cols[11]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(mat.custoM2UltimaCompra != null ? formatCurrency(mat.custoM2UltimaCompra) : '—',
              c11.x, tySingle, { width: c11.w, align: 'center', lineBreak: false });
 
-    // Status badge
     const c12 = get(cols[12]);
     const st = statusLabel(mat.status);
     const badgeH = 12;
@@ -406,13 +390,6 @@ const estoquePdfService = {
       ? `Materiais — ${categoria}${statusLabel2}${filtrosSufx} (${materiaisEnriquecidos.length})`
       : `Todos os Materiais${statusLabel2}${filtrosSufx} (${materiaisEnriquecidos.length})`;
 
-    // ── Geração do PDF ───────────────────────────────────────────────────────
-    // Estratégia: gerar duas vezes.
-    //   1ª passagem (descartada): conta o total de páginas via evento 'pageAdded'.
-    //   2ª passagem (real): gera o PDF já sabendo o total, escreve footer correto.
-    // Isso evita bufferPages:true, que retém todos os chunks e não os emite via
-    // 'data' / pipe enquanto o documento está sendo construído (retorna 4 bytes).
-
     function gerarDocumento(totalPaginas) {
       return new Promise((resolve, reject) => {
         const doc    = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0 });
@@ -423,12 +400,7 @@ const estoquePdfService = {
         doc.on('end',   () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
 
-        // A cada nova página adicionada: desenha o footer da página ANTERIOR
-        // (que já está fechada) e incrementa o contador.
         doc.on('pageAdded', () => {
-          // Neste momento a página anterior ainda é a "ativa" — não: o PDFKit
-          // já mudou para a nova. Desenhamos o footer na nova página num segundo
-          // passo. Mais simples: incrementamos aqui e desenhamos antes do addPage.
         });
 
         const desenharConteudo = () => {
@@ -448,14 +420,10 @@ const estoquePdfService = {
         };
 
         if (totalPaginas === null) {
-          // 1ª passagem: conta páginas
           doc.on('pageAdded', () => pageNum++);
           desenharConteudo();
           doc.end();
         } else {
-          // 2ª passagem: gera com footers corretos
-          // Interceptamos addPage para desenhar footer na página que está sendo
-          // "virada" antes de abrir a próxima.
           const origAddPage = doc.addPage.bind(doc);
           doc.addPage = (...args) => {
             drawFooter(doc, pageNum, totalPaginas);
@@ -464,13 +432,12 @@ const estoquePdfService = {
           };
 
           desenharConteudo();
-          drawFooter(doc, pageNum, totalPaginas); // footer da última página
+          drawFooter(doc, pageNum, totalPaginas);
           doc.end();
         }
       });
     }
 
-    // 1ª passagem: descobre total de páginas
     const bufCount = [];
     const totalPaginas = await new Promise((resolve, reject) => {
       const d = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0 });
@@ -494,7 +461,6 @@ const estoquePdfService = {
       d.end();
     });
 
-    // 2ª passagem: gera o PDF real com footers
     return gerarDocumento(totalPaginas);
   },
 };

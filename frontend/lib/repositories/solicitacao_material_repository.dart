@@ -4,6 +4,33 @@ import 'package:http/http.dart' as http;
 import '../models/solicitacao_material_model.dart';
 import '../utils/api_client.dart';
 
+/// Resultado da checagem de existência de uma OS.
+class VerificacaoOSResult {
+  final bool existe;
+  final int? id;
+  final String? numeroOS;
+  final String? nomeCliente;
+  final String? andamento;
+
+  const VerificacaoOSResult({
+    required this.existe,
+    this.id,
+    this.numeroOS,
+    this.nomeCliente,
+    this.andamento,
+  });
+
+  factory VerificacaoOSResult.fromJson(Map<String, dynamic> json) {
+    return VerificacaoOSResult(
+      existe: json['existe'] as bool? ?? false,
+      id: json['id'] as int?,
+      numeroOS: json['numeroOS'] as String?,
+      nomeCliente: json['nomeCliente'] as String?,
+      andamento: json['andamento'] as String?,
+    );
+  }
+}
+
 class SolicitacaoMaterialRepository {
   // ── Listar ────────────────────────────────────────────────────────────────
   Future<List<SolicitacaoMaterialModel>> listar({
@@ -50,6 +77,24 @@ class SolicitacaoMaterialRepository {
   Future<SolicitacaoMaterialModel> buscarPorId(int id) async {
     final data = await ApiClient.get('/solicitacoes-material/$id');
     return SolicitacaoMaterialModel.fromJson(data);
+  }
+
+  // ── Verificar se já existe uma solicitação para esse número de OS ──────────
+  // [ignorarId]: usado na tela de edição, para não acusar conflito com a
+  // própria solicitação que está sendo editada.
+  Future<VerificacaoOSResult> verificarOSExiste(
+    String numeroOS, {
+    int? ignorarId,
+  }) async {
+    final os = numeroOS.trim();
+    if (os.isEmpty) return const VerificacaoOSResult(existe: false);
+
+    final path = ignorarId != null
+        ? '/solicitacoes-material/verificar-os/${Uri.encodeComponent(os)}?ignorarId=$ignorarId'
+        : '/solicitacoes-material/verificar-os/${Uri.encodeComponent(os)}';
+
+    final data = await ApiClient.get(path);
+    return VerificacaoOSResult.fromJson(data);
   }
 
   // ── Criar (multipart — múltiplos itens com imagens opcionais) ─────────────
@@ -115,6 +160,42 @@ class SolicitacaoMaterialRepository {
       {'comprado': comprado},
     );
     return AdicionalSolicitacaoModel.fromJson(data);
+  }
+
+  // ── Editar quantidade/observação de um item original ──────────────────────
+  Future<ItemSolicitacaoModel> atualizarItem(
+    int itemId, {
+    required double quantidade,
+    String? observacao,
+  }) async {
+    final data = await ApiClient.patch(
+      '/solicitacoes-material/itens/$itemId',
+      {'quantidade': quantidade, 'observacao': observacao},
+    );
+    return ItemSolicitacaoModel.fromJson(data);
+  }
+
+  // ── Editar quantidade/observação de um adicional ──────────────────────────
+  Future<AdicionalSolicitacaoModel> atualizarAdicional(
+    int adicionalId, {
+    required double quantidade,
+    String? observacao,
+  }) async {
+    final data = await ApiClient.patch(
+      '/solicitacoes-material/adicionais/$adicionalId',
+      {'quantidade': quantidade, 'observacao': observacao},
+    );
+    return AdicionalSolicitacaoModel.fromJson(data);
+  }
+
+  // ── Excluir um item original ───────────────────────────────────────────────
+  Future<void> excluirItem(int itemId) async {
+    await ApiClient.delete('/solicitacoes-material/itens/$itemId');
+  }
+
+  // ── Excluir um adicional ───────────────────────────────────────────────────
+  Future<void> excluirAdicional(int adicionalId) async {
+    await ApiClient.delete('/solicitacoes-material/adicionais/$adicionalId');
   }
 
   // ── Excluir ───────────────────────────────────────────────────────────────
