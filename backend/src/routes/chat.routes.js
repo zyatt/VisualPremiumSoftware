@@ -263,6 +263,95 @@ router.patch('/mensagem/:id/reacao', autenticar, async (req, res) => {
   }
 });
 
+router.patch('/mensagem/:id', autenticar, async (req, res) => {
+  try {
+    const meuId      = req.usuario.id;
+    const mensagemId = parseInt(req.params.id);
+    const { conteudo } = req.body;
+
+    if (!conteudo?.trim()) {
+      return res.status(400).json({ error: 'conteudo é obrigatório' });
+    }
+
+    const mensagem = await prisma.mensagemChat.findUnique({
+      where: { id: mensagemId },
+    });
+    if (!mensagem) {
+      return res.status(404).json({ error: 'Mensagem não encontrada' });
+    }
+    // Só o próprio remetente pode editar sua mensagem.
+    if (mensagem.remetenteId !== meuId) {
+      return res.status(403).json({ error: 'Sem permissão para editar esta mensagem' });
+    }
+    if (mensagem.apagada) {
+      return res.status(400).json({ error: 'Não é possível editar uma mensagem apagada' });
+    }
+
+    const atualizada = await prisma.mensagemChat.update({
+      where: { id: mensagemId },
+      data: { conteudo: conteudo.trim(), editadaEm: new Date() },
+      include: {
+        remetente:    { select: { id: true, nome: true } },
+        destinatario: { select: { id: true, nome: true } },
+        respondendoA: {
+          select: { id: true, conteudo: true, remetente: { select: { nome: true } } },
+        },
+      },
+    });
+
+    const evento = { tipo: 'mensagem_editada', mensagem: atualizada };
+    notificarUsuario(atualizada.remetenteId, evento);
+    notificarUsuario(atualizada.destinatarioId, evento);
+
+    res.json(atualizada);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao editar mensagem' });
+  }
+});
+
+router.delete('/mensagem/:id', autenticar, async (req, res) => {
+  try {
+    const meuId      = req.usuario.id;
+    const mensagemId = parseInt(req.params.id);
+
+    const mensagem = await prisma.mensagemChat.findUnique({
+      where: { id: mensagemId },
+    });
+    if (!mensagem) {
+      return res.status(404).json({ error: 'Mensagem não encontrada' });
+    }
+    // Só o próprio remetente pode excluir sua mensagem.
+    if (mensagem.remetenteId !== meuId) {
+      return res.status(403).json({ error: 'Sem permissão para excluir esta mensagem' });
+    }
+
+    // Exclusão lógica: mantém a linha (preserva o histórico/citações de
+    // quem respondeu a ela) mas marca como apagada e esvazia o conteúdo,
+    // para a UI trocar pelo texto "Mensagem apagada".
+    const atualizada = await prisma.mensagemChat.update({
+      where: { id: mensagemId },
+      data: { conteudo: '', apagada: true, reacoes: {} },
+      include: {
+        remetente:    { select: { id: true, nome: true } },
+        destinatario: { select: { id: true, nome: true } },
+        respondendoA: {
+          select: { id: true, conteudo: true, remetente: { select: { nome: true } } },
+        },
+      },
+    });
+
+    const evento = { tipo: 'mensagem_apagada', mensagem: atualizada };
+    notificarUsuario(atualizada.remetenteId, evento);
+    notificarUsuario(atualizada.destinatarioId, evento);
+
+    res.json(atualizada);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao excluir mensagem' });
+  }
+});
+
 router.get('/nao-lidas', autenticar, async (req, res) => {
   try {
     const meuId = req.usuario.id;

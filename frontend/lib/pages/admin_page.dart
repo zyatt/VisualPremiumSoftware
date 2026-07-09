@@ -257,6 +257,8 @@ class _UsuariosTabState extends State<_UsuariosTab> {
                 foregroundColor: Colors.white,
                 padding:
                     EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              ).copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
               ),
             ),
             SizedBox(width: 10),
@@ -268,6 +270,8 @@ class _UsuariosTabState extends State<_UsuariosTab> {
                 backgroundColor: Theme.of(context).colorScheme.surface,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+              ).copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
               ),
             ),
           ],
@@ -935,6 +939,10 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                 DropdownButtonFormField<String>(
                   initialValue: _role,
                   decoration: const InputDecoration(labelText: 'Cargo *'),
+                  icon: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: const Icon(Icons.arrow_drop_down),
+                  ),
                   items: _roles
                       .map((r) => DropdownMenuItem(
                             value: r,
@@ -989,11 +997,16 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
       actions: [
         TextButton(
           onPressed: _salvando ? null : () => Navigator.of(context).pop(),
+          style: TextButton.styleFrom().copyWith(
+            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+          ),
           child: const Text('Cancelar'),
         ),
         FilledButton(
           onPressed: _salvando ? null : _salvar,
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+          ),
           child: _salvando
               ? const SizedBox(
                   width: 16,
@@ -1278,6 +1291,8 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: AppTheme.primary,
                                   side: const BorderSide(color: AppTheme.primary),
+                                ).copyWith(
+                                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                                 ),
                               ),
                               const Spacer(),
@@ -1292,7 +1307,9 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
                                 label: Text('Salvar faixas',
                                     style: GoogleFonts.nunito(fontSize: 13)),
                                 style: FilledButton.styleFrom(
-                                    backgroundColor: AppTheme.primary),
+                                    backgroundColor: AppTheme.primary).copyWith(
+                                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                ),
                               ),
                             ],
                           ),
@@ -1359,7 +1376,9 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
                                 label: Text('Salvar',
                                     style: GoogleFonts.nunito(fontSize: 13)),
                                 style: FilledButton.styleFrom(
-                                    backgroundColor: AppTheme.primary),
+                                    backgroundColor: AppTheme.primary).copyWith(
+                                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                ),
                               ),
                             ],
                           ),

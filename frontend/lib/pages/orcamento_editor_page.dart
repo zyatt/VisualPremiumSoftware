@@ -111,6 +111,13 @@ String _brl(double? v) {
   return 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
 }
 
+/// Formata uma quantidade removendo zeros decimais desnecessários.
+/// Ex: 2.0 → "2", 1.5 → "1,5"
+String _formatQtd(double v) {
+  if (v == v.truncateToDouble()) return v.toInt().toString();
+  return v.toString().replaceAll('.', ',');
+}
+
 class OrcamentoEditorPage extends StatefulWidget {
   const OrcamentoEditorPage({super.key});
 
@@ -153,8 +160,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     final partes = <String>[item.materialNome as String];
     final medida = item.materialMedida as String?;
     final esp    = item.materialEspessura as String?;
+    final dimensao = item.materialDimensaoFormatada as String?;
     if (medida != null && medida.isNotEmpty) partes.add(medida);
     if (esp    != null && esp.isNotEmpty)    partes.add(esp);
+    if (dimensao != null) partes.add(dimensao);
     return partes.join(' · ');
   }
 
@@ -316,6 +325,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       materialEspessura: material.espessura,
       materialIdentificador: material.identificador,
       materialStatus: material.status,
+      materialLargura: material.largura,
+      materialComprimento: material.comprimento,
+      estoqueMinimo: material.estoqueMinimo,
       precos: precos,
     ));
     _searchNomeCtrl.clear();
@@ -751,6 +763,14 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         jaFinalizado: status == 'APROVADO' || status == 'NAO_APROVADO',
         modoGerarOC: status == 'APROVADO',
       );
+
+      // Também atualiza estoque mínimo/dimensões/etc. dos itens já
+      // adicionados, já que esses dados podem ter mudado no módulo de
+      // estoque desde que o item foi colocado neste orçamento.
+      final materialProvider = context.read<MaterialProvider>();
+      await materialProvider.carregar();
+      if (!mounted) return;
+      provider.atualizarDadosMateriaisDosItens(materialProvider.materiais);
     } catch (e, st) {
       _logOrc('sincronizarStatusServidor[$origem]: ERRO orcamentoId=$sid', erro: e, stack: st, level: 1000);
     } finally {
@@ -1113,20 +1133,32 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                         dense: true,
                         contentPadding: EdgeInsets.zero,
                         title: Text(nome, style: const TextStyle(fontSize: 13)),
-                        trailing: TextButton.icon(
-                          onPressed: () async {
-                            await _alternarFornecedorOculto(fId, false);
-                            setSt(() {});
-                          },
-                          icon: const Icon(Icons.visibility_outlined, size: 14),
-                          label: const Text('Reexibir', style: TextStyle(fontSize: 12)),
+                        trailing: Tooltip(
+                          message: 'Reexibir fornecedor',
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: TextButton.icon(
+                              onPressed: () async {
+                                await _alternarFornecedorOculto(fId, false);
+                                setSt(() {});
+                              },
+                              icon: const Icon(Icons.visibility_outlined, size: 14),
+                              label: const Text('Reexibir', style: TextStyle(fontSize: 12)),
+                            ),
+                          ),
                         ),
                       );
                     }).toList(),
                   ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar')),
+            Tooltip(
+              message: 'Fechar',
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar')),
+              ),
+            ),
           ],
         );
       }),
@@ -1699,7 +1731,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               Icon(Icons.drag_indicator, size: 13, color: AppTheme.primary.withValues(alpha: 0.5)),
               const SizedBox(width: 3),
               Text(
-                canScrollLeft && canScrollRight ? 'Deslize para ver fornecedores' : canScrollRight ? 'Deslize para ver fornecedores →' : '← Melhor Preço',
+                canScrollLeft && canScrollRight ? 'Clique e arraste para ver fornecedores' : canScrollRight ? 'Clique e arraste para ver fornecedores →' : '← Melhor Preço',
                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: AppTheme.primary.withValues(alpha: 0.75)),
               ),
               if (canScrollRight) ...[const SizedBox(width: 2), Icon(Icons.chevron_right, size: 14, color: AppTheme.primary.withValues(alpha: 0.7))],
@@ -1795,7 +1827,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     }
 
     const double colMaterial = 200;
-    double colQtd = 58;
+    const double colQtdMin = 70;
+    double colQtd = 90;
     double colFornMin = 120;
     double colMelhor = 120;
 
@@ -1807,7 +1840,12 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       child: Row(children: [
         SizedBox(width: colMaterial, child: Padding(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6), child: Text('Material', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant)))),
         Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
-        SizedBox(width: colQtd, child: Padding(padding: EdgeInsets.symmetric(horizontal: 3, vertical: 6), child: Text('Qtd', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center))),
+        Tooltip(
+          message: 'Quantidade mínima em estoque (configurada no módulo de estoque)',
+          child: SizedBox(width: colQtdMin, child: Padding(padding: EdgeInsets.symmetric(horizontal: 3, vertical: 6), child: Text('Estoque mínimo', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center))),
+        ),
+        Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
+        SizedBox(width: colQtd, child: Padding(padding: EdgeInsets.symmetric(horizontal: 3, vertical: 6), child: Text('Quantidade', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center))),
         Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
       ]),
     );
@@ -1827,16 +1865,22 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Text(nome, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center, softWrap: true),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(4),
-                    onTap: () => _alternarFornecedorOculto(fId, true),
-                    child: Padding(
-                      padding: const EdgeInsets.all(2),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.visibility_off_outlined, size: 11, color: Theme.of(context).colorScheme.outline),
-                        const SizedBox(width: 2),
-                        Text('ocultar', style: TextStyle(fontSize: 9, color: Theme.of(context).colorScheme.outline)),
-                      ]),
+                  Tooltip(
+                    message: 'Ocultar fornecedor',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(4),
+                        onTap: () => _alternarFornecedorOculto(fId, true),
+                        child: Padding(
+                          padding: const EdgeInsets.all(2),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.visibility_off_outlined, size: 11, color: Theme.of(context).colorScheme.outline),
+                            const SizedBox(width: 2),
+                            Text('ocultar', style: TextStyle(fontSize: 9, color: Theme.of(context).colorScheme.outline)),
+                          ]),
+                        ),
+                      ),
                     ),
                   ),
                 ]),
@@ -1856,6 +1900,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest, border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant, width: 1.5))),
       child: Row(children: [
         SizedBox(width: colMaterial, child: Padding(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6), child: Text('Total por Fornecedor', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700)))),
+        Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
+        SizedBox(width: colQtdMin),
         Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
         SizedBox(width: colQtd),
         Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
@@ -1902,9 +1948,15 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                GestureDetector(
-                  onTap: () => provider.removerItem(item.itemId),
-                  child: Padding(padding: const EdgeInsets.only(top: 1, right: 3), child: Icon(Icons.close, size: 13, color: Theme.of(context).colorScheme.outline)),
+                Tooltip(
+                  message: 'Remover material',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: () => provider.removerItem(item.itemId),
+                      child: Padding(padding: const EdgeInsets.only(top: 1, right: 3), child: Icon(Icons.close, size: 13, color: Theme.of(context).colorScheme.outline)),
+                    ),
+                  ),
                 ),
                 SizedBox(
                   width: 16,
@@ -1925,8 +1977,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Flexible(child: Text(item.materialNome, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), softWrap: true)),
-                      if ([item.materialMedida, item.materialEspessura, item.materialIdentificador].any((s) => s != null && s.isNotEmpty))
-                        Text([item.materialMedida, item.materialEspessura, item.materialIdentificador].where((s) => s != null && s.isNotEmpty).join(' · '), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), softWrap: true),
+                      if ([item.materialMedida, item.materialEspessura, item.materialIdentificador, item.materialDimensaoFormatada].any((s) => s != null && s.isNotEmpty))
+                        Text([item.materialMedida, item.materialEspessura, item.materialIdentificador, item.materialDimensaoFormatada].where((s) => s != null && s.isNotEmpty).join(' · '), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), softWrap: true),
                     const SizedBox(height: 3),
                     FittedBox(
                       fit: BoxFit.scaleDown,
@@ -1953,6 +2005,28 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                   ]),
                 ),
               ]),
+            ),
+          ),
+          Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
+          Tooltip(
+            message: item.estoqueMinimo != null
+                ? 'Estoque mínimo: ${_formatQtd(item.estoqueMinimo!)}'
+                : 'Estoque mínimo não definido',
+            child: Container(
+              width: colQtdMin,
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 3),
+              child: Text(
+                item.estoqueMinimo != null ? _formatQtd(item.estoqueMinimo!) : '—',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: item.estoqueMinimo != null
+                      ? Theme.of(context).colorScheme.onSurfaceVariant
+                      : Theme.of(context).colorScheme.outline,
+                ),
+                textAlign: TextAlign.center,
+              ),
             ),
           ),
           Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
@@ -2119,11 +2193,14 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 ),
               ),
               if (provider.tabAtual?.fornecedoresOcultos.isNotEmpty ?? false)
-                OutlinedButton.icon(
-                  onPressed: () => _gerenciarFornecedoresOcultos(itens),
-                  icon: const Icon(Icons.visibility_off_outlined, size: 12),
-                  label: Text('Ocultos (${provider.tabAtual!.fornecedoresOcultos.length})', style: const TextStyle(fontSize: 10)),
-                  style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.outline, side: BorderSide(color: Theme.of(context).colorScheme.outline), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
+                Tooltip(
+                  message: 'Ver fornecedores ocultos',
+                  child: OutlinedButton.icon(
+                    onPressed: () => _gerenciarFornecedoresOcultos(itens),
+                    icon: const Icon(Icons.visibility_off_outlined, size: 12),
+                    label: Text('Ocultos (${provider.tabAtual!.fornecedoresOcultos.length})', style: const TextStyle(fontSize: 10)),
+                    style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.outline, side: BorderSide(color: Theme.of(context).colorScheme.outline), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                  ),
                 ),
             ],
           ),
@@ -2139,7 +2216,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               scrollDirection: Axis.horizontal,
               physics: const ClampingScrollPhysics(),
               child: SizedBox(
-                width: colMaterial + 1 + colQtd + 1 + scrollableWidth,
+                width: colMaterial + 1 + colQtdMin + 1 + colQtd + 1 + scrollableWidth,
                 child: Column(children: [
                   // Cabeçalho completo numa única Row
                   IntrinsicHeight(

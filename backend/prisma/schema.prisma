@@ -39,6 +39,13 @@ model MensagemChat {
   // idUsuario (string) -> emoji. Uma reação por usuário por mensagem;
   // reagir de novo com outro emoji substitui a anterior.
   reacoes        Json     @default("{}")
+  // Preenchido quando a mensagem é editada após o envio original (ver
+  // rota PATCH /chat/mensagem/:id).
+  editadaEm      DateTime?
+  // Exclusão lógica: quando true, `conteudo` é esvaziado e `reacoes`
+  // zeradas no backend, e a UI mostra "Mensagem apagada" no lugar (ver
+  // rota DELETE /chat/mensagem/:id).
+  apagada        Boolean  @default(false)
   // Mensagem original citada, quando esta é uma resposta a outra mensagem
   // da mesma conversa (feature "responder mensagem"). Auto-relação: uma
   // MensagemChat pode responder a outra MensagemChat.

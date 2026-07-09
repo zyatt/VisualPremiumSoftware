@@ -78,6 +78,37 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     _notificacaoAlteradaPendente = null;
   }
 
+  // ─── Abertura pendente vinda de um encaminhamento no chat ─────────────────
+  /// Guardado quando o usuário toca no card de uma solicitação (ou de um
+  /// material pertencente a uma solicitação) encaminhado no chat — ver
+  /// EncaminhamentoChatCard._abrirOrigem. A SolicitacoesMaterialPage, assim
+  /// que ficar visível, consome este id, busca a solicitação completa e abre
+  /// o diálogo de visualização automaticamente.
+  int? _solicitacaoParaAbrirPendente;
+  int? get solicitacaoParaAbrirPendente => _solicitacaoParaAbrirPendente;
+
+  void solicitarAberturaSolicitacao(int solicitacaoId) {
+    _solicitacaoParaAbrirPendente = solicitacaoId;
+    notifyListeners();
+  }
+
+  void consumirSolicitacaoParaAbrirPendente() {
+    _solicitacaoParaAbrirPendente = null;
+  }
+
+  /// Busca uma solicitação específica pelo id, sem alterar a lista/estado
+  /// principal do provider. Usado para abrir o diálogo de visualização a
+  /// partir de `_solicitacaoParaAbrirPendente`.
+  Future<SolicitacaoMaterialModel?> buscarPorId(int id) async {
+    try {
+      return await _repo.buscarPorId(id);
+    } catch (e) {
+      _erro = _mensagemErro(e, acao: 'carregar solicitação');
+      notifyListeners();
+      return null;
+    }
+  }
+
   bool _paginaAberta = false;
   bool _visualizacaoPersistedaNaSessao = false;
   bool _notificacoesConectadas = false;

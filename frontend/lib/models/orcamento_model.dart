@@ -6,6 +6,8 @@ class OrcamentoItemModel {
   final String? fornecedorNome;
   double quantidade;
   double? precoUnitario;
+  final double? materialLargura;
+  final double? materialComprimento;
 
   OrcamentoItemModel({
     this.id,
@@ -15,7 +17,22 @@ class OrcamentoItemModel {
     this.fornecedorNome,
     required this.quantidade,
     this.precoUnitario,
+    this.materialLargura,
+    this.materialComprimento,
   });
+
+  /// Dimensão formatada como "3X5M" (comprimento X largura) quando largura e
+  /// comprimento do material estão cadastrados. Não há campo `medida` neste
+  /// modelo (vem só do material), então a formatação é sempre feita quando
+  /// os dados estiverem disponíveis.
+  String? get materialDimensaoFormatada {
+    final l = materialLargura;
+    final c = materialComprimento;
+    if (l == null || c == null || l <= 0 || c <= 0) return null;
+    String fmt(double v) =>
+        v == v.truncateToDouble() ? v.toInt().toString() : v.toString().replaceAll('.', ',');
+    return '${fmt(c)}X${fmt(l)}M';
+  }
 
   factory OrcamentoItemModel.fromJson(Map<String, dynamic> json) =>
       OrcamentoItemModel(
@@ -28,6 +45,12 @@ class OrcamentoItemModel {
             double.tryParse(json['quantidade'].toString()) ?? 1,
         precoUnitario: json['precoUnitario'] != null
             ? double.tryParse(json['precoUnitario'].toString())
+            : null,
+        materialLargura: json['material']?['largura'] != null
+            ? double.tryParse(json['material']['largura'].toString())
+            : null,
+        materialComprimento: json['material']?['comprimento'] != null
+            ? double.tryParse(json['material']['comprimento'].toString())
             : null,
       );
 }

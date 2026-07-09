@@ -467,6 +467,15 @@ class _SidebarContentState extends State<_SidebarContent> {
             const Divider(color: Colors.white10, height: 1),
             const SizedBox(height: 6),
 
+            // ── Status de notificações SSE ────────────────────────────────
+            if (!AppShell.isProducaoRole(usuario?.role))
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                child: _StatusNotificacoesIndicador(
+                  conectado: solProv.notificacoesConectadas,
+                ),
+              ),
+
             // ── Banner de alertas de estoque ─────────────────────────────
             if (nAlertas > 0 && !AppShell.isProducaoRole(usuario?.role))
               Padding(
@@ -487,15 +496,6 @@ class _SidebarContentState extends State<_SidebarContent> {
                   total: nRetirada,
                   onTap: () =>
                       _mostrarPainelRetirada(context, veiculoProv),
-                ),
-              ),
-
-            // ── Status de notificações SSE ────────────────────────────────
-            if (!AppShell.isProducaoRole(usuario?.role))
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                child: _StatusNotificacoesIndicador(
-                  conectado: solProv.notificacoesConectadas,
                 ),
               ),
 
@@ -1542,6 +1542,7 @@ class _RetiradaVeiculosBanner extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: onTap,
+        mouseCursor: SystemMouseCursors.click,
         child: Padding(
           padding:
               const EdgeInsets.symmetric(horizontal: 10, vertical: 8),

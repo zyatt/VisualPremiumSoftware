@@ -43,6 +43,15 @@ class ItemOrcamentoData {
   final String? materialEspessura;
   final String? materialIdentificador;
   final String? materialStatus;
+  /// Largura do material (m) — usada para compor a dimensão "LxC" exibida
+  /// junto às informações do item no orçamento.
+  final double? materialLargura;
+  /// Comprimento do material (m) — usada para compor a dimensão "LxC"
+  /// exibida junto às informações do item no orçamento.
+  final double? materialComprimento;
+  /// Estoque mínimo do material — apenas para exibição na tabela do orçamento.
+  /// Não é editável aqui; é configurado no módulo de estoque.
+  final double? estoqueMinimo;
   double quantidade;
   Map<int, PrecoFornecedorData> precos;
   int? fornecedorSelecionado;
@@ -57,11 +66,28 @@ class ItemOrcamentoData {
     this.materialEspessura,
     this.materialIdentificador,
     this.materialStatus,
+    this.materialLargura,
+    this.materialComprimento,
+    this.estoqueMinimo,
     this.quantidade = 1,
     Map<int, PrecoFornecedorData>? precos,
     this.fornecedorSelecionado,
   }) : itemId = itemId ?? const Uuid().v4(),
        precos = precos ?? {};
+
+  /// Retorna a dimensão formatada como "3X5M" (comprimento X largura) quando
+  /// largura e comprimento estão cadastrados. Se o material já tiver
+  /// `medida` preenchida, a medida tem prioridade e a dimensão não é usada
+  /// (evita redundância na exibição).
+  String? get materialDimensaoFormatada {
+    if (materialMedida != null && materialMedida!.isNotEmpty) return null;
+    final l = materialLargura;
+    final c = materialComprimento;
+    if (l == null || c == null || l <= 0 || c <= 0) return null;
+    String fmt(double v) =>
+        v == v.truncateToDouble() ? v.toInt().toString() : v.toString().replaceAll('.', ',');
+    return '${fmt(c)}X${fmt(l)}M';
+  }
 
   Map<String, dynamic> toJson() => {
         'itemId': itemId,
@@ -73,6 +99,9 @@ class ItemOrcamentoData {
         'materialEspessura': materialEspessura,
         'materialIdentificador': materialIdentificador,
         'materialStatus': materialStatus,
+        'materialLargura': materialLargura,
+        'materialComprimento': materialComprimento,
+        'estoqueMinimo': estoqueMinimo,
         'quantidade': quantidade,
         'precos': precos.map((k, v) => MapEntry(k.toString(), v.toJson())),
         'fornecedorSelecionado': fornecedorSelecionado,
@@ -89,6 +118,9 @@ class ItemOrcamentoData {
         materialEspessura: j['materialEspessura'] as String?,
         materialIdentificador: j['materialIdentificador'] as String?,
         materialStatus: j['materialStatus'] as String?,
+        materialLargura: (j['materialLargura'] as num?)?.toDouble(),
+        materialComprimento: (j['materialComprimento'] as num?)?.toDouble(),
+        estoqueMinimo: (j['estoqueMinimo'] as num?)?.toDouble(),
         quantidade: (j['quantidade'] as num).toDouble(),
         precos: (j['precos'] as Map<String, dynamic>).map(
           (k, v) => MapEntry(
@@ -363,6 +395,56 @@ class OrcamentoProvider extends ChangeNotifier {
     return _abaAtiva;
   }
 
+  /// Atualiza campos "somente leitura" vindos do material (estoque mínimo,
+  /// dimensões, medida/espessura/identificador/status) nos itens da aba
+  /// ativa, usando a lista atual de materiais fornecida (ex: do
+  /// MaterialProvider). Não altera quantidade, preços ou fornecedor
+  /// selecionado. Usado ao sincronizar/atualizar um orçamento já existente,
+  /// já que esses dados podem ter mudado no módulo de estoque desde que o
+  /// item foi adicionado ao orçamento.
+  bool atualizarDadosMateriaisDosItens(List<MaterialModel> materiaisAtuais) {
+    if (tabAtual == null || tabAtual!.itens.isEmpty) return false;
+    final porId = {for (final m in materiaisAtuais) m.id: m};
+    var mudou = false;
+    for (var i = 0; i < tabAtual!.itens.length; i++) {
+      final old = tabAtual!.itens[i];
+      final m = porId[old.materialId];
+      if (m == null) continue;
+      if (old.estoqueMinimo == m.estoqueMinimo &&
+          old.materialLargura == m.largura &&
+          old.materialComprimento == m.comprimento &&
+          old.materialMedida == m.medida &&
+          old.materialEspessura == m.espessura &&
+          old.materialIdentificador == m.identificador &&
+          old.materialStatus == m.status) {
+        continue;
+      }
+      tabAtual!.itens[i] = ItemOrcamentoData(
+        itemId: old.itemId,
+        materialId: old.materialId,
+        materialNome: old.materialNome,
+        materialUnidade: old.materialUnidade,
+        materialCategoria: old.materialCategoria,
+        materialMedida: m.medida,
+        materialEspessura: m.espessura,
+        materialIdentificador: m.identificador,
+        materialStatus: m.status,
+        materialLargura: m.largura,
+        materialComprimento: m.comprimento,
+        estoqueMinimo: m.estoqueMinimo,
+        quantidade: old.quantidade,
+        precos: old.precos,
+        fornecedorSelecionado: old.fornecedorSelecionado,
+      );
+      mudou = true;
+    }
+    if (mudou) {
+      _salvarAbas();
+      notifyListeners();
+    }
+    return mudou;
+  }
+
   void removerItem(String itemId) {
     tabAtual?.itens.removeWhere((i) => i.itemId == itemId);
     _salvarAbas();
@@ -399,6 +481,9 @@ class OrcamentoProvider extends ChangeNotifier {
       materialEspessura: old.materialEspessura,
       materialIdentificador: old.materialIdentificador,
       materialStatus: old.materialStatus,
+      materialLargura: old.materialLargura,
+      materialComprimento: old.materialComprimento,
+      estoqueMinimo: old.estoqueMinimo,
       quantidade: quantidade ?? old.quantidade,
       precos: precos ?? old.precos,
       fornecedorSelecionado: clearFornecedor
@@ -490,6 +575,9 @@ class OrcamentoProvider extends ChangeNotifier {
       materialEspessura:     material.espessura,
       materialIdentificador: material.identificador,
       materialStatus:        material.status,
+      materialLargura:       material.largura,
+      materialComprimento:   material.comprimento,
+      estoqueMinimo:         material.estoqueMinimo,
       precos:                precos,
       fornecedorSelecionado: fornecedor.fornecedorId,
     );

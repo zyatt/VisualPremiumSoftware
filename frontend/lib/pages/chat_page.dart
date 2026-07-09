@@ -292,6 +292,17 @@ class _UsuarioTile extends StatelessWidget {
     final cs     = Theme.of(context).colorScheme;
     final inicial = usuario.nome.isNotEmpty ? usuario.nome[0].toUpperCase() : '?';
 
+    // Cores de texto/ícone adaptadas ao fundo: quando o tile está ativo, o
+    // fundo vira `primaryContainer` (bem saturado neste tema), então o
+    // texto precisa usar `onPrimaryContainer` para manter contraste — usar
+    // `onSurface`/`onSurfaceVariant` (pensadas pro fundo neutro do tile
+    // inativo) deixava "Visto por último..." quase ilegível em cima do
+    // laranja.
+    final corNome = isAtivo ? cs.onPrimaryContainer : cs.onSurface;
+    final corSubtitulo = isAtivo
+        ? cs.onPrimaryContainer.withValues(alpha: 0.85)
+        : cs.onSurfaceVariant;
+
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: Material(
@@ -307,11 +318,13 @@ class _UsuarioTile extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 20,
-                    backgroundColor: cs.primary.withValues(alpha: 0.15),
+                    backgroundColor: isAtivo
+                        ? cs.onPrimaryContainer.withValues(alpha: 0.18)
+                        : cs.primary.withValues(alpha: 0.15),
                     child: Text(
                       inicial,
                       style: GoogleFonts.nunito(
-                        color: cs.primary,
+                        color: isAtivo ? cs.onPrimaryContainer : cs.primary,
                         fontWeight: FontWeight.w700,
                         fontSize: 15,
                       ),
@@ -356,7 +369,7 @@ class _UsuarioTile extends StatelessWidget {
                       style: GoogleFonts.nunito(
                         fontWeight: FontWeight.w600,
                         fontSize: 13,
-                        color: cs.onSurface,
+                        color: corNome,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -364,7 +377,7 @@ class _UsuarioTile extends StatelessWidget {
                       usuario.online ? usuario.role : _formatarStatusUsuario(usuario),
                       style: GoogleFonts.nunito(
                         fontSize: 11,
-                        color: cs.onSurfaceVariant,
+                        color: corSubtitulo,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -434,6 +447,39 @@ class _PainelConversaState extends State<_PainelConversa> {
   void _responderA(MensagemChat msg) {
     setState(() => _respondendoA = msg);
     _focusNode.requestFocus();
+  }
+
+  Future<void> _editarMensagem(MensagemChat msg) async {
+    final novoTexto = await mostrarDialogoEditarMensagem(
+      context,
+      textoAtual: msg.conteudo,
+    );
+    if (novoTexto == null) return;
+    final texto = novoTexto.trim();
+    if (texto.isEmpty || texto == msg.conteudo) return;
+    try {
+      await widget.chat.editarMensagem(msg, texto);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Não foi possível editar: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _excluirMensagem(MensagemChat msg) async {
+    final confirmado = await confirmarExclusaoMensagem(context);
+    if (!confirmado) return;
+    try {
+      await widget.chat.excluirMensagem(msg);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Não foi possível excluir: $e')),
+        );
+      }
+    }
   }
 
   // instantaneo=true força um "salto" direto pro fim (jumpTo), garantindo
@@ -643,6 +689,8 @@ class _PainelConversaState extends State<_PainelConversa> {
                                 meuId: chat.meuId,
                                 onReagir: (emoji) => chat.reagirMensagem(msg, emoji),
                                 onResponder: () => _responderA(msg),
+                                onEditar: () => _editarMensagem(msg),
+                                onExcluir: () => _excluirMensagem(msg),
                               ),
                             ),
                           ],
@@ -727,12 +775,16 @@ class _BubbleMensagem extends StatefulWidget {
   final int? meuId;
   final ValueChanged<String?> onReagir;
   final VoidCallback onResponder;
+  final VoidCallback onEditar;
+  final VoidCallback onExcluir;
   const _BubbleMensagem({
     required this.mensagem,
     required this.isMinha,
     required this.meuId,
     required this.onReagir,
     required this.onResponder,
+    required this.onEditar,
+    required this.onExcluir,
   });
 
   @override
@@ -755,12 +807,28 @@ class _BubbleMensagemState extends State<_BubbleMensagem> {
         meuId != null ? mensagem.reacoes[meuId.toString()] : null;
 
     Future<void> abrirSeletor(Offset posicaoGlobal) async {
+      // Mensagens já apagadas não têm mais o que responder/editar/excluir
+      // ou reagir de forma útil, então nem abrimos o menu.
+      if (mensagem.apagada) return;
       final escolha = await mostrarSeletorReacao(
         context,
         posicaoGlobal,
         jaReagiu: minhaReacaoAtual != null,
+        souAutor: isMinha,
       );
       if (escolha == null) return;
+      if (escolha == responderSentinela) {
+        widget.onResponder();
+        return;
+      }
+      if (escolha == editarSentinela) {
+        widget.onEditar();
+        return;
+      }
+      if (escolha == excluirSentinela) {
+        widget.onExcluir();
+        return;
+      }
       onReagir(escolha == removerReacaoSentinela ? null : escolha);
     }
 
@@ -779,11 +847,9 @@ class _BubbleMensagemState extends State<_BubbleMensagem> {
         onEnter: (_) => setState(() => _hover = true),
         onExit:  (_) => setState(() => _hover = false),
         child: GestureDetector(
-          onTapDown: (details) => abrirSeletor(details.globalPosition),
-          // Toque longo = responder (citar) esta mensagem. Convive com o
-          // onTapDown de reação porque long-press só é resolvido depois de
-          // um tempo segurado, sem conflitar com o tap comum.
-          onLongPress: widget.onResponder,
+          // Toque longo = abre o menu com "Responder" no topo e os emojis
+          // de reação logo abaixo, ancorado na posição exata do toque.
+          onLongPressStart: (details) => abrirSeletor(details.globalPosition),
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -848,7 +914,9 @@ class _BubbleMensagemState extends State<_BubbleMensagem> {
                               ),
                             ),
                             Text(
-                              mensagem.respondendoAConteudo ?? '',
+                              resumoConteudoParaPreview(
+                                mensagem.respondendoAConteudo ?? '',
+                              ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: GoogleFonts.nunito(
@@ -860,7 +928,17 @@ class _BubbleMensagemState extends State<_BubbleMensagem> {
                           ],
                         ),
                       ),
-                    if (mensagem.ehEncaminhamento)
+                    if (mensagem.apagada)
+                      Text(
+                        'Mensagem apagada',
+                        style: GoogleFonts.nunito(
+                          fontSize: 13,
+                          fontStyle: FontStyle.italic,
+                          color: (isMinha ? cs.onPrimary : cs.onSurface)
+                              .withValues(alpha: 0.6),
+                        ),
+                      )
+                    else if (mensagem.ehEncaminhamento)
                       EncaminhamentoChatCard(mensagem: mensagem, isMinha: isMinha)
                     else
                       Text(
@@ -874,6 +952,18 @@ class _BubbleMensagemState extends State<_BubbleMensagem> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (mensagem.ehEditada && !mensagem.apagada) ...[
+                          Text(
+                            'editada · ',
+                            style: GoogleFonts.nunito(
+                              fontSize: 10,
+                              fontStyle: FontStyle.italic,
+                              color: isMinha
+                                  ? cs.onPrimary.withValues(alpha: 0.7)
+                                  : cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                         Text(
                           hora,
                           style: GoogleFonts.nunito(
@@ -1080,7 +1170,7 @@ class _PreviewResposta extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  mensagem.conteudo,
+                  mensagem.resumoParaPreview,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.nunito(

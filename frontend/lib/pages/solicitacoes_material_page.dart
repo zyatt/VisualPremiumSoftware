@@ -23,10 +23,12 @@ class SolicitacoesMaterialPage extends StatefulWidget {
       _SolicitacoesMaterialPageState();
 }
 
-class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
+class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
+    with SingleTickerProviderStateMixin {
   final _buscaCtrl = TextEditingController();
   String _andamentoFiltro = '';
   Timer? _debounceTimer;
+  late TabController _tabController;
 
   // ── Totais globais (sem filtro) ──────────────────────────────────────────
   // Capturados na primeira carga (sem busca/andamento) e atualizados sempre
@@ -34,6 +36,13 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
   int _totalItensGlobal     = 0;
   int _totalCompradosGlobal = 0;
   bool _totaisGlobaisCarregados = false;
+
+  // Evita disparar a busca+abertura da solicitação pendente (vinda de um
+  // encaminhamento no chat) mais de uma vez enquanto ela ainda está em
+  // andamento — o build() roda de novo a cada frame do
+  // addPostFrameCallback abaixo, mas o id só é consumido do provider depois
+  // que a busca termina.
+  bool _abrindoSolicitacaoPendente = false;
 
   // Nota: quem controla "página aberta" (badge, marcar como visualizado)
   // é o AppShell — via SolicitacaoMaterialProvider.definirPaginaVisivel(),
@@ -44,6 +53,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
         await context.read<SolicitacaoMaterialProvider>().carregar();
@@ -56,6 +66,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
   void dispose() {
     _debounceTimer?.cancel();
     _buscaCtrl.dispose();
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -105,6 +116,25 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
 
   @override
   Widget build(BuildContext context) {
+    // ── Abertura pendente vinda de um encaminhamento no chat ────────────────
+    // Ao tocar no card de uma solicitação (ou material de uma solicitação)
+    // encaminhado no chat, o provider guarda o id aqui. Buscamos a
+    // solicitação completa e abrimos o diálogo de visualização assim que
+    // esta página estiver visível.
+    final solicitacaoPendenteId =
+        context.watch<SolicitacaoMaterialProvider>().solicitacaoParaAbrirPendente;
+    if (solicitacaoPendenteId != null && !_abrindoSolicitacaoPendente) {
+      _abrindoSolicitacaoPendente = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final provider = context.read<SolicitacaoMaterialProvider>();
+        provider.consumirSolicitacaoParaAbrirPendente();
+        final solicitacao = await provider.buscarPorId(solicitacaoPendenteId);
+        _abrindoSolicitacaoPendente = false;
+        if (!mounted || solicitacao == null) return;
+        _abrirFormSolicitacao(solicitacao);
+      });
+    }
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
@@ -190,27 +220,6 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
                     },
                   ),
                 ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 185,
-                  child: DropdownButtonFormField<String>(
-                    mouseCursor: SystemMouseCursors.click,
-                    initialValue: _andamentoFiltro.isEmpty ? null : _andamentoFiltro,
-                    decoration: const InputDecoration(
-                      labelText: 'Andamento',
-                      isDense: true,
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: '', child: Text('TODOS')),
-                      DropdownMenuItem(value: 'EM_ANDAMENTO', child: Text('EM ANDAMENTO')),
-                      DropdownMenuItem(value: 'FINALIZADO', child: Text('FINALIZADO')),
-                    ],
-                    onChanged: (v) {
-                      setState(() => _andamentoFiltro = v ?? '');
-                      _aplicarFiltros();
-                    },
-                  ),
-                ),
                 const SizedBox(width: 8),
                 IconButton.outlined(
                   tooltip: 'Limpar filtros',
@@ -228,6 +237,45 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
               ],
             ),
             const SizedBox(height: 16),
+            Consumer<SolicitacaoMaterialProvider>(
+              builder: (_, provider, __) {
+                final emAndamento = provider.solicitacoes
+                    .where((s) => s.andamento != 'FINALIZADO')
+                    .toList();
+                final finalizadas = provider.solicitacoes
+                    .where((s) => s.andamento == 'FINALIZADO')
+                    .toList();
+                return Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    border: Border(
+                        bottom: BorderSide(
+                            color: Theme.of(context).colorScheme.outlineVariant)),
+                  ),
+                  child: TabBar(
+                    controller: _tabController,
+                    labelColor: AppTheme.primary,
+                    unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                    indicatorColor: AppTheme.primary,
+                    indicatorWeight: 2,
+                    labelStyle: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 13),
+                    tabs: [
+                      Tab(
+                        text: provider.carregando
+                            ? 'Em Andamento'
+                            : 'Em Andamento (${emAndamento.length})',
+                      ),
+                      Tab(
+                        text: provider.carregando
+                            ? 'Finalizadas'
+                            : 'Finalizadas (${finalizadas.length})',
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
             Expanded(
               child: Consumer<SolicitacaoMaterialProvider>(
                 builder: (_, provider, __) {
@@ -279,17 +327,51 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage> {
                       ),
                     );
                   }
-                  return Card(
-                    clipBehavior: Clip.antiAlias,
-                    child: _TabelaSolicitacoes(
-                      solicitacoes: provider.solicitacoes,
-                      onAbrir: _abrirFormSolicitacao,
-                    ),
+                  final emAndamento = provider.solicitacoes
+                      .where((s) => s.andamento != 'FINALIZADO')
+                      .toList();
+                  final finalizadas = provider.solicitacoes
+                      .where((s) => s.andamento == 'FINALIZADO')
+                      .toList();
+                  return TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildLista(emAndamento, 'Nenhuma solicitação em andamento'),
+                      _buildLista(finalizadas, 'Nenhuma solicitação finalizada'),
+                    ],
                   );
                 },
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLista(List<SolicitacaoMaterialModel> lista, String mensagemVazia) {
+    if (lista.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.inventory_2_outlined, size: 64,
+                color: Theme.of(context).colorScheme.outline),
+            const SizedBox(height: 16),
+            Text(mensagemVazia,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ],
+        ),
+      );
+    }
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(top: 16),
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: _TabelaSolicitacoes(
+          solicitacoes: lista,
+          onAbrir: _abrirFormSolicitacao,
         ),
       ),
     );
@@ -409,35 +491,33 @@ class _TabelaSolicitacoes extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-            child: const Row(
-              children: [
-                Expanded(flex: 1, child: _CabecalhoColuna(label: 'OS')),
-                Expanded(flex: 2, child: _CabecalhoColuna(label: 'Cliente')),
-                Expanded(flex: 1, child: _CabecalhoColuna(label: 'Solicitante')),
-                Expanded(flex: 2, child: _CabecalhoColuna(label: 'Materiais')),
-                Expanded(flex: 1, child: _CabecalhoColuna(label: 'Solicitação')),
-                Expanded(flex: 1, child: _CabecalhoColuna(label: 'Necessidade')),
-                Expanded(flex: 1, child: _CabecalhoColuna(label: 'Andamento')),
-              ],
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          child: const Row(
+            children: [
+              Expanded(flex: 1, child: _CabecalhoColuna(label: 'OS')),
+              Expanded(flex: 2, child: _CabecalhoColuna(label: 'Cliente')),
+              Expanded(flex: 1, child: _CabecalhoColuna(label: 'Solicitante')),
+              Expanded(flex: 2, child: _CabecalhoColuna(label: 'Materiais')),
+              Expanded(flex: 1, child: _CabecalhoColuna(label: 'Solicitação')),
+              Expanded(flex: 1, child: _CabecalhoColuna(label: 'Necessidade')),
+              Expanded(flex: 1, child: _CabecalhoColuna(label: 'Andamento')),
+            ],
           ),
-          Divider(height: 0, thickness: 0.8,
-              color: Theme.of(context).colorScheme.outlineVariant),
-          for (int i = 0; i < solicitacoes.length; i++) ...[
-            if (i > 0)
-              Divider(height: 0, thickness: 0.8,
-                  color: Theme.of(context).colorScheme.outlineVariant),
-            _LinhaSolicitacao(solicitacao: solicitacoes[i], onAbrir: onAbrir),
-          ],
+        ),
+        Divider(height: 0, thickness: 0.8,
+            color: Theme.of(context).colorScheme.outlineVariant),
+        for (int i = 0; i < solicitacoes.length; i++) ...[
+          if (i > 0)
+            Divider(height: 0, thickness: 0.8,
+                color: Theme.of(context).colorScheme.outlineVariant),
+          _LinhaSolicitacao(solicitacao: solicitacoes[i], onAbrir: onAbrir),
         ],
-      ),
+      ],
     );
   }
 }
@@ -545,7 +625,9 @@ class _LinhaSolicitacaoState extends State<_LinhaSolicitacao> {
                 ),
                 Expanded(
                   flex: 1,
-                  child: Center(child: _StatusBadge(status: sol.andamento)),
+                  child: Center(
+                    child: _StatusBadgeEditavel(solicitacao: sol),
+                  ),
                 ),
               ],
             ),
@@ -556,11 +638,18 @@ class _LinhaSolicitacaoState extends State<_LinhaSolicitacao> {
   }
 }
 
-class _StatusBadge extends StatelessWidget {
-  final String status;
-  const _StatusBadge({required this.status});
+class _StatusBadgeEditavel extends StatefulWidget {
+  final SolicitacaoMaterialModel solicitacao;
+  const _StatusBadgeEditavel({required this.solicitacao});
 
-  ({Color bg, Color fg, String label}) _estilo(BuildContext context, String status) {
+  @override
+  State<_StatusBadgeEditavel> createState() => _StatusBadgeEditavelState();
+}
+
+class _StatusBadgeEditavelState extends State<_StatusBadgeEditavel> {
+  bool _salvando = false;
+
+  ({Color bg, Color fg, String label}) _estilo(String status) {
     switch (status) {
       case 'EM_ANDAMENTO':
         return (
@@ -583,24 +672,125 @@ class _StatusBadge extends StatelessWidget {
     }
   }
 
+  Future<void> _alterarStatus(String novoStatus) async {
+    final sol = widget.solicitacao;
+    if (novoStatus == sol.andamento) return;
+
+    if (novoStatus == 'FINALIZADO' && !sol.todosComprados) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Não é possível finalizar: existem materiais ainda não marcados como comprados.'),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _salvando = true);
+    final provider = context.read<SolicitacaoMaterialProvider>();
+    final ok = await provider.atualizar(sol.id, {'andamento': novoStatus});
+    if (!mounted) return;
+    setState(() => _salvando = false);
+
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Andamento atualizado'), backgroundColor: AppTheme.success),
+      );
+    } else {
+      final mensagem = provider.erro ?? 'Erro ao atualizar andamento';
+      provider.limparErro();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(mensagem), backgroundColor: AppTheme.error),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final estilo = _estilo(context, status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: estilo.bg,
-        borderRadius: BorderRadius.circular(20),
+    final sol = widget.solicitacao;
+    final estilo = _estilo(sol.andamento);
+
+    if (_salvando) {
+      return const SizedBox(
+        width: 14,
+        height: 14,
+        child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary),
+      );
+    }
+
+    return PopupMenuButton<String>(
+      tooltip: 'Alterar andamento',
+      offset: const Offset(0, 32),
+      onSelected: _alterarStatus,
+      itemBuilder: (ctx) => [
+        _itemMenu(ctx, 'EM_ANDAMENTO', sol),
+        _itemMenu(ctx, 'FINALIZADO', sol),
+      ],
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: estilo.bg,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(estilo.label, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: estilo.fg)),
+              const SizedBox(width: 2),
+              Icon(Icons.arrow_drop_down, size: 14, color: estilo.fg),
+            ],
+          ),
+        ),
       ),
-      child: Text(estilo.label, maxLines: 1, overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: estilo.fg)),
+    );
+  }
+
+  PopupMenuItem<String> _itemMenu(
+      BuildContext ctx, String status, SolicitacaoMaterialModel sol) {
+    final estilo = _estilo(status);
+    final bloqueado = status == 'FINALIZADO' && !sol.todosComprados;
+    final selecionado = status == sol.andamento;
+    return PopupMenuItem<String>(
+      value: status,
+      enabled: !selecionado,
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: estilo.fg, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              estilo.label,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: selecionado ? FontWeight.w700 : FontWeight.w500,
+                color: bloqueado
+                    ? Theme.of(ctx).colorScheme.outline
+                    : Theme.of(ctx).colorScheme.onSurface,
+              ),
+            ),
+          ),
+          if (bloqueado)
+            Tooltip(
+              message: 'Finalize apenas com todos os materiais comprados',
+              child: Icon(Icons.lock_outline, size: 14,
+                  color: Theme.of(ctx).colorScheme.outline),
+            )
+          else if (selecionado)
+            Icon(Icons.check, size: 14, color: estilo.fg),
+        ],
+      ),
     );
   }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// DIALOG: CRIAR SOLICITAÇÃO (múltiplos materiais)
-// ═══════════════════════════════════════════
 
 class _ItemMaterialCriacao {
   MaterialModel? material;
@@ -1805,9 +1995,11 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
                   ),
                   IconButton(
                     onPressed: _encaminharSolicitacao,
-                    icon: const Icon(Icons.forward_outlined, size: 20),
+                    icon: const Icon(Icons.ios_share_outlined, size: 20),
                     tooltip: 'Enviar para chat',
-                    style: IconButton.styleFrom().copyWith(
+                    style: IconButton.styleFrom(
+                      foregroundColor: AppTheme.primary,
+                    ).copyWith(
                       mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                     ),
                   ),
@@ -2394,8 +2586,9 @@ class _MaterialCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 _IconActionButton(
-                  icon: Icons.forward_outlined,
+                  icon: Icons.ios_share_outlined,
                   tooltip: 'Encaminhar este material no chat',
+                  color: AppTheme.primary,
                   onTap: onEncaminhar,
                 ),
                 if (podeEditar) ...[
@@ -2508,87 +2701,67 @@ class _CompradoToggleState extends State<_CompradoToggle> {
   @override
   Widget build(BuildContext context) {
     final comprado = widget.comprado;
-    final pendente = widget.pendente;
 
     final corBase = comprado
         ? AppTheme.success
-        : Theme.of(context).colorScheme.outlineVariant;
+        : Theme.of(context).colorScheme.outline;
     final corFundo = comprado
         ? AppTheme.success.withValues(alpha: _hovered ? 0.22 : 0.15)
         : (_hovered
             ? Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.7)
             : Theme.of(context).colorScheme.surfaceContainerHighest);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        MouseRegion(
-          cursor: SystemMouseCursors.click,
-          onEnter: (_) => setState(() => _hovered = true),
-          onExit: (_) => setState(() => _hovered = false),
-          child: GestureDetector(
-            onTap: widget.onTap,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: corFundo,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: pendente ? AppTheme.error : corBase,
-                  width: pendente ? 1.5 : (_hovered ? 1.5 : 1),
-                ),
-                boxShadow: _hovered
-                    ? [
-                        BoxShadow(
-                          color: (pendente ? AppTheme.error : corBase)
-                              .withValues(alpha: 0.25),
-                          blurRadius: 6,
-                          offset: const Offset(0, 1),
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    comprado ? Icons.check_circle : Icons.radio_button_unchecked,
-                    size: 16,
-                    color: comprado
-                        ? AppTheme.success
-                        : Theme.of(context).colorScheme.outline,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    comprado ? 'COMPRADO' : 'PENDENTE',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: comprado
-                          ? AppTheme.success
-                          : Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: corFundo,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: corBase,
+              width: _hovered ? 1.5 : 1,
             ),
+            boxShadow: _hovered
+                ? [
+                    BoxShadow(
+                      color: corBase.withValues(alpha: 0.25),
+                      blurRadius: 6,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                comprado ? Icons.check_circle : Icons.radio_button_unchecked,
+                size: 16,
+                color: comprado
+                    ? AppTheme.success
+                    : Theme.of(context).colorScheme.outline,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                comprado ? 'COMPRADO' : 'PENDENTE',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: comprado
+                      ? AppTheme.success
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
         ),
-        if (pendente) ...[
-          const SizedBox(height: 4),
-          Text(
-            'Não salvo',
-            style: TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w700,
-              color: AppTheme.error,
-              letterSpacing: 0.3,
-            ),
-          ),
-        ],
-      ],
+      ),
     );
   }
 }

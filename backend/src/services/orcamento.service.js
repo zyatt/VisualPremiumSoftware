@@ -12,6 +12,8 @@ const _itensInclude = {
           medida: true,
           espessura: true,
           identificador: true,
+          largura: true,
+          comprimento: true,
         },
       },
       fornecedor: { select: { id: true, nomeFantasia: true } },

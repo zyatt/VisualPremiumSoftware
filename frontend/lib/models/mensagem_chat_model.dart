@@ -2,6 +2,46 @@
 
 import 'dart:convert';
 
+/// Prefixo usado para identificar conteúdo de mensagem que na verdade é um
+/// payload de encaminhamento (solicitação/material) — ver
+/// `MensagemChat.codificarEncaminhamento`. Exposto separadamente (e não só
+/// como constante privada da classe) porque `resumoConteudoParaPreview`
+/// também precisa dele para decodificar textos crus de mensagens citadas
+/// (`respondendoAConteudo`), que chegam do backend já achatados em uma
+/// String solta — sem o wrapper `MensagemChat` e seus getters.
+const _prefixoEncaminhamentoGlobal = '§FWD§';
+
+/// Decodifica um `conteudo` cru de mensagem (seja da própria mensagem, seja
+/// de uma mensagem citada, ex.: `respondendoAConteudo`) para um texto curto
+/// e legível: mensagens normais retornam o próprio texto; encaminhamentos
+/// (payload JSON prefixado) mostram o nome do material ou o número da OS
+/// em vez do JSON cru — mesmas chaves que `EncaminhamentoChatCard` usa para
+/// montar o título do card (`materialNome` / `numeroOS`), para o preview
+/// bater com o que a bolha efetivamente mostra.
+/// Usado tanto pela citação "respondendo a" dentro da bolha quanto pelo
+/// preview acima do campo de digitação.
+String resumoConteudoParaPreview(String conteudo) {
+  if (!conteudo.startsWith(_prefixoEncaminhamentoGlobal)) return conteudo;
+  try {
+    final payload = jsonDecode(
+      conteudo.substring(_prefixoEncaminhamentoGlobal.length),
+    ) as Map<String, dynamic>;
+    final dados = payload['dados'] as Map<String, dynamic>?;
+    switch (payload['tipo'] as String?) {
+      case 'solicitacao':
+        final numeroOS = dados?['numeroOS'];
+        return numeroOS != null ? 'OS $numeroOS' : 'Solicitação encaminhada';
+      case 'material':
+        final nome = (dados?['materialNome'] as String?)?.trim();
+        return nome != null && nome.isNotEmpty ? nome : 'Material encaminhado';
+      default:
+        return 'Encaminhamento';
+    }
+  } catch (_) {
+    return 'Encaminhamento';
+  }
+}
+
 class MensagemChat {
   final int id;
   final int remetenteId;
@@ -16,6 +56,14 @@ class MensagemChat {
   // pessoas reagindo à mesma mensagem, cada uma com no máximo uma reação
   // (reagir de novo com outro emoji substitui a anterior).
   final Map<String, String> reacoes;
+  // Presente quando a mensagem foi editada após o envio original — usado
+  // pela UI para mostrar o marcador "(editada)" ao lado do horário.
+  final DateTime? editadaEm;
+  // true quando o remetente excluiu a mensagem (exclusão lógica: o
+  // conteúdo original é descartado no backend e a UI mostra um texto
+  // "Mensagem apagada" no lugar).
+  final bool apagada;
+  bool get ehEditada => editadaEm != null;
   // Campo puramente local/transiente (nunca vem do JSON do servidor nem é
   // enviado): true enquanto a mensagem foi adicionada otimisticamente na UI
   // e ainda aguarda confirmação do POST /chat/mensagem. Usado só para
@@ -65,6 +113,14 @@ class MensagemChat {
     return '$_prefixoEncaminhamento${jsonEncode({'tipo': tipo, 'dados': dados})}';
   }
 
+  /// Texto curto e legível para exibir em contextos de "preview" do
+  /// conteúdo desta mensagem — citação na bolha de quem respondeu, e o
+  /// preview acima do campo de digitação enquanto se está respondendo.
+  /// Mensagens normais retornam o próprio `conteudo`; encaminhamentos
+  /// (que guardam um payload JSON bruto em `conteudo`, ver acima) viram um
+  /// resumo amigável em vez do JSON cru.
+  String get resumoParaPreview => resumoConteudoParaPreview(conteudo);
+
   const MensagemChat({
     required this.id,
     required this.remetenteId,
@@ -75,6 +131,8 @@ class MensagemChat {
     this.remetenteNome,
     this.destinatarioNome,
     this.reacoes = const {},
+    this.editadaEm,
+    this.apagada = false,
     this.pendente = false,
     this.respondendoAId,
     this.respondendoAConteudo,
@@ -95,6 +153,10 @@ class MensagemChat {
       reacoes: (json['reacoes'] as Map<String, dynamic>?)
               ?.map((k, v) => MapEntry(k, v as String)) ??
           const {},
+      editadaEm: json['editadaEm'] != null
+          ? DateTime.parse(json['editadaEm'] as String).toLocal()
+          : null,
+      apagada: json['apagada'] as bool? ?? false,
       respondendoAId:            respondendoA?['id'] as int?,
       respondendoAConteudo:      respondendoA?['conteudo'] as String?,
       respondendoARemetenteNome:
@@ -110,6 +172,8 @@ class MensagemChat {
     'lida':           lida,
     'criadoEm':       criadoEm.toIso8601String(),
     'reacoes':        reacoes,
+    if (editadaEm != null) 'editadaEm': editadaEm!.toIso8601String(),
+    'apagada':        apagada,
     if (respondendoAId != null) 'respondendoAId': respondendoAId,
   };
 
@@ -127,6 +191,8 @@ class MensagemChat {
       remetenteNome: remetenteNome,
       destinatarioNome: destinatarioNome,
       reacoes: novasReacoes,
+      editadaEm: editadaEm,
+      apagada: apagada,
       pendente: pendente,
       respondendoAId: respondendoAId,
       respondendoAConteudo: respondendoAConteudo,

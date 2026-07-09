@@ -425,6 +425,39 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
     _msgFocus.requestFocus();
   }
 
+  Future<void> _editarMensagem(ChatProvider chat, MensagemChat msg) async {
+    final novoTexto = await mostrarDialogoEditarMensagem(
+      context,
+      textoAtual: msg.conteudo,
+    );
+    if (novoTexto == null) return;
+    final texto = novoTexto.trim();
+    if (texto.isEmpty || texto == msg.conteudo) return;
+    try {
+      await chat.editarMensagem(msg, texto);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Não foi possível editar: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _excluirMensagem(ChatProvider chat, MensagemChat msg) async {
+    final confirmado = await confirmarExclusaoMensagem(context);
+    if (!confirmado) return;
+    try {
+      await chat.excluirMensagem(msg);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Não foi possível excluir: $e')),
+        );
+      }
+    }
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollCtrl.hasClients) {
@@ -585,6 +618,8 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
                   chat: chat,
                   scrollCtrl: _scrollCtrl,
                   onResponder: _responderA,
+                  onEditar: (msg) => _editarMensagem(chat, msg),
+                  onExcluir: (msg) => _excluirMensagem(chat, msg),
                 ),
         ),
 
@@ -740,10 +775,14 @@ class _MiniConversa extends StatefulWidget {
   final ChatProvider chat;
   final ScrollController scrollCtrl;
   final ValueChanged<MensagemChat> onResponder;
+  final ValueChanged<MensagemChat> onEditar;
+  final ValueChanged<MensagemChat> onExcluir;
   const _MiniConversa({
     required this.chat,
     required this.scrollCtrl,
     required this.onResponder,
+    required this.onEditar,
+    required this.onExcluir,
   });
 
   @override
@@ -848,12 +887,26 @@ class _MiniConversaState extends State<_MiniConversa> {
             : null;
 
         Future<void> abrirSeletor(Offset posicaoGlobal) async {
+          if (msg.apagada) return;
           final escolha = await mostrarSeletorReacao(
             ctx,
             posicaoGlobal,
             jaReagiu: minhaReacaoAtual != null,
+            souAutor: isMinha,
           );
           if (escolha == null) return;
+          if (escolha == responderSentinela) {
+            widget.onResponder(msg);
+            return;
+          }
+          if (escolha == editarSentinela) {
+            widget.onEditar(msg);
+            return;
+          }
+          if (escolha == excluirSentinela) {
+            widget.onExcluir(msg);
+            return;
+          }
           chat.reagirMensagem(
             msg,
             escolha == removerReacaoSentinela ? null : escolha,
@@ -868,8 +921,7 @@ class _MiniConversaState extends State<_MiniConversa> {
           temReacoes: msg.reacoes.isNotEmpty,
           pendente: msg.pendente,
           lida: msg.lida,
-          onTapDown: (details) => abrirSeletor(details.globalPosition),
-          onLongPress: () => widget.onResponder(msg),
+          onLongPressStart: (details) => abrirSeletor(details.globalPosition),
           respondendoAConteudo: msg.respondendoAConteudo,
           respondendoARemetenteNome: msg.respondendoARemetenteNome,
           reacoesBadge: msg.reacoes.isNotEmpty
@@ -908,8 +960,7 @@ class _MiniBolhaMensagem extends StatefulWidget {
   final bool temReacoes;
   final bool pendente;
   final bool lida;
-  final GestureTapDownCallback onTapDown;
-  final VoidCallback onLongPress;
+  final GestureLongPressStartCallback onLongPressStart;
   final String? respondendoAConteudo;
   final String? respondendoARemetenteNome;
   final Widget? reacoesBadge;
@@ -921,8 +972,7 @@ class _MiniBolhaMensagem extends StatefulWidget {
     required this.temReacoes,
     required this.pendente,
     required this.lida,
-    required this.onTapDown,
-    required this.onLongPress,
+    required this.onLongPressStart,
     this.respondendoAConteudo,
     this.respondendoARemetenteNome,
     this.reacoesBadge,
@@ -952,8 +1002,7 @@ class _MiniBolhaMensagemState extends State<_MiniBolhaMensagem> {
         onEnter: (_) => setState(() => _hover = true),
         onExit:  (_) => setState(() => _hover = false),
         child: GestureDetector(
-          onTapDown: widget.onTapDown,
-          onLongPress: widget.onLongPress,
+          onLongPressStart: widget.onLongPressStart,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -1014,7 +1063,9 @@ class _MiniBolhaMensagemState extends State<_MiniBolhaMensagem> {
                               ),
                             ),
                             Text(
-                              widget.respondendoAConteudo!,
+                              resumoConteudoParaPreview(
+                                widget.respondendoAConteudo!,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: GoogleFonts.nunito(
@@ -1026,7 +1077,17 @@ class _MiniBolhaMensagemState extends State<_MiniBolhaMensagem> {
                           ],
                         ),
                       ),
-                    if (widget.mensagem.ehEncaminhamento)
+                    if (widget.mensagem.apagada)
+                      Text(
+                        'Mensagem apagada',
+                        style: GoogleFonts.nunito(
+                          fontSize: 12.5,
+                          fontStyle: FontStyle.italic,
+                          color: (isMinha ? cs.onPrimary : cs.onSurface)
+                              .withValues(alpha: 0.6),
+                        ),
+                      )
+                    else if (widget.mensagem.ehEncaminhamento)
                       EncaminhamentoChatCard(
                         mensagem: widget.mensagem,
                         isMinha: isMinha,
@@ -1044,6 +1105,17 @@ class _MiniBolhaMensagemState extends State<_MiniBolhaMensagem> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (widget.mensagem.ehEditada && !widget.mensagem.apagada)
+                          Text(
+                            'editada · ',
+                            style: GoogleFonts.nunito(
+                              fontSize: 9,
+                              fontStyle: FontStyle.italic,
+                              color: isMinha
+                                  ? cs.onPrimary.withValues(alpha: 0.7)
+                                  : cs.onSurfaceVariant,
+                            ),
+                          ),
                         Text(
                           widget.hora,
                           style: GoogleFonts.nunito(
@@ -1153,7 +1225,7 @@ class _MiniPreviewResposta extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  mensagem.conteudo,
+                  mensagem.resumoParaPreview,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.nunito(fontSize: 10.5, color: cs.onSurfaceVariant),

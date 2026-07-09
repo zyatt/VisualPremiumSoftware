@@ -7,6 +7,28 @@ import '../models/material_model.dart';
 import '../repositories/material_repository.dart';
 import '../utils/api_client.dart';
 
+/// Dados de um material encaminhado via chat (ver EncaminhamentoChatCard),
+/// usados pela EstoquePage para abrir automaticamente a categoria certa já
+/// filtrada — mesmo papel que MaterialCriticoNotificacao cumpre para o
+/// MaterialCriticoBanner, mas alimentado por um encaminhamento de chat em
+/// vez de um evento SSE.
+class FiltroMaterialChat {
+  final int? materialId;
+  final String? nome;
+  final String? categoria;
+  final String? identificador;
+  final String? medida;
+  final String? espessura;
+  const FiltroMaterialChat({
+    this.materialId,
+    this.nome,
+    this.categoria,
+    this.identificador,
+    this.medida,
+    this.espessura,
+  });
+}
+
 /// Remove prefixos como "Exception:", "HttpException:" que o Dart
 /// adiciona automaticamente ao fazer e.toString() em exceções.
 ///
@@ -109,6 +131,25 @@ class MaterialProvider extends ChangeNotifier {
 
   void consumirFiltroNavegacaoPendente() {
     _filtroNavegacaoPendente = null;
+  }
+
+  // ─── Navegação a partir de um encaminhamento de material no chat ──────────
+  /// Guardado quando o usuário toca no card de encaminhamento de um material
+  /// "solto" do estoque (ver EncaminhamentoChatCard._abrirOrigem): carrega os
+  /// dados do material para que a EstoquePage, assim que ficar visível, abra
+  /// automaticamente a categoria certa já com nome/identificador/medida/
+  /// espessura preenchidos nos filtros. Mesmo mecanismo de
+  /// `_filtroNavegacaoPendente`, mas alimentado pelo chat em vez de SSE.
+  FiltroMaterialChat? _filtroChatPendente;
+  FiltroMaterialChat? get filtroChatPendente => _filtroChatPendente;
+
+  void solicitarNavegacaoParaMaterialChat(FiltroMaterialChat filtro) {
+    _filtroChatPendente = filtro;
+    notifyListeners();
+  }
+
+  void consumirFiltroChatPendente() {
+    _filtroChatPendente = null;
   }
 
   // ─── Navegação a partir do diálogo "Alertas de Estoque" ────────────────────

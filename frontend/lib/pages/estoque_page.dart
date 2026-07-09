@@ -17,6 +17,7 @@ import '../providers/alertas_estoque_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
+import '../widgets/escolher_usuario_chat_dialog.dart';
 
 // ── Formatação de preço: até 6 casas decimais, sem zeros à direita ────────────
 
@@ -224,6 +225,78 @@ class _EstoquePageState extends State<EstoquePage> {
     });
   }
 
+  /// Abre a listagem de materiais direto na categoria do material informado,
+  /// já com nome/identificador/medida/espessura preenchidos — usado quando o
+  /// usuário toca no card de um material "solto" encaminhado no chat (ver
+  /// EncaminhamentoChatCard). Mesmo comportamento de
+  /// `_abrirParaNotificacaoCritica`, mas a partir de um FiltroMaterialChat.
+  Future<void> _abrirParaFiltroChat(FiltroMaterialChat f) async {
+    // O card de encaminhamento guarda um "retrato" dos dados do material no
+    // momento do envio (nome/identificador/medida/espessura/categoria). Se o
+    // material for editado depois, esse retrato fica desatualizado e filtrar
+    // por ele pode não encontrar mais o material (ou encontrar o errado).
+    // Por isso, quando temos o materialId (mensagens encaminhadas após essa
+    // correção), buscamos os dados atuais do material antes de montar os
+    // filtros — só caindo para o retrato antigo se a busca falhar (ex.:
+    // material excluído, ou mensagem antiga sem materialId).
+    var nome         = f.nome;
+    var identificador = f.identificador;
+    var medida        = f.medida;
+    var espessura      = f.espessura;
+
+    if (f.materialId != null) {
+      final atual = await context.read<MaterialProvider>().buscarPorId(f.materialId!);
+      if (atual != null) {
+        nome          = atual.nome;
+        identificador = atual.identificador;
+        medida        = atual.medida;
+        espessura     = atual.espessura;
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Material não encontrado (pode ter sido excluído). Mostrando com os dados de quando foi encaminhado.'),
+          ),
+        );
+      }
+    }
+
+    if (!mounted) return;
+
+    // Sempre abre na aba "Geral" (todas as categorias misturadas) em vez de
+    // tentar acertar a categoria específica do material: nem sempre bate
+    // exatamente com o categoriaId esperado, e como os demais filtros
+    // (busca/identificador/medida/espessura) já são suficientes para achar
+    // o material certo, não há necessidade de acertar a categoria de
+    // antemão.
+    final identificadorTrim = identificador?.trim();
+    final temIdentificador = identificadorTrim != null && identificadorTrim.isNotEmpty;
+
+    // Remove todas as rotas empilhadas acima da EstoquePage raiz antes de
+    // empilhar a nova página filtrada. Sem isso, cada clique num material
+    // encaminhado no chat empilhava mais uma EstoqueCategoriaPage por cima
+    // da anterior — o botão "Categorias" só desempilhava um nível por vez,
+    // então voltava para o material clicado antes, e não para a lista de
+    // categorias, até desempilhar todas de uma por uma.
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => EstoqueCategoriaPage(
+          categoriaId:         _kCategoriaGeral,
+          categoriaLabel:      'Geral',
+          cor:                 _cores.first,
+          icone:               Icons.grid_view_rounded,
+          buscaInicial:        nome,
+          identificadorFiltro: temIdentificador ? identificadorTrim : null,
+          medidaInicial:       medida,
+          espessuraInicial:    espessura,
+          roleUsuario:         widget.roleUsuario,
+        ),
+      ),
+      (route) => route.isFirst,
+    ).then((_) {
+      if (mounted) context.read<MaterialProvider>().carregarCategorias();
+    });
+  }
+
   /// Abre a listagem "Geral" (todas as categorias) já filtrada por status —
   /// usado quando a página é aberta a partir do diálogo de Alertas de
   /// Estoque, clicando em "Ir para Estoque".
@@ -273,6 +346,20 @@ class _EstoquePageState extends State<EstoquePage> {
         if (!mounted) return;
         context.read<MaterialProvider>().consumirFiltroStatusPendente();
         _abrirGeralComStatus(statusPendente);
+      });
+    }
+
+    // ── Navegação pendente vinda de um encaminhamento de material no chat ───
+    // Ao tocar no card de um material "solto" encaminhado no chat, o
+    // MaterialProvider guarda os dados do material para abrirmos a
+    // categoria certa já filtrada, assim que esta página ficar visível.
+    final filtroChatPendente =
+        context.watch<MaterialProvider>().filtroChatPendente;
+    if (filtroChatPendente != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.read<MaterialProvider>().consumirFiltroChatPendente();
+        _abrirParaFiltroChat(filtroChatPendente);
       });
     }
 
@@ -1526,15 +1613,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     // Navigator.push não reconstrói a página quando o usuário muda.
     final roleAtual = context.read<UsuarioProvider>().usuarioLogado?.role;
     final isCompras = roleAtual == 'COMPRAS';
-    if (isCompras && material != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Você não tem permissão para editar materiais.'),
-          backgroundColor: AppTheme.warning,
-        ),
-      );
-      return;
-    }
     final salvou = await showDialog(
       context: context,
       barrierDismissible: true,
@@ -1544,6 +1622,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         onReativar:  (!isCompras && material != null) ? _reativar  : null,
         onExcluir:   (!isCompras && material != null) ? _excluir   : null,
         roleUsuario: roleAtual,
+        somenteLeitura: isCompras && material != null,
       ),
     );
     if (!mounted) return;
@@ -1770,6 +1849,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         materialEspessura:     m.espessura,
         materialIdentificador: m.identificador,
         materialStatus:        m.status,
+        materialLargura:       m.largura,
+        materialComprimento:   m.comprimento,
+        estoqueMinimo:         m.estoqueMinimo,
         precos:                precos,
       );
     }).toList();
@@ -3147,7 +3229,12 @@ class _MaterialFormDialog extends StatefulWidget {
   final void Function(MaterialModel)? onReativar;
   final void Function(MaterialModel)? onExcluir;
   final String? roleUsuario;
-  const _MaterialFormDialog({this.material, this.onDesativar, this.onReativar, this.onExcluir, this.roleUsuario});
+  /// Quando true, o formulário é exibido apenas para consulta: todos os
+  /// campos ficam bloqueados e as ações de salvar/desativar/reativar/excluir
+  /// ficam ocultas. Usado para permitir que o usuário COMPRAS visualize os
+  /// dados de um material já cadastrado sem poder alterá-los.
+  final bool somenteLeitura;
+  const _MaterialFormDialog({this.material, this.onDesativar, this.onReativar, this.onExcluir, this.roleUsuario, this.somenteLeitura = false});
 
   @override
   State<_MaterialFormDialog> createState() => _MaterialFormDialogState();
@@ -3373,6 +3460,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   }
 
   Future<void> _salvar() async {
+    if (widget.somenteLeitura) return;
     if (!_formKey.currentState!.validate()) return;
     if (!_modoRetalho && (_unidade == null || _unidade!.isEmpty)) {
       setState(() => _erroDialog = 'Selecione uma unidade antes de salvar.');
@@ -3464,6 +3552,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             TextFormField(
               controller: _nome,
               autofocus: !_editando,
+              readOnly: widget.somenteLeitura,
               decoration: const InputDecoration(labelText: 'Nome *'),
               textCapitalization: TextCapitalization.characters,
               inputFormatters: [_UpperCaseFormatter()],
@@ -3474,7 +3563,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             const SizedBox(height: 10),
             TextFormField(
               controller: _identificador,
-              readOnly: _modoRetalho,
+              readOnly: _modoRetalho || widget.somenteLeitura,
               decoration: InputDecoration(
                 labelText: 'Identificador',
                 suffixIcon: _modoRetalho
@@ -3492,6 +3581,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               Expanded(
                 child: TextFormField(
                   controller: _categoria,
+                  readOnly: widget.somenteLeitura,
                   decoration: const InputDecoration(labelText: 'Categoria'),
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [_UpperCaseFormatter()],
@@ -3524,7 +3614,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                         ],
                         validator: (v) =>
                             (v == null || v.isEmpty) ? 'Selecione uma unidade' : null,
-                        onChanged: (v) => setState(() => _unidade = v),
+                        onChanged: widget.somenteLeitura ? null : (v) => setState(() => _unidade = v),
                       ),
               ),
             ]),
@@ -3532,7 +3622,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             if (_unidade != 'ML' && _unidade != 'G') ...[
             TextFormField(
               controller: _medida,
-              readOnly: _modoRetalho,
+              readOnly: _modoRetalho || widget.somenteLeitura,
               decoration: InputDecoration(
                 labelText: 'Medida',
                 suffixIcon: _modoRetalho
@@ -3560,7 +3650,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               Expanded(
                 child: TextFormField(
                   controller: _comprimento,
-                  readOnly: _modoRetalho,
+                  readOnly: _modoRetalho || widget.somenteLeitura,
                   decoration: InputDecoration(
                     labelText: 'Comprimento (m)',
                     suffixIcon: _modoRetalho
@@ -3579,7 +3669,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               Expanded(
                 child: TextFormField(
                   controller: _largura,
-                  readOnly: _modoRetalho,
+                  readOnly: _modoRetalho || widget.somenteLeitura,
                   decoration: InputDecoration(
                     labelText: 'Largura (m)',
                     suffixIcon: _modoRetalho
@@ -3598,6 +3688,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               Expanded(
                 child: TextFormField(
                   controller: _espessura,
+                  readOnly: widget.somenteLeitura,
                   decoration: const InputDecoration(labelText: 'Espessura'),
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [_UpperCaseFormatter()],
@@ -3613,6 +3704,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     ? _QuantidadeBloqueadaInfo()
                     : TextFormField(
                   controller: _quantidade,
+                  readOnly: widget.somenteLeitura,
                   decoration: const InputDecoration(labelText: 'Quantidade'),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [_DecimalInputFormatter()],
@@ -3628,7 +3720,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     ? _EstoqueMinimoBloqueadoInfo()
                     : TextFormField(
                   controller: _estoqueMinimo,
-                  readOnly: _modoRetalho,
+                  readOnly: _modoRetalho || widget.somenteLeitura,
                   decoration: InputDecoration(
                     labelText: 'Estoque mínimo',
                     suffixIcon: _modoRetalho
@@ -3651,7 +3743,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             const SizedBox(height: 10),
             InkWell(
               borderRadius: BorderRadius.circular(8),
-              onTap: () => setState(() => _estoqueConfirmado = !_estoqueConfirmado),
+              onTap: widget.somenteLeitura ? null : () => setState(() => _estoqueConfirmado = !_estoqueConfirmado),
               child: Padding(
                 padding: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                 child: Row(
@@ -3864,7 +3956,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               child: Row(
                 children: [
                   Text(
-                    _editando ? 'Editar Material' : 'Novo Material',
+                    widget.somenteLeitura
+                        ? 'Visualizar Material'
+                        : (_editando ? 'Editar Material' : 'Novo Material'),
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   if (!_editando) ...[
@@ -3933,6 +4027,40 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     ),
                   ],
                   const Spacer(),
+                  if (_editando)
+                    Tooltip(
+                      message: 'Encaminhar este material no chat',
+                      child: IconButton(
+                        onPressed: () async {
+                          final m = widget.material!;
+                          final enviado = await encaminharParaChat(
+                            context,
+                            tipo: 'material',
+                            dados: {
+                              'materialId':     m.id,
+                              'materialNome':   m.nome,
+                              'unidade':        m.unidade,
+                              'categoria':      m.categoria,
+                              'identificador':  m.identificador,
+                              'medida':         m.medida,
+                              'espessura':      m.espessura,
+                              'largura':        m.largura,
+                              'comprimento':    m.comprimento,
+                              'quantidade':     m.quantidade,
+                            },
+                          );
+                          if (enviado && context.mounted) {
+                            Navigator.of(context, rootNavigator: true).pop();
+                          }
+                        },
+                        icon: const Icon(Icons.ios_share_outlined, size: 20),
+                        style: IconButton.styleFrom(
+                          foregroundColor: AppTheme.primary,
+                        ).copyWith(
+                          mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                      ),
+                    ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close, size: 20),
@@ -3970,7 +4098,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               child: Row(
                 children: [
-                  if (_editando) ...[
+                  if (_editando && !widget.somenteLeitura) ...[
                     if (widget.material!.ativo && widget.onDesativar != null)
                       Tooltip(
                         message: 'Desativar este material (ele deixa de aparecer nas listagens ativas)',
@@ -4023,19 +4151,28 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                         ),
                       ),
                   ],
+                  if (widget.somenteLeitura) ...[
+                    Icon(Icons.lock_outline, size: 14, color: Theme.of(context).colorScheme.outline),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Apenas consulta — você não tem permissão para editar materiais.',
+                      style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.outline),
+                    ),
+                  ],
                   const Spacer(),
                   Tooltip(
-                    message: 'Cancelar e fechar sem salvar',
+                    message: widget.somenteLeitura ? 'Fechar' : 'Cancelar e fechar sem salvar',
                     child: MouseRegion(
                       cursor: SystemMouseCursors.click,
                       child: TextButton(
                         onPressed: _salvando ? null : () => Navigator.pop(context),
                         style: TextButton.styleFrom()
                             .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-                        child: const Text('Cancelar'),
+                        child: Text(widget.somenteLeitura ? 'Fechar' : 'Cancelar'),
                       ),
                     ),
                   ),
+                  if (!widget.somenteLeitura) ...[
                   const SizedBox(width: 8),
                   Tooltip(
                     message: _editando ? 'Salvar alterações' : 'Criar este material',
@@ -4056,6 +4193,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                       ),
                     ),
                   ),
+                  ],
                 ],
               ),
             ),
@@ -5087,6 +5225,9 @@ class _AlertasBannerEstoqueState extends State<_AlertasBannerEstoque> {
         materialEspessura:     encontrado.espessura,
         materialIdentificador: encontrado.identificador,
         materialStatus:        encontrado.status,
+        materialLargura:       encontrado.largura,
+        materialComprimento:   encontrado.comprimento,
+        estoqueMinimo:         encontrado.estoqueMinimo,
         precos:                precos,
       ));
     }

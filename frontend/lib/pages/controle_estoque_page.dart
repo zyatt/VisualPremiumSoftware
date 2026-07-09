@@ -3260,6 +3260,9 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                             style: OutlinedButton.styleFrom(
                               side: const BorderSide(color: AppTheme.success),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ).copyWith(
+                              mouseCursor: WidgetStateProperty.all(
+                                  SystemMouseCursors.click),
                             ),
                           ),
                         ),
@@ -5684,6 +5687,8 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                   padding: EdgeInsets.zero,
                   minimumSize: const Size(28, 28),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ).copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                 ),
                 tooltip: 'Remover',
               ),

@@ -327,6 +327,89 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
+  /// Edita o conteúdo de uma mensagem própria já enviada. Assim como
+  /// `reagirMensagem`, atualiza o estado local otimisticamente e desfaz a
+  /// mudança se o servidor rejeitar (ex.: mensagem já apagada, ou não é
+  /// mais do próprio usuário).
+  Future<void> editarMensagem(MensagemChat mensagem, String novoConteudo) async {
+    final texto = novoConteudo.trim();
+    if (texto.isEmpty || texto == mensagem.conteudo) return;
+
+    final outroId = mensagem.remetenteId == _meuId
+        ? mensagem.destinatarioId
+        : mensagem.remetenteId;
+
+    final otimista = MensagemChat(
+      id: mensagem.id,
+      remetenteId: mensagem.remetenteId,
+      destinatarioId: mensagem.destinatarioId,
+      conteudo: texto,
+      lida: mensagem.lida,
+      criadoEm: mensagem.criadoEm,
+      remetenteNome: mensagem.remetenteNome,
+      destinatarioNome: mensagem.destinatarioNome,
+      reacoes: mensagem.reacoes,
+      editadaEm: DateTime.now(),
+      apagada: mensagem.apagada,
+      pendente: mensagem.pendente,
+      respondendoAId: mensagem.respondendoAId,
+      respondendoAConteudo: mensagem.respondendoAConteudo,
+      respondendoARemetenteNome: mensagem.respondendoARemetenteNome,
+    );
+    _substituirMensagem(outroId, otimista);
+
+    try {
+      final data = await ApiClient.patch(
+        '/chat/mensagem/${mensagem.id}',
+        {'conteudo': texto},
+      );
+      _substituirMensagem(outroId, MensagemChat.fromJson(data));
+    } catch (e) {
+      debugPrint('ChatProvider.editarMensagem erro: $e');
+      // Falhou: volta ao conteúdo original.
+      _substituirMensagem(outroId, mensagem);
+      rethrow;
+    }
+  }
+
+  /// Exclui (logicamente) uma mensagem própria. O backend esvazia o
+  /// conteúdo e marca `apagada`; aqui aplicamos o mesmo otimisticamente e
+  /// desfazemos em caso de erro.
+  Future<void> excluirMensagem(MensagemChat mensagem) async {
+    final outroId = mensagem.remetenteId == _meuId
+        ? mensagem.destinatarioId
+        : mensagem.remetenteId;
+
+    final otimista = MensagemChat(
+      id: mensagem.id,
+      remetenteId: mensagem.remetenteId,
+      destinatarioId: mensagem.destinatarioId,
+      conteudo: '',
+      lida: mensagem.lida,
+      criadoEm: mensagem.criadoEm,
+      remetenteNome: mensagem.remetenteNome,
+      destinatarioNome: mensagem.destinatarioNome,
+      reacoes: const {},
+      editadaEm: mensagem.editadaEm,
+      apagada: true,
+      pendente: mensagem.pendente,
+      respondendoAId: mensagem.respondendoAId,
+      respondendoAConteudo: mensagem.respondendoAConteudo,
+      respondendoARemetenteNome: mensagem.respondendoARemetenteNome,
+    );
+    _substituirMensagem(outroId, otimista);
+
+    try {
+      // ApiClient.delete não devolve corpo, então a otimista aplicada
+      // acima já é o resultado final em caso de sucesso.
+      await ApiClient.delete('/chat/mensagem/${mensagem.id}');
+    } catch (e) {
+      debugPrint('ChatProvider.excluirMensagem erro: $e');
+      _substituirMensagem(outroId, mensagem);
+      rethrow;
+    }
+  }
+
   void _substituirMensagem(int outroId, MensagemChat atualizada) {
     final lista = _conversas[outroId];
     if (lista == null) return;
@@ -441,7 +524,9 @@ class ChatProvider extends ChangeNotifier {
               notifyListeners();
             }
           }
-        } else if (tipo == 'reacao_atualizada') {
+        } else if (tipo == 'reacao_atualizada' ||
+            tipo == 'mensagem_editada' ||
+            tipo == 'mensagem_apagada') {
           final msg = MensagemChat.fromJson(
               data['mensagem'] as Map<String, dynamic>);
           final outroId = msg.remetenteId == _meuId

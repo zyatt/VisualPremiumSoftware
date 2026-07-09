@@ -909,6 +909,10 @@ class _LinhaManutencaoState extends State<_LinhaManutencao> {
               cursor: SystemMouseCursors.click,
               child: TextButton(
                   onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
+                  style: TextButton.styleFrom().copyWith(
+                    mouseCursor: WidgetStateProperty.all(
+                        SystemMouseCursors.click),
+                  ),
                   child: const Text('Cancelar')),
             ),
           ),
@@ -922,6 +926,10 @@ class _LinhaManutencaoState extends State<_LinhaManutencao> {
                   Navigator.of(dialogCtx, rootNavigator: true).pop();
                   await provider.deletarManutencao(manutencao.id, veiculoId);
                 },
+                style: TextButton.styleFrom().copyWith(
+                  mouseCursor: WidgetStateProperty.all(
+                      SystemMouseCursors.click),
+                ),
                 child: const Text('Remover',
                     style: TextStyle(color: AppTheme.error)),
               ),
@@ -1035,22 +1043,36 @@ class _LinhaManutencaoState extends State<_LinhaManutencao> {
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               ),
                             )
-                          : IconButton(
-                              onPressed: () => _finalizarServico(context),
-                              icon: const Icon(Icons.check_circle_outline,
-                                  size: 18, color: Color(0xFF43A047)),
-                              tooltip: 'Finalizar serviço',
-                              padding: EdgeInsets.zero,
-                              constraints:
-                                  BoxConstraints(minWidth: 28, minHeight: 28),
+                          : MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: IconButton(
+                                onPressed: () => _finalizarServico(context),
+                                icon: const Icon(Icons.check_circle_outline,
+                                    size: 18, color: Color(0xFF43A047)),
+                                tooltip: 'Finalizar serviço',
+                                padding: EdgeInsets.zero,
+                                constraints:
+                                    BoxConstraints(minWidth: 28, minHeight: 28),
+                                style: IconButton.styleFrom().copyWith(
+                                  mouseCursor: WidgetStateProperty.all(
+                                      SystemMouseCursors.click),
+                                ),
+                              ),
                             ),
-                    IconButton(
-                      onPressed: () => _confirmarDeletar(context),
-                      icon: Icon(Icons.delete_outline,
-                          size: 16, color: AppTheme.error),
-                      tooltip: 'Remover',
-                      padding: EdgeInsets.zero,
-                      constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: IconButton(
+                        onPressed: () => _confirmarDeletar(context),
+                        icon: Icon(Icons.delete_outline,
+                            size: 16, color: AppTheme.error),
+                        tooltip: 'Remover',
+                        padding: EdgeInsets.zero,
+                        constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                        style: IconButton.styleFrom().copyWith(
+                          mouseCursor: WidgetStateProperty.all(
+                              SystemMouseCursors.click),
+                        ),
+                      ),
                     ),
                   ],
                 ),
