@@ -214,6 +214,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                       isDense: true,
                     ),
                     onChanged: (_) {
+                      setState(() {});
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                           const Duration(milliseconds: 400), _aplicarFiltros);
@@ -221,18 +222,32 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                   ),
                 ),
                 const SizedBox(width: 8),
-                IconButton.outlined(
-                  tooltip: 'Limpar filtros',
-                  icon: Icon(Icons.filter_alt_off,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  onPressed: () {
-                    _buscaCtrl.clear();
-                    setState(() => _andamentoFiltro = '');
-                    _aplicarFiltros();
+                Builder(
+                  builder: (context) {
+                    final temFiltro = _buscaCtrl.text.isNotEmpty || _andamentoFiltro.isNotEmpty;
+                    return IconButton.outlined(
+                      tooltip: 'Limpar filtros',
+                      icon: Icon(Icons.filter_alt_off,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      onPressed: temFiltro
+                          ? () {
+                              _buscaCtrl.clear();
+                              setState(() => _andamentoFiltro = '');
+                              _aplicarFiltros();
+                            }
+                          : null,
+                      style: IconButton.styleFrom(
+                        side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.resolveWith((states) {
+                          if (states.contains(WidgetState.disabled)) {
+                            return SystemMouseCursors.basic;
+                          }
+                          return SystemMouseCursors.click;
+                        }),
+                      ),
+                    );
                   },
-                  style: IconButton.styleFrom().copyWith(
-                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                  ),
                 ),
               ],
             ),
@@ -2415,13 +2430,16 @@ class _MaterialCard extends StatelessWidget {
     // Bloqueia qualquer alteração se a solicitação está FINALIZADA
     if (_bloqueadoPorFinalizacao(context)) return;
 
-    // Se está tentando desmarcar e não é admin, bloqueia
-    if (!novoValor && !ehAdmin) {
+    // Se está tentando desmarcar e não é admin, só permite se essa marcação
+    // ainda não foi salva (ou seja, foi o próprio usuário quem marcou nesta
+    // sessão, antes de dar "Salvar"). Desmarcar algo que já veio comprado
+    // do backend continua exclusivo de ADMIN/GERENTE.
+    if (!novoValor && !ehAdmin && !pendente) {
       showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('Ação não permitida'),
-          content: const Text('Apenas administradores podem desmarcar um item como comprado.'),
+          content: const Text('Apenas administradores podem desmarcar um item já salvo como comprado.'),
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(ctx),
@@ -4021,6 +4039,16 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                       });
                       _aplicarFiltrosMateriais();
                     },
+                    style: IconButton.styleFrom(
+                      side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                    ).copyWith(
+                      mouseCursor: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.disabled)) {
+                          return SystemMouseCursors.basic;
+                        }
+                        return SystemMouseCursors.click;
+                      }),
+                    ),
                   ),
                 ],
               ),

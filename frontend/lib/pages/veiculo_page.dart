@@ -264,7 +264,8 @@ class _VeiculoPageState extends State<VeiculoPage> {
                                 icon: const Icon(Icons.refresh, size: 18),
                                 label: const Text('Tentar novamente'),
                                 style: FilledButton.styleFrom(
-                                  backgroundColor: AppTheme.primary),
+                                  backgroundColor: AppTheme.primary)
+                                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                               ),
                             ],
                           ),
@@ -784,7 +785,8 @@ class _VeiculoServicosPageState extends State<VeiculoServicosPage> {
                                 onPressed: () => context.read<VeiculoProvider>().carregarManutencoes(widget.veiculoId),
                                 icon: const Icon(Icons.refresh, size: 18),
                                 label: const Text('Tentar novamente'),
-                                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                               ),
                             ],
                           ),

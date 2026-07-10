@@ -526,7 +526,8 @@ class _AbaEstoqueState extends State<_AbaEstoque> {
               onPressed: prov.carregarEstoque,
               icon:  const Icon(Icons.refresh, size: 18),
               label: const Text('Tentar novamente'),
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             ),
           ],
         ),
@@ -1115,7 +1116,8 @@ class _AbaGastosState extends State<_AbaGastos> {
               icon:  const Icon(Icons.refresh, size: 18),
               label: const Text('Tentar novamente'),
               style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primary),
+                      backgroundColor: AppTheme.primary)
+                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             ),
           ],
         ),
@@ -1717,9 +1719,10 @@ class _GraficoMensalState extends State<_GraficoMensal>
                       label: const Text('Tentar novamente',
                           style: TextStyle(fontSize: 13)),
                       style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8)),
+                              backgroundColor: AppTheme.primary,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8))
+                          .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ],
                 ),

@@ -15,6 +15,12 @@ String _mensagemErro(Object e) {
       raw.contains('Network is unreachable')) {
     return 'Verifique a conexão com o servidor';
       }
+  if (raw.contains('foreign key constraint') ||
+      raw.contains('violates RESTRICT') ||
+      raw.contains('P2003')) {
+    return 'Não é possível excluir: Este item está vinculado a outros registros '
+        '(movimentações, orçamentos ou ordens de compra). Desative-o em vez de excluí-lo.';
+  }
   return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
 }
 

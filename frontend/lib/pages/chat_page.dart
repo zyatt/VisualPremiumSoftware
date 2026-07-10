@@ -224,6 +224,8 @@ class _ListaUsuarios extends StatelessWidget {
                 onPressed: () => chat.carregarUsuarios(),
                 icon: const Icon(Icons.refresh, size: 16),
                 label: const Text('Tentar novamente'),
+                style: FilledButton.styleFrom()
+                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
               ),
             ],
           ),

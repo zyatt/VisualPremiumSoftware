@@ -335,7 +335,8 @@ class _EstoqueTabState extends State<_EstoqueTab> {
                             icon: const Icon(Icons.refresh, size: 18),
                             label: const Text('Tentar novamente'),
                             style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.primary),
+                                backgroundColor: AppTheme.primary)
+                              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                           ),
                         ],
                       ),
@@ -1106,6 +1107,16 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                   tooltip: 'Limpar filtros',
                   icon: Icon(Icons.filter_alt_off, color: scheme.onSurfaceVariant),
                   onPressed: _limparFiltros,
+                  style: IconButton.styleFrom(
+                    side: BorderSide(color: scheme.outline),
+                  ).copyWith(
+                    mouseCursor: WidgetStateProperty.resolveWith((states) {
+                      if (states.contains(WidgetState.disabled)) {
+                        return SystemMouseCursors.basic;
+                      }
+                      return SystemMouseCursors.click;
+                    }),
+                  ),
                 ),
               ],
             ),
@@ -1197,7 +1208,8 @@ class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
                             icon: const Icon(Icons.refresh, size: 18),
                             label: const Text('Tentar novamente'),
                             style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.primary),
+                                backgroundColor: AppTheme.primary)
+                              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                           ),
                         ],
                       ),

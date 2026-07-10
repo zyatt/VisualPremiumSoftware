@@ -23,8 +23,16 @@ function registrarSseCliente(res, usuarioId) {
 function _broadcast(tipo, dados, excludeUsuarioId) {
   const payload = `data: ${JSON.stringify({ tipo, ...dados })}\n\n`;
   let enviados  = 0;
+  // Compara como string: o id do usuário conectado via SSE e o id do autor
+  // da ação podem chegar com tipos diferentes (number vs string, dependendo
+  // de como cada rota/middleware os produz) — comparar com === direto faz
+  // a exclusão falhar silenciosamente e o próprio autor acaba recebendo
+  // (e vendo) o banner da sua própria ação.
+  const excludeStr = excludeUsuarioId !== undefined && excludeUsuarioId !== null
+    ? String(excludeUsuarioId)
+    : undefined;
   for (const { res, usuarioId } of _sseClients.values()) {
-    if (excludeUsuarioId !== undefined && usuarioId === excludeUsuarioId) continue;
+    if (excludeStr !== undefined && String(usuarioId) === excludeStr) continue;
     try { res.write(payload); enviados++; }
     catch (err) { console.error(`[SSE Solicitações] Erro para usuário ${usuarioId}: ${err.message}`); }
   }
@@ -320,7 +328,7 @@ async function marcarComprado(tipo, itemId, usuarioId, usuarioNome, usuarioRole,
     tipo,
     itemId,
     comprado,
-  });
+  }, usuarioId);
 
   // Se marcou como comprado, verifica se todos os itens estão comprados e auto-finaliza
   if (comprado) {
@@ -329,15 +337,35 @@ async function marcarComprado(tipo, itemId, usuarioId, usuarioNome, usuarioRole,
       // _verificarTodosComprados não lançou: todos comprados — finaliza automaticamente
       const sol = await prisma.solicitacaoMaterial.findUnique({
         where: { id: registro.solicitacaoId },
-        select: { andamento: true },
       });
       if (sol && sol.andamento !== 'FINALIZADO') {
         await prisma.solicitacaoMaterial.update({
           where: { id: registro.solicitacaoId },
           data: { andamento: 'FINALIZADO' },
         });
-        console.log(`[Solicitações] Solicitação ${registro.solicitacaoId} auto-finalizada (todos os itens comprados)`);
-        _broadcast('solicitacao_finalizada', { solicitacaoId: registro.solicitacaoId });
+
+        // Registra no histórico a transição de andamento, igual ao fluxo manual em `atualizar`.
+        await prisma.logEdicaoSolicitacao.create({
+          data: {
+            solicitacaoId: registro.solicitacaoId,
+            editorId:      usuarioId,
+            editorNome:    usuarioNome ?? 'Desconhecido',
+            antes:         { andamento: sol.andamento },
+            depois:        { andamento: 'FINALIZADO' },
+          },
+        });
+
+        console.log(`[Solicitações] Solicitação ${registro.solicitacaoId} auto-finalizada (todos os itens comprados) por ${usuarioNome ?? usuarioId}`);
+        _broadcast('solicitacao_atualizada', {
+          id:          registro.solicitacaoId,
+          numeroOS:    sol.numeroOS,
+          nomeCliente: sol.nomeCliente,
+          editorNome:  usuarioNome ?? 'Desconhecido',
+          acao:        'auto_finalizacao',
+          antes:       { andamento: sol.andamento },
+          depois:      { andamento: 'FINALIZADO' },
+        }, usuarioId);
+        _broadcast('solicitacao_finalizada', { solicitacaoId: registro.solicitacaoId }, usuarioId);
       }
     } catch {
       // Ainda há itens pendentes — não finaliza

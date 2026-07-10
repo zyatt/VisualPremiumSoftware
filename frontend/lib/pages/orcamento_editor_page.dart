@@ -546,10 +546,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       await _sincronizarFornecedoresOcultos(orcId, tabAtualizado);
       for (final item in tabAtualizado.itens) {
         if (item.precos.isEmpty) {
-          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'selecionado': false});
+          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
       }
@@ -624,10 +624,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       await _sincronizarFornecedoresOcultos(orcId, tab);
       for (final item in tab.itens) {
         if (item.precos.isEmpty) {
-          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'selecionado': false});
+          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
       }
@@ -687,10 +687,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         _logOrc('aprovarOrcamento: regravando ${tab.itens.length} itens orcamentoId=$id');
         for (final item in tab.itens) {
          if (item.precos.isEmpty) {
-          await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'selecionado': false});
+          await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+            await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
         }
@@ -798,6 +798,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               'materialId': item.materialId,
               'fornecedorId': null,
               'quantidade': item.quantidade,
+              'qtdUnidade': item.qtdUnidade,
               'precoUnitario': null,
               'selecionado': false,
             });
@@ -807,6 +808,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 'materialId': item.materialId,
                 'fornecedorId': entry.key,
                 'quantidade': item.quantidade,
+                'qtdUnidade': item.qtdUnidade,
                 'precoUnitario': entry.value.preco,
                 'selecionado': item.fornecedorSelecionado == entry.key,
                 'observacao': entry.value.observacao,
@@ -959,10 +961,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         await repo.limparItens(orcId);
         for (final item in tab.itens) {
         if (item.precos.isEmpty) {
-          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'selecionado': false});
+          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
           }
         }
         }
@@ -973,10 +975,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         await _sincronizarFornecedoresOcultos(orcId, tab);
         for (final item in tab.itens) {
           if (item.precos.isEmpty) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'precoUnitario': null, 'selecionado': false});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false});
           } else {
             for (final entry in item.precos.entries) {
-              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
             }
           }
         }
@@ -1573,7 +1575,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                                 size: 15,
                               ),
                   ),
-                  onChanged: (_) => _agendarBuscaMateriais(),
+                  onChanged: (_) {
+                    setState(() {});
+                    _agendarBuscaMateriais();
+                  },
                 ),
               ),
 
@@ -1596,7 +1601,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                       vertical: 8,
                     ),
                   ),
-                  onChanged: (_) => _agendarBuscaMateriais(),
+                  onChanged: (_) {
+                    setState(() {});
+                    _agendarBuscaMateriais();
+                  },
                 ),
               ),
 
@@ -1619,7 +1627,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                       vertical: 8,
                     ),
                   ),
-                  onChanged: (_) => _agendarBuscaMateriais(),
+                  onChanged: (_) {
+                    setState(() {});
+                    _agendarBuscaMateriais();
+                  },
                 ),
               ),
 
@@ -1642,32 +1653,52 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                       vertical: 8,
                     ),
                   ),
-                  onChanged: (_) => _agendarBuscaMateriais(),
+                  onChanged: (_) {
+                    setState(() {});
+                    _agendarBuscaMateriais();
+                  },
                 ),
               ),
 
               const SizedBox(width: 4),
 
-              IconButton.outlined(
-                tooltip: 'Limpar filtros',
-                icon: Icon(
-                  Icons.filter_alt_off,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-                onPressed: () {
-                  _searchNomeCtrl.clear();
-                  _searchIdentificadorCtrl.clear();
-                  _searchMedidaCtrl.clear();
-                  _searchEspCtrl.clear();
+              Builder(
+                builder: (context) {
+                  final temFiltro = _searchNomeCtrl.text.isNotEmpty ||
+                      _searchIdentificadorCtrl.text.isNotEmpty ||
+                      _searchMedidaCtrl.text.isNotEmpty ||
+                      _searchEspCtrl.text.isNotEmpty;
+                  return IconButton.outlined(
+                    tooltip: 'Limpar filtros',
+                    icon: Icon(
+                      Icons.filter_alt_off,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    onPressed: temFiltro
+                        ? () {
+                            _searchNomeCtrl.clear();
+                            _searchIdentificadorCtrl.clear();
+                            _searchMedidaCtrl.clear();
+                            _searchEspCtrl.clear();
 
-                  setState(() {
-                    _resultadosBusca = [];
-                    _mostrarResultados = false;
-                  });
+                            setState(() {
+                              _resultadosBusca = [];
+                              _mostrarResultados = false;
+                            });
+                          }
+                        : null,
+                    style: IconButton.styleFrom(
+                      side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                    ).copyWith(
+                      mouseCursor: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.disabled)) {
+                          return SystemMouseCursors.basic;
+                        }
+                        return SystemMouseCursors.click;
+                      }),
+                    ),
+                  );
                 },
-                style: IconButton.styleFrom(
-                  side: BorderSide(color: Theme.of(context).colorScheme.outline),
-                ),
               ),
             ],
           ),
@@ -1829,6 +1860,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     const double colMaterial = 200;
     const double colQtdMin = 70;
     double colQtd = 90;
+    double colQtdUnidade = 100;
     double colFornMin = 120;
     double colMelhor = 120;
 
@@ -1846,6 +1878,11 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         ),
         Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
         SizedBox(width: colQtd, child: Padding(padding: EdgeInsets.symmetric(horizontal: 3, vertical: 6), child: Text('Quantidade', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center))),
+        Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
+        Tooltip(
+          message: 'Quantidade da unidade de medida por embalagem/peça (ex: M/L por lona). Só se aplica a materiais cuja unidade não é "Unidade" — repassado para a Ordem de Compra ao gerar.',
+          child: SizedBox(width: colQtdUnidade, child: Padding(padding: EdgeInsets.symmetric(horizontal: 3, vertical: 6), child: Text('Quantidade por Unidade', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center))),
+        ),
         Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
       ]),
     );
@@ -1904,6 +1941,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         SizedBox(width: colQtdMin),
         Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
         SizedBox(width: colQtd),
+        Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
+        SizedBox(width: colQtdUnidade),
         Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
       ]),
     );
@@ -2035,6 +2074,22 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
             alignment: Alignment.center,
             padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 3),
             child: _QuantidadeField(key: ValueKey('qtd_${item.itemId}'), value: item.quantidade, onChanged: (q) => provider.atualizarItemParcial(item.itemId, quantidade: q)),
+          ),
+          Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
+          Container(
+            width: colQtdUnidade,
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 3),
+            child: item.precisaQtdUnidade
+                ? Tooltip(
+                    message: item.labelQtdUnidade,
+                    child: _QtdUnidadeField(
+                      key: ValueKey('qtdUnidade_${item.itemId}'),
+                      value: item.qtdUnidade,
+                      onChanged: (q) => provider.atualizarItemParcial(item.itemId, qtdUnidade: q),
+                    ),
+                  )
+                : Text('—', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline), textAlign: TextAlign.center),
           ),
           Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
         ]),
@@ -2216,7 +2271,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               scrollDirection: Axis.horizontal,
               physics: const ClampingScrollPhysics(),
               child: SizedBox(
-                width: colMaterial + 1 + colQtdMin + 1 + colQtd + 1 + scrollableWidth,
+                width: colMaterial + 1 + colQtdMin + 1 + colQtd + 1 + colQtdUnidade + 1 + scrollableWidth,
                 child: Column(children: [
                   // Cabeçalho completo numa única Row
                   IntrinsicHeight(
@@ -2359,6 +2414,83 @@ class _QuantidadeFieldState extends State<_QuantidadeField> {
       onChanged: (v) {
         final parsed = double.tryParse(v.replaceAll(',', '.'));
         if (parsed != null && parsed > 0) widget.onChanged(parsed);
+      },
+      onEditingComplete: () {
+        setState(() => _editando = false);
+        FocusScope.of(context).unfocus();
+      },
+      onSubmitted: (_) => setState(() => _editando = false),
+    );
+  }
+}
+
+/// Campo para a quantidade da unidade de medida por embalagem/peça (ex: "M/L
+/// por unidade"). Diferente de [_QuantidadeField], aceita valor nulo/vazio —
+/// nem todo material precisa deste campo preenchido.
+class _QtdUnidadeField extends StatefulWidget {
+  final double? value;
+  final ValueChanged<double?> onChanged;
+  const _QtdUnidadeField({super.key, required this.value, required this.onChanged});
+
+  @override
+  State<_QtdUnidadeField> createState() => _QtdUnidadeFieldState();
+}
+
+class _QtdUnidadeFieldState extends State<_QtdUnidadeField> {
+  late TextEditingController _ctrl;
+  bool _editando = false;
+
+  String _formatValue(double? v) {
+    if (v == null) return '';
+    return v % 1 == 0 ? v.toStringAsFixed(0) : v.toString();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: _formatValue(widget.value));
+  }
+
+  @override
+  void didUpdateWidget(_QtdUnidadeField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_editando && oldWidget.value != widget.value) {
+      final novoTexto = _formatValue(widget.value);
+      if (_ctrl.text != novoTexto) {
+        _ctrl.text = novoTexto;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _ctrl,
+      keyboardType: TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
+      decoration: InputDecoration(
+        hintText: '0.000',
+        contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(5)),
+        isDense: true,
+        filled: true,
+        fillColor: Theme.of(context).colorScheme.surface,
+      ),
+      style: const TextStyle(fontSize: 11),
+      onTap: () => setState(() => _editando = true),
+      onChanged: (v) {
+        if (v.trim().isEmpty) {
+          widget.onChanged(null);
+          return;
+        }
+        final parsed = double.tryParse(v.replaceAll(',', '.'));
+        if (parsed != null) widget.onChanged(parsed);
       },
       onEditingComplete: () {
         setState(() => _editando = false);

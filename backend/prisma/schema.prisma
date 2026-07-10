@@ -175,6 +175,7 @@ model OrcamentoItem {
   materialId    Int
   fornecedorId  Int?
   quantidade    Decimal     @default(1) @db.Decimal(10, 3)
+  qtdUnidade    Decimal?    @db.Decimal(15, 6)
   precoUnitario Decimal?    @db.Decimal(15, 6)
   precoM2       Decimal?    @db.Decimal(15, 6)
   usarM2        Boolean     @default(false)

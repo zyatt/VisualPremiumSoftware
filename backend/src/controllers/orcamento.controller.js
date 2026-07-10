@@ -53,12 +53,13 @@ const adicionarItem = async (req, res, next) => {
       selecionado,
       descricaoItem,
       observacao,
+      qtdUnidade,
     } = req.body;
 
     res.status(201).json(
       await svc.adicionarItem(
         +req.params.id, materialId, fornecedorId, quantidade, precoUnitario,
-        { selecionado, descricaoItem, observacao }
+        { selecionado, descricaoItem, observacao, qtdUnidade }
       )
     );
   } catch (e) {
@@ -169,6 +170,7 @@ const gerarOrdemCompra = async (req, res, next) => {
         descricaoItem: item.descricaoItem || null,
         numeroOS: item.descricaoItem?.trim() || numerosOS[0],
         quantidade: item.quantidade,
+        qtdUnidade: item.qtdUnidade ?? null,
         precoUnitario: item.precoUnitario || 0,
       }));
       

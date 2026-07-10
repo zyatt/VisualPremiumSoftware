@@ -48,6 +48,16 @@ String _mensagemErro(Object e, {required String acao}) {
       raw.contains('Network is unreachable')) {
     return 'Erro ao $acao: Verifique a conexão com o servidor.';
   }
+  // Erro bruto de violação de chave estrangeira (ex.: Postgres/Prisma
+  // "violates RESTRICT setting of foreign key constraint..."), caso vaze
+  // do backend sem ser traduzido antes. Evita expor detalhes técnicos do
+  // banco de dados ao usuário final.
+  if (raw.contains('foreign key constraint') ||
+      raw.contains('violates RESTRICT') ||
+      raw.contains('P2003')) {
+    return 'Não é possível excluir: este item está vinculado a outros registros '
+        '(movimentações, orçamentos ou ordens de compra). Desative-o em vez de excluí-lo.';
+  }
   final msg = raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
   return 'Erro ao $acao: $msg';
 }

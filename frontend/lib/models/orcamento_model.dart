@@ -6,6 +6,9 @@ class OrcamentoItemModel {
   final String? fornecedorNome;
   double quantidade;
   double? precoUnitario;
+  /// Quantidade da unidade de medida por embalagem/peça (ex: 50 M/L por
+  /// lona) — mesmo conceito da Ordem de Compra. Repassado ao gerar OC.
+  final double? qtdUnidade;
   final double? materialLargura;
   final double? materialComprimento;
 
@@ -17,6 +20,7 @@ class OrcamentoItemModel {
     this.fornecedorNome,
     required this.quantidade,
     this.precoUnitario,
+    this.qtdUnidade,
     this.materialLargura,
     this.materialComprimento,
   });
@@ -45,6 +49,9 @@ class OrcamentoItemModel {
             double.tryParse(json['quantidade'].toString()) ?? 1,
         precoUnitario: json['precoUnitario'] != null
             ? double.tryParse(json['precoUnitario'].toString())
+            : null,
+        qtdUnidade: json['qtdUnidade'] != null
+            ? double.tryParse(json['qtdUnidade'].toString())
             : null,
         materialLargura: json['material']?['largura'] != null
             ? double.tryParse(json['material']['largura'].toString())

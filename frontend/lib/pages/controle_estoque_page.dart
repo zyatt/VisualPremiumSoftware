@@ -612,7 +612,10 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                 Expanded(
                   child: TextField(
                     controller: _buscaCtrl,
-                    onChanged: _buscar,
+                    onChanged: (v) {
+                      _buscar(v);
+                      setState(() {});
+                    },
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
                     decoration: InputDecoration(
@@ -645,27 +648,48 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   ),
                 ),
                 SizedBox(width: 10),
-                IconButton.outlined(
-                  tooltip: 'Limpar filtros',
-                  icon: Icon(Icons.filter_alt_off,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  onPressed: () {
-                    _buscaCtrl.clear();
-                    _buscaNomeCtrl.clear();
-                    _identificadorCtrl.clear();
-                    _medidaCtrl.clear();
-                    _espessuraCtrl.clear();
-                    setState(() {
-                      _dataInicio = null;
-                      _dataFim    = null;
-                      _ordenacao  = _OrdenacaoOS.recente;
-                      _decrescente = true;
-                    });
-                    context.read<EstoqueProvider>().carregarRelacoesOS();
+                Builder(
+                  builder: (context) {
+                    final temFiltro = _buscaCtrl.text.isNotEmpty ||
+                        _buscaNomeCtrl.text.isNotEmpty ||
+                        _identificadorCtrl.text.isNotEmpty ||
+                        _medidaCtrl.text.isNotEmpty ||
+                        _espessuraCtrl.text.isNotEmpty ||
+                        _temFiltroData ||
+                        _ordenacao != _OrdenacaoOS.recente ||
+                        !_decrescente;
+                    return IconButton.outlined(
+                      tooltip: 'Limpar filtros',
+                      icon: Icon(Icons.filter_alt_off,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      onPressed: temFiltro
+                          ? () {
+                              _buscaCtrl.clear();
+                              _buscaNomeCtrl.clear();
+                              _identificadorCtrl.clear();
+                              _medidaCtrl.clear();
+                              _espessuraCtrl.clear();
+                              setState(() {
+                                _dataInicio = null;
+                                _dataFim    = null;
+                                _ordenacao  = _OrdenacaoOS.recente;
+                                _decrescente = true;
+                              });
+                              context.read<EstoqueProvider>().carregarRelacoesOS();
+                            }
+                          : null,
+                      style: IconButton.styleFrom(
+                        side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.resolveWith((states) {
+                          if (states.contains(WidgetState.disabled)) {
+                            return SystemMouseCursors.basic;
+                          }
+                          return SystemMouseCursors.click;
+                        }),
+                      ),
+                    );
                   },
-                  style: IconButton.styleFrom(
-                    side: BorderSide(color: Theme.of(context).colorScheme.outline),
-                  ),
                 ),
               ],
             ),
@@ -843,7 +867,8 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                                   icon: const Icon(Icons.refresh, size: 18),
                                   label: const Text('Tentar novamente'),
                                   style: FilledButton.styleFrom(
-                                      backgroundColor: AppTheme.primary),
+                                      backgroundColor: AppTheme.primary)
+                                    .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                                 ),
                               ],
                             ),
@@ -2996,6 +3021,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () => _mostrarPainel(context),
+        mouseCursor: SystemMouseCursors.click,
         child: Padding(
           padding: EdgeInsets.all(14),
           child: Column(
@@ -4485,14 +4511,30 @@ class _MovimentacaoGlobalDialogState
                                   ),
                                 ),
                                 SizedBox(width: 4),
-                                IconButton.outlined(
-                                  tooltip: 'Limpar filtros',
-                                  icon: Icon(Icons.filter_alt_off,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant, size: 18),
-                                  onPressed: _limparFiltros,
-                                  style: IconButton.styleFrom(
-                                    side: BorderSide(color: Theme.of(context).colorScheme.outline),
-                                  ),
+                                Builder(
+                                  builder: (context) {
+                                    final temFiltro = _nomeCtrl.text.isNotEmpty ||
+                                        _identificadorCtrl.text.isNotEmpty ||
+                                        _medidaCtrl.text.isNotEmpty ||
+                                        _espessuraCtrl.text.isNotEmpty ||
+                                        _categoriaFiltro != null;
+                                    return IconButton.outlined(
+                                      tooltip: 'Limpar filtros',
+                                      icon: Icon(Icons.filter_alt_off,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant, size: 18),
+                                      onPressed: temFiltro ? _limparFiltros : null,
+                                      style: IconButton.styleFrom(
+                                        side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                                      ).copyWith(
+                                        mouseCursor: WidgetStateProperty.resolveWith((states) {
+                                          if (states.contains(WidgetState.disabled)) {
+                                            return SystemMouseCursors.basic;
+                                          }
+                                          return SystemMouseCursors.click;
+                                        }),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ],
                             ),

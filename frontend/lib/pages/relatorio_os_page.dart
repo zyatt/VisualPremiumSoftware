@@ -332,15 +332,18 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                 const SizedBox(width: 10),
                 IconButton.outlined(
                   tooltip: 'Limpar filtros',
-                  icon: Icon(
-                    Icons.filter_alt_off,
-                    color: _temFiltroMaterial
-                        ? AppTheme.primary
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                  icon: Icon(Icons.filter_alt_off,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
                   onPressed: _temFiltroMaterial ? _limparFiltrosMaterial : null,
                   style: IconButton.styleFrom(
                     side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                  ).copyWith(
+                    mouseCursor: WidgetStateProperty.resolveWith((states) {
+                      if (states.contains(WidgetState.disabled)) {
+                        return SystemMouseCursors.basic;
+                      }
+                      return SystemMouseCursors.click;
+                    }),
                   ),
                 ),
               ],
@@ -530,7 +533,8 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                                 icon: const Icon(Icons.refresh, size: 18),
                                 label: const Text('Tentar novamente'),
                                 style: FilledButton.styleFrom(
-                                  backgroundColor: AppTheme.primary),
+                                  backgroundColor: AppTheme.primary)
+                                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                               ),
                             ],
                           ),

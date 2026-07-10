@@ -347,7 +347,22 @@ async function excluir(id, usuarioId, usuarioNome) {
     },
   });
 
-  const deletado = await prisma.material.delete({ where: { id } });
+  let deletado;
+  try {
+    deletado = await prisma.material.delete({ where: { id } });
+  } catch (e) {
+    // P2003 = violação de foreign key (Prisma). Ocorre quando o material
+    // ainda está referenciado em outra tabela com RESTRICT (ex.: movimentações
+    // de estoque). Traduzimos para uma mensagem amigável em vez de deixar
+    // o erro bruto do banco vazar para o usuário.
+    if (e?.code === 'P2003') {
+      throw {
+        status: 400,
+        message: 'Não é possível excluir: este material possui movimentações de estoque vinculadas. Desative-o em vez de excluir.',
+      };
+    }
+    throw e;
+  }
   _broadcast('material_atualizado', { motivo: 'excluir', materialId: id }, usuarioId);
   return deletado;
 }

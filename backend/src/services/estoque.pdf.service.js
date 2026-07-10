@@ -50,7 +50,7 @@ function hline(doc, y, color = C.divider, lw = 0.5) {
 function statusLabel(status) {
   switch (status) {
     case 'OK':      return { text: 'OK',      color: C.statusOk,  bg: '#DCFCE7' };
-    case 'LIMITE':  return { text: 'LIMITE',  color: C.statusLim, bg: '#DBEAFE' };
+    case 'LIMITE':  return { text: 'LIMITE',  color: C.statusWarn, bg: '#FEF3C7' };
     case 'CRITICO': return { text: 'CRÍTICO', color: C.statusErr, bg: '#FEE2E2' };
     case 'INATIVO': return { text: 'INATIVO', color: C.lightGray, bg: '#F3F4F6' };
     default:        return { text: status,    color: C.gray,      bg: '#F3F4F6' };
@@ -162,10 +162,10 @@ function drawMateriaisTable(doc, materiais, startY) {
     { key: 'unidade',       label: 'UNIDADE',         w: 42,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'medida',        label: 'MEDIDA',          w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'espessura',     label: 'ESPESSURA',       w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
+    { key: 'comprimento',   label: 'COMPRIMENTO',     w: 62,  hAlign: 'center', cAlign: 'center', pad: 3 },
+    { key: 'largura',       label: 'LARGURA',         w: 56,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'estMin',        label: 'EST. MÍN.',       w: 46,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'qtd',           label: 'QUANTIDADE',      w: 56,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'precoMed',      label: 'VL. INTERM.',     w: 62,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'precoM2Med',    label: 'VL. M² INTERM.',  w: 62,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'custoUltimo',   label: 'CUSTO ÚLT.',      w: 60,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'custoM2Ultimo', label: 'CUSTO M² ÚLT.',   w: 62,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'status',        label: 'STATUS',          w: 51,  hAlign: 'center', cAlign: 'center', pad: 3 },
@@ -254,21 +254,21 @@ function drawMateriaisTable(doc, materiais, startY) {
 
     const c6 = get(cols[6]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(formatNumber(mat.estoqueMinimo), c6.x, tySingle, { width: c6.w, align: 'center', lineBreak: false });
+       .text(mat.comprimento != null ? formatNumber(mat.comprimento) : '—',
+             c6.x, tySingle, { width: c6.w, align: 'center', lineBreak: false });
 
     const c7 = get(cols[7]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(formatNumber(mat.quantidade), c7.x, tySingle, { width: c7.w, align: 'center', lineBreak: false });
+       .text(mat.largura != null ? formatNumber(mat.largura) : '—',
+             c7.x, tySingle, { width: c7.w, align: 'center', lineBreak: false });
 
     const c8 = get(cols[8]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(mat.precoMediano != null ? formatCurrency(mat.precoMediano) : '—',
-             c8.x, tySingle, { width: c8.w, align: 'center', lineBreak: false });
+       .text(formatNumber(mat.estoqueMinimo), c8.x, tySingle, { width: c8.w, align: 'center', lineBreak: false });
 
     const c9 = get(cols[9]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(mat.precoM2Mediano != null ? formatCurrency(mat.precoM2Mediano) : '—',
-             c9.x, tySingle, { width: c9.w, align: 'center', lineBreak: false });
+       .text(formatNumber(mat.quantidade), c9.x, tySingle, { width: c9.w, align: 'center', lineBreak: false });
 
     const c10 = get(cols[10]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)

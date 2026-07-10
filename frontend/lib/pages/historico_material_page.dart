@@ -361,7 +361,8 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                             onPressed: _carregar,
                             icon: const Icon(Icons.refresh, size: 18),
                             label: const Text('Tentar novamente'),
-                            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                           ),
                         ],
                       ),

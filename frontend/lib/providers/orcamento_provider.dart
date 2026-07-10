@@ -53,6 +53,12 @@ class ItemOrcamentoData {
   /// Não é editável aqui; é configurado no módulo de estoque.
   final double? estoqueMinimo;
   double quantidade;
+  /// Quantidade da unidade de medida por embalagem/peça (ex: 50 M/L por
+  /// lona, 18000 ML por lata de thinner) — mesmo conceito de `qtdUnidade`
+  /// da Ordem de Compra. Só é relevante quando [materialUnidade] não é
+  /// "UNIDADE" (ver [precisaQtdUnidade]). É repassado para a OC gerada a
+  /// partir deste orçamento.
+  double? qtdUnidade;
   Map<int, PrecoFornecedorData> precos;
   int? fornecedorSelecionado;
 
@@ -70,10 +76,34 @@ class ItemOrcamentoData {
     this.materialComprimento,
     this.estoqueMinimo,
     this.quantidade = 1,
+    this.qtdUnidade,
     Map<int, PrecoFornecedorData>? precos,
     this.fornecedorSelecionado,
   }) : itemId = itemId ?? const Uuid().v4(),
        precos = precos ?? {};
+
+  /// Indica se este material precisa do campo "qtd/unidade" (todo material
+  /// cuja unidade não é "UNIDADE" — mesma regra usada na Ordem de Compra).
+  bool get precisaQtdUnidade {
+    final u = (materialUnidade ?? '').toUpperCase().trim();
+    return u.isNotEmpty && u != 'UNIDADE';
+  }
+
+  /// Rótulo do campo, ex: "M/L por unidade", "M² por unidade".
+  String get labelQtdUnidade {
+    final u = (materialUnidade ?? '').toUpperCase().trim();
+    switch (u) {
+      case 'M/L':    return 'M/L por unidade';
+      case 'ML':     return 'ML por unidade';
+      case 'KG':     return 'KG por unidade';
+      case 'G':      return 'g por unidade';
+      case 'L':      return 'L por unidade';
+      case 'M':      return 'M por unidade';
+      case 'M2':
+      case 'M²':     return 'M² por unidade';
+      default:       return '$u por unidade';
+    }
+  }
 
   /// Retorna a dimensão formatada como "3X5M" (comprimento X largura) quando
   /// largura e comprimento estão cadastrados. Se o material já tiver
@@ -103,6 +133,7 @@ class ItemOrcamentoData {
         'materialComprimento': materialComprimento,
         'estoqueMinimo': estoqueMinimo,
         'quantidade': quantidade,
+        'qtdUnidade': qtdUnidade,
         'precos': precos.map((k, v) => MapEntry(k.toString(), v.toJson())),
         'fornecedorSelecionado': fornecedorSelecionado,
       };
@@ -122,6 +153,7 @@ class ItemOrcamentoData {
         materialComprimento: (j['materialComprimento'] as num?)?.toDouble(),
         estoqueMinimo: (j['estoqueMinimo'] as num?)?.toDouble(),
         quantidade: (j['quantidade'] as num).toDouble(),
+        qtdUnidade: (j['qtdUnidade'] as num?)?.toDouble(),
         precos: (j['precos'] as Map<String, dynamic>).map(
           (k, v) => MapEntry(
             int.parse(k),
@@ -433,6 +465,7 @@ class OrcamentoProvider extends ChangeNotifier {
         materialComprimento: m.comprimento,
         estoqueMinimo: m.estoqueMinimo,
         quantidade: old.quantidade,
+        qtdUnidade: old.qtdUnidade,
         precos: old.precos,
         fornecedorSelecionado: old.fornecedorSelecionado,
       );
@@ -463,6 +496,7 @@ class OrcamentoProvider extends ChangeNotifier {
 
   void atualizarItemParcial(String itemId, {
     double? quantidade,
+    double? qtdUnidade,
     int? fornecedorSelecionado,
     bool clearFornecedor = false,
     Map<int, PrecoFornecedorData>? precos,
@@ -485,6 +519,7 @@ class OrcamentoProvider extends ChangeNotifier {
       materialComprimento: old.materialComprimento,
       estoqueMinimo: old.estoqueMinimo,
       quantidade: quantidade ?? old.quantidade,
+      qtdUnidade: qtdUnidade ?? old.qtdUnidade,
       precos: precos ?? old.precos,
       fornecedorSelecionado: clearFornecedor
           ? null

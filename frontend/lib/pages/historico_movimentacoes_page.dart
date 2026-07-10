@@ -602,16 +602,25 @@ class _HistoricoMovimentacoesPageState
 }
 
 // ── Linha de movimentação ───────────────────────────────────────────────────
+// O card inteiro é clicável (abre a OS), com hover e cursor de mão,
+// seguindo o mesmo padrão visual do botão "Voltar" no cabeçalho.
 
-class _LinhaHistorico extends StatelessWidget {
+class _LinhaHistorico extends StatefulWidget {
   final _ItemHistorico item;
   final VoidCallback onTapOS;
   const _LinhaHistorico({required this.item, required this.onTapOS});
 
   @override
+  State<_LinhaHistorico> createState() => _LinhaHistoricoState();
+}
+
+class _LinhaHistoricoState extends State<_LinhaHistorico> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    final mov = item.mov;
-    final relacao = item.relacao;
+    final mov = widget.item.mov;
+    final relacao = widget.item.relacao;
     final isEntrada = mov.tipo == 'ENTRADA';
     final cor = isEntrada ? AppTheme.success : AppTheme.error;
     final icon = isEntrada ? Icons.arrow_upward : Icons.arrow_downward;
@@ -619,6 +628,7 @@ class _LinhaHistorico extends StatelessWidget {
     final obsExtra = _extrairObsExtra(mov.observacao);
     final origem = _detectarOrigem(mov.observacao);
     final origemInfo = _origemInfo(origem, context);
+    final scheme = Theme.of(context).colorScheme;
 
     final qtdStr = mov.quantidade == mov.quantidade.truncate()
         ? mov.quantidade.toStringAsFixed(0)
@@ -629,15 +639,30 @@ class _LinhaHistorico extends StatelessWidget {
       if (mov.materialEspessura != null && mov.materialEspessura!.isNotEmpty) mov.materialEspessura!,
     ].join(' • ');
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: Row(
+    final bgColor = _hovered
+        ? const Color(0xFFFF9800).withValues(alpha: 0.10)
+        : scheme.surface;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTapOS,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: ColoredBox(
+              color: bgColor,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // ── Ícone entrada/saída (32px fixo) ─────────────────────────────
@@ -703,13 +728,13 @@ class _LinhaHistorico extends StatelessWidget {
           // ── OS (160px fixo) ──────────────────────────────────────────────
           SizedBox(
             width: 160,
-            child: GestureDetector(
-              onTap: onTapOS,
+            child: Tooltip(
+              message: 'Abrir OS ${relacao.numeroOS}',
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.description_outlined, size: 13,
-                      color: Theme.of(context).colorScheme.outline),
+                      color: _hovered ? AppTheme.primary : Theme.of(context).colorScheme.outline),
                   const SizedBox(width: 4),
                   Flexible(
                     child: Text(
@@ -790,7 +815,12 @@ class _LinhaHistorico extends StatelessWidget {
                   color: Theme.of(context).colorScheme.outline),
             ),
           ),
-        ],
+            ],
+          ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

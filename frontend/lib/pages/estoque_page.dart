@@ -502,7 +502,8 @@ class _EstoquePageState extends State<EstoquePage> {
                                 icon: const Icon(Icons.refresh, size: 18),
                                 label: const Text('Tentar novamente'),
                                 style: FilledButton.styleFrom(
-                                    backgroundColor: AppTheme.primary),
+                                    backgroundColor: AppTheme.primary)
+                                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                               ),
                             ],
                           ),
@@ -1615,6 +1616,11 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     final isCompras = roleAtual == 'COMPRAS';
     final salvou = await showDialog(
       context: context,
+      // true: precisa estar habilitado para que o Esc e o clique fora do
+      // barrier disparem uma tentativa de fechamento — é essa tentativa que
+      // o PopScope dentro de _MaterialFormDialog intercepta (canPop: false)
+      // para decidir se confirma alterações não salvas antes de fechar.
+      // Se ficasse false, o Flutter nem chegaria a acionar o PopScope.
       barrierDismissible: true,
       builder: (_) => _MaterialFormDialog(
         material:    material,
@@ -2304,7 +2310,8 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                             onPressed: _aplicarFiltros,
                             icon: const Icon(Icons.refresh, size: 18),
                             label: const Text('Tentar novamente'),
-                            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                           ),
                         ],
                       ),
@@ -3342,6 +3349,100 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     // Roda uma verificação inicial (ex.: ao editar um material que já
     // tenha sido cadastrado em duplicidade por alguma falha anterior).
     WidgetsBinding.instance.addPostFrameCallback((_) => _agendarVerificacaoDuplicata());
+
+    // ── Snapshot inicial para detectar alterações não salvas ──────────────
+    // Usado para decidir se, ao tentar fechar o diálogo (X, "Cancelar",
+    // clique fora ou tecla Esc), é preciso confirmar com o usuário antes de
+    // descartar o que foi digitado.
+    _snapshotInicial = _capturarEstadoAtual();
+  }
+
+  /// Estado "assinatura" de todos os campos editáveis do formulário, usado
+  /// para comparar com o estado atual e saber se houve alguma alteração.
+  late String _snapshotInicial;
+
+  String _capturarEstadoAtual() => [
+        _nome.text,
+        _identificador.text,
+        _unidade ?? '',
+        _categoria.text,
+        _medida.text,
+        _espessura.text,
+        _largura.text,
+        _comprimento.text,
+        _quantidade.text,
+        _estoqueMinimo.text,
+        _estoqueConfirmado.toString(),
+        _modoRetalho.toString(),
+      ].join('␟');
+
+  /// true se algum campo foi alterado em relação ao estado com que o
+  /// diálogo foi aberto.
+  bool get _temAlteracoesNaoSalvas => _capturarEstadoAtual() != _snapshotInicial;
+
+  /// Verifica se há alterações não salvas e, em caso positivo, pergunta ao
+  /// usuário se deseja descartá-las antes de fechar o diálogo. Retorna
+  /// `true` quando o diálogo pode ser fechado (sem alterações, ou usuário
+  /// confirmou o descarte / optou por salvar), e `false` quando o
+  /// fechamento deve ser cancelado.
+  Future<bool> _confirmarFechamento() async {
+    if (widget.somenteLeitura || !_temAlteracoesNaoSalvas) return true;
+
+    final resultado = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text('Descartar alterações?'),
+        content: const Text(
+          'Você fez alterações neste material que ainda não foram salvas. '
+          'O que deseja fazer?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'continuar'),
+            child: Text(_editando ? 'Continuar editando' : 'Continuar cadastrando'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'descartar'),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            child: const Text('Descartar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, 'salvar'),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+            child: Text(_editando ? 'Salvar alterações' : 'Cadastrar'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) return false;
+
+    switch (resultado) {
+      case 'descartar':
+        return true;
+      case 'salvar':
+        // _salvar() já cuida de dar Navigator.pop(context, true) quando
+        // a operação for concluída com sucesso; se falhar, o diálogo de
+        // edição permanece aberto para o usuário corrigir/tentar de novo.
+        await _salvar();
+        return false;
+      case 'continuar':
+      default:
+        return false;
+    }
+  }
+
+  /// Tenta fechar o diálogo, passando pela confirmação de alterações não
+  /// salvas quando necessário. Usado pelo botão "X", pelo botão
+  /// "Cancelar"/"Fechar" e pelo PopScope (Esc / clique fora / botão voltar).
+  Future<void> _tentarFechar() async {
+    if (_salvando) return;
+    final podeFechar = await _confirmarFechamento();
+    if (!mounted) return;
+    if (podeFechar) {
+      Navigator.pop(context);
+    }
   }
 
   @override
@@ -3383,8 +3484,44 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     setState(() => _verificandoDuplicata = true);
 
     final provider = context.read<MaterialProvider>();
-    final candidatos = await provider.buscarSugestoes(_nome.text.trim(), limite: 30);
+
+    // O backend faz busca por AND entre as palavras digitadas (todas as
+    // palavras precisam estar contidas no nome). Isso significa que buscar
+    // pela frase inteira falha em achar duplicatas quando o nome digitado
+    // tem uma palavra a mais/a menos/diferente do material já cadastrado
+    // (ex.: "ABS ACO ESCOVADO PRATA 2" não encontra "ABS ACO ESCOVADO
+    // PRATA", pois nenhum material tem a palavra "2" no nome). Por isso
+    // buscamos por cada palavra do nome separadamente (OR) e unificamos os
+    // resultados — a similaridade real é decidida depois, via Levenshtein,
+    // então um candidato a mais aqui não causa falso-positivo, só amplia
+    // a chance de achar o material realmente parecido.
+    final tokensUnicos = _nome.text
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((t) => t.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort((a, b) => b.length.compareTo(a.length)); // palavras mais longas (mais distintivas) primeiro
+
+    // Limita a 5 palavras para não disparar buscas demais em nomes longos;
+    // ignora tokens de 1 char (pouco distintivos, geram excesso de ruído).
+    final termosBusca = tokensUnicos.where((t) => t.length >= 2).take(5).toList();
+    if (termosBusca.isEmpty && _nome.text.trim().isNotEmpty) {
+      termosBusca.add(_nome.text.trim());
+    }
+
+    final resultadosPorToken = await Future.wait(
+      termosBusca.map((t) => provider.buscarSugestoes(t, limite: 30)),
+    );
     if (!mounted) return;
+
+    final candidatosMap = <int, MaterialModel>{};
+    for (final lista in resultadosPorToken) {
+      for (final m in lista) {
+        candidatosMap[m.id] = m;
+      }
+    }
+    final candidatos = candidatosMap.values.toList();
 
     final identificadorNorm = _normalizarTextoComparacao(_identificador.text);
     final medidaNorm        = _normalizarTextoComparacao(_medida.text);
@@ -3412,23 +3549,40 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       final mesmoIdentificador =
           identificadorNorm.isNotEmpty && identificadorNorm == mIdentificadorNorm;
 
-      // "Similar": nome muito parecido (>=72%), ou mesmo identificador com
-      // nome com alguma semelhança (evita falso-positivo de identificadores
-      // genéricos reutilizados em materiais bem diferentes).
+      // Detecta se um nome é prefixo/trecho do outro. Importante para quando
+      // o usuário ainda está no início da digitação (ex.: "ABS ACO" digitado
+      // com "ABS ACO ESCOVADO DOURADO" já cadastrado): a similaridade
+      // Levenshtein do texto inteiro fica baixa (o nome cadastrado é bem mais
+      // longo), mas o texto digitado é claramente o começo de um nome já
+      // existente, então isso também conta como "similar". Exige um mínimo
+      // de 4 caracteres no texto mais curto pra não disparar em prefixos
+      // genéricos demais (ex.: "AB").
+      final curto = nomeNorm.length <= mNomeNorm.length ? nomeNorm : mNomeNorm;
+      final longo = nomeNorm.length <= mNomeNorm.length ? mNomeNorm : nomeNorm;
+      final contido = curto.length >= 4 && curto.isNotEmpty && longo.contains(curto);
+
+      // "Similar": nome muito parecido (>=72%), mesmo identificador com
+      // alguma semelhança (evita falso-positivo de identificadores genéricos
+      // reutilizados em materiais bem diferentes), ou um nome é prefixo/
+      // trecho do outro (digitação em andamento).
       final similar = !exata &&
-          (similaridadeNome >= 0.72 || (mesmoIdentificador && similaridadeNome >= 0.4));
+          (similaridadeNome >= 0.72 ||
+              (mesmoIdentificador && similaridadeNome >= 0.4) ||
+              contido);
 
       if (exata || similar) {
         encontrados.add(_PossivelDuplicata(
           material: m,
           exata: exata,
           similaridade: similaridadeNome,
+          contido: contido,
         ));
       }
     }
 
     encontrados.sort((a, b) {
       if (a.exata != b.exata) return a.exata ? -1 : 1;
+      if (a.contido != b.contido) return a.contido ? -1 : 1;
       return b.similaridade.compareTo(a.similaridade);
     });
 
@@ -3941,11 +4095,25 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     }
 
     // ── Dialog com layout condicional ─────────────────────────────────────
-    return Dialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
-      child: SizedBox(
+    return PopScope(
+      // Intercepta qualquer tentativa de fechar o diálogo que não passe
+      // pelos botões (X/Cancelar), como a tecla Esc ou o gesto/botão
+      // "voltar": sempre barra o pop automático e decide via
+      // _confirmarFechamento se deve realmente fechar.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final podeFechar = await _confirmarFechamento();
+        if (!context.mounted) return;
+        if (podeFechar) {
+          Navigator.pop(context);
+        }
+      },
+      child: Dialog(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        child: SizedBox(
         width: temFornecedor ? 840 : 560,
         height: 680,
         child: Column(
@@ -4062,7 +4230,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                       ),
                     ),
                   IconButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: _salvando ? null : _tentarFechar,
                     icon: const Icon(Icons.close, size: 20),
                     tooltip: 'Fechar',
                     style: IconButton.styleFrom()
@@ -4165,7 +4333,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     child: MouseRegion(
                       cursor: SystemMouseCursors.click,
                       child: TextButton(
-                        onPressed: _salvando ? null : () => Navigator.pop(context),
+                        onPressed: _salvando ? null : _tentarFechar,
                         style: TextButton.styleFrom()
                             .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                         child: Text(widget.somenteLeitura ? 'Fechar' : 'Cancelar'),
@@ -4175,7 +4343,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   if (!widget.somenteLeitura) ...[
                   const SizedBox(width: 8),
                   Tooltip(
-                    message: _editando ? 'Salvar alterações' : 'Criar este material',
+                    message: _editando ? 'Salvar alterações' : 'Cadastrar este material',
                     child: MouseRegion(
                       cursor: SystemMouseCursors.click,
                       child: FilledButton(
@@ -4189,7 +4357,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                                 child: CircularProgressIndicator(
                                     strokeWidth: 2, color: Colors.white),
                               )
-                            : Text(_editando ? 'Salvar' : 'Criar'),
+                            : Text(_editando ? 'Salvar' : 'Cadastrar'),
                       ),
                     ),
                   ),
@@ -4198,6 +4366,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
             ),
           ],
+        ),
         ),
       ),
     );
@@ -4257,11 +4426,16 @@ class _PossivelDuplicata {
   /// coincidem exatamente — o backend rejeitaria esse cadastro com 409.
   final bool exata;
   final double similaridade;
+  /// true quando o nome digitado é um prefixo/trecho do nome já cadastrado
+  /// (ou vice-versa) — sinal forte de duplicata mesmo no início da digitação,
+  /// quando a similaridade Levenshtein do texto inteiro ainda é baixa.
+  final bool contido;
 
   _PossivelDuplicata({
     required this.material,
     required this.exata,
     required this.similaridade,
+    this.contido = false,
   });
 }
 
@@ -4934,7 +5108,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                         onPressed: _carregar,
                         icon: const Icon(Icons.refresh, size: 18),
                         label: const Text('Tentar novamente'),
-                        style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                        style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                          .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                       ),
                     ],
                   ),
@@ -5404,6 +5579,7 @@ class _BannerSecao extends StatelessWidget {
               return InkWell(
                 onTap: () => onToggle(a),
                 borderRadius: BorderRadius.circular(6),
+                mouseCursor: SystemMouseCursors.click,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(

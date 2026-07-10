@@ -49,8 +49,124 @@ class _UpperCaseFormatter extends TextInputFormatter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAIN PAGE
+// FORMATTER: NÚMERO NO PADRÃO BR (PONTO DE MILHAR, VÍRGULA DECIMAL)
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// Usado nos campos de quantidade/preço/valor total da OC. O usuário digita
+// livremente (dígitos e, opcionalmente, uma vírgula para casas decimais); o
+// formatter recalcula a exibição a cada tecla, inserindo pontos de milhar e
+// preservando a posição do cursor em relação aos dígitos (não à posição
+// absoluta do texto, já que ela muda conforme os pontos são inseridos/
+// removidos).
+//
+// Internamente o valor "de verdade" nunca é armazenado com pontos de milhar:
+// para converter o texto exibido de volta a um double, use [parseNumeroBr].
+// Para gerar o texto formatado a partir de um double, use [formatarNumeroBr].
+
+/// Converte um texto no padrão BR ("1.234,56") para double (1234.56).
+/// Aceita também texto "cru" sem separador de milhar ("1234,56" ou
+/// "1234.56"), então é seguro usar em qualquer texto vindo desses campos.
+double? parseNumeroBr(String texto) {
+  final limpo = texto.trim();
+  if (limpo.isEmpty) return null;
+  // Remove pontos de milhar e troca a vírgula decimal por ponto.
+  final semMilhar = limpo.replaceAll('.', '');
+  final comPontoDecimal = semMilhar.replaceAll(',', '.');
+  return double.tryParse(comPontoDecimal);
+}
+
+/// Formata um double no padrão BR com [casas] decimais fixas.
+/// Ex.: formatarNumeroBr(10500.593004, 6) → "10.500,593004"
+String formatarNumeroBr(double valor, int casas) {
+  final fixo = valor.toStringAsFixed(casas);
+  final partes = fixo.split('.');
+  final inteiro = partes[0];
+  final decimal = partes.length > 1 ? partes[1] : '';
+
+  final negativo = inteiro.startsWith('-');
+  final digitosInteiro = negativo ? inteiro.substring(1) : inteiro;
+
+  final buffer = StringBuffer();
+  for (var i = 0; i < digitosInteiro.length; i++) {
+    if (i > 0 && (digitosInteiro.length - i) % 3 == 0) buffer.write('.');
+    buffer.write(digitosInteiro[i]);
+  }
+
+  final inteiroFormatado = '${negativo ? '-' : ''}${buffer.toString()}';
+  return casas > 0 ? '$inteiroFormatado,$decimal' : inteiroFormatado;
+}
+
+class _NumeroBrFormatter extends TextInputFormatter {
+  /// Quantidade máxima de casas decimais permitidas.
+  final int casasDecimais;
+
+  _NumeroBrFormatter({this.casasDecimais = 2});
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) return newValue;
+
+    // Mantém só dígitos e, no máximo, uma vírgula.
+    var texto = newValue.text.replaceAll(RegExp(r'[^\d,]'), '');
+    final primeiraVirgula = texto.indexOf(',');
+    if (primeiraVirgula != -1) {
+      final antes = texto.substring(0, primeiraVirgula + 1);
+      final depois = texto
+          .substring(primeiraVirgula + 1)
+          .replaceAll(',', '')
+          .substring(0, texto.substring(primeiraVirgula + 1).replaceAll(',', '').length.clamp(0, casasDecimais));
+      texto = antes + depois;
+    }
+
+    // Separa parte inteira e decimal para reconstruir com pontos de milhar.
+    final partes = texto.split(',');
+    var inteiro = partes[0].replaceAll(RegExp(r'^0+(?=\d)'), '');
+    final decimal = partes.length > 1 ? partes[1] : null;
+
+    // Quantos dígitos havia antes do cursor no texto cru (sem pontos), para
+    // reposicionar o cursor corretamente após a reformatação.
+    final cursorCru = newValue.selection.baseOffset < 0
+        ? texto.length
+        : newValue.text
+            .substring(0, newValue.selection.baseOffset.clamp(0, newValue.text.length))
+            .replaceAll(RegExp(r'[^\d,]'), '')
+            .length;
+
+    final buffer = StringBuffer();
+    for (var i = 0; i < inteiro.length; i++) {
+      if (i > 0 && (inteiro.length - i) % 3 == 0) buffer.write('.');
+      buffer.write(inteiro[i]);
+    }
+    var resultado = buffer.toString();
+    if (decimal != null) resultado += ',$decimal';
+    if (texto.endsWith(',') && decimal == null) resultado += ',';
+
+    // Reconta a posição do cursor: percorre o resultado contando dígitos e
+    // vírgula até atingir cursorCru caracteres "reais" (dígito ou vírgula).
+    var restantes = cursorCru;
+    var novoCursor = resultado.length;
+    for (var i = 0; i < resultado.length; i++) {
+      final c = resultado[i];
+      if (c == '.') continue;
+      restantes--;
+      if (restantes <= 0) {
+        novoCursor = i + 1;
+        break;
+      }
+    }
+    if (cursorCru == 0) novoCursor = 0;
+
+    return TextEditingValue(
+      text: resultado,
+      selection: TextSelection.collapsed(offset: novoCursor.clamp(0, resultado.length)),
+    );
+  }
+}
+
+
 
 class OrdemCompraPage extends StatefulWidget {
   /// Quando informado, abre automaticamente os detalhes desta OC ao entrar na página.
@@ -406,31 +522,43 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                   ),
                 ),
                 const SizedBox(width: 4),
-                IconButton.outlined(
-                  tooltip: 'Limpar filtros',
-                  icon: Icon(
-                    Icons.filter_alt_off,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  onPressed: (_filtroBuscaNumero.isNotEmpty || _filtroBuscaNome.isNotEmpty || _filtroBuscaMedida.isNotEmpty || _filtroBuscaEspessura.isNotEmpty || _filtroBuscaIdentificador.isNotEmpty)
-                      ? () {
-                          _buscaNumeroCtrl.clear();
-                          _buscaNomeCtrl.clear();
-                          _buscaMedidaCtrl.clear();
-                          _buscaEspessuraCtrl.clear();
-                          _buscaIdentificadorCtrl.clear();
-                          setState(() {
-                            _filtroBuscaNumero = '';
-                            _filtroBuscaNome = '';
-                            _filtroBuscaMedida = '';
-                            _filtroBuscaEspessura = '';
-                            _filtroBuscaIdentificador = '';
-                          });
-                        }
-                      : null,
-                  style: IconButton.styleFrom(
-                    side: BorderSide(color: Theme.of(context).colorScheme.outline),
-                  ),
+                Builder(
+                  builder: (context) {
+                    final temFiltro = _filtroBuscaNumero.isNotEmpty || _filtroBuscaNome.isNotEmpty || _filtroBuscaMedida.isNotEmpty || _filtroBuscaEspessura.isNotEmpty || _filtroBuscaIdentificador.isNotEmpty;
+                    return IconButton.outlined(
+                      tooltip: 'Limpar filtros',
+                      icon: Icon(
+                        Icons.filter_alt_off,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      onPressed: temFiltro
+                          ? () {
+                              _buscaNumeroCtrl.clear();
+                              _buscaNomeCtrl.clear();
+                              _buscaMedidaCtrl.clear();
+                              _buscaEspessuraCtrl.clear();
+                              _buscaIdentificadorCtrl.clear();
+                              setState(() {
+                                _filtroBuscaNumero = '';
+                                _filtroBuscaNome = '';
+                                _filtroBuscaMedida = '';
+                                _filtroBuscaEspessura = '';
+                                _filtroBuscaIdentificador = '';
+                              });
+                            }
+                          : null,
+                      style: IconButton.styleFrom(
+                        side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.resolveWith((states) {
+                          if (states.contains(WidgetState.disabled)) {
+                            return SystemMouseCursors.basic;
+                          }
+                          return SystemMouseCursors.click;
+                        }),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -502,7 +630,8 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                               icon: const Icon(Icons.refresh, size: 18),
                               label: const Text('Tentar novamente'),
                               style: FilledButton.styleFrom(
-                                  backgroundColor: AppTheme.primary),
+                                  backgroundColor: AppTheme.primary)
+                                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                             ),
                           ],
                         ),
@@ -3626,30 +3755,36 @@ class _OsInputSectionState extends State<_OsInputSection> {
           Wrap(
             spacing: 8,
             children: [
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: _atalho('Empresa', () {
-                  // Preenche o primeiro campo vazio ou adiciona
-                  final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
-                  if (idx != -1) {
-                    setState(() => _controllers[idx].text = 'EMPRESA');
-                  } else {
-                    setState(() => _controllers.add(TextEditingController(text: 'EMPRESA')));
-                  }
-                  _sincronizar();
-                }),
+              Tooltip(
+                message: "Preenche automaticamente com 'EMPRESA'",
+                child: _AtalhoChip(
+                  label: 'Empresa',
+                  onTap: () {
+                    // Preenche o primeiro campo vazio ou adiciona
+                    final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
+                    if (idx != -1) {
+                      setState(() => _controllers[idx].text = 'EMPRESA');
+                    } else {
+                      setState(() => _controllers.add(TextEditingController(text: 'EMPRESA')));
+                    }
+                    _sincronizar();
+                  },
+                ),
               ),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: _atalho('Outros', () {
-                  final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
-                  if (idx != -1) {
-                    setState(() => _controllers[idx].text = 'OUTROS');
-                  } else {
-                    setState(() => _controllers.add(TextEditingController(text: 'OUTROS')));
-                  }
-                  _sincronizar();
-                }),
+              Tooltip(
+                message: "Preenche automaticamente com 'OUTROS'",
+                child: _AtalhoChip(
+                  label: 'Outros',
+                  onTap: () {
+                    final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
+                    if (idx != -1) {
+                      setState(() => _controllers[idx].text = 'OUTROS');
+                    } else {
+                      setState(() => _controllers.add(TextEditingController(text: 'OUTROS')));
+                    }
+                    _sincronizar();
+                  },
+                ),
               ),
             ],
           ),
@@ -3731,19 +3866,50 @@ class _OsInputSectionState extends State<_OsInputSection> {
     );
   }
 
-  Widget _atalho(String label, VoidCallback onTap) {
+}
+
+/// Chip de atalho ("Empresa" / "Outros") com feedback visual de hover:
+/// preenche o fundo, intensifica a borda e destaca o texto na cor primária
+/// quando o mouse passa por cima, além do cursor de clique já existente.
+class _AtalhoChip extends StatefulWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _AtalhoChip({required this.label, required this.onTap});
+
+  @override
+  State<_AtalhoChip> createState() => _AtalhoChipState();
+}
+
+class _AtalhoChipState extends State<_AtalhoChip> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       opaque: false,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
       child: GestureDetector(
-        onTap: onTap,
-        child: Container(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           decoration: BoxDecoration(
-            border: Border.all(color: AppTheme.primary),
+            color: _hover ? AppTheme.primary.withValues(alpha: 0.12) : Colors.transparent,
+            border: Border.all(
+              color: _hover ? AppTheme.primary : AppTheme.primary.withValues(alpha: 0.6),
+              width: _hover ? 1.4 : 1,
+            ),
             borderRadius: BorderRadius.circular(20),
           ),
-          child: Text(label),
+          child: Text(
+            widget.label,
+            style: TextStyle(
+              color: _hover ? AppTheme.primary : Theme.of(context).colorScheme.onSurface,
+              fontWeight: _hover ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
         ),
       ),
     );
@@ -3874,20 +4040,22 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     _qtdCtrl = TextEditingController(
         text: widget.item.quantidade == 0
             ? ''
-            : widget.item.quantidade % 1 == 0
-                ? widget.item.quantidade.toInt().toString()
-                : widget.item.quantidade.toString());
+            : formatarNumeroBr(widget.item.quantidade,
+                widget.item.quantidade % 1 == 0 ? 0 : 2));
     _qtdUnidadeCtrl = TextEditingController(
         text: widget.item.qtdUnidade == null || widget.item.qtdUnidade == 0
             ? ''
-            : widget.item.qtdUnidade! % 1 == 0
-                ? widget.item.qtdUnidade!.toInt().toString()
-                : widget.item.qtdUnidade.toString());
+            : formatarNumeroBr(widget.item.qtdUnidade!,
+                widget.item.qtdUnidade! % 1 == 0 ? 0 : 3));
     _precoCtrl = TextEditingController(
-        text: widget.item.precoUnitario == 0 ? '' : widget.item.precoUnitario.toString());
+        text: widget.item.precoUnitario == 0
+            ? ''
+            : formatarNumeroBr(widget.item.precoUnitario, 6));
     
     _precoTotalCtrl = TextEditingController(
-        text: _calcularPrecoTotal() == 0 ? '' : _calcularPrecoTotal().toStringAsFixed(2));
+        text: _calcularPrecoTotal() == 0
+            ? ''
+            : formatarNumeroBr(_calcularPrecoTotal(), 2));
     
     _descricaoCtrl = TextEditingController(
         text: widget.item.descricaoItem ?? '');
@@ -3909,9 +4077,9 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   }
 
   double _calcularPrecoTotal() {
-    final qtd = double.tryParse(_qtdCtrl.text) ?? 0;
-    final qtdUnit = double.tryParse(_qtdUnidadeCtrl.text);
-    final preco = double.tryParse(_precoCtrl.text) ?? 0;
+    final qtd = parseNumeroBr(_qtdCtrl.text) ?? 0;
+    final qtdUnit = parseNumeroBr(_qtdUnidadeCtrl.text);
+    final preco = parseNumeroBr(_precoCtrl.text) ?? 0;
     
     if (qtd <= 0 || preco <= 0) return 0;
     
@@ -3924,7 +4092,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   void _onPrecoUnitarioChanged() {
     if (_ignorarCalculo) return;
     
-    final preco = double.tryParse(_precoCtrl.text);
+    final preco = parseNumeroBr(_precoCtrl.text);
     if (preco == null || preco <= 0) {
       if (_precoTotalCtrl.text.isNotEmpty) {
         _ignorarCalculo = true;
@@ -3938,7 +4106,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     
     final total = _calcularPrecoTotal();
     if (total > 0) {
-      final novoTexto = total.toStringAsFixed(2);
+      final novoTexto = formatarNumeroBr(total, 2);
       if (_precoTotalCtrl.text != novoTexto) {
         _ignorarCalculo = true;
         _precoTotalCtrl.text = novoTexto;
@@ -3950,15 +4118,15 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   void _onPrecoTotalChanged() {
     if (_ignorarCalculo) return;
     
-    final total = double.tryParse(_precoTotalCtrl.text);
+    final total = parseNumeroBr(_precoTotalCtrl.text);
     if (total == null || total <= 0) {
       return;
     }
     
     _campoEditado = 'total';
     
-    final qtd = double.tryParse(_qtdCtrl.text) ?? 0;
-    final qtdUnit = double.tryParse(_qtdUnidadeCtrl.text);
+    final qtd = parseNumeroBr(_qtdCtrl.text) ?? 0;
+    final qtdUnit = parseNumeroBr(_qtdUnidadeCtrl.text);
     
     if (qtd <= 0) return;
     
@@ -3969,7 +4137,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
       precoUnitario = total / qtd;
     }
     
-    final novoTexto = precoUnitario.toStringAsFixed(6);
+    final novoTexto = formatarNumeroBr(precoUnitario, 6);
     if (_precoCtrl.text != novoTexto) {
       _ignorarCalculo = true;
       _precoCtrl.text = novoTexto;
@@ -3982,10 +4150,10 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   
   void _recalcularComBaseNaPrioridade() {
     if (_campoEditado == 'total') {
-      final total = double.tryParse(_precoTotalCtrl.text);
+      final total = parseNumeroBr(_precoTotalCtrl.text);
       if (total != null && total > 0) {
-        final qtd = double.tryParse(_qtdCtrl.text) ?? 0;
-        final qtdUnit = double.tryParse(_qtdUnidadeCtrl.text);
+        final qtd = parseNumeroBr(_qtdCtrl.text) ?? 0;
+        final qtdUnit = parseNumeroBr(_qtdUnidadeCtrl.text);
         
         if (qtd > 0) {
           double precoUnitario;
@@ -3996,18 +4164,18 @@ class _ItemFormCardState extends State<_ItemFormCard> {
           }
           
           _ignorarCalculo = true;
-          _precoCtrl.text = precoUnitario.toStringAsFixed(6);
+          _precoCtrl.text = formatarNumeroBr(precoUnitario, 6);
           widget.item.precoUnitario = precoUnitario;
           _ignorarCalculo = false;
         }
       }
     } else {
-      final preco = double.tryParse(_precoCtrl.text);
+      final preco = parseNumeroBr(_precoCtrl.text);
       if (preco != null && preco > 0) {
         final total = _calcularPrecoTotal();
         if (total > 0) {
           _ignorarCalculo = true;
-          _precoTotalCtrl.text = total.toStringAsFixed(2);
+          _precoTotalCtrl.text = formatarNumeroBr(total, 2);
           _ignorarCalculo = false;
         }
       }
@@ -4135,9 +4303,9 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                         controller: _qtdCtrl,
                         decoration: _deco('0', hasError: item.erroQtd),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))],
+                        inputFormatters: [_NumeroBrFormatter(casasDecimais: 2)],
                         onChanged: (v) {
-                          item.quantidade = double.tryParse(v) ?? 0;
+                          item.quantidade = parseNumeroBr(v) ?? 0;
                           item.erroQtd = false;
                           if (widget.numerosOS.length == 1 && item.distribuicao.length == 1) {
                             item.distribuicao[0].os = widget.numerosOS.first;
@@ -4173,13 +4341,11 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       const SizedBox(height: 4),
                       TextFormField(
                         controller: _qtdUnidadeCtrl,
-                        decoration: _deco('0.000', hasError: item.erroQtdUnidade),
+                        decoration: _deco('0,000', hasError: item.erroQtdUnidade),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,6}'))
-                        ],
+                        inputFormatters: [_NumeroBrFormatter(casasDecimais: 6)],
                         onChanged: (v) {
-                          item.qtdUnidade = double.tryParse(v);
+                          item.qtdUnidade = parseNumeroBr(v);
                           item.erroQtdUnidade = false;
                           // Se o valor total já estiver preenchido, ele tem
                           // prioridade: alterar a qtd/unidade não deve mudar
@@ -4187,7 +4353,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                           // para que quantidade × qtdUnidade × valor
                           // continue batendo com o total já informado.
                           final totalJaPreenchido =
-                              (double.tryParse(_precoTotalCtrl.text) ?? 0) > 0;
+                              (parseNumeroBr(_precoTotalCtrl.text) ?? 0) > 0;
                           if (totalJaPreenchido) _campoEditado = 'total';
                           _recalcularComBaseNaPrioridade();
                           widget.onChanged();
@@ -4210,13 +4376,13 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       const SizedBox(height: 4),
                       TextFormField(
                         controller: _precoCtrl,
-                        decoration: _deco('0.000000', hasError: item.erroPreco),
+                        decoration: _deco('0,000000', hasError: item.erroPreco).copyWith(
+                          prefixText: 'R\$ ',
+                        ),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,6}'))
-                        ],
+                        inputFormatters: [_NumeroBrFormatter(casasDecimais: 6)],
                         onChanged: (v) {
-                          item.precoUnitario = double.tryParse(v.trim().isEmpty ? '0' : v) ?? 0;
+                          item.precoUnitario = parseNumeroBr(v) ?? 0;
                           item.erroPreco = false;
                           widget.onChanged();
                           setState(() {});
@@ -4238,13 +4404,11 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       const SizedBox(height: 4),
                       TextFormField(
                         controller: _precoTotalCtrl,
-                        decoration: _deco('0.00').copyWith(
+                        decoration: _deco('0,00').copyWith(
                           prefixText: 'R\$ ',
                         ),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))
-                        ],
+                        inputFormatters: [_NumeroBrFormatter(casasDecimais: 2)],
                         onChanged: (_) {
                           widget.onChanged();
                           setState(() {});
@@ -4293,9 +4457,9 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                         controller: _qtdCtrl,
                         decoration: _deco('0', hasError: item.erroQtd),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))],
+                        inputFormatters: [_NumeroBrFormatter(casasDecimais: 2)],
                         onChanged: (v) {
-                          item.quantidade = double.tryParse(v) ?? 0;
+                          item.quantidade = parseNumeroBr(v) ?? 0;
                           item.erroQtd = false;
                           if (widget.numerosOS.length == 1 && item.distribuicao.length == 1) {
                             item.distribuicao[0].os = widget.numerosOS.first;
@@ -4327,11 +4491,13 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       SizedBox(height: 4),
                       TextFormField(
                         controller: _precoCtrl,
-                        decoration: _deco('0.00', hasError: item.erroPreco),
+                        decoration: _deco('0,00', hasError: item.erroPreco).copyWith(
+                          prefixText: 'R\$ ',
+                        ),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))],
+                        inputFormatters: [_NumeroBrFormatter(casasDecimais: 6)],
                         onChanged: (v) {
-                          item.precoUnitario = double.tryParse(v.trim().isEmpty ? '0' : v) ?? 0;
+                          item.precoUnitario = parseNumeroBr(v) ?? 0;
                           item.erroPreco = false;
                           widget.onChanged();
                           setState(() {});
@@ -4353,13 +4519,11 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       SizedBox(height: 4),
                       TextFormField(
                         controller: _precoTotalCtrl,
-                        decoration: _deco('0.00').copyWith(
+                        decoration: _deco('0,00').copyWith(
                           prefixText: 'R\$ ',
                         ),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))
-                        ],
+                        inputFormatters: [_NumeroBrFormatter(casasDecimais: 2)],
                         onChanged: (_) {
                           widget.onChanged();
                           setState(() {});
@@ -4431,11 +4595,7 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
       // Atualiza o controller da linha 0 para refletir a nova quantidade
       if (_qtdCtrls.isNotEmpty) {
         final qtd = widget.item.distribuicao[0].quantidade;
-        final novoTexto = qtd == 0
-            ? ''
-            : qtd % 1 == 0
-                ? qtd.toInt().toString()
-                : qtd.toString();
+        final novoTexto = qtd == 0 ? '' : formatarNumeroBr(qtd, qtd % 1 == 0 ? 0 : 2);
         if (_qtdCtrls[0].text != novoTexto) {
           _qtdCtrls[0].text = novoTexto;
         }
@@ -4447,11 +4607,7 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
         widget.item.distribuicao.length == 1 &&
         _qtdCtrls.isNotEmpty) {
       final qtd = widget.item.distribuicao[0].quantidade;
-      final novoTexto = qtd == 0
-          ? ''
-          : qtd % 1 == 0
-              ? qtd.toInt().toString()
-              : qtd.toString();
+      final novoTexto = qtd == 0 ? '' : formatarNumeroBr(qtd, qtd % 1 == 0 ? 0 : 2);
       if (_qtdCtrls[0].text != novoTexto) {
         _qtdCtrls[0].text = novoTexto;
       }
@@ -4490,7 +4646,7 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
 
   void _syncControllers() {
     _qtdCtrls = widget.item.distribuicao.map((l) {
-      final v = l.quantidade == 0 ? '' : (l.quantidade % 1 == 0 ? l.quantidade.toInt().toString() : l.quantidade.toString());
+      final v = l.quantidade == 0 ? '' : formatarNumeroBr(l.quantidade, l.quantidade % 1 == 0 ? 0 : 2);
       return TextEditingController(text: v);
     }).toList();
   }
@@ -4697,11 +4853,11 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
                           controller: _qtdCtrls[idx],
                           decoration: decoSmall.copyWith(hintText: '0'),
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d*'))],
+                          inputFormatters: [_NumeroBrFormatter(casasDecimais: 2)],
                           style: const TextStyle(fontSize: 12),
                           textAlign: TextAlign.center,
                           onChanged: (v) {
-                            linha.quantidade = double.tryParse(v) ?? 0;
+                            linha.quantidade = parseNumeroBr(v) ?? 0;
                             setState(() {});
                             widget.onChanged();
                           },
@@ -4856,12 +5012,13 @@ class _FornecedorPickerState extends State<_FornecedorPicker> {
       actions: [
         Tooltip(
           message: 'Fechar sem selecionar fornecedor',
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text('Cancelar',
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
+          child: TextButton(
+            style: TextButton.styleFrom().copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancelar',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
           ),
         ),
       ],
@@ -5283,18 +5440,20 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                   ),
                 ),
                 SizedBox(width: 4),
-                MouseRegion(
-                  cursor: _temFiltro ? SystemMouseCursors.click : SystemMouseCursors.basic,
-                  child: IconButton(
-                    onPressed: _temFiltro ? _limparFiltros : null,
-                    icon: Icon(
-                      Icons.filter_alt_off,
-                      size: 18,
-                      color: _temFiltro ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
+                IconButton(
+                  onPressed: _temFiltro ? _limparFiltros : null,
+                  icon: Icon(
+                    Icons.filter_alt_off,
+                    size: 18,
+                    color: _temFiltro ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
+                  ),
+                  tooltip: 'Limpar filtros',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  style: IconButton.styleFrom().copyWith(
+                    mouseCursor: WidgetStateProperty.all(
+                      _temFiltro ? SystemMouseCursors.click : SystemMouseCursors.basic,
                     ),
-                    tooltip: 'Limpar filtros',
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
                   ),
                 ),
               ],

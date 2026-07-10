@@ -316,7 +316,8 @@ class _UsuariosTabState extends State<_UsuariosTab> {
                             icon: const Icon(Icons.refresh, size: 18),
                             label: const Text('Tentar novamente'),
                             style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.primary),
+                                backgroundColor: AppTheme.primary)
+                              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                           ),
                         ],
                       ),
@@ -1633,7 +1634,8 @@ class _ErroInline extends StatelessWidget {
             onPressed: onRetry,
             icon: const Icon(Icons.refresh, size: 16),
             label: const Text('Tentar novamente'),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
           ),
         ],
       ),

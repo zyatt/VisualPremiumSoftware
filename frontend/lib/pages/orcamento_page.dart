@@ -391,6 +391,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             materialIdentificador: materialData?['identificador'] as String?,
             materialCategoria: materialData?['categoria'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
+            qtdUnidade: item['qtdUnidade'] != null ? double.tryParse(item['qtdUnidade'].toString()) : null,
             precos: {},
           );
         }
@@ -497,6 +498,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             materialIdentificador: materialData?['identificador'] as String?,
             materialCategoria: materialData?['categoria'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
+            qtdUnidade: item['qtdUnidade'] != null ? double.tryParse(item['qtdUnidade'].toString()) : null,
             precos: {},
           );
         }
@@ -596,6 +598,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             materialIdentificador: materialData?['identificador'] as String?,
             materialCategoria: materialData?['categoria'] as String?,
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
+            qtdUnidade: item['qtdUnidade'] != null ? double.tryParse(item['qtdUnidade'].toString()) : null,
             precos: {},
           );
         }
@@ -1091,7 +1094,8 @@ class _OrcamentoPageState extends State<OrcamentoPage>
               onPressed: _carregarOrcamentosServidor,
               icon: const Icon(Icons.refresh, size: 16),
               label: const Text('Tentar novamente'),
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             ),
           ],
         ),

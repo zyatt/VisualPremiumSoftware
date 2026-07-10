@@ -33,6 +33,24 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   bool _carregando = false;
   bool get carregando => _carregando;
 
+  // Identificador incremental da chamada mais recente de carregar(). Evita
+  // que uma resposta antiga (que demorou mais para voltar) sobrescreva o
+  // resultado de uma chamada mais nova, e evita que _carregando fique
+  // travado em true quando várias chamadas concorrentes se cruzam.
+  int _carregarSeq = 0;
+
+  // Debounce para recargas disparadas por eventos SSE: se vários eventos
+  // chegarem em rajada (ex.: múltiplos broadcasts da mesma ação no
+  // backend), agrupa tudo em uma única chamada de carregar() em vez de
+  // disparar um GET por evento.
+  Timer? _sseCarregarDebounce;
+  void _carregarComDebounce() {
+    _sseCarregarDebounce?.cancel();
+    _sseCarregarDebounce = Timer(const Duration(milliseconds: 400), () {
+      carregar(emSegundoPlano: true);
+    });
+  }
+
   String? _erro;
   String? get erro => _erro;
 
@@ -111,6 +129,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
 
   bool _paginaAberta = false;
   bool _visualizacaoPersistedaNaSessao = false;
+  bool _persistindoVisualizacao = false;
   bool _notificacoesConectadas = false;
   bool get notificacoesConectadas => _notificacoesConectadas;
 
@@ -264,8 +283,8 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     }
 
     if (_paginaAberta) {
-      debugPrint('ℹ️ [Solicitações] Página aberta — recarregando lista');
-      carregar();
+      debugPrint('ℹ️ [Solicitações] Página aberta — recarregando lista (debounced)');
+      _carregarComDebounce();
       _persistirVisualizacao();
     } else {
       // Ressincroniza com o servidor em vez de incrementar localmente: um
@@ -292,7 +311,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     }
 
     if (_paginaAberta) {
-      carregar();
+      _carregarComDebounce();
     }
     notifyListeners();
   }
@@ -362,12 +381,19 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   }
 
   Future<void> _persistirVisualizacao() async {
+    if (_persistindoVisualizacao) {
+      debugPrint('⏳ [Solicitações] Persistência de visualização já em andamento — pulando chamada duplicada');
+      return;
+    }
+    _persistindoVisualizacao = true;
     try {
       await ApiClient.post('/solicitacoes-material/marcar-visualizadas', {});
       _visualizacaoPersistedaNaSessao = true;
       debugPrint('✅ [Solicitações] Visualizações persistidas no banco');
     } catch (e) {
       debugPrint('⚠️ [Solicitações] Erro ao persistir visualizações: $e');
+    } finally {
+      _persistindoVisualizacao = false;
     }
   }
 
@@ -378,6 +404,8 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     _reconnectTimer = null;
     _pollingTimer?.cancel();
     _pollingTimer = null;
+    _sseCarregarDebounce?.cancel();
+    _sseCarregarDebounce = null;
     await _sseSub?.cancel();
     _sseSub = null;
     _sseClient?.close();
@@ -400,6 +428,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     debugPrint('🗑️ [Solicitações] Dispose do provider');
     _reconnectTimer?.cancel();
     _pollingTimer?.cancel();
+    _sseCarregarDebounce?.cancel();
     _sseSub?.cancel();
     _sseClient?.close();
     super.dispose();
@@ -414,12 +443,21 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     String? numeroOS,
     DateTime? dataInicio,
     DateTime? dataFim,
+    // Quando true (recargas disparadas por SSE em segundo plano), não
+    // ativa o estado de loading de tela cheia — mantém a lista atual
+    // visível e só troca quando os novos dados chegarem. Evita o efeito
+    // de "piscar para spinner" a cada evento recebido enquanto a página
+    // já está com dados carregados.
+    bool emSegundoPlano = false,
   }) async {
-    _carregando = true;
+    final minhaSeq = ++_carregarSeq;
+    if (!emSegundoPlano) {
+      _carregando = true;
+    }
     _erro = null;
     notifyListeners();
     try {
-      _solicitacoes = await _repo.listar(
+      final resultado = await _repo.listar(
         busca: busca,
         andamento: andamento,
         materialId: materialId,
@@ -427,11 +465,28 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
         dataInicio: dataInicio,
         dataFim: dataFim,
       );
+      // Se outra chamada mais recente já foi disparada enquanto esta estava
+      // em voo, descarta este resultado (está desatualizado) e não mexe em
+      // _carregando — quem cuida disso é a chamada mais nova.
+      if (minhaSeq != _carregarSeq) return;
+      _solicitacoes = resultado;
     } catch (e) {
-      _erro = _mensagemErro(e, acao: 'carregar solicitações');
+      if (minhaSeq != _carregarSeq) return;
+      // Recarga silenciosa de fundo: não sobrescreve a tela com uma
+      // mensagem de erro por cima de dados que já estavam certos.
+      if (!emSegundoPlano) {
+        _erro = _mensagemErro(e, acao: 'carregar solicitações');
+      }
     } finally {
-      _carregando = false;
-      notifyListeners();
+      if (minhaSeq == _carregarSeq) {
+        // Só mexe em _carregando se esta chamada foi quem ligou (evita que
+        // uma recarga de fundo desligue o spinner de uma recarga em
+        // primeiro plano que ainda esteja em andamento).
+        if (!emSegundoPlano || _carregando) {
+          _carregando = false;
+        }
+        notifyListeners();
+      }
     }
   }
 

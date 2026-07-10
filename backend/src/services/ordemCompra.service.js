@@ -695,6 +695,7 @@ async function criarDeOrcamento(orcamentoId, dadosExtras, usuarioId) {
     descricaoItem:      null,
     numeroOS:           item.numeroOS || numeroOSPadrao,
     quantidade:         item.quantidade,
+    qtdUnidade:         item.qtdUnidade ?? null,
     precoUnitario:      Number(item.precoUnitario) > 0 ? item.precoUnitario : 0,
     precoMetroQuadrado: null,
     usarM2:             false,

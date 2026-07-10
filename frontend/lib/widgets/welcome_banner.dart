@@ -137,45 +137,71 @@ class _BannerCard extends StatelessWidget {
     // Primeiro nome apenas
     final primeiroNome = nomeUsuario.split(' ').first;
 
+    final scheme = Theme.of(context).colorScheme;
+
     return Container(
-      constraints: BoxConstraints(maxWidth: 280),
+      constraints: BoxConstraints(maxWidth: 340),
       margin: EdgeInsets.only(right: 16),
-      padding: EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+      padding: EdgeInsets.symmetric(horizontal: 22, vertical: 17),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            scheme.surface,
+            Color.alphaBlend(AppTheme.primary.withValues(alpha: 0.06), scheme.surface),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: AppTheme.primary.withValues(alpha: 0.18),
+          width: 1.2,
+        ),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primary.withValues(alpha: 0.12),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
+            color: AppTheme.primary.withValues(alpha: 0.18),
+            blurRadius: 28,
+            spreadRadius: -4,
+            offset: const Offset(0, 10),
           ),
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ícone com fundo
+          // logo da empresa com fundo em destaque
           Container(
-            width: 38,
-            height: 38,
+            width: 50,
+            height: 50,
             decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  AppTheme.primary.withValues(alpha: 0.18),
+                  AppTheme.primary.withValues(alpha: 0.06),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppTheme.primary.withValues(alpha: 0.25)),
             ),
-            child: const Icon(
-              Icons.waving_hand_rounded,
-              color: AppTheme.primary,
-              size: 20,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  fit: BoxFit.contain,
+                ),
+              ),
             ),
           ),
-          SizedBox(width: 12),
+          SizedBox(width: 16),
           // textos
           Flexible(
             child: Column(
@@ -185,34 +211,49 @@ class _BannerCard extends StatelessWidget {
                 Text(
                   saudacao,
                   style: TextStyle(
-                    fontSize: 11,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: 0.2,
+                    fontSize: 12.5,
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                    decoration: TextDecoration.none,
                   ),
                 ),
-                SizedBox(height: 1),
-                Text(
-                  primeiroNome,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Theme.of(context).colorScheme.onSurface,
-                    letterSpacing: -0.2,
+                SizedBox(height: 3),
+                ShaderMask(
+                  shaderCallback: (bounds) => LinearGradient(
+                    colors: [AppTheme.primary, AppTheme.primary.withValues(alpha: 0.75)],
+                  ).createShader(bounds),
+                  child: Text(
+                    primeiroNome,
+                    style: TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      letterSpacing: -0.4,
+                      height: 1.1,
+                      decoration: TextDecoration.none,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
           // acento laranja lateral
-          const SizedBox(width: 10),
+          const SizedBox(width: 14),
           Container(
-            width: 3,
-            height: 32,
+            width: 4,
+            height: 42,
             decoration: BoxDecoration(
-              color: AppTheme.primary,
-              borderRadius: BorderRadius.circular(2),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  AppTheme.primary,
+                  AppTheme.primary.withValues(alpha: 0.4),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(3),
             ),
           ),
         ],

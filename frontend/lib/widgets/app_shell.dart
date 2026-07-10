@@ -351,6 +351,89 @@ class _Sidebar extends StatelessWidget {
 
 // ─── Conteúdo da sidebar ─────────────────────────────────────────────────────
 
+/// Logo animada da sidebar: flutua suavemente para cima e para baixo,
+/// com uma leve rotação e um brilho pulsante ao redor — um toque vivo
+/// sem ser exagerado.
+class _AnimatedLogo extends StatefulWidget {
+  const _AnimatedLogo();
+
+  @override
+  State<_AnimatedLogo> createState() => _AnimatedLogoState();
+}
+
+class _AnimatedLogoState extends State<_AnimatedLogo>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _float;
+  late final Animation<double> _tilt;
+  late final Animation<double> _glow;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    )..repeat(reverse: true);
+
+    _float = Tween<double>(begin: -3, end: 3).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOutSine),
+    );
+
+    _tilt = Tween<double>(begin: -0.045, end: 0.045).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOutSine),
+    );
+
+    _glow = Tween<double>(begin: 0.15, end: 0.45).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, child) => Transform.translate(
+        offset: Offset(0, _float.value),
+        child: Transform.rotate(
+          angle: _tilt.value,
+          child: child,
+        ),
+      ),
+      child: AnimatedBuilder(
+        animation: _glow,
+        builder: (context, _) => DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primary.withValues(alpha: _glow.value),
+                blurRadius: 16,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.asset(
+              'assets/images/logo.png',
+              width: 40,
+              height: 40,
+              fit: BoxFit.cover,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SidebarContent extends StatefulWidget {
   final String currentRoute;
   final List<_NavItem> items;
@@ -429,34 +512,21 @@ class _SidebarContentState extends State<_SidebarContent> {
             // ── Cabeçalho / logo ─────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: Image.asset(
-                      'assets/images/logo.png',
-                      width: 40,
-                      height: 40,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Visual Premium',
-                    style: GoogleFonts.raleway(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                  Text(
-                    'Gestão de Estoque e Compras',
-                    style: GoogleFonts.nunito(
-                      color: Colors.white38,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
+                  const _AnimatedLogo(),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Visual Premium',
+                      style: GoogleFonts.raleway(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],

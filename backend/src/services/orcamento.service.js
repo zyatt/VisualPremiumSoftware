@@ -69,11 +69,12 @@ async function criar(titulo, criadorId) {
 
 async function adicionarItem(
   orcamentoId, materialId, fornecedorId, quantidade, precoUnitario,
-  { selecionado = false, descricaoItem = null, observacao = null } = {}
+  { selecionado = false, descricaoItem = null, observacao = null, qtdUnidade = null } = {}
   ) {
   const data = {
     fornecedorId: fornecedorId ?? null,
     quantidade,
+    qtdUnidade: qtdUnidade ?? null,
     precoUnitario: precoUnitario ?? null,
     selecionado: selecionado ?? false,
     descricaoItem: descricaoItem ?? null,

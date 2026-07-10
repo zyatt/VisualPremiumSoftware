@@ -531,41 +531,45 @@ async function gerarPdfDeItens(dados) {
 
       let mat    = 170;
       let qtd    = 48;
+      let qtdUn  = 62;
       let melhor = 80;
-      let forn   = nForn > 0 ? (contentW - mat - qtd - melhor) / nForn : FORN_IDEAL;
+      let forn   = nForn > 0 ? (contentW - mat - qtd - qtdUn - melhor) / nForn : FORN_IDEAL;
 
       if (forn >= FORN_IDEAL) forn = FORN_IDEAL;
 
       if (forn < FORN_ABS) {
         mat    = 110;
         qtd    = 36;
+        qtdUn  = 42;
         melhor = 70;
-        forn   = nForn > 0 ? (contentW - mat - qtd - melhor) / nForn : FORN_IDEAL;
+        forn   = nForn > 0 ? (contentW - mat - qtd - qtdUn - melhor) / nForn : FORN_IDEAL;
       }
 
       if (forn < FORN_ABS) {
         mat    = 88;
         qtd    = 28;
+        qtdUn  = 34;
         melhor = MELHOR_MIN;
-        forn   = nForn > 0 ? (contentW - mat - qtd - melhor) / nForn : FORN_IDEAL;
+        forn   = nForn > 0 ? (contentW - mat - qtd - qtdUn - melhor) / nForn : FORN_IDEAL;
       }
 
       if (forn < FORN_ABS) {
-        forn = Math.max(38, (contentW - mat - qtd - melhor) / nForn);
+        forn = Math.max(38, (contentW - mat - qtd - qtdUn - melhor) / nForn);
       }
 
-      return { COL_MAT: mat, COL_QTD: qtd, COL_MELHOR: melhor, COL_FORN: forn };
+      return { COL_MAT: mat, COL_QTD: qtd, COL_QTDUN: qtdUn, COL_MELHOR: melhor, COL_FORN: forn };
     };
 
-    const { COL_MAT, COL_QTD, COL_MELHOR, COL_FORN } = calcLayout();
+    const { COL_MAT, COL_QTD, COL_QTDUN, COL_MELHOR, COL_FORN } = calcLayout();
 
     const fontScale  = Math.min(1, COL_FORN / FORN_IDEAL);
     const fornFontSz = Math.max(5, Math.round(6.5 * fontScale * 10) / 10);
 
     const xMat    = margin;
     const xQtd    = xMat + COL_MAT;
-    const xForn   = (i) => xQtd + COL_QTD + i * COL_FORN;
-    const xMelhor = xQtd + COL_QTD + nForn * COL_FORN;
+    const xQtdUn  = xQtd + COL_QTD;
+    const xForn   = (i) => xQtdUn + COL_QTDUN + i * COL_FORN;
+    const xMelhor = xQtdUn + COL_QTDUN + nForn * COL_FORN;
 
     const ROW_H      = 42;
     const HDR_H      = 30;
@@ -582,8 +586,11 @@ async function gerarPdfDeItens(dados) {
       doc.font('Helvetica-Bold').fontSize(6.5).fillColor(C.gray)
          .text('MATERIAL', xMat + 4, ty, { width: COL_MAT - 8, lineBreak: false });
 
-      doc.font('Helvetica-Bold').fontSize(6.5).fillColor(C.gray)
-         .text('QTD', xQtd + 2, ty, { width: COL_QTD - 4, align: 'center', lineBreak: false });
+      doc.font('Helvetica-Bold').fontSize(6).fillColor(C.gray)
+         .text('QUANTIDADE', xQtd + 2, ty - 3, { width: COL_QTD - 4, align: 'center', lineBreak: true });
+
+      doc.font('Helvetica-Bold').fontSize(6).fillColor(C.gray)
+         .text('QUANTIDADE POR UNIDADE', xQtdUn + 2, ty - 3, { width: COL_QTDUN - 4, align: 'center', lineBreak: true });
 
       fornecedores.forEach(({ id, nome }, fi) => {
         const x        = xForn(fi);
@@ -634,7 +641,7 @@ async function gerarPdfDeItens(dados) {
       const ty = y + (TOTAL_H - 7) / 2;
 
       doc.font('Helvetica-Bold').fontSize(7).fillColor(C.black)
-         .text('TOTAL POR FORNECEDOR', xMat + 4, ty, { width: COL_MAT + COL_QTD - 8, lineBreak: false });
+         .text('TOTAL POR FORNECEDOR', xMat + 4, ty, { width: COL_MAT + COL_QTD + COL_QTDUN - 8, lineBreak: false });
 
       fornecedores.forEach(({ id }, fi) => {
         const x      = xForn(fi);
@@ -752,10 +759,20 @@ async function gerarPdfDeItens(dados) {
 
         const unidLabel = item.materialUnidade || '';
         doc.font('Helvetica').fontSize(6.5).fillColor(C.black)
-           .text(formatNumberSmart(qtd), xQtd + 2, tyCtr - 4, { width: COL_QTD - 4, align: 'center', lineBreak: false });
-        if (unidLabel) {
-          doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
-             .text(unidLabel, xQtd + 2, tyCtr + 4, { width: COL_QTD - 4, align: 'center', lineBreak: false });
+           .text(formatNumberSmart(qtd), xQtd + 2, tyCtr, { width: COL_QTD - 4, align: 'center', lineBreak: false });
+
+        doc.strokeColor(C.divider).lineWidth(0.3)
+           .moveTo(xQtdUn, y + 4).lineTo(xQtdUn, y + rowH - 4).stroke();
+        if (item.qtdUnidade != null) {
+          doc.font('Helvetica').fontSize(6.5).fillColor(C.black)
+             .text(formatNumberSmart(item.qtdUnidade), xQtdUn + 2, tyCtr - 4, { width: COL_QTDUN - 4, align: 'center', lineBreak: false });
+          if (unidLabel) {
+            doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
+               .text(unidLabel, xQtdUn + 2, tyCtr + 4, { width: COL_QTDUN - 4, align: 'center', lineBreak: false });
+          }
+        } else {
+          doc.font('Helvetica').fontSize(6.5).fillColor(C.lightGray)
+             .text('—', xQtdUn + 2, tyCtr, { width: COL_QTDUN - 4, align: 'center', lineBreak: false });
         }
 
         fornecedores.forEach(({ id }, fi) => {
