@@ -7,11 +7,14 @@ import 'package:provider/provider.dart';
 import '../providers/usuario_provider.dart';
 import '../models/usuario_model.dart';
 import '../providers/alertas_estoque_provider.dart';
+import '../providers/orcamento_provider.dart';
 import '../providers/theme_provider.dart';
+import '../pages/orcamento_page.dart';
 import '../providers/veiculo_provider.dart';
 import '../providers/solicitacao_material_provider.dart';
 import '../providers/material_provider.dart';
 import '../providers/chat_provider.dart';
+import '../rotas/app_router.dart';
 import 'chat_floating_widget.dart';
 import '../models/veiculo_model.dart';
 import '../theme/app_theme.dart';
@@ -117,19 +120,39 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
+/// Contexto estável para exibir overlays (banners) que precisam sobreviver
+/// a uma possível desmontagem do AppShell entre o momento em que o evento
+/// chega (build atual) e o momento em que o addPostFrameCallback realmente
+/// executa. Isso acontece, por exemplo, quando uma solicitação é
+/// criada/editada e, no mesmo instante, o usuário faz logout/troca de
+/// usuário: o GoRouter redireciona para /login e desmonta toda a árvore do
+/// StatefulShellRoute (incluindo o AppShell) ANTES do callback rodar. Usar
+/// o context capturado no build() do AppShell nesse cenário causa
+/// "Looking up a deactivated widget's ancestor is unsafe" / o assert
+/// '_elements.contains(element)'.
+///
+/// AppRouter.rootNavigatorKey aponta para o Navigator raiz do
+/// MaterialApp.router, que é criado uma única vez em main.dart e nunca é
+/// recriado — logo currentContext dele continua válido mesmo quando o
+/// AppShell (uma sub-árvore) é desmontado por um redirect.
+BuildContext? get _contextEstavel => AppRouter.rootNavigatorKey.currentContext;
+
 class _AppShellState extends State<AppShell> {
   /// Id do usuário para o qual já conectamos SSE/chat. Usado para detectar
   /// troca de usuário (via "Trocar para") e reconectar tudo, já que o
   /// AppShell NUNCA é recriado nesse fluxo — initState() só roda uma vez.
   int? _usuarioIdConectado;
 
+  /// Roles com permissão de leitura em /api/alertas-estoque (deve
+  /// espelhar a constante LEITURA de alertas_estoque_route.js no backend).
+  static const _rolesComAcessoAlertasEstoque = ['ADMIN', 'GERENTE', 'COMPRAS'];
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<AlertasEstoqueProvider>().iniciarPolling();
       context.read<VeiculoProvider>().carregarVeiculos();
-      _conectarParaUsuarioAtual();
+      _conectarParaUsuarioAtual(); // também inicia/pausa o polling de alertas conforme o role
     });
   }
 
@@ -142,6 +165,16 @@ class _AppShellState extends State<AppShell> {
     final token   = context.read<UsuarioProvider>().token;
 
     _usuarioIdConectado = usuario?.id;
+
+    // Reavalia o polling de alertas de estoque conforme o role do usuário
+    // ativo: liga para quem tem permissão, desliga para quem não tem
+    // (relevante na troca de usuário via "Trocar para", sem reiniciar o app).
+    final alertasProv = context.read<AlertasEstoqueProvider>();
+    if (_rolesComAcessoAlertasEstoque.contains(usuario?.role)) {
+      alertasProv.iniciarPolling();
+    } else {
+      alertasProv.pararPolling();
+    }
 
     // Conecta (ou reconecta) ao stream SSE de novas solicitações
     context.read<SolicitacaoMaterialProvider>().conectarNotificacoes();
@@ -208,7 +241,8 @@ class _AppShellState extends State<AppShell> {
     if (!SessionState.welcomeShown && nome.isNotEmpty) {
       SessionState.welcomeShown = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) WelcomeBanner.show(context, nome);
+        final ctx = _contextEstavel;
+        if (ctx != null && ctx.mounted) WelcomeBanner.show(ctx, nome);
       });
     }
 
@@ -223,11 +257,18 @@ class _AppShellState extends State<AppShell> {
       final solProvRead = context.read<SolicitacaoMaterialProvider>();
       if (AppShell.podeReceberNotificacaoSolicitacao(usuario?.role)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (context.mounted) {
+          // Usa o context estável do rootNavigator em vez do context do
+          // AppShell: se o usuário fizer logout/trocar de usuário entre o
+          // build atual e a execução deste callback, o AppShell pode já
+          // ter sido desmontado pelo redirect do GoRouter. context.mounted
+          // não protege contra essa corrida (ver comentário em
+          // _contextEstavel).
+          final ctx = _contextEstavel;
+          if (ctx != null && ctx.mounted) {
             NovaSolicitacaoBanner.show(
-              context,
+              ctx,
               notificacaoSolicitacao,
-              onTap: () => context.go('/solicitacoes-material'),
+              onTap: () => ctx.go('/solicitacoes-material'),
             );
           }
         });
@@ -249,11 +290,12 @@ class _AppShellState extends State<AppShell> {
       final solProvReadAlterada = context.read<SolicitacaoMaterialProvider>();
       if (AppShell.podeReceberNotificacaoSolicitacao(usuario?.role)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (context.mounted) {
+          final ctx = _contextEstavel;
+          if (ctx != null && ctx.mounted) {
             SolicitacaoAlteradaBanner.show(
-              context,
+              ctx,
               notificacaoAlterada,
-              onTap: () => context.go('/solicitacoes-material'),
+              onTap: () => ctx.go('/solicitacoes-material'),
             );
           }
         });
@@ -272,16 +314,17 @@ class _AppShellState extends State<AppShell> {
       final matProvRead = context.read<MaterialProvider>();
       if (AppShell.podeReceberNotificacaoSolicitacao(usuario?.role)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (context.mounted) {
+          final ctx = _contextEstavel;
+          if (ctx != null && ctx.mounted) {
             MaterialCriticoBanner.show(
-              context,
+              ctx,
               notificacaoCritica,
               onTap: () {
                 // Guarda os dados do material para a EstoquePage abrir
                 // automaticamente a categoria certa já filtrada (nome,
                 // identificador, medida, espessura).
                 matProvRead.solicitarNavegacaoParaMaterial(notificacaoCritica);
-                context.go('/estoque');
+                ctx.go('/estoque');
               },
             );
           }
@@ -1180,11 +1223,17 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
+            style: ButtonStyle(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
             child: Text('Cancelar', style: GoogleFonts.nunito()),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            style: ButtonStyle(
+              foregroundColor: WidgetStateProperty.all(AppTheme.error),
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
             child: Text('Remover',
                 style: GoogleFonts.nunito(fontWeight: FontWeight.w700)),
           ),
@@ -1392,11 +1441,26 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
                           borderRadius: BorderRadius.circular(12),
                           mouseCursor: SystemMouseCursors.click,
                           onTap: () async {
-                            Navigator.of(context).pop();
-                            final provider = context.read<UsuarioProvider>();
+                            // Guarda o Navigator do diálogo ANTES do pop,
+                            // e usa o context do State (this.context), que
+                            // só deixa de ser válido quando _TrocaUsuarioDialogState
+                            // é de fato desmontado — diferente do context do
+                            // item da lista, capturado pelo Builder/map, cujo
+                            // Element é removido no mesmo frame do pop().
+                            //
+                            // Fechamos o diálogo só DEPOIS de loginComoUsuario
+                            // terminar: assim o pop() do diálogo e o redirect
+                            // disparado pelo notifyListeners() do provider (via
+                            // refreshListenable do GoRouter) não competem para
+                            // mexer na árvore de Navigators ao mesmo tempo —
+                            // que é o que gerava o
+                            // '_elements.contains(element): is not true'.
+                            final provider = this.context.read<UsuarioProvider>();
                             final ok = await provider.loginComoUsuario(u);
-                            if (!ok && context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
+                            if (!mounted) return;
+                            Navigator.of(this.context).pop();
+                            if (!ok) {
+                              ScaffoldMessenger.of(this.context).showSnackBar(
                                 SnackBar(
                                   content: Text(
                                     provider.erro ?? 'Erro ao trocar usuário',
@@ -1516,9 +1580,16 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
                 padding: const EdgeInsets.all(12),
                 child: OutlinedButton.icon(
                   onPressed: () {
+                    // Mesmo padrão do logout() logo acima: só fecha o diálogo e
+                    // dispara a troca de estado — NÃO chama context.go('/login')
+                    // aqui. iniciarTrocaUsuario() já faz notifyListeners(), e o
+                    // GoRouter (via refreshListenable) já redireciona sozinho
+                    // para /login assim que usuarioLogado vira null. Chamar os
+                    // dois ao mesmo tempo fazia dois Navigators competirem para
+                    // mexer na árvore junto com o pop() do diálogo, causando o
+                    // 'element._lifecycleState == _ElementLifecycle.inactive'.
                     Navigator.of(context).pop();
                     context.read<UsuarioProvider>().iniciarTrocaUsuario();
-                    context.go('/login');
                   },
                   icon: const Icon(Icons.person_add_rounded, size: 16),
                   label: Text('Entrar com outra conta',
@@ -1691,15 +1762,95 @@ class _StatusNotificacoesIndicador extends StatelessWidget {
 
 // ─── Painel de alertas ───────────────────────────────────────────────────────
 
-class _PainelAlertasDialog extends StatelessWidget {
+class _PainelAlertasDialog extends StatefulWidget {
   final AlertasEstoqueProvider alertas;
   const _PainelAlertasDialog({required this.alertas});
 
   @override
+  State<_PainelAlertasDialog> createState() => _PainelAlertasDialogState();
+}
+
+class _PainelAlertasDialogState extends State<_PainelAlertasDialog> {
+  final Set<int> _selecionados = {};
+
+  void _toggleSelecao(int id) {
+    setState(() {
+      if (_selecionados.contains(id)) {
+        _selecionados.remove(id);
+      } else {
+        _selecionados.add(id);
+      }
+    });
+  }
+
+  void _toggleTodos(List alertas) {
+    setState(() {
+      if (_selecionados.length == alertas.length) {
+        _selecionados.clear();
+      } else {
+        _selecionados.addAll(alertas.map((a) => a.id as int));
+      }
+    });
+  }
+
+  void _orcarSelecionados() {
+    final alertas = widget.alertas.alertas;
+    final selecionados = alertas.where((a) => _selecionados.contains(a.id)).toList();
+    if (selecionados.isEmpty) return;
+
+    final todosMateriais = context.read<MaterialProvider>().materiais;
+
+    final itens = selecionados.map((alerta) {
+      // Tenta encontrar o material completo (com fornecedores) no MaterialProvider
+      final materialCompleto = todosMateriais.cast<dynamic>().firstWhere(
+        (m) => m.id == alerta.id,
+        orElse: () => null,
+      );
+
+      final precos = <int, PrecoFornecedorData>{};
+      if (materialCompleto != null) {
+        for (final fm in materialCompleto.fornecedorMateriais) {
+          precos[fm.fornecedorId] = PrecoFornecedorData(
+            fornecedorNome: fm.fornecedorNome,
+            preco: fm.preco > 0 ? fm.preco : null,
+          );
+        }
+      }
+
+      return ItemOrcamentoData(
+        materialId:            alerta.id,
+        materialNome:          alerta.nome,
+        materialUnidade:       alerta.unidade,
+        materialCategoria:     alerta.categoria,
+        materialMedida:        alerta.medida,
+        materialEspessura:     alerta.espessura,
+        materialIdentificador: alerta.identificador,
+        materialStatus:        'CRITICO',
+        materialLargura:       materialCompleto?.largura,
+        materialComprimento:   materialCompleto?.comprimento,
+        estoqueMinimo:         alerta.estoqueMinimo,
+        precos:                precos,
+      );
+    }).toList();
+
+    final titulo = selecionados.length == 1
+        ? 'Orç. ${selecionados.first.nome}'
+        : 'Orç. Críticos (${selecionados.length})';
+
+    context.read<OrcamentoProvider>().adicionarItensEmLote(titulo, itens);
+    OrcamentoPage.abrirEditorAoEntrar = true;
+
+    Navigator.of(context).pop();
+    context.go('/orcamento');
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final itens = alertas.alertas;
+    final itens = widget.alertas.alertas;
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final todosSelecionados = itens.isNotEmpty && _selecionados.length == itens.length;
+    final temSelecao = _selecionados.isNotEmpty;
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -1728,6 +1879,7 @@ class _PainelAlertasDialog extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // ── Cabeçalho ──────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 12, 16),
                 child: Row(
@@ -1754,7 +1906,7 @@ class _PainelAlertasDialog extends StatelessWidget {
                     ),
                     const Spacer(),
                     Text(
-                      '${alertas.totalAlertas} itens',
+                      '${widget.alertas.totalAlertas} itens',
                       style: TextStyle(
                         fontSize: 12,
                         color: colorScheme.onSurfaceVariant,
@@ -1778,11 +1930,62 @@ class _PainelAlertasDialog extends StatelessWidget {
               Divider(
                   color: colorScheme.outline.withValues(alpha: 0.4),
                   height: 1),
+              // ── Barra "selecionar todos" (só aparece se houver itens) ──────
+              if (itens.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                  child: Row(
+                    children: [
+                      Tooltip(
+                        message: todosSelecionados ? 'Desmarcar todos' : 'Selecionar todos',
+                        child: InkWell(
+                          onTap: () => _toggleTodos(itens),
+                          mouseCursor: SystemMouseCursors.click,
+                          borderRadius: BorderRadius.circular(6),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Checkbox(
+                                value: todosSelecionados,
+                                tristate: true,
+                                onChanged: (_) => _toggleTodos(itens),
+                                activeColor: AppTheme.primary,
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                todosSelecionados ? 'Desmarcar todos' : 'Selecionar todos',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (temSelecao) ...[
+                        const Spacer(),
+                        Text(
+                          '${_selecionados.length} selecionado${_selecionados.length > 1 ? 's' : ''}',
+                          style: GoogleFonts.nunito(
+                            fontSize: 11,
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              // ── Lista de alertas ────────────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
                 child: SizedBox(
                   width: 400,
-                  height: 360,
+                  height: 320,
                   child: itens.isEmpty
                       ? Center(
                           child: Column(
@@ -1812,18 +2015,26 @@ class _PainelAlertasDialog extends StatelessWidget {
                                 icone: Icons.error_outline_rounded,
                               ),
                               const SizedBox(height: 6),
-                              ...itens.map((a) => _AlertaItemTile(alerta: a)),
+                              ...itens.map((a) => _AlertaItemTile(
+                                alerta: a,
+                                selecionado: _selecionados.contains(a.id),
+                                onToggle: () => _toggleSelecao(a.id),
+                              )),
                             ],
                           ),
                         ),
                 ),
               ),
+              // ── Rodapé com botões ───────────────────────────────────────────
+              Divider(
+                  color: colorScheme.outline.withValues(alpha: 0.4),
+                  height: 1),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    FilledButton.icon(
+                    // Botão "Ir para Estoque" (sempre visível)
+                    OutlinedButton.icon(
                       onPressed: () {
                         Navigator.of(context).pop();
                         context
@@ -1832,14 +2043,31 @@ class _PainelAlertasDialog extends StatelessWidget {
                         context.go('/estoque');
                       },
                       icon: const Icon(Icons.inventory_2_rounded, size: 15),
-                      label:
-                          Text('Ir para Estoque', style: GoogleFonts.nunito()),
+                      label: Text('Ver no Estoque', style: GoogleFonts.nunito()),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: colorScheme.onSurfaceVariant,
+                        side: BorderSide(color: colorScheme.outlineVariant),
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                    ),
+                    const Spacer(),
+                    // Botão "Orçar selecionados" (só ativo com seleção)
+                    FilledButton.icon(
+                      onPressed: temSelecao ? _orcarSelecionados : null,
+                      icon: const Icon(Icons.request_quote_rounded, size: 15),
+                      label: Text(
+                        temSelecao
+                            ? 'Orçar (${_selecionados.length})'
+                            : 'Orçar selecionados',
+                        style: GoogleFonts.nunito(),
+                      ),
                       style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.primary,
                         foregroundColor: Colors.white,
                       ).copyWith(
-                          mouseCursor: WidgetStateProperty.all(
-                              SystemMouseCursors.click)),
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
                     ),
                   ],
                 ),
@@ -1980,7 +2208,13 @@ class _AlertaSecaoHeader extends StatelessWidget {
 
 class _AlertaItemTile extends StatelessWidget {
   final dynamic alerta;
-  const _AlertaItemTile({required this.alerta});
+  final bool selecionado;
+  final VoidCallback? onToggle;
+  const _AlertaItemTile({
+    required this.alerta,
+    this.selecionado = false,
+    this.onToggle,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2015,67 +2249,93 @@ class _AlertaItemTile extends StatelessWidget {
         ? min.toStringAsFixed(0)
         : min.toStringAsFixed(2);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 4),
-      padding:
-          const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: cor.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(8),
-        border: Border(left: BorderSide(color: cor, width: 3)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  alerta.nome as String,
-                  style: GoogleFonts.nunito(
-                    color:
-                        Theme.of(context).colorScheme.onSurface,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (subtitulo.isNotEmpty)
-                  Text(
-                    subtitulo,
-                    style: GoogleFonts.nunito(
-                      color:
-                          Theme.of(context).colorScheme.outline,
-                      fontSize: 10,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-              ],
+    return MouseRegion(
+      cursor: onToggle != null ? SystemMouseCursors.click : MouseCursor.defer,
+      child: GestureDetector(
+        onTap: onToggle,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          margin: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: selecionado
+                ? AppTheme.primary.withValues(alpha: 0.10)
+                : cor.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(8),
+            border: Border(
+              left: BorderSide(
+                color: selecionado ? AppTheme.primary : cor,
+                width: 3,
+              ),
             ),
           ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                '$qtdStr${unidade.isNotEmpty ? ' $unidade' : ''}',
-                style: GoogleFonts.nunito(
-                  color: cor,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
+              // Checkbox de seleção
+              if (onToggle != null) ...[
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: Checkbox(
+                    value: selecionado,
+                    onChanged: (_) => onToggle!(),
+                    activeColor: AppTheme.primary,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      alerta.nome as String,
+                      style: GoogleFonts.nunito(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (subtitulo.isNotEmpty)
+                      Text(
+                        subtitulo,
+                        style: GoogleFonts.nunito(
+                          color: Theme.of(context).colorScheme.outline,
+                          fontSize: 10,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
                 ),
               ),
-              Text(
-                'mín $minStr',
-                style: GoogleFonts.nunito(
-                  color: Theme.of(context).colorScheme.outline,
-                  fontSize: 10,
-                ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '$qtdStr${unidade.isNotEmpty ? ' $unidade' : ''}',
+                    style: GoogleFonts.nunito(
+                      color: selecionado ? AppTheme.primary : cor,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                  Text(
+                    'mín $minStr',
+                    style: GoogleFonts.nunito(
+                      color: Theme.of(context).colorScheme.outline,
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }

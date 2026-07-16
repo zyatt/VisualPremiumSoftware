@@ -118,6 +118,63 @@ String _formatQtd(double v) {
   return v.toString().replaceAll('.', ',');
 }
 
+/// Formata uma quantidade seguida da unidade de medida em minúsculo,
+/// ex.: "50 m/l", "20 kg". Se a unidade não estiver definida, retorna
+/// apenas o número.
+String _formatQtdComUnidade(double v, String? unidade) {
+  final u = _formatarUnidadeExibicao(unidade).toLowerCase();
+  return u.isEmpty ? _formatQtd(v) : '${_formatQtd(v)} $u';
+}
+
+/// Formata a dimensão (largura x comprimento) de um material como "50x1.27m",
+/// mesma convenção usada em [ItemOrcamentoData.materialDimensaoFormatada]
+/// (comprimento x largura, minúsculo). Retorna null se largura/comprimento
+/// não estiverem cadastrados.
+String? _materialDimensaoFormatada(double? largura, double? comprimento) {
+  if (largura == null || comprimento == null || largura <= 0 || comprimento <= 0) return null;
+  String fmt(double v) =>
+      v == v.truncateToDouble() ? v.toInt().toString() : v.toString().replaceAll('.', ',');
+  return '${fmt(comprimento)}x${fmt(largura)}m';
+}
+
+/// Formata a unidade para exibição (o valor salvo permanece em maiúsculo).
+/// Ex.: 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²'/'M2' → 'm²'; 'KG' → 'Kg'; 'G' → 'g'.
+String _formatarUnidadeExibicao(String? unidade) {
+  if (unidade == null || unidade.trim().isEmpty) return '';
+  final u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'UNIDADE': return 'Unidade';
+    case 'M/L':     return 'm/l';
+    case 'M':       return 'm';
+    case 'ML':      return 'ml';
+    case 'M²':
+    case 'M2':      return 'm²';
+    case 'KG':      return 'Kg';
+    case 'G':       return 'g';
+    default:        return unidade;
+  }
+}
+
+/// Nome da unidade por extenso, entre parênteses, no mesmo padrão usado
+/// na tela de Ordem de Compra (ex.: "ml (mililitro)", "m/l (metro linear)").
+String _unidadeDescricaoCompleta(String? unidade) {
+  if (unidade == null || unidade.trim().isEmpty) return '';
+  final u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'M/L':     return 'm/l (metro linear)';
+    case 'M':       return 'm (metro)';
+    case 'ML':      return 'ml (mililitro)';
+    case 'M²':
+    case 'M2':      return 'm² (metro quadrado)';
+    case 'G':       return 'g (grama)';
+    case 'KG':      return 'kg (quilograma)';
+    case 'UNIDADE':
+    case 'UN':
+    case 'UNID':    return 'unidade';
+    default:        return unidade.toLowerCase();
+  }
+}
+
 class OrcamentoEditorPage extends StatefulWidget {
   const OrcamentoEditorPage({super.key});
 
@@ -147,6 +204,12 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
   bool _syncing = false;
   late final _ScrollMetricsNotifier _abasScrollHintNotifier;
   late final _ScrollMetricsNotifier _tabelaHScrollHintNotifier;
+
+  // ── Renomear guia inline ──────────────────────────────────────────────────
+  // Índice da aba atualmente em edição de nome (null = nenhuma).
+  int? _abaRenomeando;
+  TextEditingController? _renomeCtrl;
+  final _renomeFocusNode = FocusNode();
 
   List<MaterialModel> _resultadosBusca = [];
   bool _buscando = false;
@@ -266,6 +329,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     _pageScrollCtrl.dispose();
     _abasScrollHintNotifier.dispose();
     _tabelaHScrollHintNotifier.dispose();
+    _renomeCtrl?.dispose();
+    _renomeFocusNode.dispose();
     super.dispose();
   }
 
@@ -516,9 +581,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+            TextButton(
+              style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.success),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.success).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
               onPressed: () { if (tituloCtrl.text.trim().isEmpty) { setSt(() => vazio = true); return; } Navigator.pop(ctx, tituloCtrl.text.trim()); },
               child: Text(tab.servidorId != null ? 'Atualizar' : 'Salvar'),
             ),
@@ -564,6 +633,45 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     }
   }
 
+  // ── Renomear guia (inline, clicando no título da aba, ou pelo botão) ────────
+
+  void _iniciarRenomeacaoAba(int index) {
+    final provider = context.read<OrcamentoProvider>();
+    final aba = provider.abas[index];
+    setState(() {
+      _abaRenomeando = index;
+      _renomeCtrl?.dispose();
+      _renomeCtrl = TextEditingController(text: aba.titulo);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _renomeFocusNode.requestFocus();
+      _renomeCtrl?.selection = TextSelection(baseOffset: 0, extentOffset: _renomeCtrl!.text.length);
+    });
+  }
+
+  Future<void> _confirmarRenomeacaoAba(int index) async {
+    final provider = context.read<OrcamentoProvider>();
+    final novoTitulo = _renomeCtrl?.text.trim() ?? '';
+    setState(() => _abaRenomeando = null);
+    if (novoTitulo.isEmpty || index < 0 || index >= provider.abas.length) return;
+
+    final aba = provider.abas[index];
+    if (novoTitulo == aba.titulo) return;
+
+    provider.renomearAba(index, novoTitulo);
+
+    // Se o orçamento já existe no servidor, persiste o novo título também lá.
+    final servidorId = aba.servidorId;
+    if (servidorId != null) {
+      try {
+        await OrcamentoRepository().atualizarOrcamento(servidorId, {'titulo': novoTitulo});
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_mensagemErro(e, acao: 'renomear orçamento')), backgroundColor: AppTheme.error));
+      }
+    }
+  }
+
   Future<void> _enviarParaAprovacao() async {
     final provider = context.read<OrcamentoProvider>();
     final tab = provider.tabAtual;
@@ -594,9 +702,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+            TextButton(
+              style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
               onPressed: () { if (tituloCtrl.text.trim().isEmpty) { setSt(() => vazio = true); return; } Navigator.pop(ctx, tituloCtrl.text.trim()); },
               child: const Text('Enviar para Aprovação'),
             ),
@@ -735,38 +847,46 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
   Future<void> _sincronizarStatusServidor({String origem = 'manual'}) async {
     final provider = context.read<OrcamentoProvider>();
     final sid = provider.tabAtual?.servidorId;
-    if (sid == null) {
-      _logOrc('sincronizarStatusServidor[$origem]: ignorado (aba sem servidorId, ainda não salva)');
-      return;
-    }
+
     if (_syncing) {
       _logOrc('sincronizarStatusServidor[$origem]: ignorado (já existe uma sincronização em andamento) orcamentoId=$sid');
       return;
     }
     _syncing = true;
     final inicio = DateTime.now();
-    _logOrc('sincronizarStatusServidor[$origem]: iniciando GET /orcamentos/$sid');
     try {
-      // ApiClient já aplica timeout de 15s em toda chamada HTTP — se a
-      // requisição nunca responder, ela mesma lança TimeoutException aqui,
-      // caindo no catch abaixo (sem deixar o `_syncing` travado em true).
-      final orc = await OrcamentoRepository().buscarPorId(sid);
-      if (!mounted) {
-        _logOrc('sincronizarStatusServidor[$origem]: resposta chegou mas widget já foi desmontado, ignorando orcamentoId=$sid');
-        return;
+      // O status (aguardando aprovação/aprovado/etc.) só existe no servidor,
+      // então só faz sentido buscá-lo quando o orçamento já foi salvo
+      // (servidorId != null). Um rascunho ainda não salvo simplesmente não
+      // tem status remoto para sincronizar.
+      if (sid != null) {
+        _logOrc('sincronizarStatusServidor[$origem]: iniciando GET /orcamentos/$sid');
+        // ApiClient já aplica timeout de 15s em toda chamada HTTP — se a
+        // requisição nunca responder, ela mesma lança TimeoutException aqui,
+        // caindo no catch abaixo (sem deixar o `_syncing` travado em true).
+        final orc = await OrcamentoRepository().buscarPorId(sid);
+        if (!mounted) {
+          _logOrc('sincronizarStatusServidor[$origem]: resposta chegou mas widget já foi desmontado, ignorando orcamentoId=$sid');
+          return;
+        }
+        final status = orc['status'] as String? ?? '';
+        _logOrc('sincronizarStatusServidor[$origem]: sucesso em ${DateTime.now().difference(inicio).inMilliseconds}ms '
+            'orcamentoId=$sid status=$status');
+        provider.atualizarFlagsTab(
+          aguardandoAprovacao: status == 'AGUARDANDO_APROVACAO',
+          jaFinalizado: status == 'APROVADO' || status == 'NAO_APROVADO',
+          modoGerarOC: status == 'APROVADO',
+        );
+      } else {
+        _logOrc('sincronizarStatusServidor[$origem]: aba sem servidorId (rascunho ainda não salvo) — '
+            'pulando sync de status, mas atualizando dados dos materiais mesmo assim');
       }
-      final status = orc['status'] as String? ?? '';
-      _logOrc('sincronizarStatusServidor[$origem]: sucesso em ${DateTime.now().difference(inicio).inMilliseconds}ms '
-          'orcamentoId=$sid status=$status');
-      provider.atualizarFlagsTab(
-        aguardandoAprovacao: status == 'AGUARDANDO_APROVACAO',
-        jaFinalizado: status == 'APROVADO' || status == 'NAO_APROVADO',
-        modoGerarOC: status == 'APROVADO',
-      );
 
-      // Também atualiza estoque mínimo/dimensões/etc. dos itens já
-      // adicionados, já que esses dados podem ter mudado no módulo de
-      // estoque desde que o item foi colocado neste orçamento.
+      // Atualiza nome/unidade/categoria/estoque mínimo/dimensões/etc. dos
+      // itens já adicionados, já que esses dados podem ter mudado no módulo
+      // de estoque desde que o item foi colocado neste orçamento. Isso vale
+      // tanto para orçamentos já salvos quanto para rascunhos locais — os
+      // itens já estão na aba independente de o orçamento ter sido salvo.
       final materialProvider = context.read<MaterialProvider>();
       await materialProvider.carregar();
       if (!mounted) return;
@@ -891,7 +1011,19 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Adicione ao menos um material antes de exportar.')));
       return;
     }
-    setState(() => _salvando = true);
+    // Mesmo padrão da Ordem de Compra: SnackBar laranja avisando que o PDF
+    // está sendo gerado, sem depender do flag `_salvando` (que também
+    // controla o spinner compartilhado da barra de abas). Usar `_salvando`
+    // aqui fazia o spinner aparecer durante a exportação do PDF e dava a
+    // impressão de que outras ações (como o botão "Atualizar") também
+    // estavam em loading, mesmo sem nenhuma relação real entre elas.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Gerando PDF…'),
+        duration: Duration(seconds: 2),
+        backgroundColor: AppTheme.primary,
+      ),
+    );
     try {
       final pdfBytes = await OrcamentoRepository().gerarPdf({
         'titulo': tab.titulo,
@@ -907,9 +1039,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       else { await Process.run('xdg-open', [file.path]); }
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PDF exportado com sucesso!'), backgroundColor: AppTheme.success));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_mensagemErro(e, acao: 'exportar PDF')), backgroundColor: AppTheme.error));
-    } finally {
-      if (mounted) setState(() => _salvando = false);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao gerar PDF: $e'), backgroundColor: AppTheme.error));
     }
   }
 
@@ -1255,18 +1385,54 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                                           shape: BoxShape.circle,
                                         ),
                                       ),
-                                    ConstrainedBox(
-                                      constraints: BoxConstraints(maxWidth: 140),
-                                      child: Text(
-                                        aba.titulo,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: ativa ? FontWeight.w700 : FontWeight.w500,
-                                          color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+                                    if (_abaRenomeando == i)
+                                      ConstrainedBox(
+                                        constraints: BoxConstraints(maxWidth: 140),
+                                        child: IntrinsicWidth(
+                                          child: TextField(
+                                            controller: _renomeCtrl,
+                                            focusNode: _renomeFocusNode,
+                                            autofocus: true,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                              color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurface,
+                                            ),
+                                            cursorColor: ativa ? Colors.white : AppTheme.primary,
+                                            decoration: const InputDecoration(
+                                              isDense: true,
+                                              contentPadding: EdgeInsets.zero,
+                                              border: InputBorder.none,
+                                              isCollapsed: true,
+                                            ),
+                                            onSubmitted: (_) => _confirmarRenomeacaoAba(i),
+                                            onTapOutside: (_) => _confirmarRenomeacaoAba(i),
+                                            onEditingComplete: () => _confirmarRenomeacaoAba(i),
+                                          ),
+                                        ),
+                                      )
+                                    else
+                                      GestureDetector(
+                                        onDoubleTap: () => _iniciarRenomeacaoAba(i),
+                                        child: MouseRegion(
+                                          cursor: SystemMouseCursors.click,
+                                          child: Tooltip(
+                                            message: 'Clique duas vezes para renomear',
+                                            child: ConstrainedBox(
+                                              constraints: BoxConstraints(maxWidth: 140),
+                                              child: Text(
+                                                aba.titulo,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: ativa ? FontWeight.w700 : FontWeight.w500,
+                                                  color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
                                         ),
                                       ),
-                                    ),
                                     SizedBox(width: 6),
                                     Tooltip(
                                       message: 'Fechar guia',
@@ -1391,6 +1557,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
           Tooltip(
             message: 'Cancelar orçamento',
             child: OutlinedButton.icon(onPressed: _cancelarOrcamento, icon: Icon(Icons.delete_outline, size: iconSize), label: Text('Cancelar', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: BorderSide(color: AppTheme.error), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click))),
+          ),
+          Tooltip(
+            message: 'Renomear orçamento',
+            child: OutlinedButton.icon(onPressed: () => _iniciarRenomeacaoAba(provider.abaAtiva), icon: Icon(Icons.edit_outlined, size: iconSize), label: Text('Renomear', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant, side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click))),
           ),
           Tooltip(
             message: 'Baixar PDF do orçamento',
@@ -1720,14 +1890,23 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                         separatorBuilder: (_, __) => Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
                         itemBuilder: (ctx, i) {
                           final m = _resultadosBusca[i];
-                          final sub = [m.categoria, m.medida, m.espessura, m.identificador, m.unidade].where((s) => s != null && s.isNotEmpty).join(' · ');
+                          final medidaOuDimensao = (m.medida != null && m.medida!.isNotEmpty)
+                              ? m.medida
+                              : _materialDimensaoFormatada(m.largura, m.comprimento);
+                          final sub = [m.categoria, medidaOuDimensao, m.espessura, m.identificador, _formatarUnidadeExibicao(m.unidade)].where((s) => s != null && s.isNotEmpty).join(' • ');
                           return ListTile(
                             dense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                            title: Row(children: [
-                              Expanded(child: Text(m.nome, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
-
-                            ]),
-                            subtitle: sub.isNotEmpty ? Text(sub, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)) : null,
+                            title: RichText(
+                              overflow: TextOverflow.ellipsis,
+                              text: TextSpan(
+                                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface),
+                                children: [
+                                  TextSpan(text: m.nome, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                  if (sub.isNotEmpty)
+                                    TextSpan(text: ' • $sub', style: const TextStyle(fontWeight: FontWeight.w400)),
+                                ],
+                              ),
+                            ),
                             trailing: _StatusChip(status: m.status),
                             onTap: () => _adicionarMaterial(m),
                           );
@@ -1880,7 +2059,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         SizedBox(width: colQtd, child: Padding(padding: EdgeInsets.symmetric(horizontal: 3, vertical: 6), child: Text('Quantidade', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center))),
         Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
         Tooltip(
-          message: 'Quantidade da unidade de medida por embalagem/peça (ex: M/L por lona). Só se aplica a materiais cuja unidade não é "Unidade" — repassado para a Ordem de Compra ao gerar.',
+          message: 'Quantidade por unidade (ex: m/l por lona). Só se aplica a materiais cuja unidade não é "Unidade" — repassado para a Ordem de Compra ao gerar.',
           child: SizedBox(width: colQtdUnidade, child: Padding(padding: EdgeInsets.symmetric(horizontal: 3, vertical: 6), child: Text('Quantidade por Unidade', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center))),
         ),
         Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
@@ -2016,8 +2195,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Flexible(child: Text(item.materialNome, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), softWrap: true)),
-                      if ([item.materialMedida, item.materialEspessura, item.materialIdentificador, item.materialDimensaoFormatada].any((s) => s != null && s.isNotEmpty))
-                        Text([item.materialMedida, item.materialEspessura, item.materialIdentificador, item.materialDimensaoFormatada].where((s) => s != null && s.isNotEmpty).join(' · '), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), softWrap: true),
+                      if ([item.materialMedida, item.materialDimensaoFormatada, item.materialEspessura, item.materialIdentificador].any((s) => s != null && s.isNotEmpty))
+                        Text([item.materialMedida ?? item.materialDimensaoFormatada, item.materialEspessura, item.materialIdentificador].where((s) => s != null && s.isNotEmpty).join(' · '), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), softWrap: true),
                     const SizedBox(height: 3),
                     FittedBox(
                       fit: BoxFit.scaleDown,
@@ -2049,14 +2228,16 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
           Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
           Tooltip(
             message: item.estoqueMinimo != null
-                ? 'Estoque mínimo: ${_formatQtd(item.estoqueMinimo!)}'
+                ? 'Estoque mínimo: ${_formatQtdComUnidade(item.estoqueMinimo!, item.materialUnidade)}'
                 : 'Estoque mínimo não definido',
             child: Container(
               width: colQtdMin,
               alignment: Alignment.center,
               padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 3),
               child: Text(
-                item.estoqueMinimo != null ? _formatQtd(item.estoqueMinimo!) : '—',
+                item.estoqueMinimo != null
+                    ? _formatQtdComUnidade(item.estoqueMinimo!, item.materialUnidade)
+                    : '—',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
@@ -2082,10 +2263,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
             padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 3),
             child: item.precisaQtdUnidade
                 ? Tooltip(
-                    message: item.labelQtdUnidade,
+                    message: _unidadeDescricaoCompleta(item.materialUnidade).isEmpty
+                        ? 'Qtd por unidade'
+                        : '${_unidadeDescricaoCompleta(item.materialUnidade)} por unidade',
                     child: _QtdUnidadeField(
                       key: ValueKey('qtdUnidade_${item.itemId}'),
                       value: item.qtdUnidade,
+                      unidade: item.materialUnidade,
                       onChanged: (q) => provider.atualizarItemParcial(item.itemId, qtdUnidade: q),
                     ),
                   )
@@ -2429,8 +2613,9 @@ class _QuantidadeFieldState extends State<_QuantidadeField> {
 /// nem todo material precisa deste campo preenchido.
 class _QtdUnidadeField extends StatefulWidget {
   final double? value;
+  final String? unidade;
   final ValueChanged<double?> onChanged;
-  const _QtdUnidadeField({super.key, required this.value, required this.onChanged});
+  const _QtdUnidadeField({super.key, required this.value, this.unidade, required this.onChanged});
 
   @override
   State<_QtdUnidadeField> createState() => _QtdUnidadeFieldState();
@@ -2470,12 +2655,31 @@ class _QtdUnidadeFieldState extends State<_QtdUnidadeField> {
 
   @override
   Widget build(BuildContext context) {
+    final unidade = widget.unidade?.trim();
     return TextField(
       controller: _ctrl,
       keyboardType: TextInputType.numberWithOptions(decimal: true),
       inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
       decoration: InputDecoration(
         hintText: '0.000',
+        suffixIcon: (unidade != null && unidade.isNotEmpty)
+            ? Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  widthFactor: 1,
+                  child: Text(
+                    unidade.toLowerCase(),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              )
+            : null,
+        suffixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
         contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 5),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(5)),
         isDense: true,
@@ -2811,9 +3015,13 @@ class _DialogDescartarOrcamentoState extends State<_DialogDescartarOrcamento> {
         ],
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        TextButton(
+          style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
           onPressed: () {
             if (_ctrl.text.trim().isEmpty) {
               setState(() => _vazio = true);

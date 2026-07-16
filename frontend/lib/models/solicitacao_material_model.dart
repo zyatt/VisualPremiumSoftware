@@ -115,6 +115,11 @@ class ItemSolicitacaoModel {
   final int? compradoPorId;
   final String? compradoPorNome;
 
+  final bool estoque;
+  final DateTime? estoqueEm;
+  final int? estoquePorId;
+  final String? estoquePorNome;
+
   final DateTime criadoEm;
 
   final DateTime? editadoEm;
@@ -140,6 +145,17 @@ class ItemSolicitacaoModel {
     return null;
   }
 
+  /// Status atual do material: 'PENDENTE', 'COMPRADO' ou 'ESTOQUE'.
+  String get statusCompra {
+    if (estoque)  return 'ESTOQUE';
+    if (comprado) return 'COMPRADO';
+    return 'PENDENTE';
+  }
+
+  /// true se o material já está resolvido (comprado OU retirado do estoque) —
+  /// usado na regra de "pode finalizar a solicitação".
+  bool get resolvido => comprado || estoque;
+
   const ItemSolicitacaoModel({
     required this.id,
     required this.solicitacaoId,
@@ -160,6 +176,10 @@ class ItemSolicitacaoModel {
     this.compradoEm,
     this.compradoPorId,
     this.compradoPorNome,
+    this.estoque = false,
+    this.estoqueEm,
+    this.estoquePorId,
+    this.estoquePorNome,
     required this.criadoEm,
     this.editadoEm,
     this.editadoPorNome,
@@ -193,6 +213,12 @@ class ItemSolicitacaoModel {
           : null,
       compradoPorId:   (json['compradoPorId'] as num?)?.toInt(),
       compradoPorNome: json['compradoPorNome'],
+      estoque:       json['estoque'] as bool? ?? false,
+      estoqueEm:     json['estoqueEm'] != null
+          ? DateTime.parse(json['estoqueEm']).toLocal()
+          : null,
+      estoquePorId:   (json['estoquePorId'] as num?)?.toInt(),
+      estoquePorNome: json['estoquePorNome'],
       criadoEm: DateTime.parse(json['criadoEm']).toLocal(),
       editadoEm: json['editadoEm'] != null
           ? DateTime.parse(json['editadoEm']).toLocal()
@@ -206,6 +232,10 @@ class ItemSolicitacaoModel {
     DateTime? compradoEm,
     int? compradoPorId,
     String? compradoPorNome,
+    bool? estoque,
+    DateTime? estoqueEm,
+    int? estoquePorId,
+    String? estoquePorNome,
     DateTime? editadoEm,
     String? editadoPorNome,
   }) {
@@ -229,6 +259,10 @@ class ItemSolicitacaoModel {
       compradoEm: compradoEm ?? this.compradoEm,
       compradoPorId: compradoPorId ?? this.compradoPorId,
       compradoPorNome: compradoPorNome ?? this.compradoPorNome,
+      estoque: estoque ?? this.estoque,
+      estoqueEm: estoqueEm ?? this.estoqueEm,
+      estoquePorId: estoquePorId ?? this.estoquePorId,
+      estoquePorNome: estoquePorNome ?? this.estoquePorNome,
       criadoEm: criadoEm,
       editadoEm: editadoEm ?? this.editadoEm,
       editadoPorNome: editadoPorNome ?? this.editadoPorNome,
@@ -273,6 +307,11 @@ class AdicionalSolicitacaoModel {
   final int? compradoPorId;
   final String? compradoPorNome;
 
+  final bool estoque;
+  final DateTime? estoqueEm;
+  final int? estoquePorId;
+  final String? estoquePorNome;
+
   final DateTime? editadoEm;
   final String? editadoPorNome;
 
@@ -295,6 +334,17 @@ class AdicionalSolicitacaoModel {
     }
     return null;
   }
+
+  /// Status atual do material: 'PENDENTE', 'COMPRADO' ou 'ESTOQUE'.
+  String get statusCompra {
+    if (estoque)  return 'ESTOQUE';
+    if (comprado) return 'COMPRADO';
+    return 'PENDENTE';
+  }
+
+  /// true se o material já está resolvido (comprado OU retirado do estoque) —
+  /// usado na regra de "pode finalizar a solicitação".
+  bool get resolvido => comprado || estoque;
 
   const AdicionalSolicitacaoModel({
     required this.id,
@@ -319,6 +369,10 @@ class AdicionalSolicitacaoModel {
     this.compradoEm,
     this.compradoPorId,
     this.compradoPorNome,
+    this.estoque = false,
+    this.estoqueEm,
+    this.estoquePorId,
+    this.estoquePorNome,
     this.editadoEm,
     this.editadoPorNome,
   });
@@ -354,6 +408,12 @@ class AdicionalSolicitacaoModel {
           : null,
       compradoPorId:   (json['compradoPorId'] as num?)?.toInt(),
       compradoPorNome: json['compradoPorNome'],
+      estoque:       json['estoque'] as bool? ?? false,
+      estoqueEm:     json['estoqueEm'] != null
+          ? DateTime.parse(json['estoqueEm']).toLocal()
+          : null,
+      estoquePorId:   (json['estoquePorId'] as num?)?.toInt(),
+      estoquePorNome: json['estoquePorNome'],
       editadoEm: json['editadoEm'] != null
           ? DateTime.parse(json['editadoEm']).toLocal()
           : null,
@@ -366,6 +426,10 @@ class AdicionalSolicitacaoModel {
     DateTime? compradoEm,
     int? compradoPorId,
     String? compradoPorNome,
+    bool? estoque,
+    DateTime? estoqueEm,
+    int? estoquePorId,
+    String? estoquePorNome,
     DateTime? editadoEm,
     String? editadoPorNome,
   }) {
@@ -392,6 +456,10 @@ class AdicionalSolicitacaoModel {
       compradoEm: compradoEm ?? this.compradoEm,
       compradoPorId: compradoPorId ?? this.compradoPorId,
       compradoPorNome: compradoPorNome ?? this.compradoPorNome,
+      estoque: estoque ?? this.estoque,
+      estoqueEm: estoqueEm ?? this.estoqueEm,
+      estoquePorId: estoquePorId ?? this.estoquePorId,
+      estoquePorNome: estoquePorNome ?? this.estoquePorNome,
       editadoEm: editadoEm ?? this.editadoEm,
       editadoPorNome: editadoPorNome ?? this.editadoPorNome,
     );
@@ -432,24 +500,37 @@ class SolicitacaoMaterialModel {
   /// Alias para criadoEm — data em que a solicitação foi aberta.
   DateTime get dataSolicitacao => criadoEm;
 
-  /// Retorna true se todos os materiais (itens + adicionais) estão marcados como comprado.
+  /// Retorna true se todos os materiais (itens + adicionais) já estão
+  /// resolvidos — comprados OU retirados do estoque. É essa a condição usada
+  /// para permitir finalizar a solicitação.
   bool get todosComprados {
     final todos = [...itens, ...adicionais];
     if (todos.isEmpty) return false;
-    return itens.every((e) => e.comprado) &&
-        adicionais.every((e) => e.comprado);
+    return itens.every((e) => e.resolvido) &&
+        adicionais.every((e) => e.resolvido);
   }
 
   /// Quantidade total de materiais (itens + adicionais).
   int get totalMateriais => itens.length + adicionais.length;
 
-  /// Quantidade de materiais já comprados.
+  /// Quantidade de materiais marcados como comprado (não inclui estoque).
   int get totalComprados {
     int c = 0;
     for (final i in itens)      { if (i.comprado) c++; }
     for (final a in adicionais) { if (a.comprado) c++; }
     return c;
   }
+
+  /// Quantidade de materiais marcados como retirados do estoque.
+  int get totalEstoque {
+    int c = 0;
+    for (final i in itens)      { if (i.estoque) c++; }
+    for (final a in adicionais) { if (a.estoque) c++; }
+    return c;
+  }
+
+  /// Quantidade de materiais já resolvidos (comprados + estoque).
+  int get totalResolvidos => totalComprados + totalEstoque;
 
   factory SolicitacaoMaterialModel.fromJson(Map<String, dynamic> json) {
     return SolicitacaoMaterialModel(

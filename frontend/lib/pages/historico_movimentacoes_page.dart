@@ -21,6 +21,61 @@ String _fmtHora(DateTime? dt) {
       '${dt.minute.toString().padLeft(2, '0')}';
 }
 
+/// Formata um valor de dimensão (metros) sem casas decimais desnecessárias.
+/// Ex.: 1.0 → "1"; 0.5 → "0.5".
+String _fmtDim(double v) =>
+    v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
+
+/// Retorna a exibição de medida de um material: usa o campo [medida] quando
+/// preenchido; caso contrário, monta a partir de [largura]/[comprimento]
+/// cadastrados diretamente no material.
+/// Exemplos: comprimento=50 e largura=1.22 → "50x1.22m"; só comprimento=50 → "50m";
+/// só largura=1.22 → "1.22m". Retorna null se nada estiver disponível.
+String? _formatarMedidaOuDimensoes({
+  required String? medida,
+  required double? largura,
+  required double? comprimento,
+}) {
+  if (medida != null && medida.trim().isNotEmpty) return medida.trim();
+
+  final temLargura     = largura != null && largura > 0;
+  final temComprimento = comprimento != null && comprimento > 0;
+
+  if (temComprimento && temLargura) {
+    return '${_fmtDim(comprimento)}x${_fmtDim(largura)}m';
+  }
+  if (temComprimento) return '${_fmtDim(comprimento)}m';
+  if (temLargura)     return '${_fmtDim(largura)}m';
+  return null;
+}
+
+/// Formata a unidade para exibição (o valor interno permanece em maiúsculo,
+/// usado para comparações/enum). Ex.: 'UNIDADE' → 'Unidade'; 'M' → 'm';
+/// 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²' → 'm²'; 'KG' → 'Kg'; 'G' → 'g'.
+String formatarUnidadeExibicao(String? unidade) {
+  if (unidade == null || unidade.trim().isEmpty) return '';
+  final u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'M':
+      return 'm';
+    case 'M/L':
+      return 'm/l';
+    case 'ML':
+      return 'ml';
+    case 'M²':
+    case 'M2':
+      return 'm²';
+    case 'KG':
+      return 'Kg';
+    case 'G':
+      return 'g';
+    case 'UNIDADE':
+      return 'Unidade';
+    default:
+      return unidade;
+  }
+}
+
 String _fmtDataCompleta(DateTime dt) {
   final hoje = DateTime.now();
   final hojeData = DateTime(hoje.year, hoje.month, hoje.day);
@@ -363,16 +418,32 @@ class _HistoricoMovimentacoesPageState
                   ),
                 ),
                 const SizedBox(width: 10),
-                IconButton(
-                  tooltip: 'Limpar filtros',
-                  icon: Icon(Icons.filter_alt_off,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  onPressed: _limparFiltros,
-                  style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                  ),
+                Builder(
+                  builder: (context) {
+                    final temFiltro = _buscaOSCtrl.text.isNotEmpty ||
+                        _buscaMaterialCtrl.text.isNotEmpty ||
+                        _buscaUsuarioCtrl.text.isNotEmpty ||
+                        _filtroTipo != _FiltroTipo.todos ||
+                        _filtroOrigem != null ||
+                        _dataInicio != null ||
+                        _dataFim != null;
+                    return IconButton.outlined(
+                      tooltip: 'Limpar filtros',
+                      icon: Icon(Icons.filter_alt_off,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      onPressed: temFiltro ? _limparFiltros : null,
+                      style: IconButton.styleFrom(
+                        side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.resolveWith((states) {
+                          if (states.contains(WidgetState.disabled)) {
+                            return SystemMouseCursors.basic;
+                          }
+                          return SystemMouseCursors.click;
+                        }),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -633,9 +704,14 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
     final qtdStr = mov.quantidade == mov.quantidade.truncate()
         ? mov.quantidade.toStringAsFixed(0)
         : mov.quantidade.toStringAsFixed(2);
+    final medidaFmt = _formatarMedidaOuDimensoes(
+      medida:      mov.materialMedida,
+      largura:     mov.materialLargura,
+      comprimento: mov.materialComprimento,
+    );
     final detalhesMaterial = [
       if (mov.materialIdentificador != null && mov.materialIdentificador!.isNotEmpty) mov.materialIdentificador!,
-      if (mov.materialMedida != null && mov.materialMedida!.isNotEmpty) mov.materialMedida!,
+      if (medidaFmt != null) medidaFmt,
       if (mov.materialEspessura != null && mov.materialEspessura!.isNotEmpty) mov.materialEspessura!,
     ].join(' • ');
 
@@ -719,7 +795,7 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
           SizedBox(
             width: 100,
             child: Text(
-              '${isEntrada ? '+' : '-'}$qtdStr${mov.materialUnidade != null ? ' ${mov.materialUnidade}' : ''}',
+              '${isEntrada ? '+' : '-'}$qtdStr${mov.materialUnidade != null ? ' ${formatarUnidadeExibicao(mov.materialUnidade)}' : ''}',
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: cor),
               overflow: TextOverflow.ellipsis,
             ),

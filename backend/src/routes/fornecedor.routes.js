@@ -11,8 +11,8 @@ router.get('/buscar',                  authMiddleware, roleMiddleware(LEITURA), 
 router.get('/material/:materialId',    authMiddleware, roleMiddleware(LEITURA), ctrl.listarPorMaterial);
 router.get('/:id',                     authMiddleware, roleMiddleware(LEITURA), ctrl.buscarPorId);
 
-router.post('/',                       authMiddleware, roleMiddleware(ESCRITA), ctrl.criar);
-router.put('/:id',                     authMiddleware, roleMiddleware(ESCRITA), ctrl.atualizar);
+router.post('/',                       authMiddleware, roleMiddleware(ESCRITA), ctrl.uploadImagem, ctrl.criar);
+router.put('/:id',                     authMiddleware, roleMiddleware(ESCRITA), ctrl.uploadImagem, ctrl.atualizar);
 router.delete('/:id',                  authMiddleware, roleMiddleware(ADMIN),   ctrl.remover);
 
 router.post('/:id/materiais',                        authMiddleware, roleMiddleware(ESCRITA), ctrl.vincularMaterial);

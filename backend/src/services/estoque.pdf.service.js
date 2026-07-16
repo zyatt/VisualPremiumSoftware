@@ -18,6 +18,25 @@ function formatNumber(value) {
   }).format(value ?? 0);
 }
 
+// Formata a unidade para exibição (o valor interno no banco permanece em
+// maiúsculo). Ex.: 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²'/'M2' → 'm²'; 'KG' → 'Kg';
+// 'G' → 'g'. Espelha `formatarUnidadeExibicao` do app Flutter.
+function formatUnidade(unidade) {
+  if (!unidade || !unidade.trim()) return '—';
+  const u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'UNIDADE': return 'Unidade';
+    case 'M/L':     return 'm/l';
+    case 'M':       return 'm';
+    case 'ML':      return 'ml';
+    case 'M²':
+    case 'M2':      return 'm²';
+    case 'KG':      return 'Kg';
+    case 'G':       return 'g';
+    default:        return unidade;
+  }
+}
+
 const C = {
   black:     '#1A1A1A',
   gray:      '#6B7280',
@@ -242,7 +261,7 @@ function drawMateriaisTable(doc, materiais, startY) {
 
     const c3 = get(cols[3]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.black)
-       .text(mat.unidade || '—', c3.x, tySingle, { width: c3.w, align: 'center', lineBreak: false });
+       .text(formatUnidade(mat.unidade), c3.x, tySingle, { width: c3.w, align: 'center', lineBreak: false });
 
     const c4 = get(cols[4]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)

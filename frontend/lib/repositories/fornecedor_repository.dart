@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:http/http.dart' as http;
 import '../models/fornecedor_model.dart';
 import '../utils/api_client.dart';
 
@@ -61,13 +64,28 @@ class FornecedorRepository {
         .toList();
   }
 
-  Future<FornecedorModel> criar(Map<String, dynamic> dados) async {
-    final data = await ApiClient.post('/fornecedores', dados);
+  /// Cria um fornecedor. Se [imagem] for informada, envia como multipart
+  /// (campo "imagem"); caso contrário, envia JSON comum.
+  Future<FornecedorModel> criar(
+    Map<String, dynamic> dados, {
+    File? imagem,
+  }) async {
+    final data = imagem != null
+        ? await _enviarMultipart('POST', '/fornecedores', dados, imagem)
+        : await ApiClient.post('/fornecedores', dados);
     return FornecedorModel.fromJson(data);
   }
 
-  Future<FornecedorModel> atualizar(int id, Map<String, dynamic> dados) async {
-    final data = await ApiClient.put('/fornecedores/$id', dados);
+  /// Atualiza um fornecedor. Se [imagem] for informada, envia como multipart
+  /// (campo "imagem"), substituindo a imagem atual; caso contrário, envia JSON.
+  Future<FornecedorModel> atualizar(
+    int id,
+    Map<String, dynamic> dados, {
+    File? imagem,
+  }) async {
+    final data = imagem != null
+        ? await _enviarMultipart('PUT', '/fornecedores/$id', dados, imagem)
+        : await ApiClient.put('/fornecedores/$id', dados);
     return FornecedorModel.fromJson(data);
   }
 
@@ -131,5 +149,50 @@ class FornecedorRepository {
         'comprimento':  item['comprimento'],
       };
     }).toList();
+  }
+
+  // ── Helper: multipart com campos escalares + 1 arquivo de imagem ──────────
+  Future<Map<String, dynamic>> _enviarMultipart(
+    String method,
+    String path,
+    Map<String, dynamic> campos,
+    File imagem,
+  ) async {
+    final prefixed = path.startsWith('/auth') ? path : '/api$path';
+    final uri = Uri.parse('${ApiClient.baseUrl}$prefixed');
+
+    final request = http.MultipartRequest(method, uri);
+
+    final token = ApiClient.token;
+    if (token != null) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+
+    campos.forEach((key, value) {
+      if (value != null) request.fields[key] = value.toString();
+    });
+
+    request.files.add(
+      await http.MultipartFile.fromPath('imagem', imagem.path),
+    );
+
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+
+    Map<String, dynamic> decoded;
+    try {
+      decoded = response.body.trim().isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      decoded = <String, dynamic>{};
+    }
+
+    if (response.statusCode >= 400) {
+      final mensagem = decoded['message'] as String? ??
+          'Erro ao enviar dados (HTTP ${response.statusCode}).';
+      throw Exception(mensagem);
+    }
+    return decoded;
   }
 }

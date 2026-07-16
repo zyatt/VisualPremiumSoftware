@@ -35,6 +35,25 @@ String _fmtCusto(double v) {
   return v.toStringAsFixed(6).replaceAll('.', ',');
 }
 
+String _fmtDim(double v) =>
+    v == v.truncateToDouble()
+        ? v.toStringAsFixed(0)
+        : v.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
+
+String? _formatarMedidaOuDimensoes({
+  required String? medida,
+  required double? largura,
+  required double? comprimento,
+}) {
+  if (medida != null && medida.trim().isNotEmpty) return medida.trim();
+  final temLargura     = largura != null && largura > 0;
+  final temComprimento = comprimento != null && comprimento > 0;
+  if (temComprimento && temLargura) return '${_fmtDim(comprimento)}x${_fmtDim(largura)}m';
+  if (temComprimento) return '${_fmtDim(comprimento)}m';
+  if (temLargura)     return '${_fmtDim(largura)}m';
+  return null;
+}
+
 const _corGasto    = Color(0xFFE53935);
 const _corEstoque  = Color(0xFF1E88E5);
 const _corVeiculo  = Color(0xFFF4511E);
@@ -918,10 +937,15 @@ class _LinhaEstoque extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final m = material;
+    final medidaOuDim = _formatarMedidaOuDimensoes(
+      medida:      m.medida,
+      largura:     m.largura,
+      comprimento: m.comprimento,
+    );
     final detalhes = [
       if (m.identificador != null && m.identificador!.isNotEmpty)
         m.identificador!,
-      if (m.medida    != null && m.medida!.isNotEmpty)    m.medida!,
+      if (medidaOuDim != null && medidaOuDim.isNotEmpty) medidaOuDim,
       if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
     ].join(' · ');
 
@@ -1504,10 +1528,15 @@ class _LinhaGasto extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final m = material;
+    final medidaOuDim = _formatarMedidaOuDimensoes(
+      medida:      m.medida,
+      largura:     m.largura,
+      comprimento: m.comprimento,
+    );
     final detalhes = [
       if (m.identificador != null && m.identificador!.isNotEmpty)
         m.identificador!,
-      if (m.medida    != null && m.medida!.isNotEmpty)    m.medida!,
+      if (medidaOuDim != null && medidaOuDim.isNotEmpty) medidaOuDim,
       if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
     ].join(' · ');
 

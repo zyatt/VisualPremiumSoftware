@@ -363,21 +363,36 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   void definirPaginaVisivel(bool visivel) {
     if (visivel == _paginaAberta) return;
     _paginaAberta = visivel;
-    
+
     if (visivel) {
       if (_novasSolicitacoes != 0) {
         _novasSolicitacoes = 0;
-        notifyListeners();
+        // definirPaginaVisivel() é chamado de dentro do build() do AppShell
+        // (ver comentário na declaração deste método), então NUNCA podemos
+        // chamar notifyListeners() aqui de forma síncrona — isso dispara
+        // "setState()/markNeedsBuild() called during build", pois o Provider
+        // tentaria reconstruir o próprio InheritedProviderScope no meio da
+        // fase de build em andamento. Adiamos para depois do frame atual.
+        WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
       }
+      // Persiste no banco só na PRIMEIRA vez que a página fica visível
+      // nesta sessão de app (ex: logo após login). Se o usuário navega
+      // para outra aba e volta para "Solicitações" depois, não repete a
+      // chamada — não há nada de novo pra marcar, já que qualquer
+      // solicitação criada enquanto a página estava aberta já é
+      // persistida pelo próprio handler de evento SSE (ver
+      // _processarLinhaSSE / linhas que chamam _persistirVisualizacao
+      // quando _paginaAberta é true no momento do evento).
       if (_visualizacaoPersistedaNaSessao) {
         debugPrint('✅ [Solicitações] Visualizações já persistidas nesta sessão — pulando');
       } else {
-        debugPrint('🧹 [Solicitações] Persistindo visualizações no banco...');
+        debugPrint('🧹 [Solicitações] Persistindo visualizações no banco (primeira vez na sessão)...');
         _persistirVisualizacao();
       }
-    } else {
-      _visualizacaoPersistedaNaSessao = false;
     }
+    // Note: NÃO resetamos _visualizacaoPersistedaNaSessao ao sair da
+    // página. Ela só volta a false em resetarConexao() (logout/reset de
+    // sessão), que é o momento correto de "esquecer" que já persistiu.
   }
 
   Future<void> _persistirVisualizacao() async {
@@ -436,6 +451,21 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
 
   // ─── CRUD ──────────────────────────────────
 
+  // Sequência dedicada às chamadas em PRIMEIRO PLANO (spinner de tela
+  // cheia). É separada de _carregarSeq (que serve só para descartar
+  // resultados de dados desatualizados) porque misturar as duas em uma
+  // única contagem permitia que uma chamada de fundo (SSE) "roubasse" a
+  // sequência mais recente enquanto uma chamada em primeiro plano ainda
+  // estava em voo — quando a chamada em primeiro plano finalmente
+  // terminava, `minhaSeq != _carregarSeq` fazia o `finally` inteiro ser
+  // pulado, e _carregando ficava travado em `true` para sempre (loading
+  // infinito, só resolvido com refresh manual ou reabrindo o app).
+  //
+  // Com _carregandoSeq própria, toda chamada em primeiro plano sempre
+  // desliga o spinner ao terminar, independente de quantos carregar()
+  // de fundo tenham entrado e saído no meio do caminho.
+  int _carregandoSeq = 0;
+
   Future<void> carregar({
     String? busca,
     String? andamento,
@@ -451,8 +481,19 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     bool emSegundoPlano = false,
   }) async {
     final minhaSeq = ++_carregarSeq;
+    int? minhaCarregandoSeq;
     if (!emSegundoPlano) {
+      minhaCarregandoSeq = ++_carregandoSeq;
       _carregando = true;
+
+      final seqDoWatchdog = minhaCarregandoSeq;
+      Timer(const Duration(seconds: 20), () {
+        if (seqDoWatchdog == _carregandoSeq && _carregando) {
+          debugPrint('⚠️ [Solicitações] Watchdog: destravando spinner preso após 20s');
+          _carregando = false;
+          notifyListeners();
+        }
+      });
     }
     _erro = null;
     notifyListeners();
@@ -466,8 +507,8 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
         dataFim: dataFim,
       );
       // Se outra chamada mais recente já foi disparada enquanto esta estava
-      // em voo, descarta este resultado (está desatualizado) e não mexe em
-      // _carregando — quem cuida disso é a chamada mais nova.
+      // em voo, descarta este resultado (está desatualizado) — isso só vale
+      // para os DADOS; o spinner é controlado separadamente abaixo.
       if (minhaSeq != _carregarSeq) return;
       _solicitacoes = resultado;
     } catch (e) {
@@ -479,12 +520,16 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
       }
     } finally {
       if (minhaSeq == _carregarSeq) {
-        // Só mexe em _carregando se esta chamada foi quem ligou (evita que
-        // uma recarga de fundo desligue o spinner de uma recarga em
-        // primeiro plano que ainda esteja em andamento).
-        if (!emSegundoPlano || _carregando) {
-          _carregando = false;
-        }
+        notifyListeners();
+      }
+      // Toda chamada em PRIMEIRO PLANO sempre desliga o próprio spinner ao
+      // terminar — não depende de _carregarSeq (compartilhado com as
+      // chamadas de fundo do SSE, que podem ter avançado no meio tempo).
+      // Isso garante que o spinner nunca fica preso mesmo se um evento SSE
+      // disparar carregar(emSegundoPlano:true) enquanto esta chamada ainda
+      // estava em voo.
+      if (minhaCarregandoSeq != null && minhaCarregandoSeq == _carregandoSeq) {
+        _carregando = false;
         notifyListeners();
       }
     }
@@ -591,6 +636,26 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
       await _repo.marcarAdicionalComprado(adicionalId, comprado: comprado);
       await _resincronizarSolicitacaoDoItem(adicionalId: adicionalId);
       debugPrint('✅ [Solicitações] Adicional marcado como ${comprado ? 'comprado' : 'não comprado'}');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> marcarItemEstoque(int itemId, {required bool estoque}) async {
+    try {
+      await _repo.marcarItemEstoque(itemId, estoque: estoque);
+      await _resincronizarSolicitacaoDoItem(itemId: itemId);
+      debugPrint('✅ [Solicitações] Item marcado como ${estoque ? 'estoque' : 'não estoque'}');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> marcarAdicionalEstoque(int adicionalId, {required bool estoque}) async {
+    try {
+      await _repo.marcarAdicionalEstoque(adicionalId, estoque: estoque);
+      await _resincronizarSolicitacaoDoItem(adicionalId: adicionalId);
+      debugPrint('✅ [Solicitações] Adicional marcado como ${estoque ? 'estoque' : 'não estoque'}');
     } catch (e) {
       rethrow;
     }

@@ -1,10 +1,36 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/fornecedor_model.dart';
 import '../providers/fornecedor_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/api_client.dart';
+
+/// Resolve uma URL relativa (ex.: "/uploads/fornecedores/x.png") retornada
+/// pelo backend para uma URL absoluta, usando o mesmo host configurado no
+/// ApiClient. URLs já absolutas (http/https) são retornadas como estão.
+String _resolverUrlImagem(String url) {
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  final base = ApiClient.baseUrl.replaceAll(RegExp(r'/$'), '');
+  return '$base$url';
+}
+
+/// Formata a dimensão (largura x comprimento) de um material como "50x1.27m"
+/// — usado como fallback quando o material não tem `medida` cadastrada.
+/// Mesma convenção usada em outras telas (comprimento x largura, minúsculo).
+/// Aceita `dynamic` porque esses campos podem chegar como String (ex.:
+/// Decimal do Prisma serializado) ou num, dependendo do endpoint.
+String? _materialDimensaoFormatada(dynamic larguraRaw, dynamic comprimentoRaw) {
+  final largura = larguraRaw is num ? larguraRaw : num.tryParse(larguraRaw?.toString() ?? '');
+  final comprimento = comprimentoRaw is num ? comprimentoRaw : num.tryParse(comprimentoRaw?.toString() ?? '');
+  if (largura == null || comprimento == null || largura <= 0 || comprimento <= 0) return null;
+  String fmt(num v) =>
+      v == v.toInt() ? v.toInt().toString() : v.toString().replaceAll('.', ',');
+  return '${fmt(comprimento)}x${fmt(largura)}m';
+}
 
 class _UpperCaseFormatter extends TextInputFormatter {
   static final _acentos = {
@@ -39,6 +65,26 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
+class _MedidaEspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text.replaceAll(',', '.');
+    texto = _UpperCaseFormatter._removerAcentos(texto).toUpperCase();
+    final partes = texto.split('.');
+    if (partes.length > 2) {
+      texto = '${partes[0]}.${partes.sublist(1).join('')}';
+    }
+    final sel = newValue.selection.copyWith(
+      baseOffset: newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
 class _DecimalInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -58,7 +104,6 @@ class _DecimalInputFormatter extends TextInputFormatter {
     return newValue.copyWith(text: texto, selection: sel);
   }
 }
-
 
 class _CnpjInputFormatter extends TextInputFormatter {
   @override
@@ -102,8 +147,16 @@ class FornecedoresPage extends StatefulWidget {
 
 class _FornecedoresPageState extends State<FornecedoresPage> {
   final _buscaCtrl   = TextEditingController();
-  String _tipoFiltro = '';
+  String _tipoFiltro  = '';
+  bool   _tipoHovered = false;
   Timer? _debounceTimer;
+
+  static const _cores = [
+    Color(0xFF5E35B1), Color(0xFF1E88E5), Color(0xFF00897B),
+    Color(0xFFE53935), Color(0xFFF4511E), Color(0xFF8E24AA),
+    Color(0xFF039BE5), Color(0xFF43A047), Color(0xFFFFB300),
+    Color(0xFF6D4C41), Color(0xFF546E7A), Color(0xFFD81B60),
+  ];
 
   @override
   void initState() {
@@ -297,24 +350,12 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                   flex: 3,
                   child: TextField(
                     controller: _buscaCtrl,
+                    inputFormatters: [_UpperCaseFormatter()],
                     decoration: InputDecoration(
                       hintText: 'Buscar por nome, vendedor ou CNPJ…',
                       prefixIcon: Icon(Icons.search,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
-                      suffixIcon: ValueListenableBuilder(
-                        valueListenable: _buscaCtrl,
-                        builder: (_, v, __) => v.text.isNotEmpty
-                            ? IconButton(
-                                icon: Icon(Icons.clear, size: 18),
-                                onPressed: () {
-                                  _buscaCtrl.clear();
-                                  _aplicarFiltros();
-                                },
-                                color: Theme.of(context).colorScheme.outline,
-                              )
-                            : const SizedBox.shrink(),
-                      ),
                     ),
                     onChanged: _onBuscaChanged,
                     onSubmitted: (_) => _aplicarFiltros(),
@@ -324,452 +365,458 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                 Consumer<FornecedorProvider>(
                   builder: (_, p, __) {
                     final tipos = p.tipos;
-                    return SizedBox(
-                      width: 180,
-                      child: DropdownButtonFormField<String>(
-                        key: ValueKey('tipo_${tipos.join('|')}'),
-                        initialValue: _tipoFiltro.isEmpty ? null : _tipoFiltro,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Tipo',
-                          isDense: true,
+                    final valorAtual = _tipoFiltro.isEmpty ? null : _tipoFiltro;
+                    return MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      onEnter: (_) => setState(() => _tipoHovered = true),
+                      onExit:  (_) => setState(() => _tipoHovered = false),
+                      child: SizedBox(
+                        width: 180,
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'Tipo',
+                            isDense: true,
+                          ),
+                          isEmpty: valorAtual == null,
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              key: ValueKey('tipo_${tipos.join('|')}'),
+                              value: valorAtual,
+                              isDense: true,
+                              isExpanded: true,
+                              mouseCursor: SystemMouseCursors.click,
+                              icon: Icon(
+                                Icons.arrow_drop_down,
+                                color: _tipoHovered
+                                    ? AppTheme.primary
+                                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                              items: [
+                                const DropdownMenuItem(value: '', child: Text('TODOS', overflow: TextOverflow.ellipsis)),
+                                for (final t in tipos)
+                                  DropdownMenuItem(value: t, child: Text(t, overflow: TextOverflow.ellipsis)),
+                              ],
+                              onChanged: (v) {
+                                setState(() => _tipoFiltro = v ?? '');
+                                _aplicarFiltros();
+                              },
+                            ),
+                          ),
                         ),
-                        items: [
-                          const DropdownMenuItem(value: '', child: Text('TODOS', overflow: TextOverflow.ellipsis)),
-                          for (final t in tipos)
-                            DropdownMenuItem(value: t, child: Text(t, overflow: TextOverflow.ellipsis)),
-                        ],
-                        onChanged: (v) {
-                          setState(() => _tipoFiltro = v ?? '');
-                          _aplicarFiltros();
-                        },
                       ),
                     );
                   },
                 ),
                 const SizedBox(width: 8),
-                IconButton.outlined(
-                  tooltip: 'Limpar filtros',
-                  icon: Icon(Icons.filter_alt_off,
-                      color: scheme.onSurfaceVariant),
-                  onPressed: () {
-                    _buscaCtrl.clear();
-                    setState(() => _tipoFiltro = '');
-                    context.read<FornecedorProvider>().carregar();
+                ValueListenableBuilder(
+                  valueListenable: _buscaCtrl,
+                  builder: (context, v, __) {
+                    final temFiltro = v.text.isNotEmpty || _tipoFiltro.isNotEmpty;
+                    return IconButton.outlined(
+                      tooltip: 'Limpar filtros',
+                      icon: Icon(Icons.filter_alt_off,
+                          color: scheme.onSurfaceVariant),
+                      onPressed: () {
+                        if (!temFiltro) return;
+                        _buscaCtrl.clear();
+                        setState(() => _tipoFiltro = '');
+                        context.read<FornecedorProvider>().carregar();
+                      },
+                      style: IconButton.styleFrom(
+                        side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.resolveWith((states) {
+                          if (!temFiltro) {
+                            return SystemMouseCursors.basic;
+                          }
+                          return SystemMouseCursors.click;
+                        }),
+                      ),
+                    );
                   },
                 ),
               ],
             ),
             const SizedBox(height: 16),
 
-            Expanded(
-              child: Consumer<FornecedorProvider>(
-                builder: (_, prov, __) {
-                  if (prov.carregando) {
-                    return const Center(
-                      child: CircularProgressIndicator(color: AppTheme.primary),
-                    );
-                  }
-                  if (prov.erro != null) {
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.cloud_off_outlined,
-                              size: 48, color: AppTheme.error),
-                          SizedBox(height: 12),
-                          Text(
-                            prov.erro!,
-                            style: TextStyle(
-                                color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 16),
-                          FilledButton.icon(
-                            onPressed: prov.recarregar,
-                            icon: const Icon(Icons.refresh, size: 18),
-                            label: const Text('Tentar novamente'),
-                            style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.primary)
-                              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-                  if (prov.fornecedores.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty
-                                ? Icons.search_off_outlined
-                                : Icons.storefront_outlined,
-                            size: 64,
-                            color: Theme.of(context).colorScheme.outline,
-                          ),
-                          SizedBox(height: 16),
-                          Text(
-                            _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty
-                                ? 'Nenhum fornecedor encontrado'
-                                : 'Nenhum fornecedor cadastrado',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyLarge
-                                ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty
-                                ? 'Tente um termo diferente.'
-                                : 'Clique em "Novo Fornecedor" para começar.',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(color: Theme.of(context).colorScheme.outline),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  return Card(
-                    clipBehavior: Clip.antiAlias,
-                    child: SingleChildScrollView(
-                      child: _TabelaFornecedores(
-                        fornecedores: prov.fornecedores,
-                        onEditar: (f) => _abrirFormulario(fornecedor: f),
-                        onRemover: _confirmarRemover,
-                        onMateriais: _abrirMateriais,
-                      ),
+          Expanded(
+            child: Consumer<FornecedorProvider>(
+              builder: (_, prov, __) {
+                if (prov.carregando) {
+                  return const Center(
+                    child: CircularProgressIndicator(color: AppTheme.primary),
+                  );
+                }
+                if (prov.erro != null) {
+                  return Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.cloud_off_outlined,
+                            size: 48, color: AppTheme.error),
+                        SizedBox(height: 12),
+                        Text(
+                          prov.erro!,
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          onPressed: prov.recarregar,
+                          icon: const Icon(Icons.refresh, size: 18),
+                          label: const Text('Tentar novamente'),
+                          style: FilledButton.styleFrom(
+                              backgroundColor: AppTheme.primary)
+                            .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                        ),
+                      ],
                     ),
                   );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ColDef {
-  final String label;
-  final double? fixed;
-  final double? flex;
-  const _ColDef({required this.label, this.fixed, this.flex});
-}
-
-class _TabelaFornecedores extends StatelessWidget {
-  final List<FornecedorModel> fornecedores;
-  final void Function(FornecedorModel) onEditar;
-  final void Function(FornecedorModel) onRemover;
-  final void Function(FornecedorModel) onMateriais;
-
-  const _TabelaFornecedores({
-    required this.fornecedores,
-    required this.onEditar,
-    required this.onRemover,
-    required this.onMateriais,
-  });
-
-  static const List<_ColDef> _cols = [
-    _ColDef(label: 'ID',           fixed: 56),
-    _ColDef(label: 'NOME FANTASIA',flex: 2.2),
-    _ColDef(label: 'RAZÃO SOCIAL', flex: 1.8),
-    _ColDef(label: 'CNPJ',         flex: 1.4),
-    _ColDef(label: 'WHATSAPP',     flex: 1.2),
-    _ColDef(label: 'VENDEDOR',     flex: 1.4),
-    _ColDef(label: 'TIPO',         flex: 1.0),
-    _ColDef(label: 'MATERIAIS',    flex: 0.9),
-  ];
-
-  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
-      ? SizedBox(width: col.fixed, child: child)
-      : Expanded(flex: (col.flex! * 10).round(), child: child);
-
-  Widget _cabecalho(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-        color: scheme.surfaceContainerHighest,
-        child: Row(
-          children: [
-            for (final col in _cols)
-              _colWrap(
-                col,
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                  child: Text(
-                    col.label,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      color: scheme.onSurfaceVariant,
+                }
+                if (prov.fornecedores.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty
+                              ? Icons.search_off_outlined
+                              : Icons.storefront_outlined,
+                          size: 64,
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                        SizedBox(height: 16),
+                        Text(
+                          _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty
+                              ? 'Nenhum fornecedor encontrado'
+                              : 'Nenhum fornecedor cadastrado',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyLarge
+                              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          _buscaCtrl.text.isNotEmpty || _tipoFiltro.isNotEmpty
+                              ? 'Tente um termo diferente.'
+                              : 'Clique em "Novo Fornecedor" para começar.',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(color: Theme.of(context).colorScheme.outline),
+                        ),
+                      ],
                     ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      );
-  }
+                  );
+                }
 
-  @override
-  Widget build(BuildContext context) {
-    final outlineVariant = Theme.of(context).colorScheme.outlineVariant;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _cabecalho(context),
-        for (int i = 0; i < fornecedores.length; i++) ...[
-          if (i > 0)
-            Divider(height: 0, thickness: 0.8, color: outlineVariant),
-          _LinhaFornecedor(
-            fornecedor:  fornecedores[i],
-            cols:        _cols,
-            onEditar:    onEditar,
-            onRemover:   onRemover,
-            onMateriais: onMateriais,
+                return SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 16,
+                    runSpacing: 16,
+                    children: List.generate(prov.fornecedores.length, (i) {
+                      final f = prov.fornecedores[i];
+                      final cor = _cores[i % _cores.length];
+                      return _FornecedorCard(
+                        fornecedor: f,
+                        cor: cor,
+                        onTap: () => _abrirFormulario(fornecedor: f),
+                        onVerMateriais: () => _abrirMateriais(f),
+                      );
+                    }),
+                  ),
+                );
+              },
+            ),
           ),
         ],
-        Divider(height: 0, thickness: 0.8, color: outlineVariant),
-      ],
-    );
+      ),
+    ),
+  );
   }
 }
 
-class _LinhaFornecedor extends StatefulWidget {
+class _FornecedorCard extends StatefulWidget {
   final FornecedorModel fornecedor;
-  final List<_ColDef> cols;
-  final void Function(FornecedorModel) onEditar;
-  final void Function(FornecedorModel) onRemover;
-  final void Function(FornecedorModel) onMateriais;
+  final Color cor;
+  final VoidCallback onTap;
+  final VoidCallback onVerMateriais;
 
-  const _LinhaFornecedor({
+  const _FornecedorCard({
     required this.fornecedor,
-    required this.cols,
-    required this.onEditar,
-    required this.onRemover,
-    required this.onMateriais,
+    required this.cor,
+    required this.onTap,
+    required this.onVerMateriais,
   });
 
   @override
-  State<_LinhaFornecedor> createState() => _LinhaFornecedorState();
+  State<_FornecedorCard> createState() => _FornecedorCardState();
 }
 
-class _LinhaFornecedorState extends State<_LinhaFornecedor> {
+class _FornecedorCardState extends State<_FornecedorCard> {
   bool _hovered = false;
+  final _cardKey = GlobalKey();
 
-  void _onHover(PointerHoverEvent _) {
-    if (!_hovered) setState(() => _hovered = true);
-  }
-
-  void _onExit(PointerExitEvent _) {
-    if (_hovered) setState(() => _hovered = false);
-  }
-
-  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
-      ? SizedBox(width: col.fixed, child: child)
-      : Expanded(flex: (col.flex! * 10).round(), child: child);
-
-  static Widget _cell(BuildContext context, String text) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-        ),
-      );
-
-  static Widget _vDivider(BuildContext context) => VerticalDivider(
-        width: 1, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant,
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final f    = widget.fornecedor;
-    final cols = widget.cols;
-
+  void _abrirMenu(BuildContext context) async {
     final scheme = Theme.of(context).colorScheme;
-    final bgColor = _hovered
-        ? const Color(0xFFFF9800).withValues(alpha: 0.10)
-        : scheme.surface;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final cardBox = _cardKey.currentContext?.findRenderObject() as RenderBox?;
 
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onHover: _onHover,
-      onExit:  _onExit,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => widget.onEditar(f),
-        child: ColoredBox(
-          color: bgColor,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 52),
+    // Centraliza o menu dentro do próprio card, em vez de na posição do clique.
+    final Rect areaAncora;
+    if (cardBox != null) {
+      final topLeft = cardBox.localToGlobal(Offset.zero, ancestor: overlay);
+      areaAncora = topLeft & cardBox.size;
+    } else {
+      areaAncora = Offset.zero & overlay.size;
+    }
+
+    final opcao = await showMenu<int>(
+      context: context,
+      position: RelativeRect.fromRect(
+        areaAncora,
+        Offset.zero & overlay.size,
+      ),
+      color: scheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: scheme.outlineVariant),
+      ),
+      items: [
+        PopupMenuItem(
+          value: 1,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                _colWrap(cols[0], Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                  child: Text(
-                    '${f.id}',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                )),
-                _vDivider(context),
-                _colWrap(cols[1], Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                  child: Text(
-                    f.nomeFantasia,
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                )),
-                _vDivider(context),
-                _colWrap(cols[2], _cell(context, f.razaoSocial ?? '—')),
-                _vDivider(context),
-                _colWrap(cols[3], _cell(context, f.cnpj != null ? f.cnpjFormatado : '—')),
-                _vDivider(context),
-                _colWrap(cols[4], _cell(context, f.telefone != null ? f.telefoneFormatado : '—')),
-                _vDivider(context),
-                _colWrap(cols[5], _cell(context, f.nomeVendedor ?? '—')),
-                _vDivider(context),
-                _colWrap(cols[6], _cell(context, f.tipoFornecedor ?? '—')),
-                _vDivider(context),
-                _colWrap(cols[7], _MateriaisCell(
-                  count: f.materiais.length,
-                  onTap: () => widget.onMateriais(f),
-                )),
+                Icon(Icons.edit_outlined, size: 18, color: widget.cor),
+                const SizedBox(width: 10),
+                const Text('Editar fornecedor'),
               ],
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _MateriaisCell extends StatefulWidget {
-  final int count;
-  final VoidCallback onTap;
-
-  const _MateriaisCell({required this.count, required this.onTap});
-
-  @override
-  State<_MateriaisCell> createState() => _MateriaisCellState();
-}
-
-class _MateriaisCellState extends State<_MateriaisCell> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final showHover = _hovered;
-    final label     = widget.count == 0 ? 'Ver' : '${widget.count}';
-
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onHover: (_) { if (!_hovered) setState(() => _hovered = true); },
-      onExit:  (_) { if (_hovered)  setState(() => _hovered = false); },
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-          child: Center(
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
-              decoration: BoxDecoration(
-                color: showHover
-                    ? AppTheme.primary.withValues(alpha: 0.12)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.inventory_2_outlined,
-                    size: 16,
-                    color: showHover ? AppTheme.primary : AppTheme.primary.withValues(alpha: 0.7),
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: showHover ? AppTheme.primary : AppTheme.primary.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ],
-              ),
+        PopupMenuItem(
+          value: 2,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: Row(
+              children: [
+                Icon(Icons.inventory_2_outlined, size: 18, color: widget.cor),
+                const SizedBox(width: 10),
+                const Text('Materiais vinculados'),
+              ],
             ),
           ),
         ),
-      ),
+      ],
     );
+
+    if (opcao == 1) {
+      widget.onTap();
+    } else if (opcao == 2) {
+      widget.onVerMateriais();
+    }
   }
-}
-
-class _IconBtn extends StatefulWidget {
-  final IconData icon;
-  final Color color;
-  final VoidCallback onPressed;
-  final String tooltip;
-
-  const _IconBtn({
-    required this.icon,
-    required this.color,
-    required this.onPressed,
-    required this.tooltip,
-  });
-
-  @override
-  State<_IconBtn> createState() => _IconBtnState();
-}
-
-class _IconBtnState extends State<_IconBtn> {
-  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: widget.tooltip,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onHover: (_) { if (!_hovered) setState(() => _hovered = true); },
-        onExit:  (_) { if (_hovered)  setState(() => _hovered = false); },
-        child: GestureDetector(
-          onTap: widget.onPressed,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
+    final f = widget.fornecedor;
+    final temImagem = f.imagemUrl != null && f.imagemUrl!.isNotEmpty;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      cursor: SystemMouseCursors.click,
+      opaque: false,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _abrirMenu(context),
+        child: AnimatedContainer(
+          key: _cardKey,
+          duration: const Duration(milliseconds: 150),
+          width: 280,
+          height: 240,
+          decoration: BoxDecoration(
+            color: _hovered
+                ? widget.cor.withValues(alpha: 0.08)
+                : Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
               color: _hovered
-                  ? widget.color.withValues(alpha: 0.12)
-                  : Colors.transparent,
-              shape: BoxShape.circle,
+                  ? widget.cor
+                  : widget.cor.withValues(alpha: 0.25),
+              width: _hovered ? 2 : 1.5,
             ),
-            child: Icon(widget.icon, size: 18, color: widget.color),
+            boxShadow: _hovered
+                ? [
+                    BoxShadow(
+                      color: widget.cor.withValues(alpha: 0.20),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    )
+                  ]
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    )
+                  ],
+          ),
+          child: Column(
+            children: [
+              // Imagem ou ícone
+              Container(
+                width: double.infinity,
+                height: 120,
+                decoration: BoxDecoration(
+                  // Fundo sempre branco por trás da logo, independente do
+                  // tema claro/escuro: a maioria dos logos de fornecedores
+                  // já vem com fundo branco/opaco próprio, então tingir esse
+                  // container com widget.cor (que varia por fornecedor)
+                  // deixava algumas logos ilegíveis no escuro e brigando
+                  // com a cor do card no claro. Quando não há imagem, o
+                  // ícone genérico continua usando a cor do card por cima
+                  // de um fundo neutro levemente tingido.
+                  color: temImagem
+                      ? Colors.white
+                      : widget.cor.withValues(alpha: 0.10),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(14),
+                    topRight: Radius.circular(14),
+                  ),
+                ),
+                child: temImagem
+                    ? ClipRRect(
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(14),
+                          topRight: Radius.circular(14),
+                        ),
+                        child: Padding(
+                          // Padding evita que a logo encoste nas bordas do
+                          // card e garante área de respiro consistente,
+                          // já que fit: contain por si só não garante isso
+                          // quando a imagem já vem "colada" nas bordas.
+                          padding: const EdgeInsets.all(12),
+                          child: Image.network(
+                            _resolverUrlImagem(f.imagemUrl!),
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => Icon(
+                              Icons.store,
+                              size: 48,
+                              color: widget.cor,
+                            ),
+                          ),
+                        ),
+                      )
+                    : Icon(
+                        Icons.store,
+                        size: 48,
+                        color: widget.cor,
+                      ),
+              ),
+              // Informações
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        f.nomeFantasia,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: _hovered
+                              ? widget.cor
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      if (f.tipoFornecedor != null)
+                        Text(
+                          f.tipoFornecedor!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      const Spacer(),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.inventory_2_outlined,
+                            size: 14,
+                            color: widget.cor,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${f.materiais.length} material${f.materiais.length != 1 ? 'is' : ''}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: widget.cor,
+                            ),
+                          ),
+                          const Spacer(),
+                          Tooltip(
+                            message: 'Editar fornecedor',
+                            child: MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(4),
+                                onTap: widget.onTap,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: widget.cor.withValues(alpha: 0.10),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Icon(
+                                    Icons.edit_outlined,
+                                    size: 14,
+                                    color: widget.cor,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Tooltip(
+                            message: 'Ver materiais vinculados',
+                            child: MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(4),
+                                onTap: widget.onVerMateriais,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: widget.cor.withValues(alpha: 0.10),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Icon(
+                                    Icons.inventory_2_outlined,
+                                    size: 14,
+                                    color: widget.cor,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -795,8 +842,35 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
   late final TextEditingController _nomeVendedorCtrl;
   late final TextEditingController _tipoCtrl;
 
+  File? _imagemSelecionada;
+  String? _imagemUrlAtual;
+
   bool _salvando = false;
   String? _erroDialog;
+
+  Future<void> _selecionarImagem() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+      allowMultiple: false,
+    );
+    if (result != null && result.files.single.path != null) {
+      final file = File(result.files.single.path!);
+      if (await file.exists()) {
+        setState(() {
+          _imagemSelecionada = file;
+          _imagemUrlAtual = null;
+        });
+      }
+    }
+  }
+
+  void _removerImagem() {
+    setState(() {
+      _imagemSelecionada = null;
+      _imagemUrlAtual = null;
+    });
+  }
 
   bool get _editando => widget.fornecedor != null;
 
@@ -823,6 +897,7 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
     );
     _nomeVendedorCtrl = TextEditingController(text: f?.nomeVendedor ?? '');
     _tipoCtrl = TextEditingController(text: f?.tipoFornecedor ?? '');
+    _imagemUrlAtual = f?.imagemUrl;
   }
 
   @override
@@ -865,8 +940,9 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
 
     final prov = context.read<FornecedorProvider>();
     final bool sucesso = _editando
-        ? await prov.atualizar(widget.fornecedor!.id, dados)
-        : await prov.criar(dados);
+        ? await prov.atualizar(widget.fornecedor!.id, dados,
+            imagem: _imagemSelecionada)
+        : await prov.criar(dados, imagem: _imagemSelecionada);
 
     if (!mounted) return;
     setState(() => _salvando = false);
@@ -894,7 +970,6 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Cabeçalho ────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
               child: Row(
@@ -917,7 +992,7 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                           onPressed: _salvando
                               ? null
                               : () {
-                                  Navigator.of(context).pop(false);
+                                  Navigator.of(context, rootNavigator: true).pop(false);
                                   widget.onRemover!(widget.fornecedor!);
                                 },
                           icon: const Icon(Icons.delete_outline, size: 16),
@@ -931,7 +1006,6 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
               ),
             ),
 
-            // ── Corpo com scroll ──────────────────────────────────────
             Flexible(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
@@ -1055,6 +1129,93 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                         ),
                       ]),
 
+                      const SizedBox(height: 12),
+
+                      if (_imagemSelecionada != null ||
+                          (_imagemUrlAtual != null &&
+                              _imagemUrlAtual!.isNotEmpty))
+                        Container(
+                          width: double.infinity,
+                          height: 140,
+                          margin: const EdgeInsets.only(bottom: 10),
+                          decoration: BoxDecoration(
+                            // Fundo branco fixo, independente do tema: a
+                            // maioria das logos enviadas já tem fundo
+                            // branco/opaco próprio, então usar a cor de
+                            // superfície do tema (escura no dark mode)
+                            // deixava o preview com contraste ruim, igual
+                            // acontecia no card da listagem.
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color:
+                                  Theme.of(context).colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: _imagemSelecionada != null
+                                  ? Image.file(
+                                      _imagemSelecionada!,
+                                      fit: BoxFit.contain,
+                                    )
+                                  : Image.network(
+                                      _resolverUrlImagem(_imagemUrlAtual!),
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (_, __, ___) => Center(
+                                        child: Icon(
+                                          Icons.broken_image_outlined,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .outline,
+                                          size: 32,
+                                        ),
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _selecionarImagem,
+                              icon: const Icon(Icons.add_photo_alternate_outlined,
+                                  size: 16),
+                              label: Text(
+                                _imagemSelecionada != null ||
+                                        (_imagemUrlAtual != null &&
+                                            _imagemUrlAtual!.isNotEmpty)
+                                    ? 'Trocar imagem'
+                                    : 'Anexar imagem',
+                              ),
+                              style: OutlinedButton.styleFrom().copyWith(
+                                mouseCursor: WidgetStateProperty.all(
+                                    SystemMouseCursors.click),
+                              ),
+                            ),
+                          ),
+                          if (_imagemSelecionada != null ||
+                              (_imagemUrlAtual != null &&
+                                  _imagemUrlAtual!.isNotEmpty)) ...[
+                            const SizedBox(width: 8),
+                            TextButton.icon(
+                              onPressed: _removerImagem,
+                              icon: const Icon(Icons.close, size: 16),
+                              label: const Text('Remover'),
+                              style: TextButton.styleFrom(
+                                      foregroundColor: AppTheme.error)
+                                  .copyWith(
+                                mouseCursor: WidgetStateProperty.all(
+                                    SystemMouseCursors.click),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+
                       const SizedBox(height: 8),
                     ],
                   ),
@@ -1062,7 +1223,6 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
               ),
             ),
 
-            // ── Rodapé com ações ──────────────────────────────────────
             Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1158,7 +1318,6 @@ class _MateriaisDialog extends StatefulWidget {
 class _MateriaisDialogState extends State<_MateriaisDialog> {
   late FornecedorModel _fornecedor;
 
-  // filtros locais
   final _filtroNomeCtrl         = TextEditingController();
   final _filtroIdentificadorCtrl = TextEditingController();
   final _filtroMedidaCtrl       = TextEditingController();
@@ -1271,8 +1430,7 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
     );
     if (ok == true && mounted) {
       final prov = context.read<FornecedorProvider>();
-      final sucesso =
-          await prov.desvincularMaterial(_fornecedor.id, m.materialId);
+      final sucesso = await prov.desvincularMaterial(_fornecedor.id, m.materialId);
       if (sucesso) await _recarregar();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1313,7 +1471,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
         height: 620,
         child: Column(
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
               child: Row(
@@ -1380,19 +1537,18 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
             ),
             Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
 
-            // ── Barra de filtros ────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Column(
                 children: [
                   Row(
                     children: [
-                      // Nome
                       Expanded(
                         flex: 3,
                         child: TextField(
                           controller: _filtroNomeCtrl,
                           autofocus: true,
+                          inputFormatters: [_UpperCaseFormatter()],
                           decoration: InputDecoration(
                             hintText: 'Buscar por nome…',
                             prefixIcon: Icon(Icons.search,
@@ -1414,26 +1570,35 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      // Limpar todos
-                      if (_temFiltro)
-                        Tooltip(
-                          message: 'Limpar filtros',
-                          child: IconButton.outlined(
-                            icon: Icon(Icons.filter_alt_off, size: 18),
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            visualDensity: VisualDensity.compact,
-                            onPressed: _limparFiltros,
+                      Tooltip(
+                        message: 'Limpar filtros',
+                        child: IconButton.outlined(
+                          icon: Icon(Icons.filter_alt_off, size: 18),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () {
+                            if (!_temFiltro) return;
+                            _limparFiltros();
+                          },
+                          style: IconButton.styleFrom().copyWith(
+                            mouseCursor: WidgetStateProperty.resolveWith((states) {
+                              if (!_temFiltro) {
+                                return SystemMouseCursors.basic;
+                              }
+                              return SystemMouseCursors.click;
+                            }),
                           ),
                         ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      // Identificador
                       Expanded(
                         child: TextField(
                           controller: _filtroIdentificadorCtrl,
+                          inputFormatters: [_UpperCaseFormatter()],
                           decoration: const InputDecoration(
                             hintText: 'Identificador',
                             isDense: true,
@@ -1443,10 +1608,10 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      // Medida
                       Expanded(
                         child: TextField(
                           controller: _filtroMedidaCtrl,
+                          inputFormatters: [_MedidaEspessuraFormatter()],
                           decoration: const InputDecoration(
                             hintText: 'Medida',
                             isDense: true,
@@ -1456,10 +1621,10 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      // Espessura
                       Expanded(
                         child: TextField(
                           controller: _filtroEspessuraCtrl,
+                          inputFormatters: [_MedidaEspessuraFormatter()],
                           decoration: const InputDecoration(
                             hintText: 'Espessura',
                             isDense: true,
@@ -1470,7 +1635,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                       ),
                     ],
                   ),
-                  // contador de resultados
                   if (total > 0)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
@@ -1492,7 +1656,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
             ),
             Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
 
-            // ── Lista ───────────────────────────────────────────────────────
             Expanded(
               child: total == 0
                   ? Center(
@@ -1654,8 +1817,6 @@ class _VinculoCardState extends State<_VinculoCard> {
     );
   }
 }
-
-
 
 class _PriceTag extends StatelessWidget {
   final String label;
@@ -1900,7 +2061,6 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     }
   }
 
-
   Future<void> _buscarMateriais({String? idPrefix, String? nomePrefix}) async {
     setState(() => _buscandoMateriais = true);
     try {
@@ -2073,7 +2233,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                             color: Theme.of(context).colorScheme.outline,
                           ),
                         ),
-                        inputFormatters: [_UpperCaseFormatter()],
+                        inputFormatters: [_MedidaEspessuraFormatter()],
                         onTap: _onFiltroAdicionalFocus,
                       ),
                     ),
@@ -2092,7 +2252,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                             color: Theme.of(context).colorScheme.outline,
                           ),
                         ),
-                        inputFormatters: [_UpperCaseFormatter()],
+                        inputFormatters: [_MedidaEspessuraFormatter()],
                         onTap: _onFiltroAdicionalFocus,
                       ),
                     ),
@@ -2137,12 +2297,14 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                       itemCount: _sugestoes.length,
                       itemBuilder: (_, i) {
                         final m = _sugestoes[i];
-                        final identificador = m['Identificador'] as String?;
-                        final medida    = m['medida']    as String?;
+                        final identificador = m['identificador'] as String?;
+                        final medidaOuDimensao = (m['medida'] as String?)?.isNotEmpty == true
+                            ? m['medida'] as String?
+                            : _materialDimensaoFormatada(m['largura'], m['comprimento']);
                         final espessura = m['espessura'] as String?;
                         final detalhe = [
                           if (identificador != null && identificador.isNotEmpty) identificador,
-                          if (medida    != null && medida.isNotEmpty)    medida,
+                          if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
                           if (espessura != null && espessura.isNotEmpty) espessura,
                         ].join(' · ');
 
@@ -2855,7 +3017,7 @@ class _VincularPorMaterialDialogState
                 ],
               ),
             ),
-            Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+            Divider(height:1, color: Theme.of(context).colorScheme.outlineVariant),
 
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
@@ -2934,7 +3096,7 @@ class _VincularPorMaterialDialogState
                             prefixIcon: Icon(Icons.straighten_outlined,
                                 size: 16, color: Theme.of(context).colorScheme.outline),
                           ),
-                          inputFormatters: [_UpperCaseFormatter()],
+                          inputFormatters: [_MedidaEspessuraFormatter()],
                           onTap: _onFiltroAdicionalFocus,
                         ),
                       ),
@@ -2948,7 +3110,7 @@ class _VincularPorMaterialDialogState
                             prefixIcon: Icon(Icons.layers_outlined,
                                 size: 16, color: Theme.of(context).colorScheme.outline),
                           ),
-                          inputFormatters: [_UpperCaseFormatter()],
+                          inputFormatters: [_MedidaEspessuraFormatter()],
                           onTap: _onFiltroAdicionalFocus,
                         ),
                       ),
@@ -2990,11 +3152,13 @@ class _VincularPorMaterialDialogState
                         itemBuilder: (_, i) {
                           final m         = _sugestoes[i];
                           final identificador = m['identificador'] as String?;
-                          final medida    = m['medida']    as String?;
+                          final medidaOuDimensao = (m['medida'] as String?)?.isNotEmpty == true
+                              ? m['medida'] as String?
+                              : _materialDimensaoFormatada(m['largura'], m['comprimento']);
                           final espessura = m['espessura'] as String?;
                           final detalhe   = [
                             if (identificador != null && identificador.isNotEmpty) identificador,
-                            if (medida    != null && medida.isNotEmpty)    medida,
+                            if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
                             if (espessura != null && espessura.isNotEmpty) espessura,
                           ].join(' · ');
                           return InkWell(
@@ -3023,22 +3187,26 @@ class _VincularPorMaterialDialogState
                                   ),
                                   const SizedBox(width: 8),
                                   Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(m['nome'] ?? '',
+                                    child: Text.rich(
+                                      TextSpan(
+                                        children: [
+                                          TextSpan(
+                                            text: m['nome'] ?? '',
                                             style: TextStyle(
                                                 fontSize: 13,
                                                 color: Theme.of(context).colorScheme.onSurface),
-                                            overflow: TextOverflow.ellipsis),
-                                        if (detalhe.isNotEmpty)
-                                          Text(detalhe,
+                                          ),
+                                          if (detalhe.isNotEmpty)
+                                            TextSpan(
+                                              text: '  ·  $detalhe',
                                               style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                              overflow: TextOverflow.ellipsis),
-                                      ],
+                                                  fontSize: 13,
+                                                  color: Theme.of(context).colorScheme.onSurface),
+                                            ),
+                                        ],
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
                                     ),
                                   ),
                                 ],

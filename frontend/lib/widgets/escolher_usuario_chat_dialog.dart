@@ -122,29 +122,32 @@ class _EscolherUsuarioChatDialogState extends State<_EscolherUsuarioChatDialog> 
                         separatorBuilder: (_, __) => const SizedBox(height: 2),
                         itemBuilder: (_, i) {
                           final u = usuarios[i];
-                          return MouseRegion(
-                            cursor: SystemMouseCursors.click,
-                            child: ListTile(
-                              dense: true,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8)),
-                              leading: CircleAvatar(
-                                radius: 16,
-                                backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
-                                child: Text(
-                                  u.nome.isNotEmpty ? u.nome[0].toUpperCase() : '?',
-                                  style: const TextStyle(
-                                      color: AppTheme.primary, fontWeight: FontWeight.w700),
+                          return Material(
+                            color: Colors.transparent,
+                            child: MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: ListTile(
+                                dense: true,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8)),
+                                leading: CircleAvatar(
+                                  radius: 16,
+                                  backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
+                                  child: Text(
+                                    u.nome.isNotEmpty ? u.nome[0].toUpperCase() : '?',
+                                    style: const TextStyle(
+                                        color: AppTheme.primary, fontWeight: FontWeight.w700),
+                                  ),
                                 ),
+                                title: Text(u.nome, style: const TextStyle(fontSize: 13)),
+                                subtitle: Text(
+                                  u.role,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                ),
+                                onTap: () => Navigator.pop(context, u.id),
                               ),
-                              title: Text(u.nome, style: const TextStyle(fontSize: 13)),
-                              subtitle: Text(
-                                u.role,
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant),
-                              ),
-                              onTap: () => Navigator.pop(context, u.id),
                             ),
                           );
                         },

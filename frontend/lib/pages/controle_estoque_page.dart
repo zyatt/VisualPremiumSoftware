@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../models/estoque_model.dart';
 import '../models/material_model.dart';
 import '../providers/estoque_provider.dart';
+import '../providers/estoque_producao_provider.dart';
 import '../providers/material_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
@@ -31,7 +32,71 @@ String _brl6(double v) {
   return 'R\$ ${partes[0].replaceAll('.', ',')},$decFinal';
 }
 
+/// Formata um valor de dimensão (metros) sem casas decimais desnecessárias.
+/// Ex.: 1.0 → "1"; 0.5 → "0.5".
+String _fmtDim(double v) =>
+    v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
+
+/// Retorna a exibição de medida de um material: usa o campo [medida] quando
+/// preenchido; caso contrário, monta a partir de [largura]/[comprimento]
+/// cadastrados diretamente no material.
+/// Exemplos: comprimento=50 e largura=1.22 → "50x1.22m"; só comprimento=50 → "50m";
+/// só largura=1.22 → "1.22m". Retorna null se nada estiver disponível.
+String? formatarMedidaOuDimensoes({
+  required String? medida,
+  required double? largura,
+  required double? comprimento,
+}) {
+  if (medida != null && medida.trim().isNotEmpty) return medida.trim();
+
+  final temLargura     = largura != null && largura > 0;
+  final temComprimento = comprimento != null && comprimento > 0;
+
+  if (temComprimento && temLargura) {
+    return '${_fmtDim(comprimento)}x${_fmtDim(largura)}m';
+  }
+  if (temComprimento) return '${_fmtDim(comprimento)}m';
+  if (temLargura)     return '${_fmtDim(largura)}m';
+  return null;
+}
+
+/// Formata a unidade para exibição (o valor interno permanece em maiúsculo,
+/// usado para comparações/enum). Ex.: 'UNIDADE' → 'Unidade'; 'M' → 'm';
+/// 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²' → 'm²'; 'KG' → 'Kg'; 'G' → 'g'.
+String formatarUnidadeExibicao(String? unidade) {
+  if (unidade == null || unidade.trim().isEmpty) return '';
+  final u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'M':
+      return 'm';
+    case 'M/L':
+      return 'm/l';
+    case 'ML':
+      return 'ml';
+    case 'M²':
+    case 'M2':
+      return 'm²';
+    case 'KG':
+      return 'Kg';
+    case 'G':
+      return 'g';
+    case 'UNIDADE':
+      return 'Unidade';
+    default:
+      return unidade;
+  }
+}
+
 // ── Formatter: maiúsculas sem acentos ─────────────────────────────────────────
+
+/// TextEditingController que expõe [notify] publicamente. `notifyListeners()`
+/// é `@protected` em `ChangeNotifier`, então não pode ser chamado de fora da
+/// própria classe/subclasse — usamos essa subclasse só para forçar o
+/// RawAutocomplete a reavaliar as opções ao focar o campo vazio.
+class _NotifiableTextEditingController extends TextEditingController {
+  _NotifiableTextEditingController();
+  void notify() => notifyListeners();
+}
 
 class _UpperCaseFormatter extends TextInputFormatter {
   static final _acentos = {
@@ -177,6 +242,43 @@ class _RenomearOSDialogState extends State<_RenomearOSDialog> {
   }
 }
 
+// ── Formatter: medida/espessura (vírgula -> ponto, minúsculas, 1 ponto por número) ─────
+/// - remove acentuação e força minúsculas
+/// - converte vírgula em ponto
+/// - permite apenas 1 ponto POR NÚMERO (bloqueia pontos repetidos/seguidos
+///   dentro do mesmo número, ex.: "1..5" ou "1.2.3"), mas preserva múltiplos
+///   números na mesma medida, ex.: "2.44x1.22m" (dois números, um ponto cada)
+class _MedidaEspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    // 1) Vírgula -> ponto
+    var texto = newValue.text.replaceAll(',', '.');
+
+    // 2) Remove acentos e força minúsculas
+    texto = _UpperCaseFormatter._removerAcentos(texto).toLowerCase();
+
+    // 3) Para cada bloco de dígitos+pontos (um "número"), permite apenas o
+    //    primeiro ponto e remove os demais. Não mexe no que não é dígito/ponto
+    //    (letras, "x", espaços, etc.), preservando a separação entre números.
+    texto = texto.replaceAllMapped(RegExp(r'[\d.]+'), (m) {
+      final partes = m.group(0)!.split('.');
+      if (partes.length > 2) {
+        return '${partes[0]}.${partes.sublist(1).join('')}';
+      }
+      return m.group(0)!;
+    });
+
+    final sel = newValue.selection.copyWith(
+      baseOffset:  newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
 // ── Formatter: números decimais (aceita vírgula ou ponto) ─────────────────────
 
 class _DecimalInputFormatter extends TextInputFormatter {
@@ -227,6 +329,24 @@ Color _corStatus(String status) =>
 
 String _labelStatus(String status) =>
     status == 'FECHADA' ? 'Fechada' : 'Em andamento';
+
+Widget _badgeContagem(int contagem) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+    decoration: BoxDecoration(
+      color: AppTheme.primary.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Text(
+      '$contagem',
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: AppTheme.primary,
+      ),
+    ),
+  );
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Página principal
@@ -283,20 +403,11 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     }).toList();
 
     for (final os in atrasadas) {
-      await provider.fecharOS(os.id);
+      await provider.fecharOSSilencioso(os.id);
     }
 
     if (mounted && atrasadas.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${atrasadas.length} OS de dia(s) anterior(es) fechada(s) automaticamente.',
-          ),
-          backgroundColor: _corFechada,
-          duration: const Duration(seconds: 5),
-        ),
-      );
-      await provider.carregarRelacoesOS();
+      await provider.recarregarRelacoesOSSilencioso();
     }
   }
 
@@ -304,7 +415,9 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     if (!mounted) return;
     final provider = context.read<EstoqueProvider>();
 
-    await provider.carregarRelacoesOS();
+    // Busca o estado mais recente em silêncio (sem acionar o spinner de
+    // tela cheia) antes de decidir quais OS fechar.
+    await provider.recarregarRelacoesOSSilencioso();
     if (!mounted) return;
 
     final osTextuaisEmAndamento = provider.relacoesOS
@@ -312,20 +425,11 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
         .toList();
 
     for (final os in osTextuaisEmAndamento) {
-      await provider.fecharOS(os.id);
+      await provider.fecharOSSilencioso(os.id);
     }
 
     if (mounted && osTextuaisEmAndamento.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${osTextuaisEmAndamento.length} OS fechada(s) automaticamente.',
-          ),
-          backgroundColor: _corFechada,
-          duration: const Duration(seconds: 5),
-        ),
-      );
-      await provider.carregarRelacoesOS();
+      await provider.recarregarRelacoesOSSilencioso();
     }
 
     if (mounted) _agendarFechamentoAutomatico();
@@ -373,6 +477,13 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     showDialog(
       context: context,
       builder: (_) => _MovimentacaoGlobalDialog(tipo: tipo),
+    );
+  }
+
+  void _abrirTransferenciaProducao() {
+    showDialog(
+      context: context,
+      builder: (_) => const _TransferenciaProducaoDialog(),
     );
   }
 
@@ -517,6 +628,24 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                 ),
                 const Spacer(),
                 Tooltip(
+                  message: 'Transferir material do estoque normal para o estoque de produção',
+                  child: FilledButton.icon(
+                    onPressed: _abrirTransferenciaProducao,
+                    icon: const Icon(Icons.factory_outlined, size: 18),
+                    label: const Text('Saída p/ Produção'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.warning,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                    ).copyWith(
+                      mouseCursor:
+                          WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Tooltip(
                   message: 'Cadastrar um novo material no estoque',
                   child: FilledButton.icon(
                     onPressed: _abrirCadastroMaterial,
@@ -633,7 +762,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
                     decoration: InputDecoration(
-                      hintText: 'Filtrar por nome do material...',
+                      hintText: 'Nome do material...',
                       prefixIcon: Icon(Icons.filter_alt_outlined,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
@@ -727,8 +856,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [_UpperCaseFormatter()],
+                    inputFormatters: [_MedidaEspessuraFormatter()],
                     onChanged: (_) {
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
@@ -748,8 +876,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [_UpperCaseFormatter()],
+                    inputFormatters: [_MedidaEspessuraFormatter()],
                     onChanged: (_) {
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
@@ -810,14 +937,24 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                     fontWeight: FontWeight.w600, fontSize: 13),
                 tabs: [
                   Tab(
-                    text: provider.carregando
-                        ? 'Em Andamento'
-                        : 'Em Andamento (${emAndamento.length})',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Em Andamento'),
+                        const SizedBox(width: 6),
+                        _badgeContagem(provider.carregando ? 0 : emAndamento.length),
+                      ],
+                    ),
                   ),
                   Tab(
-                    text: provider.carregando
-                        ? 'Fechadas'
-                        : 'Fechadas (${fechadas.length})',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Fechadas'),
+                        const SizedBox(width: 6),
+                        _badgeContagem(provider.carregando ? 0 : fechadas.length),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -2285,11 +2422,18 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       _primeira.materialNome.isEmpty;
 
   String get _subtitulo {
+    final medidaOuDimensao = (_primeira.materialMedida ?? '').isNotEmpty
+        ? _primeira.materialMedida
+        : formatarMedidaOuDimensoes(
+            medida:      null,
+            largura:     _primeira.materialLargura,
+            comprimento: _primeira.materialComprimento,
+          );
     final partes = <String>[
       if ((_primeira.materialIdentificador ?? '').isNotEmpty)
         _primeira.materialIdentificador!,
-      if ((_primeira.materialMedida ?? '').isNotEmpty)
-        _primeira.materialMedida!,
+      if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty)
+        medidaOuDimensao,
       if ((_primeira.materialEspessura ?? '').isNotEmpty)
         _primeira.materialEspessura!,
     ];
@@ -2300,7 +2444,8 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
     final qStr = qtd == qtd.truncate()
         ? qtd.toStringAsFixed(0)
         : qtd.toStringAsFixed(2);
-    return unidade != null ? '$qStr $unidade' : qStr;
+    final unFmt = formatarUnidadeExibicao(unidade);
+    return unFmt.isNotEmpty ? '$qStr $unFmt' : qStr;
   }
 
   String _formatData(DateTime dt) =>
@@ -2510,7 +2655,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                       final valML = mat.ultimoValorPago ?? mat.ultimoValorPagoM2;
                       if (valML != null && valML > 0) {
                         return Text(
-                          'M/L: ${brl(valML)}',
+                          'm/l: ${brl(valML)}',
                           style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
@@ -3145,9 +3290,9 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                                       fontSize: 12,
                                       color: Theme.of(context).colorScheme.onSurfaceVariant),
                                 ),
-                              if (unidade != null)
+                              if (unidade != null && formatarUnidadeExibicao(unidade).isNotEmpty)
                                 Text(
-                                  unidade,
+                                  formatarUnidadeExibicao(unidade),
                                   style: TextStyle(
                                       fontSize: 12,
                                       color: Theme.of(context).colorScheme.onSurfaceVariant),
@@ -3428,7 +3573,7 @@ class _UltimoPrecoRow extends StatelessWidget {
       // Prefere precoUnitario (custo/metro linear); fallback para precoM2
       final valorML = pu ?? pm2;
       if (valorML != null) {
-        chips.add(_PrecoBadge(label: 'M/L', valor: _brl(valorML)));
+        chips.add(_PrecoBadge(label: 'm/l', valor: _brl(valorML)));
       }
     } else {
       if (pu != null) {
@@ -3567,7 +3712,7 @@ class _TotaisResumoMini extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final unStr      = unidade ?? '';
+    final unStr      = formatarUnidadeExibicao(unidade);
     final temEntrada = totais.qtdEntrada > 0;
     final temSaida   = totais.qtdSaida   > 0;
     if (!temEntrada && !temSaida) return const SizedBox.shrink();
@@ -3604,7 +3749,7 @@ class _TotaisResumoCompleto extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final totais     = _TotaisMovimentacao.calcular(movimentacoes);
-    final unStr      = unidade ?? '';
+    final unStr      = formatarUnidadeExibicao(unidade);
     final temEntrada = totais.qtdEntrada > 0;
     final temSaida   = totais.qtdSaida   > 0;
     if (!temEntrada && !temSaida) return SizedBox.shrink();
@@ -3773,7 +3918,9 @@ class _MovimentacaoRow extends StatelessWidget {
                     ),
                     SizedBox(width: 6),
                     Text(
-                      formatQtd(mov.quantidade, unidade),
+                      mov.usouModoDimensional
+                          ? '${formatQtd(mov.quantidade, unidade)} - (${_fmtDim(mov.comprimentoUsado!)}x${_fmtDim(mov.larguraUsada!)}m)'
+                          : formatQtd(mov.quantidade, unidade),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Theme.of(context).colorScheme.onSurface,
                             fontWeight: FontWeight.w600,
@@ -4036,7 +4183,7 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
               final partes = <String>[];
               if (eMLDlg) {
                 final valML = (pu != null && pu > 0) ? pu : (pm2 != null && pm2 > 0 ? pm2 : null);
-                if (valML != null) partes.add('M/L: R\$ ${_brl6(valML).substring(3)}');
+                if (valML != null) partes.add('m/l: R\$ ${_brl6(valML).substring(3)}');
               } else {
                 if (pu != null && pu > 0) {
                   partes.add('Unidade: R\$ ${_brl6(pu).substring(3)}');
@@ -4474,38 +4621,11 @@ class _MovimentacaoGlobalDialogState
                                 const SizedBox(width: 8),
                                 Expanded(
                                   flex: 2,
-                                  child: DropdownButtonFormField<String?>(
-                                    initialValue: _categoriaFiltro == null
-                                        ? '__TODOS__'
-                                        : _categoriaFiltro!.isEmpty
-                                            ? '__SEM__'
-                                            : _categoriaFiltro,
-                                    isExpanded: true,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Categoria',
-                                      isDense: true,
-                                    ),
-                                    items: [
-                                      const DropdownMenuItem(
-                                          value: '__TODOS__',
-                                          child: Text('Todas')),
-                                      const DropdownMenuItem(
-                                          value: '__SEM__',
-                                          child: Text('Sem categoria')),
-                                      ..._categorias.map((c) =>
-                                          DropdownMenuItem(
-                                              value: c, child: Text(c))),
-                                    ],
-                                    onChanged: (v) {
-                                      setState(() {
-                                        if (v == '__TODOS__') {
-                                          _categoriaFiltro = null;
-                                        } else if (v == '__SEM__') {
-                                          _categoriaFiltro = '';
-                                        } else {
-                                          _categoriaFiltro = v;
-                                        }
-                                      });
+                                  child: _CategoriaFiltroDropdownCE(
+                                    categorias: _categorias,
+                                    valorSelecionado: _categoriaFiltro,
+                                    onSelecionar: (v) {
+                                      setState(() => _categoriaFiltro = v);
                                       if (_buscouUmaVez) _buscar();
                                     },
                                   ),
@@ -4568,9 +4688,7 @@ class _MovimentacaoGlobalDialogState
                                           color: Theme.of(context).colorScheme.outline, size: 16),
                                       isDense: true,
                                     ),
-                                    textCapitalization:
-                                        TextCapitalization.characters,
-                                    inputFormatters: [_UpperCaseFormatter()],
+                                    inputFormatters: [_MedidaEspessuraFormatter()],
                                     onChanged: (_) => _agendarBusca(),
                                     onSubmitted: (_) => _buscar(),
                                   ),
@@ -4585,9 +4703,7 @@ class _MovimentacaoGlobalDialogState
                                           color: Theme.of(context).colorScheme.outline, size: 16),
                                       isDense: true,
                                     ),
-                                    textCapitalization:
-                                        TextCapitalization.characters,
-                                    inputFormatters: [_UpperCaseFormatter()],
+                                    inputFormatters: [_MedidaEspessuraFormatter()],
                                     onChanged: (_) => _agendarBusca(),
                                     onSubmitted: (_) => _buscar(),
                                   ),
@@ -4818,7 +4934,8 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
   late final TextEditingController _nome;
   late final TextEditingController _identificador;
   String? _unidade;
-  late final TextEditingController _categoria;
+  late final _NotifiableTextEditingController _categoria;
+  final FocusNode _categoriaFocusNode = FocusNode();
   late final TextEditingController _medida;
   late final TextEditingController _espessura;
   late final TextEditingController _largura;
@@ -4843,7 +4960,12 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     super.initState();
     _nome          = TextEditingController();
     _identificador = TextEditingController();
-    _categoria     = TextEditingController();
+    _categoria     = _NotifiableTextEditingController();
+    _categoriaFocusNode.addListener(() {
+      if (_categoriaFocusNode.hasFocus) {
+        _categoria.notify();
+      }
+    });
     _medida        = TextEditingController();
     _espessura     = TextEditingController();
     _largura       = TextEditingController();
@@ -4862,6 +4984,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
   @override
   void dispose() {
     _debounceDuplicata?.cancel();
+    _categoriaFocusNode.dispose();
     for (final c in [
       _nome, _identificador, _categoria, _medida, _espessura,
       _largura, _comprimento, _estoqueMinimo, _custoCtrl,
@@ -5172,11 +5295,79 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                       const SizedBox(height: 10),
                       Row(children: [
                         Expanded(
-                          child: TextFormField(
-                            controller: _categoria,
-                            decoration: const InputDecoration(labelText: 'Categoria'),
-                            textCapitalization: TextCapitalization.characters,
-                            inputFormatters: [_UpperCaseFormatter()],
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              return RawAutocomplete<String>(
+                                textEditingController: _categoria,
+                                focusNode: _categoriaFocusNode,
+                                optionsBuilder: (TextEditingValue value) {
+                                  final query = value.text.trim().toUpperCase();
+                                  final categorias =
+                                      context.read<MaterialProvider>().categorias;
+                                  if (query.isEmpty) return categorias;
+                                  return categorias.where((c) {
+                                    final upper = c.toUpperCase();
+                                    return upper.contains(query) && upper != query;
+                                  });
+                                },
+                                onSelected: (String selection) {
+                                  _categoria.text = selection;
+                                  _categoria.selection =
+                                      TextSelection.collapsed(offset: selection.length);
+                                },
+                                fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                                  return TextFormField(
+                                    controller: controller,
+                                    focusNode: focusNode,
+                                    decoration: const InputDecoration(labelText: 'Categoria'),
+                                    textCapitalization: TextCapitalization.characters,
+                                    inputFormatters: [_UpperCaseFormatter()],
+                                  );
+                                },
+                                optionsViewBuilder: (context, onSelected, options) {
+                                  return Align(
+                                    alignment: Alignment.topLeft,
+                                    child: Material(
+                                      elevation: 4,
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: SizedBox(
+                                        width: constraints.maxWidth,
+                                        child: ConstrainedBox(
+                                          constraints: const BoxConstraints(maxHeight: 200),
+                                          child: ListView.builder(
+                                            padding: EdgeInsets.zero,
+                                            shrinkWrap: true,
+                                            itemCount: options.length,
+                                            itemBuilder: (context, index) {
+                                              final opcao = options.elementAt(index);
+                                              return MouseRegion(
+                                                cursor: SystemMouseCursors.click,
+                                                child: InkWell(
+                                                  onTap: () => onSelected(opcao),
+                                                  hoverColor: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary
+                                                      .withValues(alpha: 0.08),
+                                                  child: Container(
+                                                    width: double.infinity,
+                                                    padding: const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 10,
+                                                    ),
+                                                    color: Colors.transparent,
+                                                    child: Text(opcao),
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              );
+                            },
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -5192,21 +5383,44 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                                   ),
                                   child: const Text('M²', style: TextStyle(fontSize: 14)),
                                 )
-                              : DropdownButtonFormField<String>(
-                                  initialValue: _unidade,
-                                  decoration: const InputDecoration(labelText: 'Unidade *'),
-                                  hint: const Text('Selecione'),
-                                  items: const [
-                                    DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE — (unidade)')),
-                                    DropdownMenuItem(value: 'M/L',     child: Text('M/L — (metro linear)')),
-                                    DropdownMenuItem(value: 'M',       child: Text('M — (metro)')),
-                                    DropdownMenuItem(value: 'ML',      child: Text('ML — (mililitro)')),
-                                    DropdownMenuItem(value: 'M²',      child: Text('M² — (metro quadrado)')),
-                                    DropdownMenuItem(value: 'G',       child: Text('G — (grama)')),
-                                  ],
-                                  validator: (v) =>
-                                      (v == null || v.isEmpty) ? 'Selecione uma unidade' : null,
-                                  onChanged: (v) => setState(() => _unidade = v),
+                              : MouseRegion(
+                                  cursor: SystemMouseCursors.click,
+                                  child: DropdownButtonFormField<String>(
+                                    initialValue: _unidade,
+                                    decoration: const InputDecoration(labelText: 'Unidade *'),
+                                    hint: const Text('Selecione'),
+                                    icon: const Icon(Icons.arrow_drop_down),
+                                    mouseCursor: SystemMouseCursors.click,
+                                    items: const [
+                                      DropdownMenuItem(
+                                        value: 'UNIDADE',
+                                        child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('Unidade')),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'M/L',
+                                        child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('m/l — (metro linear)')),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'M',
+                                        child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('m — (metro)')),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'ML',
+                                        child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('ml — (mililitro)')),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'M²',
+                                        child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('m² — (metro quadrado)')),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'G',
+                                        child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('g — (grama)')),
+                                      ),
+                                    ],
+                                    validator: (v) =>
+                                        (v == null || v.isEmpty) ? 'Selecione uma unidade' : null,
+                                    onChanged: (v) => setState(() => _unidade = v),
+                                  ),
                                 ),
                         ),
                       ]),
@@ -5224,8 +5438,8 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                                 )
                               : null,
                         ),
-                        textCapitalization: TextCapitalization.characters,
-                        inputFormatters: [_UpperCaseFormatter()],
+                        textCapitalization: TextCapitalization.none,
+                        inputFormatters: [_MedidaEspessuraFormatter()],
                         onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                       ),
                       ], // end if not ML/G (medida)
@@ -5244,7 +5458,9 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                             controller: _comprimento,
                             readOnly: _modoRetalho,
                             decoration: InputDecoration(
-                              labelText: 'Comprimento (m)',
+                              labelText: 'Comprimento',
+                              suffixText: 'm',
+                              floatingLabelBehavior: FloatingLabelBehavior.always,
                               suffixIcon: _modoRetalho
                                   ? const Tooltip(
                                       message: 'Bloqueado no modo Retalho',
@@ -5263,7 +5479,9 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                             controller: _largura,
                             readOnly: _modoRetalho,
                             decoration: InputDecoration(
-                              labelText: 'Largura (m)',
+                              labelText: 'Largura',
+                              suffixText: 'm',
+                              floatingLabelBehavior: FloatingLabelBehavior.always,
                               suffixIcon: _modoRetalho
                                   ? const Tooltip(
                                       message: 'Bloqueado no modo Retalho',
@@ -5281,8 +5499,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                           child: TextFormField(
                             controller: _espessura,
                             decoration: const InputDecoration(labelText: 'Espessura'),
-                            textCapitalization: TextCapitalization.characters,
-                            inputFormatters: [_UpperCaseFormatter()],
+                            inputFormatters: [_MedidaEspessuraFormatter()],
                             onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                           ),
                         ),
@@ -5407,6 +5624,454 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
 }
 
 // ─── Modelo de item de movimentação ──────────────────────────────────────────
+
+// ═════════════════════════════════════════════════════════════════════════
+// Diálogo: Saída para Produção (transferência de estoque)
+// ═════════════════════════════════════════════════════════════════════════
+//
+// Move uma quantidade de um material do estoque normal para o estoque de
+// produção (EstoqueProducao). Não vincula a uma OS — a OS só é informada
+// depois, quando a produção der baixa a partir do estoque de produção.
+class _TransferenciaProducaoDialog extends StatefulWidget {
+  const _TransferenciaProducaoDialog();
+
+  @override
+  State<_TransferenciaProducaoDialog> createState() =>
+      _TransferenciaProducaoDialogState();
+}
+
+class _TransferenciaProducaoDialogState
+    extends State<_TransferenciaProducaoDialog> {
+  // ── Filtros de busca ──────────────────────────────────────────────────
+  final _nomeCtrl         = TextEditingController();
+  final _identificadorCtrl = TextEditingController();
+  final _medidaCtrl       = TextEditingController();
+  final _espessuraCtrl    = TextEditingController();
+  Timer? _debounce;
+  bool _buscando = false;
+  bool _buscouUmaVez = false;
+  List<MaterialModel> _resultados = [];
+
+  // ── Material selecionado e campos do formulário ───────────────────────
+  MaterialModel? _selecionado;
+  final _quantCtrl            = TextEditingController();
+  final _obsCtrl              = TextEditingController();
+
+  bool _enviando = false;
+  String? _erro;
+
+  @override
+  void dispose() {
+    _nomeCtrl.dispose();
+    _identificadorCtrl.dispose();
+    _medidaCtrl.dispose();
+    _espessuraCtrl.dispose();
+    _quantCtrl.dispose();
+    _obsCtrl.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  bool get _temFiltroAtivo =>
+      _identificadorCtrl.text.trim().isNotEmpty ||
+      _medidaCtrl.text.trim().isNotEmpty ||
+      _espessuraCtrl.text.trim().isNotEmpty;
+
+  void _agendarBusca() {
+    _debounce?.cancel();
+    final temQualquerFiltro = _nomeCtrl.text.trim().isNotEmpty ||
+        _identificadorCtrl.text.trim().isNotEmpty ||
+        _medidaCtrl.text.trim().isNotEmpty ||
+        _espessuraCtrl.text.trim().isNotEmpty;
+    if (!temQualquerFiltro) {
+      setState(() {
+        _buscouUmaVez = false;
+        _resultados = [];
+      });
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 350), _buscar);
+  }
+
+  Future<void> _buscar() async {
+    if (!mounted) return;
+    setState(() {
+      _buscando = true;
+      _buscouUmaVez = true;
+    });
+    try {
+      final lista = await context.read<MaterialProvider>().buscarParaMovimentacao(
+        busca:         _nomeCtrl.text.trim(),
+        identificador: _identificadorCtrl.text.trim(),
+        medida:        _medidaCtrl.text.trim(),
+        espessura:     _espessuraCtrl.text.trim(),
+      );
+      if (mounted) {
+        setState(() {
+          _resultados = lista;
+          _buscando = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _buscando = false);
+    }
+  }
+
+  void _limparFiltros() {
+    _identificadorCtrl.clear();
+    _medidaCtrl.clear();
+    _espessuraCtrl.clear();
+    _agendarBusca();
+  }
+
+  void _selecionar(MaterialModel m) {
+    setState(() {
+      _selecionado = m;
+      _resultados = [];
+      _erro = null;
+    });
+  }
+
+  Future<void> _confirmar() async {
+    final material = _selecionado;
+    if (material == null) {
+      setState(() => _erro = 'Selecione um material');
+      return;
+    }
+    final qtd = double.tryParse(_quantCtrl.text.replaceAll(',', '.'));
+    if (qtd == null || qtd <= 0) {
+      setState(() => _erro = 'Informe uma quantidade válida');
+      return;
+    }
+
+    setState(() { _enviando = true; _erro = null; });
+
+    final provider  = context.read<EstoqueProducaoProvider>();
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    final ok = await provider.transferir(
+      materialId:       material.id,
+      quantidade:       qtd,
+      observacao:       _obsCtrl.text.trim().isEmpty ? null : _obsCtrl.text.trim(),
+    );
+
+    if (!mounted) return;
+    setState(() => _enviando = false);
+
+    if (ok) {
+      navigator.pop();
+      messenger.showSnackBar(SnackBar(
+        content: Text(
+          '${qtd.toStringAsFixed(qtd == qtd.truncateToDouble() ? 0 : 3)} '
+          '${formatarUnidadeExibicao(material.unidade)} de ${material.nome} transferido(s) para o estoque de produção',
+        ),
+        backgroundColor: AppTheme.success,
+      ));
+    } else {
+      setState(() => _erro = provider.erro ?? 'Erro ao transferir material');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: SizedBox(
+        width: 620,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Cabeçalho ─────────────────────────────────────────────
+              Row(
+                children: [
+                  const Icon(Icons.factory_outlined, color: AppTheme.warning),
+                  const SizedBox(width: 8),
+                  Text('Saída para Produção', style: Theme.of(context).textTheme.headlineSmall),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Move uma quantidade do estoque para o estoque de produção. '
+                'Não é necessário informar OS agora.',
+                style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 16),
+
+              // ── Busca / seleção de material ───────────────────────────
+              if (_selecionado == null) ...[
+                // Busca por nome
+                TextField(
+                  controller: _nomeCtrl,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: 'Buscar material por nome...',
+                    prefixIcon: Icon(Icons.search, size: 18, color: Theme.of(context).colorScheme.outline),
+                    isDense: true,
+                  ),
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [_UpperCaseFormatter()],
+                  onChanged: (_) { _agendarBusca(); setState(() {}); },
+                  onSubmitted: (_) => _buscar(),
+                ),
+                const SizedBox(height: 8),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _identificadorCtrl,
+                        decoration: InputDecoration(
+                          hintText:   'Identificador...',
+                          prefixIcon: Icon(Icons.qr_code,
+                              color: Theme.of(context).colorScheme.outline, size: 18),
+                          isDense: true,
+                        ),
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: [_UpperCaseFormatter()],
+                        onChanged: (_) { _agendarBusca(); setState(() {}); },
+                        onSubmitted: (_) => _buscar(),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: _medidaCtrl,
+                        decoration: InputDecoration(
+                          hintText:   'Medida...',
+                          prefixIcon: Icon(Icons.straighten,
+                              color: Theme.of(context).colorScheme.outline, size: 18),
+                          isDense: true,
+                        ),
+                        inputFormatters: [_MedidaEspessuraFormatter()],
+                        onChanged: (_) { _agendarBusca(); setState(() {}); },
+                        onSubmitted: (_) => _buscar(),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: _espessuraCtrl,
+                        decoration: InputDecoration(
+                          hintText:   'Espessura...',
+                          prefixIcon: Icon(Icons.layers,
+                              color: Theme.of(context).colorScheme.outline, size: 18),
+                          isDense: true,
+                        ),
+                        inputFormatters: [_MedidaEspessuraFormatter()],
+                        onChanged: (_) { _agendarBusca(); setState(() {}); },
+                        onSubmitted: (_) => _buscar(),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+
+                // ── Lista de resultados ───────────────────────────────
+                SizedBox(
+                  height: 220,
+                  child: _buscando
+                      ? const Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary))
+                      : !_buscouUmaVez
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.search, size: 32, color: Theme.of(context).colorScheme.outlineVariant),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Digite para buscar materiais',
+                                    style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 13),
+                                  ),
+                                  Text(
+                                    'Use os filtros avançados para refinar por identificador, medida ou espessura',
+                                    style: TextStyle(color: Theme.of(context).colorScheme.outlineVariant, fontSize: 11),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            )
+                          : _resultados.isEmpty
+                              ? Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.search_off, size: 32, color: Theme.of(context).colorScheme.outlineVariant),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Nenhum material encontrado',
+                                        style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 13),
+                                      ),
+                                      if (_temFiltroAtivo)
+                                        TextButton(
+                                          onPressed: () { _limparFiltros(); setState(() {}); },
+                                          style: TextButton.styleFrom().copyWith(
+                                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                          ),
+                                          child: const Text('Limpar filtros avançados', style: TextStyle(fontSize: 12)),
+                                        ),
+                                    ],
+                                  ),
+                                )
+                              : Container(
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: ListView.separated(
+                                    itemCount: _resultados.length,
+                                    separatorBuilder: (_, __) => const Divider(height: 0, thickness: 0.5),
+                                    itemBuilder: (_, i) {
+                                      final m = _resultados[i];
+                                      final medidaFmt = formatarMedidaOuDimensoes(
+                                        medida:      m.medida,
+                                        largura:     m.largura,
+                                        comprimento: m.comprimento,
+                                      );
+                                      final detalhes = [
+                                        if (m.identificador != null && m.identificador!.isNotEmpty) m.identificador!,
+                                        if (medidaFmt != null) medidaFmt,
+                                        if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
+                                      ].join(' • ');
+                                      final qtdStr = m.quantidade.toStringAsFixed(
+                                        m.quantidade == m.quantidade.truncateToDouble() ? 0 : 2,
+                                      );
+                                      final corQtd = m.quantidade <= 0
+                                          ? AppTheme.error
+                                          : Theme.of(context).colorScheme.onSurfaceVariant;
+                                      return ListTile(
+                                        dense: true,
+                                        title: Text(m.nome, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                        subtitle: detalhes.isEmpty ? null : Text(detalhes, style: const TextStyle(fontSize: 11)),
+                                        trailing: Text(
+                                          '$qtdStr ${formatarUnidadeExibicao(m.unidade)}',
+                                          style: TextStyle(fontSize: 12, color: corQtd, fontWeight: FontWeight.w500),
+                                        ),
+                                        onTap: () => _selecionar(m),
+                                      );
+                                    },
+                                  ),
+                                ),
+                ),
+              ] else ...[
+                // ── Material selecionado ──────────────────────────────
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppTheme.primary.withValues(alpha: 0.25)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.check_circle, size: 16, color: AppTheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(_selecionado!.nome,
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                            Text(
+                              [
+                                'Disponível: ${_selecionado!.quantidade.toStringAsFixed(_selecionado!.quantidade == _selecionado!.quantidade.truncateToDouble() ? 0 : 2)} ${formatarUnidadeExibicao(_selecionado!.unidade)}',
+                                if (_selecionado!.identificador != null && _selecionado!.identificador!.isNotEmpty)
+                                  _selecionado!.identificador!,
+                                if (formatarMedidaOuDimensoes(
+                                      medida:      _selecionado!.medida,
+                                      largura:     _selecionado!.largura,
+                                      comprimento: _selecionado!.comprimento,
+                                    ) !=
+                                    null)
+                                  formatarMedidaOuDimensoes(
+                                    medida:      _selecionado!.medida,
+                                    largura:     _selecionado!.largura,
+                                    comprimento: _selecionado!.comprimento,
+                                  )!,
+                                if (_selecionado!.espessura != null && _selecionado!.espessura!.isNotEmpty)
+                                  _selecionado!.espessura!,
+                              ].join(' • '),
+                              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        tooltip: 'Trocar material',
+                        onPressed: () => setState(() {
+                          _selecionado = null;
+                          _nomeCtrl.clear();
+                        }),
+                        style: IconButton.styleFrom().copyWith(
+                          mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                TextField(
+                  controller: _quantCtrl,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_DecimalInputFormatter()],
+                  decoration: InputDecoration(
+                    labelText: 'Quantidade *',
+                    suffixText: formatarUnidadeExibicao(_selecionado!.unidade),
+                    isDense: true,
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _obsCtrl,
+                  decoration: const InputDecoration(labelText: 'Observação (opcional)', isDense: true),
+                ),
+              ],
+
+              if (_erro != null) ...[
+                const SizedBox(height: 12),
+                Text(_erro!, style: const TextStyle(color: AppTheme.error, fontSize: 12.5)),
+              ],
+
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: TextButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
+                    child: const Text('Cancelar'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: (_selecionado == null || _enviando) ? null : _confirmar,
+                    style: FilledButton.styleFrom(backgroundColor: AppTheme.warning).copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
+                    child: _enviando
+                        ? const SizedBox(
+                            width: 18, height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Text('Confirmar Transferência'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _ItemMovimentacao {
   final MaterialModel material;
@@ -5599,8 +6264,13 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
   @override
   Widget build(BuildContext context) {
     final m = item.material;
+    final medidaFmt = formatarMedidaOuDimensoes(
+      medida:      m.medida,
+      largura:     m.largura,
+      comprimento: m.comprimento,
+    );
     final partes = <String>[
-      if (m.medida    != null && m.medida!.isNotEmpty)    m.medida!,
+      if (medidaFmt != null) medidaFmt,
       if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
       if (m.categoria != null && m.categoria!.isNotEmpty) m.categoria!,
     ].join(' · ');
@@ -5861,7 +6531,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                   decoration: InputDecoration(
                     labelText: 'Quantidade *',
                     isDense: true,
-                    suffixText: m.unidade,
+                    suffixText: formatarUnidadeExibicao(m.unidade),
                   ),
                   validator: (v) {
                     if (item.erroEstoque != null) return item.erroEstoque;
@@ -5905,7 +6575,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
             if (eMLCard) {
               final valML = pm2 ?? pu;
               if (valML != null && valML > 0) {
-                partesBrl.add('M/L: R\$ ${_brl6(valML).substring(3)}');
+                partesBrl.add('m/l: R\$ ${_brl6(valML).substring(3)}');
               }
             } else {
               if (pu != null && pu > 0) {
@@ -5972,10 +6642,15 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
             ? AppTheme.primary.withValues(alpha: 0.05)
             : Colors.transparent;
 
+    final medidaFmt = formatarMedidaOuDimensoes(
+      medida:      m.medida,
+      largura:     m.largura,
+      comprimento: m.comprimento,
+    );
     final partes = <String>[
       if (m.identificador != null && m.identificador!.isNotEmpty)
         '${m.identificador}',
-      if (m.medida != null && m.medida!.isNotEmpty) m.medida!,
+      if (medidaFmt != null) medidaFmt,
       if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
       if (m.categoria != null && m.categoria!.isNotEmpty) m.categoria!,
     ].join(' · ');
@@ -6055,7 +6730,7 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
                   ),
                   if (m.unidade != null)
                     Text(
-                      m.unidade!,
+                      formatarUnidadeExibicao(m.unidade),
                       style: TextStyle(
                           fontSize: 10, color: Theme.of(context).colorScheme.outline),
                     ),
@@ -6293,6 +6968,197 @@ class _AvisoPossivelDuplicataCE extends StatelessWidget {
     );
   }
 }
+// ── Dropdown de categoria (filtro no diálogo de Entrada/Saída) ─────────────
+// Mesmo padrão visual do dropdown de categoria usado nas outras páginas do
+// sistema (ex.: estoque_page.dart): campo com o mesmo estilo de
+// InputDecorator dos demais filtros, cursor de mão no campo inteiro, seta
+// que destaca no hover e busca embutida no próprio menu. Diferente do
+// dropdown de estoque_page.dart, aqui há 3 estados possíveis: null = Todas,
+// '' = Sem categoria, e o nome da categoria selecionada.
+class _CategoriaFiltroDropdownCE extends StatefulWidget {
+  final List<String> categorias;
+  final String? valorSelecionado; // null = Todas; '' = Sem categoria
+  final ValueChanged<String?> onSelecionar;
+  const _CategoriaFiltroDropdownCE({
+    required this.categorias,
+    required this.valorSelecionado,
+    required this.onSelecionar,
+  });
+
+  @override
+  State<_CategoriaFiltroDropdownCE> createState() => _CategoriaFiltroDropdownCEState();
+}
+
+class _CategoriaFiltroDropdownCEState extends State<_CategoriaFiltroDropdownCE> {
+  final MenuController _menuController = MenuController();
+  final TextEditingController _buscaCtrl = TextEditingController();
+  String _busca = '';
+  bool _hovered = false;
+
+  @override
+  void dispose() {
+    _buscaCtrl.dispose();
+    super.dispose();
+  }
+
+  void _abrirMenu() {
+    _buscaCtrl.clear();
+    setState(() => _busca = '');
+    _menuController.open();
+  }
+
+  String get _labelExibido {
+    if (widget.valorSelecionado == null) return 'Todas';
+    if (widget.valorSelecionado!.isEmpty) return 'Sem categoria';
+    return widget.valorSelecionado!;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return MenuAnchor(
+      controller: _menuController,
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(scheme.surface),
+        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+        elevation: const WidgetStatePropertyAll(6),
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: scheme.outlineVariant),
+          ),
+        ),
+      ),
+      menuChildren: [
+        StatefulBuilder(
+          builder: (context, setMenuState) {
+            final filtradas = _busca.trim().isEmpty
+                ? widget.categorias
+                : widget.categorias
+                    .where((c) => c.toLowerCase().contains(_busca.trim().toLowerCase()))
+                    .toList();
+            return SizedBox(
+              width: 240,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+                    child: TextField(
+                      controller: _buscaCtrl,
+                      autofocus: true,
+                      inputFormatters: [_UpperCaseFormatter()],
+                      decoration: InputDecoration(
+                        hintText:   'Buscar categoria...',
+                        isDense:    true,
+                        prefixIcon: Icon(Icons.search, size: 18, color: scheme.outline),
+                      ),
+                      onChanged: (v) {
+                        _busca = v;
+                        setMenuState(() {});
+                      },
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 260),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          MenuItemButton(
+                            onPressed: () {
+                              widget.onSelecionar(null);
+                              _menuController.close();
+                            },
+                            trailingIcon: widget.valorSelecionado == null
+                                ? Icon(Icons.check, size: 16, color: AppTheme.primary)
+                                : null,
+                            child: const SizedBox(
+                              width: 208,
+                              child: Text('Todas'),
+                            ),
+                          ),
+                          MenuItemButton(
+                            onPressed: () {
+                              widget.onSelecionar('');
+                              _menuController.close();
+                            },
+                            trailingIcon: widget.valorSelecionado != null &&
+                                    widget.valorSelecionado!.isEmpty
+                                ? Icon(Icons.check, size: 16, color: AppTheme.primary)
+                                : null,
+                            child: const SizedBox(
+                              width: 208,
+                              child: Text('Sem categoria'),
+                            ),
+                          ),
+                          for (final c in filtradas)
+                            MenuItemButton(
+                              onPressed: () {
+                                widget.onSelecionar(c);
+                                _menuController.close();
+                              },
+                              trailingIcon: widget.valorSelecionado == c
+                                  ? Icon(Icons.check, size: 16, color: AppTheme.primary)
+                                  : null,
+                              child: SizedBox(
+                                width: 208,
+                                child: Text(c, overflow: TextOverflow.ellipsis),
+                              ),
+                            ),
+                          if (filtradas.isEmpty && _busca.trim().isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text(
+                                'Nenhuma categoria encontrada',
+                                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+      builder: (context, controller, child) {
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit:  (_) => setState(() => _hovered = false),
+          child: GestureDetector(
+            onTap: () => controller.isOpen ? controller.close() : _abrirMenu(),
+            child: InputDecorator(
+              decoration: InputDecoration(
+                labelText: 'Categoria',
+                isDense:   true,
+                suffixIcon: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Icon(
+                    controller.isOpen ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+                    color: _hovered ? AppTheme.primary : scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              child: Text(
+                _labelExibido,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 14, color: scheme.onSurface),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 // ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
 // Mesmo padrão usado no cabeçalho das outras páginas do sistema.
 class _BotaoVoltar extends StatefulWidget {

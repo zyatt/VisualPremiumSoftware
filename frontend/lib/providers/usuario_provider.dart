@@ -137,9 +137,15 @@ class UsuarioProvider extends ChangeNotifier {
   /// Troca diretamente para outro usuário que já logou nesta máquina,
   /// sem precisar de senha. Requer que haja um token ativo no momento.
   Future<bool> loginComoUsuario(UsuarioModel alvo) async {
+    // Não chama notifyListeners() aqui: como o GoRouter escuta este provider
+    // via refreshListenable, uma notificação intermediária (com o usuário
+    // antigo ainda ativo e _carregando=true) dispara um redirect no meio da
+    // troca — concorrendo com o Navigator.pop() do diálogo de seleção e com
+    // o rebuild do AppShell/sidebar que acontece na notificação final. Essa
+    // corrida entre dois Navigators mexendo na árvore quase ao mesmo tempo
+    // é o que produz o erro '_elements.contains(element): is not true'.
     _carregando = true;
     _erro       = null;
-    notifyListeners();
     try {
       await _solicitacaoMaterialProvider?.resetarConexao();
       final data    = await ApiClient.post('/auth/trocar-usuario', {'id': alvo.id});
@@ -158,6 +164,10 @@ class UsuarioProvider extends ChangeNotifier {
       return false;
     } finally {
       _carregando = false;
+      // Notificação única, no final, já com o usuário/role definitivos.
+      // Garante que o redirect do GoRouter e o rebuild do AppShell vejam
+      // exatamente o mesmo estado consistente, em vez de dois estados
+      // intermediários conflitantes.
       notifyListeners();
     }
   }

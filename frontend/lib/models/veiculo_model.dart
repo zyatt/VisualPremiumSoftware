@@ -87,6 +87,7 @@ class VeiculoModel {
   final String               placa;
   final bool                 ativo;
   final List<ManutencaoModel> manutencoes; // última manutenção (do endpoint de lista)
+  final int?                 qtdManutencoes; // total de manutenções (só preenchido na listagem de inativos)
 
   const VeiculoModel({
     required this.id,
@@ -94,6 +95,7 @@ class VeiculoModel {
     required this.placa,
     required this.ativo,
     required this.manutencoes,
+    this.qtdManutencoes,
   });
 
   factory VeiculoModel.fromJson(Map<String, dynamic> json) => VeiculoModel(
@@ -104,6 +106,9 @@ class VeiculoModel {
         manutencoes: (json['manutencoes'] as List? ?? [])
             .map((m) => ManutencaoModel.fromJson(m as Map<String, dynamic>))
             .toList(),
+        qtdManutencoes: (json['_count'] as Map<String, dynamic>?)?['manutencoes'] != null
+            ? (json['_count']['manutencoes'] as num).toInt()
+            : null,
       );
 
   ManutencaoModel? get ultimaManutencao =>

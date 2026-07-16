@@ -24,6 +24,20 @@ router.patch(
 );
 
 router.patch(
+  '/itens/:itemId/estoque',
+  authMiddleware,
+  roleMiddleware(ACESSO),
+  ctrl.marcarItemEstoque,
+);
+
+router.patch(
+  '/adicionais/:adicionalId/estoque',
+  authMiddleware,
+  roleMiddleware(ACESSO),
+  ctrl.marcarAdicionalEstoque,
+);
+
+router.patch(
   '/itens/:itemId',
   authMiddleware,
   roleMiddleware(ACESSO),

@@ -1,4 +1,23 @@
 const prisma = require('../utils/prisma');
+
+// Formata a unidade para exibição em mensagens ao usuário (o valor salvo no
+// banco permanece em maiúsculo). Ex.: 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²'/'M2'
+// → 'm²'; 'KG' → 'Kg'; 'G' → 'g'. Espelha `formatarUnidadeExibicao` do app.
+function formatUnidade(unidade) {
+  if (!unidade || !unidade.trim()) return '';
+  const u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'UNIDADE': return 'Unidade';
+    case 'M/L':     return 'm/l';
+    case 'M':       return 'm';
+    case 'ML':      return 'ml';
+    case 'M²':
+    case 'M2':      return 'm²';
+    case 'KG':      return 'Kg';
+    case 'G':       return 'g';
+    default:        return unidade;
+  }
+}
 const materialSvc = require('./material.service');
 
 const _includeMovimentacoes = {
@@ -8,6 +27,7 @@ const _includeMovimentacoes = {
         select: {
           id: true, nome: true, unidade: true,
           identificador: true, medida: true, espessura: true,
+          largura: true, comprimento: true,
         },
       },
       materialOrigem: {
@@ -35,6 +55,50 @@ async function buscarPorNumeroOS(numeroOS) {
     orderBy: { criadoEm: 'desc' },
     include: _includeMovimentacoes,
   });
+}
+
+/**
+ * Resolve (ou cria) uma RelacaoOS para OS descritivas (não-numéricas, sem sufixo
+ * #OC/#S/#E). Aplica data automática no nome: "NOME-DD-MM-YYYY".
+ *
+ * Regras:
+ *  - Se já existir uma relação EM_ANDAMENTO com esse nome-base ou nome-base+hoje,
+ *    reutiliza ela (acumula movimentações do dia).
+ *  - Se não existir, cria "NOME-DD-MM-YYYY". Se já estiver FECHADA, acrescenta
+ *    sufixo sequencial: "NOME-DD-MM-YYYY-2", "-3", etc.
+ *
+ * Exportada para que outros serviços (ex: estoqueProducao.service.js) possam
+ * reutilizar a mesma lógica sem duplicação.
+ */
+async function resolverRelacaoOSDescritiva(nomeBase) {
+  const _d   = new Date();
+  const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`;
+
+  const relacaoAberta = await prisma.relacaoOS.findFirst({
+    where: {
+      status: 'EM_ANDAMENTO',
+      OR: [
+        { numeroOS: nomeBase },
+        { numeroOS: { startsWith: `${nomeBase}-${hoje}` } },
+      ],
+    },
+    orderBy: { criadoEm: 'asc' },
+  });
+
+  if (relacaoAberta) return relacaoAberta;
+
+  let candidato = `${nomeBase}-${hoje}`;
+  let sufixoSeq = 1;
+
+  while (true) {
+    const existente = await prisma.relacaoOS.findUnique({ where: { numeroOS: candidato } });
+    if (!existente) {
+      return prisma.relacaoOS.create({ data: { numeroOS: candidato, status: 'EM_ANDAMENTO' } });
+    }
+    if (existente.status !== 'FECHADA') return existente;
+    sufixoSeq += 1;
+    candidato = `${nomeBase}-${hoje}-${sufixoSeq}`;
+  }
 }
 
 async function registrarMovimentacao({
@@ -68,7 +132,7 @@ async function registrarMovimentacao({
     if (saldo < quantidade) {
       throw {
         status: 400,
-        message: `Estoque insuficiente: disponível ${saldo} ${material.unidade ?? ''}`.trim(),
+        message: `Estoque insuficiente: disponível ${saldo} ${formatUnidade(material.unidade)}`.trim(),
       };
     }
   }
@@ -84,40 +148,7 @@ async function registrarMovimentacao({
       update: {},
     });
   } else {
-    const _d   = new Date();
-    const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`;
-
-    const relacaoAberta = await prisma.relacaoOS.findFirst({
-      where: {
-        status:   'EM_ANDAMENTO',
-        OR: [
-          { numeroOS: numeroOS },
-          { numeroOS: { startsWith: `${numeroOS}-${hoje}` } },
-        ],
-      },
-      orderBy: { criadoEm: 'asc' },
-    });
-
-    if (relacaoAberta) {
-      relacao = relacaoAberta;
-    } else {
-      let candidato  = `${numeroOS}-${hoje}`;
-      let sufixoSeq  = 1;
-
-      while (true) {
-        const existente = await prisma.relacaoOS.findUnique({ where: { numeroOS: candidato } });
-        if (!existente) {
-          relacao = await prisma.relacaoOS.create({ data: { numeroOS: candidato, status: 'EM_ANDAMENTO' } });
-          break;
-        }
-        if (existente.status !== 'FECHADA') {
-          relacao = existente;
-          break;
-        }
-        sufixoSeq += 1;
-        candidato = `${numeroOS}-${hoje}-${sufixoSeq}`;
-      }
-    }
+    relacao = await resolverRelacaoOSDescritiva(numeroOS);
   }
   const precoUnitarioFinal = precoUnitario ?? null;
 
@@ -338,19 +369,94 @@ async function removerMovimentacao(movimentacaoId) {
     }
   }
 
+  // Se a movimentação removida é uma SAÍDA vinculada a uma OS de
+  // transferência para produção (numeroOS começa com 'TRANSFERENCIA-PRODUCAO'),
+  // precisa também decrementar o EstoqueProducao — a quantidade que havia
+  // entrado lá ao fazer a transferência deixa de existir.
+  const ehTransferenciaProducao =
+    mov.tipo === 'SAIDA' &&
+    (mov.numeroOS ?? '').startsWith('TRANSFERENCIA-PRODUCAO');
+
+  // Se a movimentação removida é a SAÍDA de registro/relatório gerada
+  // automaticamente quando uma solicitação de Produção é finalizada
+  // (ver _registrarSaidaControleEstoque em producao.service.js), essa
+  // saída NUNCA decrementou o estoque normal — o material já havia saído
+  // do estoque normal antes, na transferência para o EstoqueProducao, e
+  // foi consumido de lá. Deletar essa movimentação, portanto, não deve
+  // devolver quantidade ao estoque normal; deve devolver ao EstoqueProducao,
+  // de onde ela realmente foi baixada.
+  const ehSaidaDeProducao =
+    mov.tipo === 'SAIDA' &&
+    /^(Saída via produção|Baixa do estoque de produção)/i.test((mov.observacao ?? '').trim());
+
   await prisma.$transaction([
     prisma.movimentacaoEstoque.delete({ where: { id: movimentacaoId } }),
-    prisma.material.update({
-      where: { id: mov.materialId },
-      data:  { quantidade: { increment: delta } },
-    }),
+    // Para saídas originadas da Produção, NÃO mexe em material.quantidade
+    // (estoque normal) — o saldo correto a reverter é o do EstoqueProducao.
+    ...(ehSaidaDeProducao
+      ? []
+      : [prisma.material.update({
+          where: { id: mov.materialId },
+          data:  { quantidade: { increment: delta } },
+        })]),
     ...(retalhoParaReverter
       ? [prisma.material.update({
           where: { id: retalhoParaReverter.id },
           data:  { quantidade: { decrement: retalhoParaReverter.areaRetalho } },
         })]
       : []),
+    // Reverte o saldo no EstoqueProducao se for uma transferência desfeita.
+    // Usa Math.max(0) via update condicional — se o saldo já tiver sido
+    // consumido por baixas posteriores, protege contra negativo fazendo
+    // um segundo update logo após a transaction.
+    ...(ehTransferenciaProducao
+      ? [prisma.estoqueProducao.updateMany({
+          where: { materialId: mov.materialId },
+          data:  { quantidade: { decrement: Number(mov.quantidade) } },
+        }),
+         prisma.movimentacaoProducao.create({
+          data: {
+            materialId:  mov.materialId,
+            tipo:       'BAIXA',
+            quantidade:  Number(mov.quantidade),
+            observacao:  'Estorno automático: transferência removida do controle de estoque',
+            usuarioNome: null,
+          },
+        })]
+      : []),
+    // Devolve a quantidade ao EstoqueProducao (não ao estoque normal) quando
+    // a saída removida é a de registro de uma baixa de produção.
+    ...(ehSaidaDeProducao
+      ? [prisma.estoqueProducao.upsert({
+          where:  { materialId: mov.materialId },
+          create: { materialId: mov.materialId, quantidade: Number(mov.quantidade) },
+          update: { quantidade: { increment: Number(mov.quantidade) } },
+        }),
+         prisma.movimentacaoProducao.create({
+          data: {
+            materialId:  mov.materialId,
+            tipo:        'TRANSFERENCIA',
+            quantidade:  Number(mov.quantidade),
+            numeroOS:    mov.numeroOS ?? null,
+            observacao:  'Estorno automático: saída removida do controle de estoque',
+            usuarioNome: null,
+          },
+        })]
+      : []),
   ]);
+
+  // Protege EstoqueProducao contra quantidade negativa (caso o material já
+  // tenha sido parcialmente ou totalmente consumido por baixas antes da
+  // remoção da transferência).
+  if (ehTransferenciaProducao) {
+    const ep = await prisma.estoqueProducao.findUnique({ where: { materialId: mov.materialId } });
+    if (ep && Number(ep.quantidade) < 0) {
+      await prisma.estoqueProducao.update({
+        where: { materialId: mov.materialId },
+        data:  { quantidade: 0 },
+      });
+    }
+  }
 
   const mat      = await prisma.material.findUnique({ where: { id: mov.materialId } });
   const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
@@ -394,24 +500,107 @@ async function excluirRelacaoOS(relacaoOSId) {
     throw { status: 400, message: 'Não é possível excluir uma OS fechada' };
   }
 
+  // Acumula quanto precisa ser revertido do EstoqueProducao por material
+  // (pode haver múltiplas transferências/baixas do mesmo material na mesma OS).
+  // - TRANSFERENCIA-PRODUCAO desfeita: registra como BAIXA no histórico de produção
+  //   (a transferência que teria entrado lá é estornada).
+  // - Saída de produção desfeita: registra como TRANSFERENCIA no histórico de produção
+  //   (a quantidade volta a ficar disponível no estoque de produção, de onde saiu).
+  const estornoProducaoTransferencia = new Map(); // materialId → qtd a decrementar (BAIXA)
+  const estornoProducaoBaixa         = new Map(); // materialId → qtd a incrementar (TRANSFERENCIA)
+
   for (const mov of relacao.movimentacoes) {
     const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
+
+    // Se esta SAÍDA é o registro/relatório automático de uma baixa feita a
+    // partir do Estoque de Produção (ver _registrarSaidaControleEstoque em
+    // producao.service.js), ela NUNCA decrementou o estoque normal — o
+    // material já havia saído dele na transferência anterior. Excluir a OS,
+    // portanto, não deve devolver quantidade ao estoque normal; deve
+    // devolver ao EstoqueProducao, de onde ela realmente foi baixada.
+    const ehSaidaDeProducao =
+      mov.tipo === 'SAIDA' &&
+      /^(Saída via produção|Baixa do estoque de produção)/i.test((mov.observacao ?? '').trim());
 
     const statusAntes = mov.material?.status
       ?? (await prisma.material.findUnique({ where: { id: mov.materialId } }))?.status;
 
-    await prisma.material.update({
-      where: { id: mov.materialId },
-      data:  { quantidade: { increment: delta } },
-    });
-    const mat = await prisma.material.findUnique({ where: { id: mov.materialId } });
-    const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
-    await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
-    materialSvc.notificarSeCritico(statusAntes, { ...mat, status: novoStatus });
+    if (!ehSaidaDeProducao) {
+      await prisma.material.update({
+        where: { id: mov.materialId },
+        data:  { quantidade: { increment: delta } },
+      });
+      const mat = await prisma.material.findUnique({ where: { id: mov.materialId } });
+      const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
+      await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
+      materialSvc.notificarSeCritico(statusAntes, { ...mat, status: novoStatus });
+    }
+
+    // Marca para reverter no EstoqueProducao se for uma transferência desfeita.
+    if (
+      mov.tipo === 'SAIDA' &&
+      (mov.numeroOS ?? '').startsWith('TRANSFERENCIA-PRODUCAO')
+    ) {
+      const acumulado = estornoProducaoTransferencia.get(mov.materialId) ?? 0;
+      estornoProducaoTransferencia.set(mov.materialId, acumulado + Number(mov.quantidade));
+    }
+
+    // Marca para devolver ao EstoqueProducao se for uma saída de produção desfeita.
+    if (ehSaidaDeProducao) {
+      const acumulado = estornoProducaoBaixa.get(mov.materialId) ?? 0;
+      estornoProducaoBaixa.set(mov.materialId, acumulado + Number(mov.quantidade));
+    }
   }
 
   await prisma.movimentacaoEstoque.deleteMany({ where: { relacaoOSId: relacao.id } });
   await prisma.relacaoOS.delete({ where: { id: relacao.id } });
+
+  // Reverte EstoqueProducao para cada material afetado por transferências
+  // desfeitas e registra estorno no histórico de produção. Protege contra
+  // negativo caso o material já tenha sido parcialmente consumido por baixas.
+  for (const [materialId, qtdEstorno] of estornoProducaoTransferencia) {
+    await prisma.estoqueProducao.updateMany({
+      where: { materialId },
+      data:  { quantidade: { decrement: qtdEstorno } },
+    });
+    await prisma.movimentacaoProducao.create({
+      data: {
+        materialId,
+        tipo:       'BAIXA',
+        quantidade: qtdEstorno,
+        observacao: 'Estorno automático: OS de transferência excluída do controle de estoque',
+        usuarioNome: null,
+      },
+    });
+    // Protege contra negativo
+    const ep = await prisma.estoqueProducao.findUnique({ where: { materialId } });
+    if (ep && Number(ep.quantidade) < 0) {
+      await prisma.estoqueProducao.update({
+        where: { materialId },
+        data:  { quantidade: 0 },
+      });
+    }
+  }
+
+  // Devolve ao EstoqueProducao a quantidade das saídas de produção desfeitas
+  // (baixas feitas a partir do estoque de produção que estavam registradas
+  // nesta OS excluída).
+  for (const [materialId, qtdDevolver] of estornoProducaoBaixa) {
+    await prisma.estoqueProducao.upsert({
+      where:  { materialId },
+      create: { materialId, quantidade: qtdDevolver },
+      update: { quantidade: { increment: qtdDevolver } },
+    });
+    await prisma.movimentacaoProducao.create({
+      data: {
+        materialId,
+        tipo:       'TRANSFERENCIA',
+        quantidade: qtdDevolver,
+        observacao: 'Estorno automático: OS excluída do controle de estoque',
+        usuarioNome: null,
+      },
+    });
+  }
 }
 
 async function fecharOS(relacaoOSId) {
@@ -553,4 +742,5 @@ module.exports = {
   listarTodas,
   renomearOS,
   atualizarPrecoMovimentacao,
+  resolverRelacaoOSDescritiva,
 };

@@ -27,7 +27,14 @@ class NovaSolicitacaoBanner extends StatelessWidget {
     NovaSolicitacaoNotificacao notificacao, {
     VoidCallback? onTap,
   }) {
-    final overlay = Overlay.of(context);
+    // rootOverlay: true força o Overlay do MaterialApp.router (que
+    // sobrevive a qualquer navegação do GoRouter), em vez do Overlay mais
+    // próximo — que pode pertencer a uma parte da árvore sendo desmontada
+    // no exato momento da troca de rota/usuário (ver AppShell). maybeOf
+    // evita lançar exceção e derrubar o app se, por algum motivo, nenhum
+    // Overlay estiver mais disponível nesse instante.
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
     late OverlayEntry entry;
     entry = OverlayEntry(
       builder: (_) => _BannerOverlay(

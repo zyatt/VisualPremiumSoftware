@@ -16,6 +16,7 @@ import 'providers/orcamento_provider.dart';
 import 'providers/ordem_compra_provider.dart';
 import 'providers/relatorio_os_provider.dart';
 import 'providers/producao_provider.dart';
+import 'providers/estoque_producao_provider.dart';
 import 'providers/audit_log_provider.dart';
 import 'providers/gastos_categoria_provider.dart';
 import 'providers/alertas_estoque_provider.dart';
@@ -82,6 +83,7 @@ class _VisualPremiumAppState extends State<VisualPremiumApp> {
         ChangeNotifierProvider(create: (_) => OrdemCompraProvider()),
         ChangeNotifierProvider(create: (_) => RelatorioOSProvider()),
         ChangeNotifierProvider(create: (_) => ProducaoProvider()),
+        ChangeNotifierProvider(create: (_) => EstoqueProducaoProvider()),
         ChangeNotifierProvider(create: (_) => AuditLogProvider()),
         ChangeNotifierProvider(create: (_) => GastosCategoriaProvider()),
         ChangeNotifierProvider(create: (_) => AlertasEstoqueProvider()),

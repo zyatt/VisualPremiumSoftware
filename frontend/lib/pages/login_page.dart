@@ -166,6 +166,7 @@ class _LoginPageState extends State<LoginPage> {
                                 Icons.lock_outline_rounded,
                                 size: 18),
                             suffixIcon: IconButton(
+                              mouseCursor: SystemMouseCursors.click,
                               icon: Icon(
                                 _obscure
                                     ? Icons.visibility_off_outlined
@@ -189,6 +190,9 @@ class _LoginPageState extends State<LoginPage> {
                           height: 48,
                           child: ElevatedButton(
                             onPressed: loading ? null : _login,
+                            style: ButtonStyle(
+                              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                            ),
                             child: loading
                                 ? const SizedBox(
                                     height: 20,
@@ -237,6 +241,7 @@ class _ThemeToggleButton extends StatelessWidget {
         elevation: 0,
         child: InkWell(
           borderRadius: BorderRadius.circular(50),
+          mouseCursor: SystemMouseCursors.click,
           onTap: () {
             ThemeTransitionOverlay.of(context)?.switchTheme(
               onSwitch: () => themeProvider.toggle(),

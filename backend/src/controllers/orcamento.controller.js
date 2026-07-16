@@ -165,14 +165,29 @@ const gerarOrdemCompra = async (req, res, next) => {
         numerosOS.push('EMPRESA');
       }
       
-      const itensOC = grupo.itens.map(item => ({
-        materialId: item.materialId,
-        descricaoItem: item.descricaoItem || null,
-        numeroOS: item.descricaoItem?.trim() || numerosOS[0],
-        quantidade: item.quantidade,
-        qtdUnidade: item.qtdUnidade ?? null,
-        precoUnitario: item.precoUnitario || 0,
-      }));
+      const itensOC = grupo.itens.map(item => {
+        // No orçamento, o preço do item é "por quantidade" (ex: preço por rolo):
+        // total do orçamento = quantidade * precoUnitario.
+        // Na OC, precoUnitario é "por M/L" (Valor/M.L):
+        // total da OC = quantidade * qtdUnidade * precoUnitario.
+        // Por isso é preciso dividir pelo qtdUnidade aqui, senão o valor do
+        // orçamento acaba multiplicado duas vezes (por quantidade E por qtdUnidade)
+        // e o total na OC fica inflado.
+        const qtdUnidade = item.qtdUnidade ?? null;
+        const precoOrcamento = item.precoUnitario || 0;
+        const precoUnitarioOC = qtdUnidade && qtdUnidade > 0
+          ? precoOrcamento / qtdUnidade
+          : precoOrcamento;
+
+        return {
+          materialId: item.materialId,
+          descricaoItem: item.descricaoItem || null,
+          numeroOS: item.descricaoItem?.trim() || numerosOS[0],
+          quantidade: item.quantidade,
+          qtdUnidade,
+          precoUnitario: precoUnitarioOC,
+        };
+      });
       
       const oc = await ocService.criar({
         fornecedorId,

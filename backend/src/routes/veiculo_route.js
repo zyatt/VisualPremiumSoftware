@@ -35,6 +35,31 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+router.get('/inativos', async (req, res) => {
+  try {
+    res.json(await svc.listarVeiculosInativos());
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.put('/:id/reativar', async (req, res) => {
+  try {
+    res.json(await svc.reativarVeiculo(parseInt(req.params.id)));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id/definitivo', async (req, res) => {
+  try {
+    await svc.excluirVeiculoDefinitivo(parseInt(req.params.id));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 router.get('/:id/manutencoes', async (req, res) => {
   try {
     res.json(await svc.listarManutencoes(parseInt(req.params.id)));

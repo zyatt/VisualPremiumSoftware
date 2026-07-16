@@ -136,6 +136,22 @@ const marcarAdicionalComprado = async (req, res, next) => {
   } catch (e) { _responderErro(res, e); }
 };
 
+const marcarItemEstoque = async (req, res, next) => {
+  try {
+    const { usuarioId, usuarioNome, usuarioRole } = _usuario(req);
+    const estoque = req.body.estoque === true || req.body.estoque === 'true';
+    res.json(await svc.marcarEstoque('item', +req.params.itemId, usuarioId, usuarioNome, usuarioRole, estoque));
+  } catch (e) { _responderErro(res, e); }
+};
+
+const marcarAdicionalEstoque = async (req, res, next) => {
+  try {
+    const { usuarioId, usuarioNome, usuarioRole } = _usuario(req);
+    const estoque = req.body.estoque === true || req.body.estoque === 'true';
+    res.json(await svc.marcarEstoque('adicional', +req.params.adicionalId, usuarioId, usuarioNome, usuarioRole, estoque));
+  } catch (e) { _responderErro(res, e); }
+};
+
 const atualizarItem = async (req, res, next) => {
   try {
     const { usuarioId, usuarioNome, usuarioRole } = _usuario(req);
@@ -224,6 +240,8 @@ module.exports = {
   adicionarMateriais,
   marcarItemComprado,
   marcarAdicionalComprado,
+  marcarItemEstoque,
+  marcarAdicionalEstoque,
   atualizarItem,
   atualizarAdicional,
   excluirItem,

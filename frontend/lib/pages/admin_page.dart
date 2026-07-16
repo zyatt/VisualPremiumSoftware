@@ -179,11 +179,19 @@ class _UsuariosTabState extends State<_UsuariosTab> {
   void _abrirFormularioEdicao(Map<String, dynamic> usuario) {
     showDialog(
       context: context,
-      builder: (_) => _UsuarioFormDialog(usuario: usuario, onSalvo: _carregar),
+      builder: (_) => _UsuarioFormDialog(
+        usuario: usuario,
+        onSalvo: _carregar,
+        onExcluir: (onConfirmado) =>
+            _excluir(usuario, onConfirmado: onConfirmado),
+      ),
     );
   }
 
-  Future<void> _excluir(Map<String, dynamic> usuario) async {
+  Future<bool> _excluir(
+    Map<String, dynamic> usuario, {
+    VoidCallback? onConfirmado,
+  }) async {
     final nome = usuario['nome'] as String? ?? 'usuário';
 
     final confirmar = await showDialog<bool>(
@@ -197,12 +205,17 @@ class _UsuariosTabState extends State<_UsuariosTab> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom().copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
             child: const Text('Cancelar'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.error,
+            ).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
             ),
             child: const Text('Excluir'),
           ),
@@ -210,7 +223,8 @@ class _UsuariosTabState extends State<_UsuariosTab> {
       ),
     );
 
-    if (confirmar != true || !mounted) return;
+    if (confirmar != true || !mounted) return false;
+    onConfirmado?.call();
 
     try {
       await _repo.excluir(usuario['id'] as int);
@@ -221,6 +235,7 @@ class _UsuariosTabState extends State<_UsuariosTab> {
           backgroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
         ));
       }
+      return true;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -228,6 +243,7 @@ class _UsuariosTabState extends State<_UsuariosTab> {
           backgroundColor: AppTheme.error,
         ));
       }
+      return false;
     }
   }
 
@@ -394,8 +410,13 @@ class _TabelaUsuarios extends StatelessWidget {
                   Expanded(flex: 3, child: _HeaderCell('Nome')),
                   Expanded(flex: 2, child: _HeaderCell('Username')),
                   Expanded(flex: 2, child: _HeaderCell('Cargo')),
-                  Expanded(flex: 2, child: _HeaderCell('Status')),
-                  SizedBox(width: 80, child: _HeaderCell('Ações')),
+                  Expanded(
+                    flex: 2,
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: _HeaderCell('Status'),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -529,6 +550,8 @@ class _LinhaUsuarioState extends State<_LinhaUsuario> {
                 Expanded(
                   flex: 2,
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.max,
                     children: [
                       Container(
                         width: 7,
@@ -549,26 +572,6 @@ class _LinhaUsuarioState extends State<_LinhaUsuario> {
                       ),
                     ],
                   ),
-                ),
-
-                // Ações
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _IconBtn(
-                      icon: Icons.edit_rounded,
-                      color: AppTheme.primary,
-                      tooltip: 'Editar',
-                      onPressed: () => widget.onEditar(u),
-                    ),
-                    const SizedBox(width: 4),
-                    _IconBtn(
-                      icon: Icons.delete_outline_rounded,
-                      color: AppTheme.error,
-                      tooltip: 'Excluir',
-                      onPressed: () => widget.onExcluir(u),
-                    ),
-                  ],
                 ),
               ],
             ),
@@ -723,8 +726,9 @@ class _RoleLabel extends StatelessWidget {
 class _UsuarioFormDialog extends StatefulWidget {
   final Map<String, dynamic>? usuario;
   final VoidCallback onSalvo;
+  final Future<bool> Function(VoidCallback onConfirmado)? onExcluir;
 
-  const _UsuarioFormDialog({this.usuario, required this.onSalvo});
+  const _UsuarioFormDialog({this.usuario, required this.onSalvo, this.onExcluir});
 
   @override
   State<_UsuarioFormDialog> createState() => _UsuarioFormDialogState();
@@ -741,6 +745,7 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
   String _role = 'COMPRAS';
   bool _ativo = true;
   bool _salvando = false;
+  bool _excluindo = false;
   bool _mostrarSenha = false;
   String? _erroDialog;
 
@@ -815,6 +820,19 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
           _erroDialog = e.toString().replaceFirst('Exception: ', '');
         });
       }
+    }
+  }
+
+  Future<void> _excluir() async {
+    if (widget.onExcluir == null) return;
+    final excluido = await widget.onExcluir!(() {
+      if (mounted) setState(() => _excluindo = true);
+    });
+    if (!mounted) return;
+    if (excluido) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() => _excluindo = false);
     }
   }
 
@@ -940,14 +958,18 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                 DropdownButtonFormField<String>(
                   initialValue: _role,
                   decoration: const InputDecoration(labelText: 'Cargo *'),
-                  icon: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: const Icon(Icons.arrow_drop_down),
-                  ),
+                  mouseCursor: SystemMouseCursors.click,
+                  icon: const Icon(Icons.arrow_drop_down),
                   items: _roles
                       .map((r) => DropdownMenuItem(
                             value: r,
-                            child: Text(_roleLabel(r)),
+                            child: MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(_roleLabel(r)),
+                              ),
+                            ),
                           ))
                       .toList(),
                   onChanged: (v) => setState(() => _role = v ?? _role),
@@ -996,28 +1018,48 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: _salvando ? null : () => Navigator.of(context).pop(),
-          style: TextButton.styleFrom().copyWith(
-            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-          ),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: _salvando ? null : _salvar,
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
-            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-          ),
-          child: _salvando
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : Text(_isEdicao ? 'Salvar alterações' : 'Criar usuário'),
+        Row(
+          children: [
+            if (_isEdicao && widget.onExcluir != null)
+              TextButton(
+                onPressed: (_salvando || _excluindo) ? null : _excluir,
+                style: TextButton.styleFrom(foregroundColor: AppTheme.error).copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+                child: _excluindo
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Excluir'),
+              ),
+            const Expanded(child: SizedBox.shrink()),
+            TextButton(
+              onPressed: (_salvando || _excluindo) ? null : () => Navigator.of(context).pop(),
+              style: TextButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: const Text('Cancelar'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: (_salvando || _excluindo) ? null : _salvar,
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: _salvando
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Text(_isEdicao ? 'Salvar alterações' : 'Criar usuário'),
+            ),
+          ],
         ),
       ],
     );

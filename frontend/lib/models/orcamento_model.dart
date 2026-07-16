@@ -35,7 +35,7 @@ class OrcamentoItemModel {
     if (l == null || c == null || l <= 0 || c <= 0) return null;
     String fmt(double v) =>
         v == v.truncateToDouble() ? v.toInt().toString() : v.toString().replaceAll('.', ',');
-    return '${fmt(c)}X${fmt(l)}M';
+    return '${fmt(c)}x${fmt(l)}m';
   }
 
   factory OrcamentoItemModel.fromJson(Map<String, dynamic> json) =>

@@ -21,6 +21,42 @@ import '../widgets/escolher_usuario_chat_dialog.dart';
 
 // ── Formatação de preço: até 6 casas decimais, sem zeros à direita ────────────
 
+/// Formata a unidade para exibição (o valor interno permanece em maiúsculo,
+/// usado para comparações/enum). Ex.: 'UNIDADE' → 'Unidade'; 'M' → 'm';
+/// 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²' → 'm²'; 'KG' → 'Kg'; 'G' → 'g'.
+String formatarUnidadeExibicao(String? unidade) {
+  if (unidade == null || unidade.trim().isEmpty) return '—';
+  final u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'M':
+      return 'm';
+    case 'M/L':
+      return 'm/l';
+    case 'ML':
+      return 'ml';
+    case 'M²':
+    case 'M2':
+      return 'm²';
+    case 'KG':
+      return 'Kg';
+    case 'G':
+      return 'g';
+    case 'UNIDADE':
+      return 'Unidade';
+    default:
+      return unidade;
+  }
+}
+
+/// TextEditingController que expõe [notify] publicamente. `notifyListeners()`
+/// é `@protected` em `ChangeNotifier`, então não pode ser chamado de fora da
+/// própria classe/subclasse — usamos essa subclasse só para forçar o
+/// RawAutocomplete a reavaliar as opções ao focar o campo vazio.
+class _NotifiableTextEditingController extends TextEditingController {
+  _NotifiableTextEditingController({super.text});
+  void notify() => notifyListeners();
+}
+
 class _UpperCaseFormatter extends TextInputFormatter {
   static final _acentos = {
     'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A',
@@ -56,17 +92,40 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
-/// Bloqueia a digitação de vírgula em campos de texto livre (busca, descrição, etc.)
-class _NoCommaFormatter extends TextInputFormatter {
+/// Formatter para os campos Medida e Espessura (cadastro e filtro/busca):
+/// - remove acentuação e força minúsculas
+/// - converte vírgula em ponto
+/// - permite apenas 1 ponto POR NÚMERO (bloqueia pontos repetidos/seguidos
+///   dentro do mesmo número, ex.: "1..5" ou "1.2.3"), mas preserva múltiplos
+///   números na mesma medida, ex.: "2.44x1.22m" (dois números, um ponto cada)
+class _MedidaEspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    if (newValue.text.contains(',')) {
-      return oldValue;
-    }
-    return newValue;
+    // 1) Vírgula -> ponto
+    var texto = newValue.text.replaceAll(',', '.');
+
+    // 2) Remove acentos e força minúsculas
+    texto = _UpperCaseFormatter._removerAcentos(texto).toLowerCase();
+
+    // 3) Para cada bloco de dígitos+pontos (um "número"), permite apenas o
+    //    primeiro ponto e remove os demais. Não mexe no que não é dígito/ponto
+    //    (letras, "x", espaços, etc.), preservando a separação entre números.
+    texto = texto.replaceAllMapped(RegExp(r'[\d.]+'), (m) {
+      final partes = m.group(0)!.split('.');
+      if (partes.length > 2) {
+        return '${partes[0]}.${partes.sublist(1).join('')}';
+      }
+      return m.group(0)!;
+    });
+
+    final sel = newValue.selection.copyWith(
+      baseOffset:  newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
   }
 }
 
@@ -430,7 +489,7 @@ class _EstoquePageState extends State<EstoquePage> {
               width: 360,
               child: TextField(
                 controller: _filtroCategoriaCtrl,
-                inputFormatters: [_NoCommaFormatter()],
+                inputFormatters: [_UpperCaseFormatter()],
                 decoration: InputDecoration(
                   hintText:   'Buscar categoria...',
                   prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
@@ -952,7 +1011,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
               width: 360,
               child: TextField(
                 controller: _filtroCtrl,
-                inputFormatters: [_NoCommaFormatter()],
+                inputFormatters: [_UpperCaseFormatter()],
                 decoration: InputDecoration(
                   hintText:   'Buscar identificador...',
                   prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
@@ -1315,6 +1374,7 @@ class _CategoriaFiltroDropdownState extends State<_CategoriaFiltroDropdown> {
   final MenuController _menuController = MenuController();
   final TextEditingController _buscaCtrl = TextEditingController();
   String _busca = '';
+  bool _hovered = false;
 
   @override
   void dispose() {
@@ -1366,7 +1426,7 @@ class _CategoriaFiltroDropdownState extends State<_CategoriaFiltroDropdown> {
                     child: TextField(
                       controller: _buscaCtrl,
                       autofocus: true,
-                      inputFormatters: [_NoCommaFormatter()],
+                      inputFormatters: [_UpperCaseFormatter()],
                       decoration: InputDecoration(
                         hintText:   'Buscar categoria...',
                         isDense:    true,
@@ -1431,22 +1491,29 @@ class _CategoriaFiltroDropdownState extends State<_CategoriaFiltroDropdown> {
         ),
       ],
       builder: (context, controller, child) {
-        return InkWell(
-          borderRadius: BorderRadius.circular(4),
-          onTap: () => controller.isOpen ? controller.close() : _abrirMenu(),
-          child: InputDecorator(
-            decoration: InputDecoration(
-              labelText: 'Categoria',
-              isDense:   true,
-              suffixIcon: Icon(
-                controller.isOpen ? Icons.arrow_drop_up : Icons.arrow_drop_down,
-                color: scheme.onSurfaceVariant,
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit:  (_) => setState(() => _hovered = false),
+          child: GestureDetector(
+            onTap: () => controller.isOpen ? controller.close() : _abrirMenu(),
+            child: InputDecorator(
+              decoration: InputDecoration(
+                labelText: 'Categoria',
+                isDense:   true,
+                suffixIcon: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Icon(
+                    controller.isOpen ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+                    color: _hovered ? AppTheme.primary : scheme.onSurfaceVariant,
+                  ),
+                ),
               ),
-            ),
-            child: Text(
-              widget.valorSelecionado.isEmpty ? 'TODAS' : widget.valorSelecionado,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 14, color: scheme.onSurface),
+              child: Text(
+                widget.valorSelecionado.isEmpty ? 'TODAS' : widget.valorSelecionado,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 14, color: scheme.onSurface),
+              ),
             ),
           ),
         );
@@ -1463,6 +1530,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   String _statusFiltro         = '';
   String _categoriaFiltro      = ''; // só usado quando widget.categoriaId == _kCategoriaGeral
   bool   _somenteFornecedor    = false;
+  bool   _statusHovered        = false;
   Timer? _debounceTimer;
 
   static const int _itensPorPagina = 50;
@@ -1663,11 +1731,14 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogCtx).pop(false),
+            style: TextButton.styleFrom()
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             child: const Text('Cancelar'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogCtx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.warning),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.warning)
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             child: const Text('Desativar'),
           ),
         ],
@@ -1691,11 +1762,14 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogCtx).pop(false),
+            style: TextButton.styleFrom()
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             child: const Text('Cancelar'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogCtx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.success),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.success)
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             child: const Text('Reativar'),
           ),
         ],
@@ -1726,11 +1800,14 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogCtx).pop(false),
+            style: TextButton.styleFrom()
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             child: const Text('Cancelar'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogCtx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error)
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             child: const Text('Excluir'),
           ),
         ],
@@ -2092,13 +2169,14 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   flex: 3,
                   child: TextField(
                     controller: _buscaCtrl,
-                    inputFormatters: [_NoCommaFormatter()],
+                    inputFormatters: [_UpperCaseFormatter()],
                     decoration: InputDecoration(
                       hintText:   'Buscar material...',
                       prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense:    true,
                     ),
                     onChanged: (_) {
+                      setState(() {});
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                           const Duration(milliseconds: 400), _aplicarFiltros);
@@ -2109,7 +2187,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                 const SizedBox(width: 12),
                 if (widget.categoriaId == _kCategoriaGeral) ...[
                   SizedBox(
-                    width: 220,
+                    width: 160,
                     child: Consumer<MaterialProvider>(
                       builder: (_, provider, __) {
                         final categorias = provider.categorias;
@@ -2130,25 +2208,42 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   ),
                   const SizedBox(width: 12),
                 ],
-                SizedBox(
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  onEnter: (_) => setState(() => _statusHovered = true),
+                  onExit:  (_) => setState(() => _statusHovered = false),
+                  child: SizedBox(
                   width: 160,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _statusFiltro.isEmpty ? null : _statusFiltro,
+                  child: InputDecorator(
                     decoration: const InputDecoration(
                       labelText: 'Status',
                       isDense:   true,
                     ),
-                    items: const [
-                      DropdownMenuItem(value: '',        child: Text('TODOS')),
-                      DropdownMenuItem(value: 'OK',      child: Text('OK')),
-                      DropdownMenuItem(value: 'LIMITE',  child: Text('LIMITE')),
-                      DropdownMenuItem(value: 'CRITICO', child: Text('CRITICO')),
-                      DropdownMenuItem(value: 'INATIVO', child: Text('INATIVO')),
-                    ],
-                    onChanged: (v) {
-                      setState(() => _statusFiltro = v ?? '');
-                      _aplicarFiltros();
-                    },
+                    isEmpty: _statusFiltro.isEmpty,
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _statusFiltro.isEmpty ? null : _statusFiltro,
+                        isDense: true,
+                        isExpanded: true,
+                        mouseCursor: SystemMouseCursors.click,
+                        icon: Icon(
+                          Icons.arrow_drop_down,
+                          color: _statusHovered ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: '',        child: Text('TODOS')),
+                          DropdownMenuItem(value: 'OK',      child: Text('OK')),
+                          DropdownMenuItem(value: 'LIMITE',  child: Text('LIMITE')),
+                          DropdownMenuItem(value: 'CRITICO', child: Text('CRITICO')),
+                          DropdownMenuItem(value: 'INATIVO', child: Text('INATIVO')),
+                        ],
+                        onChanged: (v) {
+                          setState(() => _statusFiltro = v ?? '');
+                          _aplicarFiltros();
+                        },
+                      ),
+                    ),
+                  ),
                   ),
                 ),
                 SizedBox(width: 8),
@@ -2185,22 +2280,45 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                IconButton.outlined(
-                  tooltip: 'Limpar filtros',
-                  icon: Icon(Icons.filter_alt_off, color: scheme.onSurfaceVariant),
-                  onPressed: () {
-                    _buscaCtrl.clear();
-                    _identificadorCtrl.clear();
-                    _medidaCtrl.clear();
-                    _espessuraCtrl.clear();
-                    setState(() {
-                      _statusFiltro      = '';
-                      _categoriaFiltro   = '';
-                      _somenteFornecedor = false;
-                    });
-                    context.read<MaterialProvider>().carregar(
-                          categoria: _categoriaParaProvider(),
-                        );
+                Builder(
+                  builder: (context) {
+                    final temFiltro = _buscaCtrl.text.isNotEmpty ||
+                        _identificadorCtrl.text.isNotEmpty ||
+                        _medidaCtrl.text.isNotEmpty ||
+                        _espessuraCtrl.text.isNotEmpty ||
+                        _statusFiltro.isNotEmpty ||
+                        _categoriaFiltro.isNotEmpty ||
+                        _somenteFornecedor;
+                    return IconButton.outlined(
+                      tooltip: 'Limpar filtros',
+                      icon: Icon(Icons.filter_alt_off, color: scheme.onSurfaceVariant),
+                      onPressed: temFiltro
+                          ? () {
+                              _buscaCtrl.clear();
+                              _identificadorCtrl.clear();
+                              _medidaCtrl.clear();
+                              _espessuraCtrl.clear();
+                              setState(() {
+                                _statusFiltro      = '';
+                                _categoriaFiltro   = '';
+                                _somenteFornecedor = false;
+                              });
+                              context.read<MaterialProvider>().carregar(
+                                    categoria: _categoriaParaProvider(),
+                                  );
+                            }
+                          : null,
+                      style: IconButton.styleFrom(
+                        side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.resolveWith((states) {
+                          if (states.contains(WidgetState.disabled)) {
+                            return SystemMouseCursors.basic;
+                          }
+                          return SystemMouseCursors.click;
+                        }),
+                      ),
+                    );
                   },
                 ),
               ],
@@ -2221,6 +2339,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
                     onChanged: (_) {
+                      setState(() {});
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                           const Duration(milliseconds: 400), _aplicarFiltros);
@@ -2237,9 +2356,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                       prefixIcon: Icon(Icons.straighten, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [_UpperCaseFormatter()],
+                    inputFormatters: [_MedidaEspessuraFormatter()],
                     onChanged: (_) {
+                      setState(() {});
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                           const Duration(milliseconds: 400), _aplicarFiltros);
@@ -2256,9 +2375,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                       prefixIcon: Icon(Icons.layers, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [_UpperCaseFormatter()],
+                    inputFormatters: [_MedidaEspessuraFormatter()],
                     onChanged: (_) {
+                      setState(() {});
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                           const Duration(milliseconds: 400), _aplicarFiltros);
@@ -2361,8 +2480,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   final fim          = (inicio + _itensPorPagina).clamp(0, ordenados.length);
                   final paginados    = ordenados.sublist(inicio, fim);
 
-                  final mostrarCat = widget.categoriaId == _kCategoriaGeral ||
-                                     widget.categoriaId == _kCategoriaSemCategoria;
+                  final mostrarCat = widget.categoriaId != _kCategoriaGeral;
                   return Column(
                     children: [
                       Expanded(
@@ -2783,25 +2901,28 @@ class _TabelaMateriais extends StatefulWidget {
 
   static const List<_ColDef> _colsBase = [
     _ColDef(label: 'ID',                          fixed: 56,  sortKey: 'id'),
-    _ColDef(label: 'Identificador',               flex: 0.7,  sortKey: 'identificador'),
-    _ColDef(label: 'Material',                    flex: 2.0,  sortKey: 'nome'),
-    _ColDef(label: 'Categoria',                   flex: 1.0,  sortKey: 'categoria'),
-    _ColDef(label: 'Medida',                      flex: 0.8,  sortKey: 'medida'),
-    _ColDef(label: 'Espessura',                   flex: 0.7,  sortKey: 'espessura'),
-    _ColDef(label: 'Comprimento',                 flex: 0.8,  sortKey: 'comprimento'),
-    _ColDef(label: 'Largura',                     flex: 0.7,  sortKey: 'largura'),
-    _ColDef(label: 'Estoque atual',               flex: 0.6,  sortKey: 'quantidade'),
-    _ColDef(label: 'Estoque mínimo',              flex: 0.6,  sortKey: 'estoqueMinimo'),
-    _ColDef(label: 'Unidade',                     flex: 0.9,  sortKey: 'unidade'),
-    _ColDef(label: 'Custo (Últimas compras)',     flex: 0.9,  sortKey: 'ultimoValorPago'),
-    _ColDef(label: 'Custo m² (Últimas compras)',  flex: 0.9,  sortKey: 'ultimoValorPagoM2'),
-    _ColDef(label: 'Status',                      flex: 0.8,  sortKey: 'status'),
+    _ColDef(label: 'Identificador',               flex: 1.0,  minWidth: 160, sortKey: 'identificador'),
+    _ColDef(label: 'Material',                    flex: 2.0,  minWidth: 200, sortKey: 'nome'),
+    _ColDef(label: 'Categoria',                   flex: 1.0,  minWidth: 110, sortKey: 'categoria'),
+    _ColDef(label: 'Medida',                      flex: 0.8,  minWidth: 100, sortKey: 'medida'),
+    _ColDef(label: 'Espessura',                   flex: 0.7,  minWidth: 100, sortKey: 'espessura'),
+    _ColDef(label: 'Comprimento',                 flex: 0.8,  minWidth: 120, sortKey: 'comprimento'),
+    _ColDef(label: 'Largura',                     flex: 0.7,  minWidth: 100, sortKey: 'largura'),
+    _ColDef(label: 'Estoque atual',               flex: 0.6,  minWidth: 120, sortKey: 'quantidade'),
+    _ColDef(label: 'Estoque mínimo',              flex: 0.6,  minWidth: 130, sortKey: 'estoqueMinimo'),
+    _ColDef(label: 'Unidade',                     flex: 0.9,  minWidth: 100, sortKey: 'unidade'),
+    _ColDef(label: 'Custo (Últimas compras)',     flex: 0.9,  minWidth: 170, sortKey: 'ultimoValorPago'),
+    _ColDef(label: 'Custo m² (Últimas compras)',  flex: 0.9,  minWidth: 180, sortKey: 'ultimoValorPagoM2'),
+    _ColDef(label: 'Status',                      flex: 0.6,  minWidth: 120, sortKey: 'status'),
     _ColDef(label: '',                             fixed: 40),
   ];
 
   static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
       ? SizedBox(width: col.fixed, child: child)
-      : Expanded(flex: (col.flex! * 10).round(), child: child);
+      : Expanded(
+          flex: (col.flex! * 10).round(),
+          child: child,
+        );
 
   @override
   State<_TabelaMateriais> createState() => _TabelaMateriaisState();
@@ -2918,13 +3039,16 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
       ),
     );
 
+    // A tabela sempre ocupa exatamente a largura disponível — as colunas
+    // encolhem proporcionalmente (via Expanded/flex) e o texto que não
+    // couber é cortado com reticências, em vez de forçar scroll horizontal.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Cabeçalho fixo — não entra no scroll
+        // Cabeçalho fixo — não entra no scroll vertical
         _cabecalho(),
         Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
-        // Corpo rolável ocupa o espaço restante
+        // Corpo rolável (verticalmente) ocupa o espaço restante
         Expanded(child: corpoRolavel),
       ],
     );
@@ -2935,9 +3059,21 @@ class _ColDef {
   final String  label;
   final double? fixed;
   final double? flex;
+  /// Largura mínima em pixels — garante que o texto da coluna (cabeçalho e
+  /// células) nunca quebre em mais de uma linha nem seja cortado, mesmo em
+  /// telas estreitas. Quando a soma das larguras mínimas ultrapassa a largura
+  /// disponível, a tabela passa a rolar horizontalmente em vez de espremer
+  /// as colunas.
+  final double  minWidth;
   /// Identificador de ordenação; null = coluna não ordenável
   final String? sortKey;
-  const _ColDef({required this.label, this.fixed, this.flex, this.sortKey});
+  const _ColDef({
+    required this.label,
+    this.fixed,
+    this.flex,
+    this.minWidth = 90,
+    this.sortKey,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3034,7 +3170,10 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
  
   static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
       ? SizedBox(width: col.fixed, child: child)
-      : Expanded(flex: (col.flex! * 10).round(), child: child);
+      : Expanded(
+          flex: (col.flex! * 10).round(),
+          child: child,
+        );
  
   static Widget _cell(String text, BuildContext context, {bool inativo = false}) => Padding(
         padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -3163,7 +3302,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _vDivider(context),
  
                 // Unidade
-                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], maybeOpacity(_cell(m.unidade ?? '—', context, inativo: inativo))),
+                _colWrap(cols[widget.mostrarCategoria ? 10 : 9], maybeOpacity(_cell(formatarUnidadeExibicao(m.unidade), context, inativo: inativo))),
                 _vDivider(context),
  
                 // Custo última compra
@@ -3194,20 +3333,28 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _colWrap(
                   cols[widget.mostrarCategoria ? 14 : 13],
                   Center(
-                    child: IconButton(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => HistoricoMaterialPage(
-                            materialIdInicial:   m.id,
-                            materialNomeInicial: m.nome,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkResponse(
+                        mouseCursor: SystemMouseCursors.click,
+                        radius: 18,
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => HistoricoMaterialPage(
+                              materialIdInicial: m.id,
+                              materialNomeInicial: m.nome,
+                            ),
+                          ),
+                        ),
+                        child: const Padding(
+                          padding: EdgeInsets.all(6),
+                          child: Icon(
+                            Icons.history,
+                            size: 18,
+                            color: Color(0xFFF59E0B),
                           ),
                         ),
                       ),
-                      icon: const Icon(Icons.history, size: 18),
-                      tooltip: 'Histórico deste material',
-                      color: const Color(0xFFF59E0B),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
                     ),
                   ),
                 ),
@@ -3225,8 +3372,8 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
   }
  
   static Widget _vDivider(BuildContext context) => VerticalDivider(
-        width: 1, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant,
-      );
+    width: 1, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant,
+  );
 }
 
 
@@ -3267,7 +3414,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   late final TextEditingController _nome;
   late final TextEditingController _identificador;
   String? _unidade;
-  late final TextEditingController _categoria;
+  late final _NotifiableTextEditingController _categoria;
+  final FocusNode _categoriaFocusNode = FocusNode();
   late final TextEditingController _medida;
   late final TextEditingController _espessura;
   late final TextEditingController _largura;
@@ -3331,7 +3479,17 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     _nome          = TextEditingController(text: m?.nome ?? '');
     _identificador = TextEditingController(text: m?.identificador ?? '');
     _unidade       = _normalizarUnidade(m?.unidade);
-    _categoria     = TextEditingController(text: m?.categoria ?? '');
+    _categoria     = _NotifiableTextEditingController(text: m?.categoria ?? '');
+    // Ao focar o campo vazio, força o RawAutocomplete a reavaliar as opções
+    // (ele só reage a mudanças no texto do controller, não ao foco).
+    _categoriaFocusNode.addListener(() {
+      if (_categoriaFocusNode.hasFocus) {
+        // Ao focar o campo (mesmo vazio), força o RawAutocomplete a
+        // reavaliar as opções, para que a lista de categorias já apareça
+        // antes mesmo do usuário digitar algo.
+        _categoria.notify();
+      }
+    });
     _medida        = TextEditingController(text: m?.medida ?? '');
     _espessura     = TextEditingController(text: m?.espessura ?? '');
     _largura       = TextEditingController(text: m?.largura != null ? m!.largura!.toStringAsFixed((m.largura! % 1 == 0 ? 0 : 4).toInt()) : '');
@@ -3400,16 +3558,23 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, 'continuar'),
+            style: TextButton.styleFrom().copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
             child: Text(_editando ? 'Continuar editando' : 'Continuar cadastrando'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, 'descartar'),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
             child: const Text('Descartar'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, 'salvar'),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
             child: Text(_editando ? 'Salvar alterações' : 'Cadastrar'),
           ),
         ],
@@ -3454,6 +3619,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     ]) {
       c.dispose();
     }
+    _categoriaFocusNode.dispose();
     super.dispose();
   }
 
@@ -3733,13 +3899,88 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
-                child: TextFormField(
-                  controller: _categoria,
-                  readOnly: widget.somenteLeitura,
-                  decoration: const InputDecoration(labelText: 'Categoria'),
-                  textCapitalization: TextCapitalization.characters,
-                  inputFormatters: [_UpperCaseFormatter()],
-                ),
+                child: widget.somenteLeitura
+                    ? TextFormField(
+                        controller: _categoria,
+                        readOnly: true,
+                        decoration: const InputDecoration(labelText: 'Categoria'),
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: [_UpperCaseFormatter()],
+                      )
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          return RawAutocomplete<String>(
+                            textEditingController: _categoria,
+                            focusNode: _categoriaFocusNode,
+                            optionsBuilder: (TextEditingValue value) {
+                              final query = value.text.trim().toUpperCase();
+                              final categorias =
+                                  context.read<MaterialProvider>().categorias;
+                              if (query.isEmpty) return categorias;
+                              return categorias.where((c) {
+                                final upper = c.toUpperCase();
+                                return upper.contains(query) && upper != query;
+                              });
+                            },
+                            onSelected: (String selection) {
+                              _categoria.text = selection;
+                              _categoria.selection =
+                                  TextSelection.collapsed(offset: selection.length);
+                            },
+                            fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                              return TextFormField(
+                                controller: controller,
+                                focusNode: focusNode,
+                                decoration: const InputDecoration(labelText: 'Categoria'),
+                                textCapitalization: TextCapitalization.characters,
+                                inputFormatters: [_UpperCaseFormatter()],
+                              );
+                            },
+                            optionsViewBuilder: (context, onSelected, options) {
+                              return Align(
+                                alignment: Alignment.topLeft,
+                                child: Material(
+                                  elevation: 4,
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: SizedBox(
+                                    width: constraints.maxWidth,
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(maxHeight: 200),
+                                      child: ListView.builder(
+                                        padding: EdgeInsets.zero,
+                                        shrinkWrap: true,
+                                        itemCount: options.length,
+                                        itemBuilder: (context, index) {
+                                          final opcao = options.elementAt(index);
+                                          return MouseRegion(
+                                            cursor: SystemMouseCursors.click,
+                                            child: InkWell(
+                                              onTap: () => onSelected(opcao),
+                                              hoverColor: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary
+                                                  .withValues(alpha: 0.08),
+                                              child: Container(
+                                                width: double.infinity,
+                                                padding: const EdgeInsets.symmetric(
+                                                  horizontal: 12,
+                                                  vertical: 10,
+                                                ),
+                                                color: Colors.transparent,
+                                                child: Text(opcao),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -3752,23 +3993,46 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                             child: Icon(Icons.lock_outline, size: 16),
                           ),
                         ),
-                        child: const Text('M²', style: TextStyle(fontSize: 14)),
+                        child: const Text('m²', style: TextStyle(fontSize: 14)),
                       )
-                    : DropdownButtonFormField<String>(
-                        initialValue: _unidade,
-                        decoration: const InputDecoration(labelText: 'Unidade *'),
-                        hint: const Text('Selecione'),
-                        items: const [
-                          DropdownMenuItem(value: 'UNIDADE', child: Text('UNIDADE — (unidade)')),
-                          DropdownMenuItem(value: 'M/L',     child: Text('M/L — (metro linear)')),
-                          DropdownMenuItem(value: 'M',       child: Text('M — (metro)')),
-                          DropdownMenuItem(value: 'ML',      child: Text('ML — (mililitro)')),
-                          DropdownMenuItem(value: 'M²',      child: Text('M² — (metro quadrado)')),
-                          DropdownMenuItem(value: 'G',       child: Text('G — (grama)')),
-                        ],
-                        validator: (v) =>
-                            (v == null || v.isEmpty) ? 'Selecione uma unidade' : null,
-                        onChanged: widget.somenteLeitura ? null : (v) => setState(() => _unidade = v),
+                    : MouseRegion(
+                        cursor: widget.somenteLeitura ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _unidade,
+                          decoration: const InputDecoration(labelText: 'Unidade *'),
+                          hint: const Text('Selecione'),
+                          icon: const Icon(Icons.arrow_drop_down),
+                          mouseCursor: widget.somenteLeitura ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'UNIDADE',
+                              child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('Unidade')),
+                            ),
+                            DropdownMenuItem(
+                              value: 'M/L',
+                              child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('m/l — (metro linear)')),
+                            ),
+                            DropdownMenuItem(
+                              value: 'M',
+                              child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('m — (metro)')),
+                            ),
+                            DropdownMenuItem(
+                              value: 'ML',
+                              child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('ml — (mililitro)')),
+                            ),
+                            DropdownMenuItem(
+                              value: 'M²',
+                              child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('m² — (metro quadrado)')),
+                            ),
+                            DropdownMenuItem(
+                              value: 'G',
+                              child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('g — (grama)')),
+                            ),
+                          ],
+                          validator: (v) =>
+                              (v == null || v.isEmpty) ? 'Selecione uma unidade' : null,
+                          onChanged: widget.somenteLeitura ? null : (v) => setState(() => _unidade = v),
+                        ),
                       ),
               ),
             ]),
@@ -3786,8 +4050,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                       )
                     : null,
               ),
-              textCapitalization: TextCapitalization.characters,
-              inputFormatters: [_UpperCaseFormatter()],
+              textCapitalization: TextCapitalization.none,
+              inputFormatters: [_MedidaEspessuraFormatter()],
               onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
             ),
             ], // end if not ML/G (medida)
@@ -3806,7 +4070,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   controller: _comprimento,
                   readOnly: _modoRetalho || widget.somenteLeitura,
                   decoration: InputDecoration(
-                    labelText: 'Comprimento (m)',
+                    labelText: 'Comprimento',
+                    suffixText: 'm',
+                    floatingLabelBehavior: FloatingLabelBehavior.always,
                     suffixIcon: _modoRetalho
                         ? const Tooltip(
                             message: 'Bloqueado no modo Retalho',
@@ -3825,7 +4091,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   controller: _largura,
                   readOnly: _modoRetalho || widget.somenteLeitura,
                   decoration: InputDecoration(
-                    labelText: 'Largura (m)',
+                    labelText: 'Largura',
+                    suffixText: 'm',
+                    floatingLabelBehavior: FloatingLabelBehavior.always,
                     suffixIcon: _modoRetalho
                         ? const Tooltip(
                             message: 'Bloqueado no modo Retalho',
@@ -3844,8 +4112,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   controller: _espessura,
                   readOnly: widget.somenteLeitura,
                   decoration: const InputDecoration(labelText: 'Espessura'),
-                  textCapitalization: TextCapitalization.characters,
-                  inputFormatters: [_UpperCaseFormatter()],
+                  textCapitalization: TextCapitalization.none,
+                  inputFormatters: [_MedidaEspessuraFormatter()],
                   onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                 ),
               ),
@@ -3897,6 +4165,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             const SizedBox(height: 10),
             InkWell(
               borderRadius: BorderRadius.circular(8),
+              mouseCursor: widget.somenteLeitura ? SystemMouseCursors.basic : SystemMouseCursors.click,
               onTap: widget.somenteLeitura ? null : () => setState(() => _estoqueConfirmado = !_estoqueConfirmado),
               child: Padding(
                 padding: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
@@ -4297,7 +4566,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                               },
                         icon: const Icon(Icons.restore, size: 16),
                         label: const Text('Reativar'),
-                        style: TextButton.styleFrom(foregroundColor: AppTheme.success),
+                        style: TextButton.styleFrom(foregroundColor: AppTheme.success)
+                            .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                       ),
                     if (!widget.material!.ativo && widget.onExcluir != null)
                       Tooltip(
@@ -4861,6 +5131,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                   _ctrlUnit.clear();
                   _ctrlM2.clear();
                 }),
+                style: TextButton.styleFrom()
+                    .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                 child: const Text('Cancelar'),
               ),
               const SizedBox(width: 8),
@@ -4870,7 +5142,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                     ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                     : const Icon(Icons.save_outlined, size: 16),
                 label: const Text('Salvar'),
-                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                    .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
               ),
             ],
           ),
@@ -5291,11 +5564,14 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                       size: 16,
                     ),
                     label: Text(_mostrarFormCusto ? 'Cancelar inserção' : 'Inserir custo manualmente'),
-                    style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
+                    style: TextButton.styleFrom(foregroundColor: AppTheme.primary)
+                        .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                   ),
                   const Spacer(),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
+                    style: TextButton.styleFrom()
+                        .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     child: const Text('Fechar'),
                   ),
                 ],
@@ -5455,7 +5731,11 @@ class _AlertasBannerEstoqueState extends State<_AlertasBannerEstoque> {
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: cor.withValues(alpha: 0.30)),
       ),
-      child: Theme(
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        clipBehavior: Clip.antiAlias,
+        child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           leading: const Icon(
@@ -5528,6 +5808,7 @@ class _AlertasBannerEstoqueState extends State<_AlertasBannerEstoque> {
             ),
           ],
         ),
+        ),
       ),
     );
   }
@@ -5570,7 +5851,8 @@ class _BannerSecao extends StatelessWidget {
             spacing: 8,
             runSpacing: 6,
             children: alertas.map<Widget>((a) {
-              final unidade = (a.unidade as String?) ?? '';
+              final unidade = formatarUnidadeExibicao(a.unidade as String?);
+              final unidadeExibir = unidade == '—' ? '' : unidade;
               final qtd     = a.quantidade as double;
               final qtdStr  = qtd % 1 == 0
                   ? qtd.toStringAsFixed(0)
@@ -5611,7 +5893,7 @@ class _BannerSecao extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        '$qtdStr${unidade.isNotEmpty ? ' $unidade' : ''}',
+                        '$qtdStr${unidadeExibir.isNotEmpty ? ' $unidadeExibir' : ''}',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -5656,7 +5938,13 @@ class _StatusBadgeEstoque extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
-      child: Text(status, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: fg)),
+      child: Text(
+        status,
+        softWrap: false,
+        overflow: TextOverflow.visible,
+        maxLines: 1,
+        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: fg),
+      ),
     );
   }
 }

@@ -71,8 +71,10 @@ async function adicionarItem(
   orcamentoId, materialId, fornecedorId, quantidade, precoUnitario,
   { selecionado = false, descricaoItem = null, observacao = null, qtdUnidade = null } = {}
   ) {
+  const fid = fornecedorId ?? null;
+
   const data = {
-    fornecedorId: fornecedorId ?? null,
+    fornecedorId: fid,
     quantidade,
     qtdUnidade: qtdUnidade ?? null,
     precoUnitario: precoUnitario ?? null,
@@ -81,16 +83,47 @@ async function adicionarItem(
     observacao: observacao ?? null,
   };
 
-  const existente = await prisma.orcamentoItem.findFirst({
-    where: { orcamentoId, materialId, fornecedorId: fornecedorId ?? null },
-  });
-
-  if (existente) {
-    return prisma.orcamentoItem.update({ where: { id: existente.id }, data });
+  // Caso fornecedorId preenchido: a unique constraint composta
+  // (orcamentoId, materialId, fornecedorId) protege de verdade no Postgres,
+  // então dá pra usar upsert atômico e resolver a race condition de vez.
+  if (fid !== null) {
+    return prisma.orcamentoItem.upsert({
+      where: {
+        orcamentoId_materialId_fornecedorId: {
+          orcamentoId,
+          materialId,
+          fornecedorId: fid,
+        },
+      },
+      update: data,
+      create: { orcamentoId, materialId, ...data },
+    });
   }
 
-  return prisma.orcamentoItem.create({
-    data: { orcamentoId, materialId, ...data },
+  // Caso fornecedorId seja null: no Postgres, uma unique constraint composta
+  // trata cada NULL como distinto de qualquer outro NULL, então
+  // @@unique([orcamentoId, materialId, fornecedorId]) NÃO impede duas linhas
+  // com o mesmo (orcamentoId, materialId) e fornecedorId nulo. O Prisma
+  // também não aceita usar esse índice como chave de upsert quando um dos
+  // campos é null. Por isso, aqui a concorrência é resolvida com um lock
+  // explícito de linha (SELECT ... FOR UPDATE) dentro de uma transação,
+  // serializando requests concorrentes em vez de depender da constraint.
+  return prisma.$transaction(async (tx) => {
+    const linhas = await tx.$queryRaw`
+      SELECT id FROM orcamento_itens
+      WHERE "orcamentoId" = ${orcamentoId}
+        AND "materialId" = ${materialId}
+        AND "fornecedorId" IS NULL
+      FOR UPDATE
+    `;
+
+    if (linhas.length > 0) {
+      return tx.orcamentoItem.update({ where: { id: linhas[0].id }, data });
+    }
+
+    return tx.orcamentoItem.create({
+      data: { orcamentoId, materialId, ...data },
+    });
   });
 }
 

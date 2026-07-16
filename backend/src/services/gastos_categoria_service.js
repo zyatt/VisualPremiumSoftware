@@ -104,6 +104,7 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
         select: {
           id: true, nome: true, categoria: true,
           unidade: true, identificador: true, medida: true, espessura: true,
+          largura: true, comprimento: true,
         },
       },
       materialOrigem: { select: { id: true } },
@@ -159,6 +160,8 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
           identificador: material.identificador,
           medida:        material.medida,
           espessura:     material.espessura,
+          largura:       material.largura   ? Number(material.largura)   : null,
+          comprimento:   material.comprimento ? Number(material.comprimento) : null,
           totalGasto:    0,
           qtdGasta:      0,
         };

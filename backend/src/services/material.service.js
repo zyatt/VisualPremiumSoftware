@@ -209,6 +209,7 @@ async function criar(data, usuarioId, usuarioNome) {
       valorDepois: material.nome,
       usuarioId,
       usuarioNome,
+      material,
     });
 
     _broadcast('material_atualizado', {
@@ -306,7 +307,7 @@ async function desativar(id, usuarioId, usuarioNome) {
     data: { ativo: false, status: 'INATIVO' },
   });
 
-  await auditSvc.registrar(id, 'DESATIVACAO', { usuarioId, usuarioNome });
+  await auditSvc.registrar(id, 'DESATIVACAO', { usuarioId, usuarioNome, material: result });
   _broadcast('material_atualizado', { motivo: 'desativar', materialId: id }, usuarioId);
   return result;
 }
@@ -323,7 +324,7 @@ async function reativar(id, usuarioId, usuarioNome) {
     data: { ativo: true, status },
   });
 
-  await auditSvc.registrar(id, 'REATIVACAO', { usuarioId, usuarioNome });
+  await auditSvc.registrar(id, 'REATIVACAO', { usuarioId, usuarioNome, material: result });
   _broadcast('material_atualizado', { motivo: 'reativar', materialId: id }, usuarioId);
   return result;
 }
@@ -333,12 +334,7 @@ async function excluir(id, usuarioId, usuarioNome) {
   if (!material) throw { status: 404, message: 'Material não encontrado' };
   if (material.ativo) throw { status: 400, message: 'Desative o material antes de excluí-lo' };
 
-  await auditSvc.registrar(id, 'EXCLUSAO', {
-    valorAntes: material.nome,
-    usuarioId,
-    usuarioNome,
-  });
-
+  // Orphaning de ordemItens antes do delete para evitar violação de FK.
   await prisma.ordemCompraItem.updateMany({
     where: { materialId: id },
     data: {
@@ -347,14 +343,16 @@ async function excluir(id, usuarioId, usuarioNome) {
     },
   });
 
+  // Deleta PRIMEIRO. Com onDelete: SetNull no schema, o banco seta
+  // materialId = NULL em todos os AuditLogMaterial existentes para este
+  // material — preservando o histórico completo via snapshot (*Snap).
+  // Se ainda houver FK com RESTRICT em outra tabela (ex.: movimentações),
+  // o delete falha aqui antes de qualquer log ser gravado, mantendo
+  // o estado do banco consistente.
   let deletado;
   try {
     deletado = await prisma.material.delete({ where: { id } });
   } catch (e) {
-    // P2003 = violação de foreign key (Prisma). Ocorre quando o material
-    // ainda está referenciado em outra tabela com RESTRICT (ex.: movimentações
-    // de estoque). Traduzimos para uma mensagem amigável em vez de deixar
-    // o erro bruto do banco vazar para o usuário.
     if (e?.code === 'P2003') {
       throw {
         status: 400,
@@ -363,6 +361,18 @@ async function excluir(id, usuarioId, usuarioNome) {
     }
     throw e;
   }
+
+  // Grava o log de EXCLUSAO depois do delete. O materialId passado (id)
+  // já não existe mais na tabela materiais, então o banco grava NULL
+  // nesse campo (onDelete: SetNull), mas o snapshot capturado em `material`
+  // acima preserva todos os dados descritivos para exibição no histórico.
+  await auditSvc.registrar(id, 'EXCLUSAO', {
+    valorAntes: material.nome,
+    usuarioId,
+    usuarioNome,
+    material,
+  });
+
   _broadcast('material_atualizado', { motivo: 'excluir', materialId: id }, usuarioId);
   return deletado;
 }
@@ -370,7 +380,7 @@ async function excluir(id, usuarioId, usuarioNome) {
 async function confirmarEstoque(id, usuarioId, usuarioNome) {
   const result = await prisma.material.update({ where: { id }, data: { estoqueConfirmado: true } });
 
-  await auditSvc.registrar(id, 'ESTOQUE_CONFIRMADO', { usuarioId, usuarioNome });
+  await auditSvc.registrar(id, 'ESTOQUE_CONFIRMADO', { usuarioId, usuarioNome, material: result });
   _broadcast('material_atualizado', { motivo: 'confirmar', materialId: id }, usuarioId);
   return result;
 }
@@ -427,6 +437,7 @@ async function atualizarCustoManual(id, data, usuarioId, usuarioNome) {
           : null,
       usuarioId,
       usuarioNome,
+      material: result,
     });
   }
 
@@ -443,6 +454,7 @@ async function atualizarCustoManual(id, data, usuarioId, usuarioNome) {
           : null,
       usuarioId,
       usuarioNome,
+      material: result,
     });
   }
 

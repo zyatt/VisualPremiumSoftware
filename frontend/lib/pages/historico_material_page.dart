@@ -40,6 +40,21 @@ import '../theme/app_theme.dart';
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// A partir de materialInfoLine, mantém apenas os segmentos que representam
+/// dimensões (medida, espessura, comprimento, largura — sempre contêm algum
+/// número), descartando categoria e unidade (que são apenas texto, ex.:
+/// "unidade", "m²", "RETALHO").
+String _dimensoesDoMaterial(String infoLine) {
+  final s = infoLine.trim();
+  if (s.isEmpty) return '';
+  final partes = s
+      .split(RegExp(r'[·•∙⋅]|(?<=\s)-(?=\s)'))
+      .map((p) => p.trim())
+      .where((p) => p.isNotEmpty && RegExp(r'\d').hasMatch(p))
+      .toList();
+  return partes.join(' · ');
+}
+
 /// Converte mensagens de erro técnicas em textos legíveis pelo usuário.
 /// Trata especialmente erros de rede (SocketException / ClientException).
 String _mensagemErroAmigavel(String raw) {
@@ -82,7 +97,8 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
   final _buscaCtrl      = TextEditingController();
   DateTime? _dataInicio;
   DateTime? _dataFim;
-  String    _acaoFiltro = '';
+  String    _acaoFiltro  = '';
+  bool      _acaoHovered = false;
   Timer?    _debounce;
 
   static const int _itensPorPagina = 50;
@@ -279,21 +295,43 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                 ],
 
                 // Filtro de ação
-                SizedBox(
-                  width: 200,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _acaoFiltro,
-                    decoration: const InputDecoration(
-                      labelText: 'Ação',
-                      isDense:   true,
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  onEnter: (_) => setState(() => _acaoHovered = true),
+                  onExit:  (_) => setState(() => _acaoHovered = false),
+                  child: SizedBox(
+                    width: 200,
+                    child: Theme(
+                      data: Theme.of(context).copyWith(
+                        inputDecorationTheme: Theme.of(context).inputDecorationTheme.copyWith(
+                          hoverColor: Colors.transparent,
+                          focusColor: Colors.transparent,
+                        ),
+                      ),
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _acaoFiltro,
+                        decoration: InputDecoration(
+                          labelText: 'Ação',
+                          isDense:   true,
+                          suffixIcon: Icon(
+                            Icons.arrow_drop_down,
+                            color: _acaoHovered
+                                ? AppTheme.primary
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                          focusedBorder: Theme.of(context).inputDecorationTheme.enabledBorder,
+                        ),
+                        mouseCursor: SystemMouseCursors.click,
+                        icon: const SizedBox.shrink(),
+                        items: _acoes
+                            .map((a) => DropdownMenuItem(value: a.$1, child: Text(a.$2)))
+                            .toList(),
+                        onChanged: (v) {
+                          setState(() => _acaoFiltro = v ?? '');
+                          _carregar();
+                        },
+                      ),
                     ),
-                    items: _acoes
-                        .map((a) => DropdownMenuItem(value: a.$1, child: Text(a.$2)))
-                        .toList(),
-                    onChanged: (v) {
-                      setState(() => _acaoFiltro = v ?? '');
-                      _carregar();
-                    },
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -585,14 +623,14 @@ class _CabecalhoTabela extends StatelessWidget {
         children: [
           // Ação
           SizedBox(
-            width: 170,
+            width: 120,
             child: Text('Ação',
                 style: _estiloHeader(context)),
           ),
           // Material (só quando não está filtrado por material)
           if (mostrarMaterial)
             Expanded(
-              flex: 3,
+              flex: 4,
               child: Text('Material', style: _estiloHeader(context)),
             ),
           // Campo alterado
@@ -662,37 +700,60 @@ class _LinhaLog extends StatelessWidget {
         children: [
           // ── Badge de ação ────────────────────────────────────────────────
           SizedBox(
-            width: 170,
+            width: 120,
             child: _BadgeAcao(label: log.acaoLabel, cor: cor),
           ),
 
           // ── Nome do material ─────────────────────────────────────────────
           if (mostrarMaterial)
             Expanded(
-              flex: 3,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              flex: 4,
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    log.materialNome ?? '—',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (log.materialCategoria != null)
-                    Text(
-                      [
-                        log.materialCategoria,
-                        log.materialMedida,
-                        log.materialEspessura,
-                      ].whereType<String>().join(' · '),
-                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
+                  Flexible(
+                    child: Text(
+                      log.materialNome ?? '—',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
+                  ),
+                  if (_dimensoesDoMaterial(log.materialInfoLine).isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        _dimensoesDoMaterial(log.materialInfoLine),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                  if (log.materialExcluido) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'excluído',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

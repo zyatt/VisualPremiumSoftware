@@ -250,6 +250,39 @@ class EstoqueProvider extends ChangeNotifier {
     }
   }
 
+  /// Igual a [fecharOS], mas não altera [_carregando]/[_fechandoOS] nem
+  /// recarrega a lista internamente — não dispara o spinner de tela cheia.
+  /// Usado no fechamento automático em segundo plano (ex.: ao virar o dia),
+  /// onde a lista deve ser atualizada sem "piscar" a UI. Chame
+  /// [recarregarRelacoesOSSilencioso] uma única vez ao final do lote.
+  Future<bool> fecharOSSilencioso(int relacaoOSId) async {
+    try {
+      await _repo.fecharOS(relacaoOSId);
+      if (_relacaoSelecionada?.id == relacaoOSId) {
+        _relacaoSelecionada = null;
+      }
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      return false;
+    }
+  }
+
+  /// Recarrega [_relacoesOS] do servidor e notifica os listeners sem passar
+  /// por [_carregando] — evita o spinner de tela cheia. Usado após um lote
+  /// de fechamentos automáticos silenciosos, para refletir o resultado na
+  /// UI com uma única atualização "suave".
+  Future<void> recarregarRelacoesOSSilencioso({String? busca}) async {
+    try {
+      final novasRelacoes = await _repo.listarTodasRelacoesOS(busca: busca);
+      _relacoesOS = novasRelacoes;
+      notifyListeners();
+    } catch (e) {
+      _erro = _mensagemErro(e);
+      notifyListeners();
+    }
+  }
+
   /// Reverte a OS fechada: muda status para EM_ANDAMENTO no backend.
   /// A OS volta ao controle de estoque e some da página de relatórios.
   Future<bool> reverterOS(String numeroOS) async {

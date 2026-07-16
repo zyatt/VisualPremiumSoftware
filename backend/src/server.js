@@ -18,6 +18,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/auth',                      require('./routes/usuario.routes'));
 app.use('/api/usuarios',              require('./routes/usuario.routes'));
 app.use('/api/materiais',             require('./routes/material.routes'));
+app.use('/api/estoque-producao',      require('./routes/estoqueProducao.routes'));
 app.use('/api/produtos',              require('./routes/produto.routes'));
 app.use('/api/fornecedores',          require('./routes/fornecedor.routes'));
 app.use('/api/orcamentos',            require('./routes/orcamento.routes'));

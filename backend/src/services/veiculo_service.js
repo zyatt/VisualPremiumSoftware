@@ -15,6 +15,20 @@ async function listarVeiculos() {
   });
 }
 
+async function listarVeiculosInativos() {
+  return prisma.veiculo.findMany({
+    where: { ativo: false },
+    include: {
+      manutencoes: {
+        orderBy: { dataEnvio: 'desc' },
+        take: 1,
+      },
+      _count: { select: { manutencoes: true } },
+    },
+    orderBy: { atualizadoEm: 'desc' },
+  });
+}
+
 async function criarVeiculo({ nome, placa }) {
   if (!nome || !placa) {
     const err = new Error('Nome e placa são obrigatórios.');
@@ -33,6 +47,34 @@ async function atualizarVeiculo(id, { nome, placa }) {
 
 async function desativarVeiculo(id) {
   return prisma.veiculo.update({ where: { id }, data: { ativo: false } });
+}
+
+async function reativarVeiculo(id) {
+  return prisma.veiculo.update({ where: { id }, data: { ativo: true } });
+}
+
+/**
+ * Exclui o veículo permanentemente, junto com todo o histórico de
+ * manutenções associado. Só deve ser chamado para veículos já desativados
+ * (a rota garante essa checagem). Ação irreversível.
+ */
+async function excluirVeiculoDefinitivo(id) {
+  const veiculo = await prisma.veiculo.findUnique({ where: { id } });
+  if (!veiculo) {
+    const err = new Error('Veículo não encontrado.');
+    err.status = 404;
+    throw err;
+  }
+  if (veiculo.ativo) {
+    const err = new Error('Desative o veículo antes de excluí-lo definitivamente.');
+    err.status = 400;
+    throw err;
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.manutencaoVeiculo.deleteMany({ where: { veiculoId: id } });
+    return tx.veiculo.delete({ where: { id } });
+  });
 }
 
 // ─── Manutenções ─────────────────────────────────────────────────────────────
@@ -184,9 +226,12 @@ async function resumoGastosVeiculo({ ano } = {}) {
 
 module.exports = {
   listarVeiculos,
+  listarVeiculosInativos,
   criarVeiculo,
   atualizarVeiculo,
   desativarVeiculo,
+  reativarVeiculo,
+  excluirVeiculoDefinitivo,
   listarManutencoes,
   criarManutencao,
   atualizarManutencao,

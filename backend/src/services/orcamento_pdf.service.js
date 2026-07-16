@@ -27,6 +27,22 @@ function formatNumberSmart(value) {
   }).format(v);
 }
 
+/**
+ * Retorna a dimensão formatada como "2x1m" (comprimento x largura).
+ * Se o material já tiver `medida` preenchida, usa só a medida (prioridade).
+ * Se não tiver nem medida nem largura/comprimento, retorna null.
+ */
+function formatDimensao(medida, largura, comprimento) {
+  if (medida && medida.trim()) return medida.trim();
+  const l = largura != null ? Number(largura) : null;
+  const c = comprimento != null ? Number(comprimento) : null;
+  if (!l || !c || l <= 0 || c <= 0) return null;
+  const fmt = (v) => Number.isInteger(v) || Math.abs(v - Math.round(v)) < 0.0001
+    ? Math.round(v).toString()
+    : v.toString().replace('.', ',');
+  return `${fmt(c)}x${fmt(l)}m`;
+}
+
 const C = {
   black:     '#1A1A1A',
   gray:      '#6B7280',
@@ -746,7 +762,8 @@ async function gerarPdfDeItens(dados) {
         doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
            .text(item.materialNome, xMat + 4, tyTop, { width: COL_MAT - 8, lineBreak: true });
 
-        const subparts = [item.materialCategoria, item.materialMedida, item.materialEspessura, item.materialIdentificador]
+        const dimensao = formatDimensao(item.materialMedida, item.materialLargura, item.materialComprimento);
+        const subparts = [item.materialCategoria, dimensao, item.materialEspessura, item.materialIdentificador]
           .filter(Boolean).join(' · ');
         if (subparts) {
           doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)

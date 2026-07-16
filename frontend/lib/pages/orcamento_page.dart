@@ -29,6 +29,26 @@ void _logOrc(String mensagem, {Object? erro, StackTrace? stack, int? level}) {
   );
 }
 
+/// Converte um valor vindo de JSON (pode ser String, int, double ou null)
+/// para double de forma segura, sem lançar exceção de cast.
+double? _parseDoubleOrNull(dynamic value) {
+  if (value == null) return null;
+  if (value is num) return value.toDouble();
+  final str = value.toString().trim();
+  if (str.isEmpty) return null;
+  return double.tryParse(str);
+}
+
+/// Formata a dimensão (largura x comprimento) de um material como "50x1.27m",
+/// mesma convenção usada em [OrcamentoEditorPage] (comprimento x largura,
+/// minúsculo). Retorna null se largura/comprimento não estiverem cadastrados.
+String? _materialDimensaoFormatada(double? largura, double? comprimento) {
+  if (largura == null || comprimento == null || largura <= 0 || comprimento <= 0) return null;
+  String fmt(double v) =>
+      v == v.truncateToDouble() ? v.toInt().toString() : v.toString().replaceAll('.', ',');
+  return '${fmt(comprimento)}x${fmt(largura)}m';
+}
+
 /// Remove prefixos como "Exception:", "HttpException:" que o Dart adiciona
 /// automaticamente ao fazer e.toString() em exceções. Quando o erro é de
 /// conexão (sem internet / servidor fora do ar), retorna uma mensagem
@@ -73,6 +93,24 @@ class _NoCommaFormatter extends TextInputFormatter {
     }
     return newValue;
   }
+}
+
+Widget _badgeContagem(int contagem) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+    decoration: BoxDecoration(
+      color: AppTheme.primary.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Text(
+      '$contagem',
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: AppTheme.primary,
+      ),
+    ),
+  );
 }
 
 class OrcamentoPage extends StatefulWidget {
@@ -744,29 +782,31 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Text('Aguardando Aprovação'),
-                    if (_aguardandoAprovacao.isNotEmpty) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: AppTheme.warning,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          '${_aguardandoAprovacao.length}',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ],
+                    const SizedBox(width: 6),
+                    _badgeContagem(_aguardandoAprovacao.length),
                   ],
                 ),
               ),
-              const Tab(text: 'Aprovados'),
-              const Tab(text: 'Não Aprovados'),
+              Tab(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Aprovados'),
+                    const SizedBox(width: 6),
+                    _badgeContagem(_aprovados.length),
+                  ],
+                ),
+              ),
+              Tab(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Não Aprovados'),
+                    const SizedBox(width: 6),
+                    _badgeContagem(_naoAprovados.length),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -1313,8 +1353,15 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
       final nomeBase = (materialData?['nome'] as String? ?? '').isNotEmpty
           ? materialData!['nome'] as String
           : 'Material excluído';
+      final medida = materialData?['medida'] as String?;
+      final medidaOuDimensao = (medida != null && medida.isNotEmpty)
+          ? medida
+          : _materialDimensaoFormatada(
+              _parseDoubleOrNull(materialData?['largura']),
+              _parseDoubleOrNull(materialData?['comprimento']),
+            );
       final partes = <String>[
-        if ((materialData?['medida'] as String? ?? '').isNotEmpty) materialData!['medida'] as String,
+        if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
         if ((materialData?['espessura'] as String? ?? '').isNotEmpty) materialData!['espessura'] as String,
         if ((materialData?['identificador'] as String? ?? '').isNotEmpty) materialData!['identificador'] as String,
       ];

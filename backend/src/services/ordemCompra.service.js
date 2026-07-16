@@ -79,25 +79,42 @@ const _selectMaterial = {
   medida: true,
   espessura: true,
   identificador: true,
+  largura: true,
+  comprimento: true,
 };
 
 async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
   if (!fornecedorId || !Array.isArray(itens) || itens.length === 0) return;
 
+  // O preço vinculado ao fornecedor (fornecedorMaterial.preco) representa o
+  // valor por "pacote/embalagem" comprado (mesmo conceito do Preço Unitário
+  // no orçamento: valorTotal do item / quantidade de embalagens). Para
+  // materiais com qtdUnidade (ML, grama etc.), item.precoUnitario é o valor
+  // por unidade de medida (ex: Valor/ML), NÃO o valor por embalagem — por
+  // isso precisa ser multiplicado por qtdUnidade aqui. O "último custo de
+  // compra" (ultimoValorPago, no material) continua usando o precoUnitario
+  // bruto em outro ponto do fluxo, então não é afetado por este cálculo.
   const porMaterial = new Map();
   for (const item of itens) {
     const mid = Number(item.materialId);
     if (!mid) continue;
+
+    const qtdUnit = item.qtdUnidade != null ? Number(item.qtdUnidade) : null;
+    const precoUnitBruto = Number(item.precoUnitario ?? 0);
+    const precoPorEmbalagem = (qtdUnit != null && qtdUnit > 0)
+      ? precoUnitBruto * qtdUnit
+      : precoUnitBruto;
+
     const existing = porMaterial.get(mid);
     if (!existing) {
       porMaterial.set(mid, {
         materialId: mid,
         usarM2:     item.usarM2 ?? false,
-        preco:      Number(item.precoUnitario ?? 0),
+        preco:      precoPorEmbalagem,
         precoM2:    Number(item.precoMetroQuadrado ?? 0),
       });
     } else {
-      if (Number(item.precoUnitario ?? 0) > existing.preco) existing.preco = Number(item.precoUnitario);
+      if (precoPorEmbalagem > existing.preco) existing.preco = precoPorEmbalagem;
       if (Number(item.precoMetroQuadrado ?? 0) > existing.precoM2) existing.precoM2 = Number(item.precoMetroQuadrado);
     }
   }

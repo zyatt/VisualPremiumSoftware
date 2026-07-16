@@ -207,8 +207,8 @@ async function atualizar(id, data, editorId, editorNome, editorRole) {
   if (data.nomeCliente     !== undefined) updateData.nomeCliente     = data.nomeCliente;
   if (data.dataNecessidade !== undefined) updateData.dataNecessidade = new Date(data.dataNecessidade);
   if (data.andamento       !== undefined) {
-    if (!['EM_ANDAMENTO', 'FINALIZADO'].includes(data.andamento)) {
-      throw { status: 400, message: 'Andamento inválido. Valores permitidos: EM_ANDAMENTO, FINALIZADO.' };
+    if (!['EM_ANDAMENTO', 'EM_NEGOCIACAO', 'FINALIZADO'].includes(data.andamento)) {
+      throw { status: 400, message: 'Andamento inválido. Valores permitidos: EM_ANDAMENTO, EM_NEGOCIACAO, FINALIZADO.' };
     }
     if (data.andamento === 'FINALIZADO') {
       await _verificarTodosComprados(id);
@@ -249,8 +249,12 @@ async function adicionarMateriais(solicitacaoId, itens, usuarioId, usuarioNome, 
   const sol = await prisma.solicitacaoMaterial.findUnique({ where: { id: solicitacaoId } });
   if (!sol) throw { status: 404, message: 'Solicitação não encontrada' };
 
-  if (sol.usuarioId !== usuarioId && usuarioRole !== 'ADMIN') {
-    throw { status: 403, message: 'Apenas o criador da solicitação ou um administrador pode adicionar materiais.' };
+  // Mesma regra usada para editar/excluir o cabeçalho e os materiais
+  // (ver _autorizarEdicaoMaterial acima): ADMIN, GERENTE ou o próprio
+  // criador da solicitação.
+  const ehAdmin = usuarioRole === 'ADMIN' || usuarioRole === 'GERENTE';
+  if (sol.usuarioId !== usuarioId && !ehAdmin) {
+    throw { status: 403, message: 'Apenas o criador da solicitação, um gerente ou um administrador pode adicionar materiais.' };
   }
 
   if (sol.andamento === 'FINALIZADO') throw { status: 400, message: 'Solicitação já finalizada.' };
@@ -297,12 +301,31 @@ async function adicionarMateriais(solicitacaoId, itens, usuarioId, usuarioNome, 
   return atualizado;
 }
 
-// ─── Marcar item/adicional como comprado ──────────────────────────────────────
-// Qualquer usuário com role ACESSO pode marcar. Só ADMIN pode desmarcar.
-// tipo = 'item' | 'adicional'
-async function marcarComprado(tipo, itemId, usuarioId, usuarioNome, usuarioRole, comprado) {
-  if (comprado === false && usuarioRole !== 'ADMIN') {
-    throw { status: 403, message: 'Apenas administradores podem desmarcar um item como comprado.' };
+// ─── Rótulo amigável de um status de compra, usado no histórico ──────────────
+function _labelStatus(status) {
+  switch (status) {
+    case 'COMPRADO': return 'Comprado';
+    case 'ESTOQUE':   return 'Estoque';
+    default:          return 'Pendente';
+  }
+}
+
+// Deriva o status ('PENDENTE' | 'COMPRADO' | 'ESTOQUE') a partir dos campos
+// booleanos comprado/estoque de um registro (item ou adicional).
+function _statusDe(registro) {
+  if (registro.estoque)  return 'ESTOQUE';
+  if (registro.comprado) return 'COMPRADO';
+  return 'PENDENTE';
+}
+
+// ─── Marcar item/adicional como comprado ou retirado do estoque ──────────────
+// Qualquer usuário com role ACESSO pode marcar. Só ADMIN pode desmarcar (voltar
+// para PENDENTE) ou trocar um status já salvo por outro.
+// tipo   = 'item' | 'adicional'
+// status = 'PENDENTE' | 'COMPRADO' | 'ESTOQUE'
+async function marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioRole, status) {
+  if (!['PENDENTE', 'COMPRADO', 'ESTOQUE'].includes(status)) {
+    throw { status: 400, message: 'Status inválido. Valores permitidos: PENDENTE, COMPRADO, ESTOQUE.' };
   }
 
   const model = tipo === 'item'
@@ -312,29 +335,72 @@ async function marcarComprado(tipo, itemId, usuarioId, usuarioNome, usuarioRole,
   const registro = await model.findUnique({ where: { id: itemId } });
   if (!registro) throw { status: 404, message: 'Item não encontrado.' };
 
+  const statusAnterior = _statusDe(registro);
+
+  // Voltar para PENDENTE (desmarcar) ou trocar um status já salvo por outro
+  // são ações restritas a ADMIN/GERENTE. Sair de PENDENTE para COMPRADO ou
+  // ESTOQUE é permitido a qualquer usuário com acesso à tela.
+  const ehAdmin = usuarioRole === 'ADMIN' || usuarioRole === 'GERENTE';
+  if (statusAnterior !== 'PENDENTE' && statusAnterior !== status && !ehAdmin) {
+    throw {
+      status: 403,
+      message: status === 'PENDENTE'
+        ? 'Apenas administradores podem desmarcar um item já salvo como comprado ou estoque.'
+        : 'Apenas administradores podem alterar um item que já foi marcado como comprado ou estoque.',
+    };
+  }
+
+  if (statusAnterior === status) {
+    // Nada muda — evita gravar log/broadcast à toa.
+    return model.findUnique({ where: { id: itemId }, include: { material: { select: _materialSelect } } });
+  }
+
+  const agora = new Date();
+  const data = {
+    comprado:        status === 'COMPRADO',
+    compradoEm:      status === 'COMPRADO' ? agora : null,
+    compradoPorId:   status === 'COMPRADO' ? usuarioId : null,
+    compradoPorNome: status === 'COMPRADO' ? usuarioNome : null,
+    estoque:         status === 'ESTOQUE',
+    estoqueEm:       status === 'ESTOQUE' ? agora : null,
+    estoquePorId:    status === 'ESTOQUE' ? usuarioId : null,
+    estoquePorNome:  status === 'ESTOQUE' ? usuarioNome : null,
+  };
+
   const atualizado = await model.update({
     where: { id: itemId },
-    data: {
-      comprado,
-      compradoEm:      comprado ? new Date() : null,
-      compradoPorId:   comprado ? usuarioId  : null,
-      compradoPorNome: comprado ? usuarioNome : null,
-    },
+    data,
     include: { material: { select: _materialSelect } },
   });
+
+  // Log de histórico da transição de status (comprado <-> pendente <-> estoque).
+  if (usuarioId) {
+    await prisma.logEdicaoSolicitacao.create({
+      data: {
+        solicitacaoId: registro.solicitacaoId,
+        editorId:      usuarioId,
+        editorNome:    usuarioNome ?? 'Desconhecido',
+        antes:  { status: _labelStatus(statusAnterior) },
+        depois: { status: _labelStatus(status) },
+        item: `${atualizado.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
+      },
+    });
+  }
 
   _broadcast('item_comprado', {
     solicitacaoId: registro.solicitacaoId,
     tipo,
     itemId,
-    comprado,
+    status,
+    comprado: status === 'COMPRADO', // mantido por compatibilidade com clientes antigos
   }, usuarioId);
 
-  // Se marcou como comprado, verifica se todos os itens estão comprados e auto-finaliza
-  if (comprado) {
+  // Se o item passou a estar resolvido (comprado ou estoque), verifica se
+  // todos os materiais da solicitação estão resolvidos e auto-finaliza.
+  if (status === 'COMPRADO' || status === 'ESTOQUE') {
     try {
-      await _verificarTodosComprados(registro.solicitacaoId);
-      // _verificarTodosComprados não lançou: todos comprados — finaliza automaticamente
+      await _verificarTodosResolvidos(registro.solicitacaoId);
+      // _verificarTodosResolvidos não lançou: tudo resolvido — finaliza automaticamente
       const sol = await prisma.solicitacaoMaterial.findUnique({
         where: { id: registro.solicitacaoId },
       });
@@ -355,7 +421,7 @@ async function marcarComprado(tipo, itemId, usuarioId, usuarioNome, usuarioRole,
           },
         });
 
-        console.log(`[Solicitações] Solicitação ${registro.solicitacaoId} auto-finalizada (todos os itens comprados) por ${usuarioNome ?? usuarioId}`);
+        console.log(`[Solicitações] Solicitação ${registro.solicitacaoId} auto-finalizada (todos os itens comprados/estoque) por ${usuarioNome ?? usuarioId}`);
         _broadcast('solicitacao_atualizada', {
           id:          registro.solicitacaoId,
           numeroOS:    sol.numeroOS,
@@ -375,24 +441,37 @@ async function marcarComprado(tipo, itemId, usuarioId, usuarioNome, usuarioRole,
   return atualizado;
 }
 
-// ─── Verificar se todos os materiais estão comprados ─────────────────────────
-async function _verificarTodosComprados(solicitacaoId) {
+// Mantido por compatibilidade: usado internamente e por chamadores antigos
+// que ainda pensam em termos de um booleano "comprado".
+async function marcarComprado(tipo, itemId, usuarioId, usuarioNome, usuarioRole, comprado) {
+  return marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioRole, comprado ? 'COMPRADO' : 'PENDENTE');
+}
+
+async function marcarEstoque(tipo, itemId, usuarioId, usuarioNome, usuarioRole, estoque) {
+  return marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioRole, estoque ? 'ESTOQUE' : 'PENDENTE');
+}
+
+// ─── Verificar se todos os materiais estão comprados ou retirados do estoque ──
+async function _verificarTodosResolvidos(solicitacaoId) {
   const [itens, adicionais] = await Promise.all([
-    prisma.itemSolicitacaoMaterial.findMany({ where: { solicitacaoId }, select: { comprado: true } }),
-    prisma.adicionalSolicitacaoMaterial.findMany({ where: { solicitacaoId }, select: { comprado: true } }),
+    prisma.itemSolicitacaoMaterial.findMany({ where: { solicitacaoId }, select: { comprado: true, estoque: true } }),
+    prisma.adicionalSolicitacaoMaterial.findMany({ where: { solicitacaoId }, select: { comprado: true, estoque: true } }),
   ]);
 
   const todos = [...itens, ...adicionais];
   if (todos.length === 0) return; // sem materiais, pode finalizar
 
-  const pendentes = todos.filter((i) => !i.comprado);
+  const pendentes = todos.filter((i) => !i.comprado && !i.estoque);
   if (pendentes.length > 0) {
     throw {
       status: 400,
-      message: `Não é possível finalizar: ${pendentes.length} material(is) ainda não marcado(s) como comprado.`,
+      message: `Não é possível finalizar: ${pendentes.length} material(is) ainda não marcado(s) como comprado ou estoque.`,
     };
   }
 }
+
+// Alias mantido por compatibilidade com o nome anterior da função.
+const _verificarTodosComprados = _verificarTodosResolvidos;
 
 // ─── Excluir ──────────────────────────────────
 async function excluir(id, usuarioId, usuarioRole) {
@@ -625,6 +704,8 @@ module.exports = {
   atualizar,
   adicionarMateriais,
   marcarComprado,
+  marcarEstoque,
+  marcarStatusCompra,
   atualizarItem,
   excluirItem,
   excluir,

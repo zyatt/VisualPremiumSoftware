@@ -7,6 +7,8 @@ class OrdemCompraItemModel {
   final String? materialMedida;
   final String? materialEspessura;
   final String? materialIdentificador;
+  final double? materialLargura;
+  final double? materialComprimento;
   final String? descricaoItem;
   final String numeroOS;
   /// Quantidade de embalagens/peças compradas (o que o usuário digita como "qtd").
@@ -28,6 +30,8 @@ class OrdemCompraItemModel {
     this.materialMedida,
     this.materialEspessura,
     this.materialIdentificador,
+    this.materialLargura,
+    this.materialComprimento,
     this.descricaoItem,
     required this.numeroOS,
     required this.quantidade,
@@ -57,6 +61,12 @@ class OrdemCompraItemModel {
     materialMedida:         json['material']?['medida'],
     materialEspessura:      json['material']?['espessura'],
     materialIdentificador:  json['material']?['identificador'],
+    materialLargura:        json['material']?['largura'] != null
+        ? double.tryParse(json['material']['largura'].toString())
+        : null,
+    materialComprimento:    json['material']?['comprimento'] != null
+        ? double.tryParse(json['material']['comprimento'].toString())
+        : null,
     descricaoItem:          json['descricaoItem'],
     numeroOS:               json['numeroOS'] ?? '',
     quantidade:             double.tryParse(json['quantidade']?.toString() ?? '0') ?? 0,

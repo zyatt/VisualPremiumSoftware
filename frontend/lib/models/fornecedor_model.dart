@@ -10,9 +10,7 @@ class FornecedorMaterialVinculoModel {
   final double precoMetroQuadrado;
   final bool ativo;
   final String? materialUnidade;
-  /// Largura da chapa/material (m) — usado para calcular preço/m² automaticamente.
   final double? materialLargura;
-  /// Comprimento da chapa/material (m) — usado para calcular preço/m² automaticamente.
   final double? materialComprimento;
 
   FornecedorMaterialVinculoModel({
@@ -31,11 +29,24 @@ class FornecedorMaterialVinculoModel {
     this.materialComprimento,
   });
 
+  /// Formata a dimensão (largura x comprimento) como "50x1.27m" — mesma
+  /// convenção usada nas demais telas (comprimento x largura, minúsculo).
+  String? get _dimensaoFormatada {
+    final l = materialLargura;
+    final c = materialComprimento;
+    if (l == null || c == null || l <= 0 || c <= 0) return null;
+    String fmt(double v) =>
+        v == v.truncateToDouble() ? v.toInt().toString() : v.toString().replaceAll('.', ',');
+    return '${fmt(c)}x${fmt(l)}m';
+  }
+
   String get descricaoCompleta {
     final partes = <String>[];
 
     if (materialMedida != null && materialMedida!.isNotEmpty) {
       partes.add(materialMedida!);
+    } else if (_dimensaoFormatada != null) {
+      partes.add(_dimensaoFormatada!);
     }
 
     if (materialEspessura != null &&
@@ -55,23 +66,17 @@ class FornecedorMaterialVinculoModel {
     return '${materialNome ?? 'Material #$materialId'} · ${partes.join(' · ')}';
   }
 
-  /// Formata um preço com até 6 casas decimais, removendo zeros trailing
-  /// mas mantendo no mínimo 2 casas (ex: 1.5 → "1.50", 0.000123 → "0.000123").
   static String formatarPreco(double valor) {
     if (valor == 0) return '0,00';
     
-    // Formata com 6 casas decimais
     String s = valor.toStringAsFixed(6);
     
-    // Remove zeros trailing, incluindo o ponto se todos os decimais forem zero
     s = s.replaceAll(RegExp(r'\.?0*$'), '');
     
-    // Se não tem ponto decimal, adiciona ,00
     if (!s.contains('.')) {
       return '$s,00';
     }
     
-    // Garante mínimo de 2 casas decimais
     final partes = s.split('.');
     final decimais = partes[1];
     
@@ -79,7 +84,6 @@ class FornecedorMaterialVinculoModel {
       s = '${partes[0]}.${decimais.padRight(2, '0')}';
     }
     
-    // Substitui ponto por vírgula
     return s.replaceAll('.', ',');
   }
 
@@ -113,6 +117,7 @@ class FornecedorModel {
   final String? cnpj;
   final String? razaoSocial;
   final String? nomeVendedor;
+  final String? imagemUrl;
   final bool ativo;
   final List<FornecedorMaterialVinculoModel> materiais;
 
@@ -124,6 +129,7 @@ class FornecedorModel {
     this.cnpj,
     this.razaoSocial,
     this.nomeVendedor,
+    this.imagemUrl,
     required this.ativo,
     this.materiais = const [],
   });
@@ -148,6 +154,7 @@ class FornecedorModel {
         cnpj:           json['cnpj'],
         razaoSocial:    json['razaoSocial'],
         nomeVendedor:   json['nomeVendedor'],
+        imagemUrl:      json['imagemUrl'],
         ativo:          json['ativo'] ?? true,
         materiais:      (json['materiais'] as List? ?? [])
             .map((m) => FornecedorMaterialVinculoModel.fromJson(m as Map<String, dynamic>))

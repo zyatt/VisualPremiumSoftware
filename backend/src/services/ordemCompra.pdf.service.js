@@ -146,30 +146,44 @@ function drawInfoRow(doc, y, label, value) {
 }
 
 function drawAvisoNotaFiscal(doc, y) {
-  const blockH = 52;
-  const padH   = 14;
+  const blockH = 62;
+  const padH   = 16;
+  const padV   = 12;
 
-  fillRect(doc, MARGIN, y, CONTENT_W, blockH, '#FFF1E6');
-  doc.rect(MARGIN, y, CONTENT_W, blockH).strokeColor(C.accent).lineWidth(1.2).stroke();
-  fillRect(doc, MARGIN, y, 5, blockH, C.accent);
+  // Fundo e borda arredondada-like (retângulo com cantos levemente destacados via linha)
+  fillRect(doc, MARGIN, y, CONTENT_W, blockH, '#FFF4EC');
+  doc.rect(MARGIN, y, CONTENT_W, blockH).strokeColor(C.accent).lineWidth(1).stroke();
+  fillRect(doc, MARGIN, y, 4, blockH, C.accent);
 
   const textX = MARGIN + padH;
   const textW = CONTENT_W - padH * 2;
-  const halfW = textW / 2 - 10;
 
-  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(C.accent)
-     .text('ATENÇÃO — ENVIO DA NOTA FISCAL', textX, y + 8, { width: textW, lineBreak: false });
+  // Título com pequeno marcador circular antes do texto
+  const titleY = y + padV;
+  doc.fillColor(C.accent).circle(textX + 2.5, titleY + 5, 2.5).fill();
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(C.accent)
+     .text('ATENÇÃO — ENVIO DA NOTA FISCAL', textX + 12, titleY, { width: textW - 12, lineBreak: false });
 
-  doc.font('Helvetica').fontSize(7.5).fillColor(C.black)
-     .text('Enviar a nota fiscal para o e-mail:', textX, y + 23, { width: halfW, lineBreak: false });
-  doc.font('Helvetica-Bold').fontSize(10).fillColor(C.black)
-     .text('financeiro@visualpremium.com.br', textX, y + 34, { width: halfW, lineBreak: false });
+  const rowY   = titleY + 20;
+  const colGap = 24;
+  const colW   = (textW - colGap) / 2;
+  const col2X  = textX + colW + colGap;
 
-  const rightX = textX + halfW + 20;
-  doc.font('Helvetica').fontSize(7.5).fillColor(C.black)
-     .text('e também para o WhatsApp:', rightX, y + 23, { width: halfW, align: 'right', lineBreak: false });
-  doc.font('Helvetica-Bold').fontSize(10).fillColor(C.black)
-     .text('(42) 9 9830-0088', rightX, y + 34, { width: halfW, align: 'right', lineBreak: false });
+  // Divisor vertical sutil entre as duas colunas
+  doc.strokeColor('#F0C9A8').lineWidth(0.8)
+     .moveTo(textX + colW + colGap / 2, rowY - 2)
+     .lineTo(textX + colW + colGap / 2, rowY + 24)
+     .stroke();
+
+  doc.font('Helvetica').fontSize(7.5).fillColor(C.gray)
+     .text('E-MAIL PARA NOTA FISCAL', textX, rowY, { width: colW, lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(10.5).fillColor(C.black)
+     .text('financeiro@visualpremium.com.br', textX, rowY + 12, { width: colW, lineBreak: false });
+
+  doc.font('Helvetica').fontSize(7.5).fillColor(C.gray)
+     .text('WHATSAPP PARA NOTA FISCAL', col2X, rowY, { width: colW, lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(10.5).fillColor(C.black)
+     .text('(42) 9 9830-0088', col2X, rowY + 12, { width: colW, lineBreak: false });
 
   return y + blockH;
 }
@@ -212,32 +226,17 @@ function drawTotalBox(doc, y, valorTotal) {
 }
 
 function drawItensTable(doc, itens, startY) {
-  const temUnitario = itens.some(i => !i.usarM2);
-  const temM2       = itens.some(i =>  i.usarM2);
-
   const itensComQtdUnidade  = itens.filter(i => !i.usarM2 && i.qtdUnidade != null && Number(i.qtdUnidade) > 0);
   const temQtdUnidadeGlobal = itensComQtdUnidade.length > 0;
 
-  const unidadesQtdUnidade = new Set(itensComQtdUnidade.map(i => (i.material?.unidade ?? '').toUpperCase().trim()));
-  const unidadeQtdUnidadeUnica = unidadesQtdUnidade.size === 1 ? [...unidadesQtdUnidade][0] : null;
-  const labelQtdPorUnid = unidadeQtdUnidadeUnica ? `${unidadeQtdUnidadeUnica} POR UNIDADE` : 'QTD/UNID.';
-
-  const unidadesPrecoUnit = new Set(
-    itens.filter(i => !i.usarM2).map(i => (i.material?.unidade ?? '').toUpperCase().trim())
-  );
-  const unidadePrecoUnitUnica = unidadesPrecoUnit.size === 1 ? [...unidadesPrecoUnit][0] : null;
-  const labelPrecoUnit = unidadePrecoUnitUnica ? `VALOR/${unidadePrecoUnitUnica}` : 'PREÇO UNIT.';
-
-  const extraUnit = !temUnitario ? 78 : 0;
-  const extraM2   = !temM2       ? 68 : 0;
+  const labelQtdPorUnid = 'QTD/UNIDADE';
 
   const cols = [
     { key: 'material',   label: 'MATERIAL',      w: temQtdUnidadeGlobal ? 120 : 190, hAlign: 'left',   cAlign: 'left',   pad: 5 },
     { key: 'qtd',        label: 'QTD',           w: 55,                 hAlign: 'center', cAlign: 'center', pad: 3 },
     ...(temQtdUnidadeGlobal ? [{ key: 'qtdPorUnid', label: labelQtdPorUnid, w: 70, hAlign: 'center', cAlign: 'center', pad: 3 }] : []),
     { key: 'unidade',    label: 'UNIDADE',       w: 44,                 hAlign: 'center', cAlign: 'center', pad: 3 },
-    ...(temUnitario ? [{ key: 'precoUnit',  label: labelPrecoUnit, w: 78 + extraM2, hAlign: 'center', cAlign: 'center', pad: 3 }] : []),
-    ...(temM2       ? [{ key: 'precoM2',    label: 'PREÇO M²',    w: 68 + extraUnit, hAlign: 'center', cAlign: 'center', pad: 3 }] : []),
+    { key: 'preco',      label: 'PREÇO',         w: 110,                hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'precoTotal', label: 'VALOR TOTAL (R$)', w: 88,             hAlign: 'center', cAlign: 'center', pad: 5 },
   ];
 
@@ -285,7 +284,7 @@ function drawItensTable(doc, itens, startY) {
 
   itens.forEach((item, idx) => {
     const nome    = item.material?.nome?? (item.descricaoItem?.trim() || '(material excluído)');
-    const unidade = item.material?.unidade ?? '—';
+    const unidade = (item.material?.unidade ?? '—').toLowerCase();
     const descricao = item.descricaoItem?.trim() || null;
 
     const qtdUnidadeNum = item.qtdUnidade != null ? Number(item.qtdUnidade) : null;
@@ -344,8 +343,7 @@ function drawItensTable(doc, itens, startY) {
     const C1 = cols.find(c => c.key === 'qtd');
     const Cqu = cols.find(c => c.key === 'qtdPorUnid');
     const C2 = cols.find(c => c.key === 'unidade');
-    const C3 = cols.find(c => c.key === 'precoUnit');
-    const C4 = cols.find(c => c.key === 'precoM2');
+    const C3 = cols.find(c => c.key === 'preco');
     const C5 = cols.find(c => c.key === 'precoTotal');
 
     doc.save();
@@ -377,17 +375,21 @@ function drawItensTable(doc, itens, startY) {
        .text(unidade, C2.x + C2.pad, tySingle,
              { width: C2.w - C2.pad * 2, align: 'center', lineBreak: false });
 
-    if (C3 && !item.usarM2) {
+    if (C3) {
+      let precoTexto = '—';
+      if (item.usarM2) {
+        if (item.precoMetroQuadrado != null) {
+          precoTexto = `${formatCurrencyPreciso(item.precoMetroQuadrado)} / m²`;
+        }
+      } else {
+        const unidadeSufixo = (item.material?.unidade ?? '').trim().toLowerCase();
+        precoTexto = unidadeSufixo
+          ? `${formatCurrencyPreciso(item.precoUnitario)} / ${unidadeSufixo}`
+          : formatCurrencyPreciso(item.precoUnitario);
+      }
       doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-         .text(formatCurrencyPreciso(item.precoUnitario), C3.x + C3.pad, tySingle,
+         .text(precoTexto, C3.x + C3.pad, tySingle,
                { width: C3.w - C3.pad * 2, align: 'center', lineBreak: false });
-    }
-
-    if (C4 && item.usarM2) {
-      doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-         .text(item.precoMetroQuadrado != null ? formatCurrencyPreciso(item.precoMetroQuadrado) : '—',
-               C4.x + C4.pad, tySingle,
-               { width: C4.w - C4.pad * 2, align: 'center', lineBreak: false });
     }
 
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
@@ -492,7 +494,7 @@ function drawFooter(doc, pageNum, empresaNome = 'Visual Premium') {
   const y = PAGE_H - 36;
   hline(doc, y - 8);
   doc.font('Helvetica').fontSize(7).fillColor(C.lightGray)
-     .text(`Gerado em ${formatDate(new Date())}   •   ${empresaNome} Estoque e Compras`,
+     .text(`Gerado em ${formatDate(new Date())}   •   ${empresaNome}`,
            MARGIN, y, { width: CONTENT_W - 60, align: 'left' })
      .text(`Página ${pageNum}`, MARGIN, y, { width: CONTENT_W, align: 'right' });
 }

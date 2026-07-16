@@ -117,7 +117,7 @@ async function listarPorMaterial(materialId) {
 }
 
 async function criar(data) {
-  const { nomeFantasia, tipoFornecedor, telefone, cnpj, razaoSocial, nomeVendedor } = data;
+  const { nomeFantasia, tipoFornecedor, telefone, cnpj, razaoSocial, nomeVendedor, imagemUrl } = data;
   if (!nomeFantasia?.trim()) throw { status: 400, message: 'nomeFantasia é obrigatório' };
 
   return prisma.fornecedor.create({
@@ -128,11 +128,14 @@ async function criar(data) {
       cnpj: cnpj?.replace(/\D/g, '') || null,
       razaoSocial: razaoSocial?.trim() ?? null,
       nomeVendedor: nomeVendedor?.trim() ?? null,
+      imagemUrl: imagemUrl?.trim() || null,
     },
   });
 }
 
 async function atualizar(id, data) {
+  data = data || {};
+
   const atual = await prisma.fornecedor.findUnique({ where: { id } });
   if (!atual) throw { status: 404, message: 'Fornecedor não encontrado' };
 
@@ -143,6 +146,7 @@ async function atualizar(id, data) {
   if (data.cnpj          !== undefined) updateData.cnpj          = data.cnpj?.replace(/\D/g, '') || null;
   if (data.razaoSocial   !== undefined) updateData.razaoSocial   = data.razaoSocial?.trim() ?? null;
   if (data.nomeVendedor  !== undefined) updateData.nomeVendedor  = data.nomeVendedor?.trim() ?? null;
+  if (data.imagemUrl     !== undefined) updateData.imagemUrl     = data.imagemUrl?.trim() || null;
 
   return prisma.fornecedor.update({ where: { id }, data: updateData });
 }

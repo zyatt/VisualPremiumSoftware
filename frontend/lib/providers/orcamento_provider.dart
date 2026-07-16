@@ -116,7 +116,7 @@ class ItemOrcamentoData {
     if (l == null || c == null || l <= 0 || c <= 0) return null;
     String fmt(double v) =>
         v == v.truncateToDouble() ? v.toInt().toString() : v.toString().replaceAll('.', ',');
-    return '${fmt(c)}X${fmt(l)}M';
+    return '${fmt(c)}x${fmt(l)}m';
   }
 
   Map<String, dynamic> toJson() => {
@@ -442,7 +442,10 @@ class OrcamentoProvider extends ChangeNotifier {
       final old = tabAtual!.itens[i];
       final m = porId[old.materialId];
       if (m == null) continue;
-      if (old.estoqueMinimo == m.estoqueMinimo &&
+      if (old.materialNome == m.nome &&
+          old.materialUnidade == m.unidade &&
+          old.materialCategoria == m.categoria &&
+          old.estoqueMinimo == m.estoqueMinimo &&
           old.materialLargura == m.largura &&
           old.materialComprimento == m.comprimento &&
           old.materialMedida == m.medida &&
@@ -454,9 +457,9 @@ class OrcamentoProvider extends ChangeNotifier {
       tabAtual!.itens[i] = ItemOrcamentoData(
         itemId: old.itemId,
         materialId: old.materialId,
-        materialNome: old.materialNome,
-        materialUnidade: old.materialUnidade,
-        materialCategoria: old.materialCategoria,
+        materialNome: m.nome,
+        materialUnidade: m.unidade,
+        materialCategoria: m.categoria,
         materialMedida: m.medida,
         materialEspessura: m.espessura,
         materialIdentificador: m.identificador,

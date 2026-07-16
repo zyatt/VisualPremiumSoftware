@@ -6,6 +6,8 @@ class MovimentacaoModel {
   final String? materialIdentificador;
   final String? materialMedida;
   final String? materialEspessura;
+  final double? materialLargura;
+  final double? materialComprimento;
   final String tipo;
   final double quantidade;
   final String numeroOS;
@@ -33,6 +35,8 @@ class MovimentacaoModel {
     this.materialIdentificador,
     this.materialMedida,
     this.materialEspessura,
+    this.materialLargura,
+    this.materialComprimento,
     required this.tipo,
     required this.quantidade,
     required this.numeroOS,
@@ -69,6 +73,12 @@ class MovimentacaoModel {
         materialIdentificador: json['material']?['identificador'],
         materialMedida:        json['material']?['medida'],
         materialEspessura:     json['material']?['espessura'],
+        materialLargura:       json['material']?['largura'] != null
+            ? double.tryParse(json['material']['largura'].toString())
+            : null,
+        materialComprimento:   json['material']?['comprimento'] != null
+            ? double.tryParse(json['material']['comprimento'].toString())
+            : null,
         tipo:                  json['tipo'],
         quantidade:            double.tryParse(json['quantidade'].toString()) ?? 0,
         numeroOS:              json['numeroOS']?.toString() ?? '',

@@ -11,6 +11,7 @@ import '../providers/estoque_provider.dart';
 import '../providers/relatorio_os_provider.dart';
 import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
+import 'controle_estoque_page.dart' show formatarMedidaOuDimensoes, formatarUnidadeExibicao;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -1711,7 +1712,7 @@ class _MovimentacaoSection extends StatelessWidget {
                   );
 
                   final unidLabel = (ref.materialUnidade ?? '').isNotEmpty
-                      ? 'por ${ref.materialUnidade}'
+                      ? 'por ${formatarUnidadeExibicao(ref.materialUnidade)}'
                       : null;
 
                   return Column(
@@ -1727,44 +1728,35 @@ class _MovimentacaoSection extends StatelessWidget {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    ref.materialNome,
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w500,
-                                      color: Theme.of(context).colorScheme.onSurface,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if ((ref.materialUnidade ?? '').isNotEmpty)
-                                    Text(
-                                      ref.materialUnidade!,
-                                      style: TextStyle(
-                                          fontSize: 11,
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  if ([
-                                        ref.materialIdentificador,
-                                        ref.materialMedida,
-                                        ref.materialEspessura,
-                                      ].any((v) => v != null && v.isNotEmpty))
-                                    Text(
-                                      [
-                                        if ((ref.materialIdentificador ?? '').isNotEmpty)
-                                          ref.materialIdentificador!,
-                                        if ((ref.materialMedida ?? '').isNotEmpty)
-                                          ref.materialMedida!,
-                                        if ((ref.materialEspessura ?? '').isNotEmpty)
-                                          ref.materialEspessura!,
-                                      ].join(' · '),
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                        fontWeight: FontWeight.w500,
+                                  Builder(builder: (_) {
+                                    final medidaOuDimensao = (ref.materialMedida ?? '').isNotEmpty
+                                        ? ref.materialMedida
+                                        : formatarMedidaOuDimensoes(
+                                            medida:      null,
+                                            largura:     ref.materialLargura,
+                                            comprimento: ref.materialComprimento,
+                                          );
+                                    final detalhe = [
+                                      if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
+                                      if ((ref.materialEspessura ?? '').isNotEmpty) ref.materialEspessura!,
+                                      if ((ref.materialIdentificador ?? '').isNotEmpty) ref.materialIdentificador!,
+                                    ].join(' · ');
+                                    return Text.rich(
+                                      TextSpan(
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                          color: Theme.of(context).colorScheme.onSurface,
+                                        ),
+                                        children: [
+                                          TextSpan(text: ref.materialNome),
+                                          if (detalhe.isNotEmpty)
+                                            TextSpan(text: '  ·  $detalhe'),
+                                        ],
                                       ),
                                       overflow: TextOverflow.ellipsis,
-                                    ),
+                                    );
+                                  }),
                                   // Observações únicas do grupo
                                   ...grupo
                                       .where((m) => m.observacao != null && m.observacao!.isNotEmpty)
@@ -1788,7 +1780,7 @@ class _MovimentacaoSection extends StatelessWidget {
                             SizedBox(
                               width: 80,
                               child: Text(
-                                '$qtdStr ${ref.materialUnidade ?? ''}',
+                                '$qtdStr ${formatarUnidadeExibicao(ref.materialUnidade)}',
                                 textAlign: TextAlign.right,
                                 style: TextStyle(
                                     fontSize: 13,

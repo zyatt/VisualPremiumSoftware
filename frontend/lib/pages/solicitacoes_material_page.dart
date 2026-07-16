@@ -12,8 +12,80 @@ import '../providers/material_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_client.dart';
-import '../pages/controle_estoque_page.dart' show MaterialFormDialog;
+import '../pages/controle_estoque_page.dart' show MaterialFormDialog, formatarUnidadeExibicao, formatarMedidaOuDimensoes;
 import '../widgets/escolher_usuario_chat_dialog.dart';
+
+class _UpperCaseFormatter extends TextInputFormatter {
+  static final _acentos = {
+    'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A',
+    'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a',
+    'È': 'E', 'É': 'E', 'Ê': 'E', 'Ë': 'E',
+    'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
+    'Ì': 'I', 'Í': 'I', 'Î': 'I', 'Ï': 'I',
+    'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
+    'Ò': 'O', 'Ó': 'O', 'Ô': 'O', 'Õ': 'O', 'Ö': 'O',
+    'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
+    'Ù': 'U', 'Ú': 'U', 'Û': 'U', 'Ü': 'U',
+    'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
+    'Ç': 'C', 'ç': 'c',
+    'Ñ': 'N', 'ñ': 'n',
+  };
+
+  static String _removerAcentos(String s) =>
+      s.split('').map((c) => _acentos[c] ?? c).join();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    // Remove vírgulas antes de qualquer outra transformação
+    final semVirgula = newValue.text.replaceAll(',', '');
+    final texto = _removerAcentos(semVirgula).toUpperCase();
+    final sel = newValue.selection.copyWith(
+      baseOffset:  newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
+/// Formatter para os campos Medida e Espessura:
+/// - remove acentuação e força maiúsculas (igual ao _UpperCaseFormatter)
+/// - converte vírgula em ponto
+/// - permite apenas 1 ponto POR NÚMERO (bloqueia pontos repetidos/seguidos
+///   dentro do mesmo número, ex.: "1..5" ou "1.2.3"), mas preserva múltiplos
+///   números na mesma medida, ex.: "2.44x1.22m" (dois números, um ponto cada)
+class _MedidaEspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    // 1) Vírgula -> ponto
+    var texto = newValue.text.replaceAll(',', '.');
+
+    // 2) Remove acentos e força minúsculas
+    texto = _UpperCaseFormatter._removerAcentos(texto).toLowerCase();
+
+    // 3) Para cada bloco de dígitos+pontos (um "número"), permite apenas o
+    //    primeiro ponto e remove os demais. Não mexe no que não é dígito/ponto
+    //    (letras, "x", espaços, etc.), preservando a separação entre números.
+    texto = texto.replaceAllMapped(RegExp(r'[\d.]+'), (m) {
+      final partes = m.group(0)!.split('.');
+      if (partes.length > 2) {
+        return '${partes[0]}.${partes.sublist(1).join('')}';
+      }
+      return m.group(0)!;
+    });
+
+    final sel = newValue.selection.copyWith(
+      baseOffset:  newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
 
 class SolicitacoesMaterialPage extends StatefulWidget {
   const SolicitacoesMaterialPage({super.key});
@@ -30,11 +102,16 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
   Timer? _debounceTimer;
   late TabController _tabController;
 
+  // ── Paginação (independente por aba) ─────────────────────────────────────
+  static const int _itensPorPagina = 50;
+  int _paginaEmAndamento = 0;
+  int _paginaFinalizadas = 0;
+
   // ── Totais globais (sem filtro) ──────────────────────────────────────────
   // Capturados na primeira carga (sem busca/andamento) e atualizados sempre
   // que o usuário limpa todos os filtros.
   int _totalItensGlobal     = 0;
-  int _totalCompradosGlobal = 0;
+  int _totalResolvidosGlobal = 0;
   bool _totaisGlobaisCarregados = false;
 
   // Evita disparar a busca+abertura da solicitação pendente (vinda de um
@@ -43,6 +120,19 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
   // addPostFrameCallback abaixo, mas o id só é consumido do provider depois
   // que a busca termina.
   bool _abrindoSolicitacaoPendente = false;
+
+  // Guardamos a referência ao provider (não o BuildContext) para poder
+  // remover o listener com segurança em dispose(). Nunca se deve chamar
+  // context.read<T>() dentro de dispose(): se a página estiver sendo
+  // desmontada porque o usuário deslogou/trocou de usuário (o que destrói
+  // toda a árvore do StatefulShellRoute no mesmo frame em que o provider
+  // dá notifyListeners() em resetarConexao()), o elemento já pode estar
+  // inativo nesse ponto — e o lookup do InheritedWidget feito por
+  // context.read() lança "Looking up a deactivated widget's ancestor is
+  // unsafe". Capturar a referência em didChangeDependencies() (chamado
+  // logo após initState, com o context ainda garantidamente ativo) evita
+  // esse lookup tardio.
+  SolicitacaoMaterialProvider? _solicitacaoProviderRef;
 
   // Nota: quem controla "página aberta" (badge, marcar como visualizado)
   // é o AppShell — via SolicitacaoMaterialProvider.definirPaginaVisivel(),
@@ -60,14 +150,85 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
         _atualizarTotaisGlobais();
       }
     });
+
+    // Escuta o provider diretamente (em vez de depender só de
+    // context.watch() dentro de build()) para a abertura pendente vinda de
+    // um encaminhamento no chat. Motivo: esta página vive dentro de um
+    // IndexedStack/StatefulShellBranch (ver nota acima) e, em produção,
+    // context.go('/solicitacoes-material') pode apenas trocar qual branch
+    // está visível sem necessariamente reconstruir esta página no mesmo
+    // frame em que solicitarAberturaSolicitacao() chama notifyListeners() —
+    // um addListener aqui garante que reagimos ao evento assim que ele
+    // ocorre, independente de esta página estar prestes a (re)construir por
+    // conta própria. Sem isso, o valor ficava "parado" no provider até
+    // algo mais (ex.: o botão Atualizar) forçar um rebuild que finalmente
+    // o lesse dentro de build().
+    context.read<SolicitacaoMaterialProvider>().addListener(_onProviderChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Captura a referência do provider aqui, e não em dispose(): neste
+    // ponto o context está garantidamente ativo (didChangeDependencies só
+    // roda com o elemento montado), então o lookup do InheritedWidget é
+    // seguro. Guardamos o objeto do provider (não o context) para usar em
+    // dispose() sem precisar de um novo lookup na árvore.
+    _solicitacaoProviderRef = context.read<SolicitacaoMaterialProvider>();
+  }
+
+  void _onProviderChanged() {
+    _tentarAbrirSolicitacaoPendente();
   }
 
   @override
   void dispose() {
+    // Usa a referência guardada em didChangeDependencies() em vez de
+    // context.read() aqui — ver comentário no campo _solicitacaoProviderRef
+    // para o motivo (evita "Looking up a deactivated widget's ancestor is
+    // unsafe" quando a página é desmontada junto com uma troca de
+    // usuário/logout).
+    _solicitacaoProviderRef?.removeListener(_onProviderChanged);
     _debounceTimer?.cancel();
     _buscaCtrl.dispose();
     _tabController.dispose();
     super.dispose();
+  }
+
+  /// Consome `solicitacaoParaAbrirPendente` (se houver) e abre o diálogo de
+  /// visualização. Chamado tanto pelo listener direto do provider
+  /// (_onProviderChanged) quanto, redundantemente, pelo próprio build()
+  /// abaixo — o que ocorrer primeiro processa o id; a flag
+  /// _abrindoSolicitacaoPendente evita disparo duplicado entre as duas vias.
+  void _tentarAbrirSolicitacaoPendente() {
+    if (!mounted) return;
+    final provider = context.read<SolicitacaoMaterialProvider>();
+    final solicitacaoPendenteId = provider.solicitacaoParaAbrirPendente;
+    if (solicitacaoPendenteId == null || _abrindoSolicitacaoPendente) return;
+
+    _abrindoSolicitacaoPendente = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      provider.consumirSolicitacaoParaAbrirPendente();
+      final solicitacao = await provider.buscarPorId(solicitacaoPendenteId);
+      _abrindoSolicitacaoPendente = false;
+      if (!mounted || !context.mounted) return;
+      if (solicitacao == null) {
+        // buscarPorId falhou (rede, token expirado, solicitação excluída
+        // etc.) — em produção isso é bem mais comum que em dev (rede
+        // local/rápida), e sem este aviso o usuário só via a troca de aba
+        // acontecer sem nenhum diálogo abrir, sem nenhuma pista do motivo.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              provider.erro ?? 'Não foi possível abrir a solicitação.',
+            ),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+        return;
+      }
+      _abrirFormSolicitacao(solicitacao);
+    });
   }
 
   void _aplicarFiltros() {
@@ -75,6 +236,10 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
           busca: _buscaCtrl.text.trim(),
           andamento: _andamentoFiltro.isEmpty ? null : _andamentoFiltro,
         );
+    setState(() {
+      _paginaEmAndamento = 0;
+      _paginaFinalizadas = 0;
+    });
     // Quando não há filtro ativo, a lista resultante é a global — captura os totais
     final semFiltro = _buscaCtrl.text.trim().isEmpty && _andamentoFiltro.isEmpty;
     if (semFiltro) {
@@ -88,11 +253,11 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     if (!mounted) return;
     final sols = context.read<SolicitacaoMaterialProvider>().solicitacoes;
     if (sols.isEmpty && _totaisGlobaisCarregados) return;
-    final itens     = sols.fold<int>(0, (s, sol) => s + sol.totalMateriais);
-    final comprados = sols.fold<int>(0, (s, sol) => s + sol.totalComprados);
+    final itens      = sols.fold<int>(0, (s, sol) => s + sol.totalMateriais);
+    final resolvidos = sols.fold<int>(0, (s, sol) => s + sol.totalResolvidos);
     setState(() {
       _totalItensGlobal     = itens;
-      _totalCompradosGlobal = comprados;
+      _totalResolvidosGlobal = resolvidos;
       _totaisGlobaisCarregados = true;
     });
   }
@@ -118,22 +283,13 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
   Widget build(BuildContext context) {
     // ── Abertura pendente vinda de um encaminhamento no chat ────────────────
     // Ao tocar no card de uma solicitação (ou material de uma solicitação)
-    // encaminhado no chat, o provider guarda o id aqui. Buscamos a
-    // solicitação completa e abrimos o diálogo de visualização assim que
-    // esta página estiver visível.
-    final solicitacaoPendenteId =
-        context.watch<SolicitacaoMaterialProvider>().solicitacaoParaAbrirPendente;
-    if (solicitacaoPendenteId != null && !_abrindoSolicitacaoPendente) {
-      _abrindoSolicitacaoPendente = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        final provider = context.read<SolicitacaoMaterialProvider>();
-        provider.consumirSolicitacaoParaAbrirPendente();
-        final solicitacao = await provider.buscarPorId(solicitacaoPendenteId);
-        _abrindoSolicitacaoPendente = false;
-        if (!mounted || solicitacao == null) return;
-        _abrirFormSolicitacao(solicitacao);
-      });
-    }
+    // encaminhado no chat, o provider guarda o id aqui. A escuta principal
+    // acontece via addListener em initState (mais confiável em produção —
+    // ver comentário lá); este watch() é apenas uma rede de segurança
+    // redundante para quando build() roda por outro motivo enquanto ainda
+    // há um id pendente não consumido.
+    context.watch<SolicitacaoMaterialProvider>().solicitacaoParaAbrirPendente;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _tentarAbrirSolicitacaoPendente());
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -196,8 +352,8 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
             // ── Banner de totais globais (independente de filtro) ────────────
             if (_totaisGlobaisCarregados && _totalItensGlobal > 0) ...[
               _BannerTotaisGlobais(
-                totalItens:     _totalItensGlobal,
-                totalComprados: _totalCompradosGlobal,
+                totalItens:      _totalItensGlobal,
+                totalResolvidos: _totalResolvidosGlobal,
               ),
               const SizedBox(height: 12),
             ],
@@ -256,10 +412,12 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
               builder: (_, provider, __) {
                 final emAndamento = provider.solicitacoes
                     .where((s) => s.andamento != 'FINALIZADO')
-                    .toList();
+                    .toList()
+                  ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
                 final finalizadas = provider.solicitacoes
                     .where((s) => s.andamento == 'FINALIZADO')
-                    .toList();
+                    .toList()
+                  ..sort((a, b) => b.atualizadoEm.compareTo(a.atualizadoEm));
                 return Container(
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surface,
@@ -344,15 +502,17 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                   }
                   final emAndamento = provider.solicitacoes
                       .where((s) => s.andamento != 'FINALIZADO')
-                      .toList();
+                      .toList()
+                    ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
                   final finalizadas = provider.solicitacoes
                       .where((s) => s.andamento == 'FINALIZADO')
-                      .toList();
+                      .toList()
+                    ..sort((a, b) => b.atualizadoEm.compareTo(a.atualizadoEm));
                   return TabBarView(
                     controller: _tabController,
                     children: [
-                      _buildLista(emAndamento, 'Nenhuma solicitação em andamento'),
-                      _buildLista(finalizadas, 'Nenhuma solicitação finalizada'),
+                      _buildLista(emAndamento, 'Nenhuma solicitação em andamento', _Aba.emAndamento),
+                      _buildLista(finalizadas, 'Nenhuma solicitação finalizada', _Aba.finalizadas),
                     ],
                   );
                 },
@@ -364,7 +524,8 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     );
   }
 
-  Widget _buildLista(List<SolicitacaoMaterialModel> lista, String mensagemVazia) {
+  Widget _buildLista(
+      List<SolicitacaoMaterialModel> lista, String mensagemVazia, _Aba aba) {
     if (lista.isEmpty) {
       return Center(
         child: Column(
@@ -380,13 +541,213 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
         ),
       );
     }
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(top: 16),
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        child: _TabelaSolicitacoes(
-          solicitacoes: lista,
-          onAbrir: _abrirFormSolicitacao,
+
+    final paginaAtual = aba == _Aba.emAndamento ? _paginaEmAndamento : _paginaFinalizadas;
+    final totalPaginas = (lista.length / _itensPorPagina).ceil();
+    final paginaSegura = paginaAtual.clamp(0, (totalPaginas - 1).clamp(0, 999));
+    final inicio = paginaSegura * _itensPorPagina;
+    final fim = (inicio + _itensPorPagina).clamp(0, lista.length);
+    final paginados = lista.sublist(inicio, fim);
+
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(top: 16),
+            child: Card(
+              clipBehavior: Clip.antiAlias,
+              child: _TabelaSolicitacoes(
+                solicitacoes: paginados,
+                onAbrir: _abrirFormSolicitacao,
+              ),
+            ),
+          ),
+        ),
+        if (totalPaginas > 1) ...[
+          const SizedBox(height: 12),
+          _BarraPaginacao(
+            paginaAtual: paginaSegura,
+            totalPaginas: totalPaginas,
+            totalItens: lista.length,
+            itensPorPagina: _itensPorPagina,
+            onPaginaChanged: (p) => setState(() {
+              if (aba == _Aba.emAndamento) {
+                _paginaEmAndamento = p;
+              } else {
+                _paginaFinalizadas = p;
+              }
+            }),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+enum _Aba { emAndamento, finalizadas }
+
+class _BarraPaginacao extends StatelessWidget {
+  final int paginaAtual;
+  final int totalPaginas;
+  final int totalItens;
+  final int itensPorPagina;
+  final void Function(int) onPaginaChanged;
+
+  const _BarraPaginacao({
+    required this.paginaAtual,
+    required this.totalPaginas,
+    required this.totalItens,
+    required this.itensPorPagina,
+    required this.onPaginaChanged,
+  });
+
+  List<int> _paginas() {
+    if (totalPaginas <= 7) return List.generate(totalPaginas, (i) => i);
+    final Set<int> vis = {0, totalPaginas - 1, paginaAtual};
+    if (paginaAtual > 0) vis.add(paginaAtual - 1);
+    if (paginaAtual < totalPaginas - 1) vis.add(paginaAtual + 1);
+    final sorted = vis.toList()..sort();
+    final List<int> result = [];
+    for (int i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.add(-1);
+      result.add(sorted[i]);
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inicio = paginaAtual * itensPorPagina + 1;
+    final fim = ((paginaAtual + 1) * itensPorPagina).clamp(0, totalItens);
+    final paginas = _paginas();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'Exibindo $inicio–$fim de $totalItens solicitações',
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _BotaoPagina(
+                icon: Icons.chevron_left,
+                tooltip: 'Página anterior',
+                enabled: paginaAtual > 0,
+                onTap: () => onPaginaChanged(paginaAtual - 1),
+              ),
+              const SizedBox(width: 4),
+              for (final p in paginas) ...[
+                if (p == -1)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text('…', style: TextStyle(color: Theme.of(context).colorScheme.outline)),
+                  )
+                else
+                  _BotaoNumeroPagina(
+                    numero: p,
+                    ativa: p == paginaAtual,
+                    onTap: () => onPaginaChanged(p),
+                  ),
+                const SizedBox(width: 4),
+              ],
+              _BotaoPagina(
+                icon: Icons.chevron_right,
+                tooltip: 'Próxima página',
+                enabled: paginaAtual < totalPaginas - 1,
+                onTap: () => onPaginaChanged(paginaAtual + 1),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BotaoPagina extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _BotaoPagina({
+    required this.icon,
+    required this.tooltip,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: enabled
+                  ? Theme.of(context).colorScheme.outlineVariant
+                  : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
+            ),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: enabled
+                ? Theme.of(context).colorScheme.onSurfaceVariant
+                : Theme.of(context).colorScheme.outline,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BotaoNumeroPagina extends StatelessWidget {
+  final int numero;
+  final bool ativa;
+  final VoidCallback onTap;
+
+  const _BotaoNumeroPagina({
+    required this.numero,
+    required this.ativa,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: ativa ? null : onTap,
+      mouseCursor: ativa ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: ativa ? AppTheme.primary : Colors.transparent,
+          border: Border.all(
+            color: ativa ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '${numero + 1}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
+            color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
       ),
     );
@@ -411,18 +772,18 @@ String _resolverUrl(String url) {
 
 class _BannerTotaisGlobais extends StatelessWidget {
   final int totalItens;
-  final int totalComprados;
+  final int totalResolvidos;
 
   const _BannerTotaisGlobais({
     required this.totalItens,
-    required this.totalComprados,
+    required this.totalResolvidos,
   });
 
   @override
   Widget build(BuildContext context) {
-    final pendentes  = totalItens - totalComprados;
+    final pendentes  = totalItens - totalResolvidos;
     final todosOk    = pendentes == 0 && totalItens > 0;
-    final progresso  = totalItens == 0 ? 0.0 : totalComprados / totalItens;
+    final progresso  = totalItens == 0 ? 0.0 : totalResolvidos / totalItens;
     final corPrimary = todosOk ? const Color(0xFF15803D) : AppTheme.primary;
 
     return Container(
@@ -456,8 +817,8 @@ class _BannerTotaisGlobais extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 todosOk
-                    ? 'Todos comprados ✓'
-                    : '$totalComprados/$totalItens comprados  ·  $pendentes pendente${pendentes == 1 ? '' : 's'}',
+                    ? 'Todos resolvidos ✓'
+                    : '$totalResolvidos/$totalItens resolvidos  ·  $pendentes pendente${pendentes == 1 ? '' : 's'}',
                 style: TextStyle(
                   fontSize: 11.5,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -613,7 +974,7 @@ class _LinhaSolicitacaoState extends State<_LinhaSolicitacao> {
                           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 2),
                       LinearProgressIndicator(
-                        value: sol.totalMateriais == 0 ? 0 : sol.totalComprados / sol.totalMateriais,
+                        value: sol.totalMateriais == 0 ? 0 : sol.totalResolvidos / sol.totalMateriais,
                         backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                         valueColor: AlwaysStoppedAnimation<Color>(
                           sol.todosComprados ? AppTheme.success : AppTheme.primary,
@@ -621,7 +982,7 @@ class _LinhaSolicitacaoState extends State<_LinhaSolicitacao> {
                         minHeight: 4,
                       ),
                       const SizedBox(height: 2),
-                      Text('${sol.totalComprados}/${sol.totalMateriais} comprados',
+                      Text('${sol.totalResolvidos}/${sol.totalMateriais} resolvidos',
                           style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.outline)),
                     ],
                   ),
@@ -672,6 +1033,12 @@ class _StatusBadgeEditavelState extends State<_StatusBadgeEditavel> {
           fg: const Color(0xFFD97706),
           label: 'EM ANDAMENTO',
         );
+      case 'EM_NEGOCIACAO':
+        return (
+          bg: const Color(0xFF2563EB).withValues(alpha: 0.1),
+          fg: const Color(0xFF2563EB),
+          label: 'EM NEGOCIAÇÃO',
+        );
       case 'FINALIZADO':
         return (
           bg: const Color(0xFF15803D).withValues(alpha: 0.1),
@@ -695,7 +1062,7 @@ class _StatusBadgeEditavelState extends State<_StatusBadgeEditavel> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-              'Não é possível finalizar: existem materiais ainda não marcados como comprados.'),
+              'Não é possível finalizar: existem materiais ainda não marcados como comprados ou retirados do estoque.'),
           backgroundColor: AppTheme.error,
         ),
       );
@@ -741,6 +1108,7 @@ class _StatusBadgeEditavelState extends State<_StatusBadgeEditavel> {
       onSelected: _alterarStatus,
       itemBuilder: (ctx) => [
         _itemMenu(ctx, 'EM_ANDAMENTO', sol),
+        _itemMenu(ctx, 'EM_NEGOCIACAO', sol),
         _itemMenu(ctx, 'FINALIZADO', sol),
       ],
       child: MouseRegion(
@@ -795,7 +1163,7 @@ class _StatusBadgeEditavelState extends State<_StatusBadgeEditavel> {
           ),
           if (bloqueado)
             Tooltip(
-              message: 'Finalize apenas com todos os materiais comprados',
+              message: 'Finalize apenas com todos os materiais comprados ou em estoque',
               child: Icon(Icons.lock_outline, size: 14,
                   color: Theme.of(ctx).colorScheme.outline),
             )
@@ -1087,6 +1455,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                                         : null,
                               ),
                               textCapitalization: TextCapitalization.characters,
+                              inputFormatters: [_UpperCaseFormatter()],
                               validator: (v) => v == null || v.trim().isEmpty
                                   ? 'Número OS é obrigatório'
                                   : null,
@@ -1285,6 +1654,7 @@ class _ItemMaterialCard extends StatelessWidget {
                   cursor: SystemMouseCursors.click,
                   child: InkWell(
                     onTap: () => _cadastrarMaterial(context),
+                    mouseCursor: SystemMouseCursors.click,
                     borderRadius: BorderRadius.circular(6),
                     child: const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -1337,15 +1707,57 @@ class _ItemMaterialCard extends StatelessWidget {
                             ? const Icon(Icons.check_circle, color: AppTheme.success, size: 20)
                             : const Icon(Icons.arrow_drop_down),
                       ),
-                      child: Text(
-                        item.material?.nome ?? 'Toque para selecionar...',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: item.material != null
-                              ? Theme.of(context).colorScheme.onSurface
-                              : Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Builder(builder: (context) {
+                            final m = item.material;
+                            final corTexto = m != null
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).colorScheme.onSurfaceVariant;
+                            if (m == null) {
+                              return Text(
+                                'Toque para selecionar...',
+                                style: TextStyle(fontSize: 14, color: corTexto),
+                                overflow: TextOverflow.ellipsis,
+                              );
+                            }
+                            final medidaFmt = formatarMedidaOuDimensoes(
+                              medida:      m.medida,
+                              largura:     m.largura,
+                              comprimento: m.comprimento,
+                            );
+                            final infoAoLado = [
+                              if (m.identificador != null && m.identificador!.isNotEmpty) m.identificador!,
+                              if (medidaFmt != null) medidaFmt,
+                              if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
+                            ].join(' · ');
+                            return Text.rich(
+                              TextSpan(
+                                style: TextStyle(fontSize: 14, color: corTexto),
+                                children: [
+                                  TextSpan(text: m.nome),
+                                  if (infoAoLado.isNotEmpty)
+                                    TextSpan(text: ' · $infoAoLado'),
+                                ],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            );
+                          }),
+                          if (item.material != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                'Estoque: ${item.material!.quantidade % 1 == 0 ? item.material!.quantidade.toStringAsFixed(0) : item.material!.quantidade.toStringAsFixed(2)} ${formatarUnidadeExibicao(item.material!.unidade)}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Theme.of(context).colorScheme.outline,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                     ),
@@ -1439,11 +1851,12 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
   String? _erroDialog;
   late SolicitacaoMaterialModel _solicitacaoAtual;
 
-  // Marcações de comprado/pendente feitas na tela mas ainda não persistidas.
-  // Chave: "item:<id>" ou "adicional:<id>" — Valor: novo estado desejado.
-  final Map<String, bool> _comprasPendentes = {};
+  // Marcações de status (comprado/pendente/estoque) feitas na tela mas ainda
+  // não persistidas. Chave: "item:<id>" ou "adicional:<id>" — Valor: novo
+  // status desejado ('PENDENTE' | 'COMPRADO' | 'ESTOQUE').
+  final Map<String, String> _statusPendentes = {};
 
-  bool get _temAlteracoesNaoSalvas => _comprasPendentes.isNotEmpty;
+  bool get _temAlteracoesNaoSalvas => _statusPendentes.isNotEmpty;
 
   // Edição do cabeçalho (ADMIN ou criador da solicitação)
   late final TextEditingController _numeroOSCtrl;
@@ -1509,14 +1922,15 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     return ehAdmin || ehCriador;
   }
 
-  // Registra/desfaz uma alteração local de comprado (não chama a API ainda).
-  void _alterarCompradoLocal(String tipo, int id, bool valorOriginal, bool novoValor) {
+  // Registra/desfaz uma alteração local de status (não chama a API ainda).
+  // statusOriginal/novoStatus: 'PENDENTE' | 'COMPRADO' | 'ESTOQUE'.
+  void _alterarStatusLocal(String tipo, int id, String statusOriginal, String novoStatus) {
     final chave = '$tipo:$id';
     setState(() {
-      if (novoValor == valorOriginal) {
-        _comprasPendentes.remove(chave);
+      if (novoStatus == statusOriginal) {
+        _statusPendentes.remove(chave);
       } else {
-        _comprasPendentes[chave] = novoValor;
+        _statusPendentes[chave] = novoStatus;
       }
     });
   }
@@ -1524,17 +1938,26 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
   // Persiste todas as marcações pendentes no backend. Retorna true se tudo ok.
   Future<bool> _persistirComprasPendentes() async {
     final provider = context.read<SolicitacaoMaterialProvider>();
-    final pendentes = Map<String, bool>.from(_comprasPendentes);
+    final pendentes = Map<String, String>.from(_statusPendentes);
 
     for (final entry in pendentes.entries) {
       final partes = entry.key.split(':');
       final tipo = partes[0];
       final id = int.parse(partes[1]);
+      final status = entry.value;
       try {
         if (tipo == 'item') {
-          await provider.marcarItemComprado(id, comprado: entry.value);
+          if (status == 'ESTOQUE') {
+            await provider.marcarItemEstoque(id, estoque: true);
+          } else {
+            await provider.marcarItemComprado(id, comprado: status == 'COMPRADO');
+          }
         } else {
-          await provider.marcarAdicionalComprado(id, comprado: entry.value);
+          if (status == 'ESTOQUE') {
+            await provider.marcarAdicionalEstoque(id, estoque: true);
+          } else {
+            await provider.marcarAdicionalComprado(id, comprado: status == 'COMPRADO');
+          }
         }
       } catch (e) {
         if (mounted) {
@@ -1562,13 +1985,13 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
 
     if (mounted) {
       setState(() {
-        _comprasPendentes.clear();
+        _statusPendentes.clear();
         _houveMudanca = true;
       });
     }
     await _recarregarSolicitacao();
     // Sincroniza _andamento local com o valor retornado pelo backend
-    // (pode ter sido auto-finalizado se todos os itens foram marcados como comprados)
+    // (pode ter sido auto-finalizado se todos os itens foram marcados como comprados/estoque)
     if (mounted) {
       setState(() => _andamento = _solicitacaoAtual.andamento);
     }
@@ -1589,7 +2012,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
       builder: (ctx) => AlertDialog(
         title: const Text('Alterações não salvas'),
         content: const Text(
-          'Você marcou materiais como comprado ou pendente, mas ainda não salvou. '
+          'Você marcou materiais como comprado, estoque ou pendente, mas ainda não salvou. '
           'Deseja salvar essas alterações antes de fechar?',
         ),
         actions: [
@@ -1623,7 +2046,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
       }
       // Se falhar, o diálogo permanece aberto com o erro exibido.
     } else if (decisao == 'cancelar') {
-      setState(() => _comprasPendentes.clear());
+      setState(() => _statusPendentes.clear());
       Navigator.pop(context, _houveMudanca ? true : null);
     }
   }
@@ -1673,7 +2096,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     // Valida se pode finalizar
     if (_andamento == 'FINALIZADO' && !_solicitacaoAtual.todosComprados) {
       setState(() => _erroDialog = 
-        'Não é possível finalizar: existem materiais ainda não marcados como comprados.');
+        'Não é possível finalizar: existem materiais ainda não marcados como comprados ou retirados do estoque.');
       setState(() => _salvando = false);
       return;
     }
@@ -2050,8 +2473,8 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
                   // Aba Materiais
                   _AbaMateriaisSolicitacao(
                     solicitacao: _solicitacaoAtual,
-                    comprasPendentes: _comprasPendentes,
-                    onToggleComprado: _alterarCompradoLocal,
+                    statusPendentes: _statusPendentes,
+                    onAlterarStatus: _alterarStatusLocal,
                     onReabrirSolicitacao: _ehAdmin ? _reabrirSolicitacao : null,
                     podeEditarMaterial: _podeEditarCabecalho,
                     onEditarMaterial: _editarMaterial,
@@ -2157,8 +2580,10 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
 
 class _AbaMateriaisSolicitacao extends StatelessWidget {
   final SolicitacaoMaterialModel solicitacao;
-  final Map<String, bool> comprasPendentes;
-  final void Function(String tipo, int id, bool valorOriginal, bool novoValor) onToggleComprado;
+  // Chave: "item:<id>" ou "adicional:<id>" — Valor: status pendente
+  // ('PENDENTE' | 'COMPRADO' | 'ESTOQUE') ainda não persistido.
+  final Map<String, String> statusPendentes;
+  final void Function(String tipo, int id, String statusOriginal, String novoStatus) onAlterarStatus;
   final VoidCallback? onReabrirSolicitacao;
   final bool podeEditarMaterial;
   final Future<void> Function(String tipo, int id, double quantidadeAtual, String? observacaoAtual) onEditarMaterial;
@@ -2167,8 +2592,8 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
 
   const _AbaMateriaisSolicitacao({
     required this.solicitacao,
-    required this.comprasPendentes,
-    required this.onToggleComprado,
+    required this.statusPendentes,
+    required this.onAlterarStatus,
     this.onReabrirSolicitacao,
     required this.podeEditarMaterial,
     required this.onEditarMaterial,
@@ -2206,8 +2631,8 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
           const SizedBox(height: 8),
           ...itensOriginais.map((item) {
             final chave = 'item:${item.id}';
-            final pendente = comprasPendentes.containsKey(chave);
-            final compradoEfetivo = comprasPendentes[chave] ?? item.comprado;
+            final pendente = statusPendentes.containsKey(chave);
+            final statusEfetivo = statusPendentes[chave] ?? item.statusCompra;
             return _MaterialCard(
               tipo: 'item',
               id: item.id,
@@ -2223,16 +2648,18 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
               quantidade: item.quantidade,
               observacao: item.observacao,
               imagemUrl: item.imagemUrl,
-              comprado: compradoEfetivo,
+              status: statusEfetivo,
               pendente: pendente,
               compradoEm: item.compradoEm,
               compradoPorNome: item.compradoPorNome,
+              estoqueEm: item.estoqueEm,
+              estoquePorNome: item.estoquePorNome,
               criadoEm: item.criadoEm,
               editadoEm: item.editadoEm,
               editadoPorNome: item.editadoPorNome,
               andamento: solicitacao.andamento,
-              onToggle: (novoValor) =>
-                  onToggleComprado('item', item.id, item.comprado, novoValor),
+              onSelecionarStatus: (novoStatus) =>
+                  onAlterarStatus('item', item.id, item.statusCompra, novoStatus),
               onReabrirSolicitacao: onReabrirSolicitacao,
               podeEditar: podeEditarMaterial,
               onEditar: () => onEditarMaterial('item', item.id, item.quantidade, item.observacao),
@@ -2249,8 +2676,8 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
           const SizedBox(height: 8),
           ...adicionais.map((ad) {
             final chave = 'adicional:${ad.id}';
-            final pendente = comprasPendentes.containsKey(chave);
-            final compradoEfetivo = comprasPendentes[chave] ?? ad.comprado;
+            final pendente = statusPendentes.containsKey(chave);
+            final statusEfetivo = statusPendentes[chave] ?? ad.statusCompra;
             return _MaterialCard(
               tipo: 'adicional',
               id: ad.id,
@@ -2266,17 +2693,19 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
               quantidade: ad.quantidade,
               observacao: ad.observacao,
               imagemUrl: ad.imagemUrl,
-              comprado: compradoEfetivo,
+              status: statusEfetivo,
               pendente: pendente,
               compradoEm: ad.compradoEm,
               compradoPorNome: ad.compradoPorNome,
+              estoqueEm: ad.estoqueEm,
+              estoquePorNome: ad.estoquePorNome,
               criadoEm: ad.adicionadoEm,
               adicionadoPorNome: ad.adicionadoPorNome,
               editadoEm: ad.editadoEm,
               editadoPorNome: ad.editadoPorNome,
               andamento: solicitacao.andamento,
-              onToggle: (novoValor) =>
-                  onToggleComprado('adicional', ad.id, ad.comprado, novoValor),
+              onSelecionarStatus: (novoStatus) =>
+                  onAlterarStatus('adicional', ad.id, ad.statusCompra, novoStatus),
               onReabrirSolicitacao: onReabrirSolicitacao,
               podeEditar: podeEditarMaterial,
               onEditar: () => onEditarMaterial('adicional', ad.id, ad.quantidade, ad.observacao),
@@ -2305,16 +2734,18 @@ class _MaterialCard extends StatelessWidget {
   final double quantidade;
   final String? observacao;
   final String? imagemUrl;
-  final bool comprado; // valor efetivo (já considera alteração pendente não salva)
+  final String status; // valor efetivo: 'PENDENTE' | 'COMPRADO' | 'ESTOQUE' (já considera alteração pendente não salva)
   final bool pendente; // true quando há alteração local ainda não persistida
   final DateTime? compradoEm;
   final String? compradoPorNome;
+  final DateTime? estoqueEm;
+  final String? estoquePorNome;
   final DateTime criadoEm;
   final String? adicionadoPorNome;
   final DateTime? editadoEm;
   final String? editadoPorNome;
   final String andamento;
-  final ValueChanged<bool> onToggle;
+  final ValueChanged<String> onSelecionarStatus;
   final VoidCallback? onReabrirSolicitacao;
   final bool podeEditar;
   final VoidCallback onEditar;
@@ -2341,7 +2772,20 @@ class _MaterialCard extends StatelessWidget {
         if (s.endsWith('.')) s = s.substring(0, s.length - 1);
         return s;
       }
-      return '${fmt(materialComprimento!)}X${fmt(materialLargura!)}M';
+      return '${fmt(materialComprimento!)}x${fmt(materialLargura!)}m';
+    }
+
+    final temApenasComprimento = materialComprimento != null && materialComprimento! > 0;
+    final temApenasLargura     = materialLargura     != null && materialLargura!     > 0;
+    if (temApenasComprimento || temApenasLargura) {
+      String fmt(double v) {
+        if (v % 1 == 0) return v.toStringAsFixed(0);
+        var s = v.toStringAsFixed(2);
+        if (s.endsWith('0')) s = s.substring(0, s.length - 1);
+        if (s.endsWith('.')) s = s.substring(0, s.length - 1);
+        return s;
+      }
+      return '${fmt(temApenasComprimento ? materialComprimento! : materialLargura!)}m';
     }
     return null;
   }
@@ -2361,16 +2805,18 @@ class _MaterialCard extends StatelessWidget {
     required this.quantidade,
     this.observacao,
     this.imagemUrl,
-    required this.comprado,
+    required this.status,
     required this.pendente,
     this.compradoEm,
     this.compradoPorNome,
+    this.estoqueEm,
+    this.estoquePorNome,
     required this.criadoEm,
     this.adicionadoPorNome,
     this.editadoEm,
     this.editadoPorNome,
     required this.andamento,
-    required this.onToggle,
+    required this.onSelecionarStatus,
     this.onReabrirSolicitacao,
     required this.podeEditar,
     required this.onEditar,
@@ -2422,24 +2868,32 @@ class _MaterialCard extends StatelessWidget {
     onExcluir();
   }
 
-  void _handleToggle(BuildContext context) {
+  // botaoStatus: status correspondente ao botão clicado ('COMPRADO' ou 'ESTOQUE').
+  // Se o status já está ativo, o clique desmarca (volta para PENDENTE) —
+  // caso contrário, seleciona o novo status (a troca é mutuamente exclusiva:
+  // marcar ESTOQUE desmarca COMPRADO e vice-versa).
+  void _handleSelecionarStatus(BuildContext context, String botaoStatus) {
     final usuario = context.read<UsuarioProvider>().usuarioLogado;
     final ehAdmin = usuario?.role.trim().toUpperCase() == 'ADMIN' || usuario?.role.trim().toUpperCase() == 'GERENTE';
-    final novoValor = !comprado;
+    final estaAtivo = status == botaoStatus;
+    final novoStatus = estaAtivo ? 'PENDENTE' : botaoStatus;
 
     // Bloqueia qualquer alteração se a solicitação está FINALIZADA
     if (_bloqueadoPorFinalizacao(context)) return;
 
-    // Se está tentando desmarcar e não é admin, só permite se essa marcação
-    // ainda não foi salva (ou seja, foi o próprio usuário quem marcou nesta
-    // sessão, antes de dar "Salvar"). Desmarcar algo que já veio comprado
-    // do backend continua exclusivo de ADMIN/GERENTE.
-    if (!novoValor && !ehAdmin && !pendente) {
+    // Só é restrito a ADMIN/GERENTE desmarcar ou trocar um item que JÁ está
+    // marcado como COMPRADO ou ESTOQUE e essa marcação já foi persistida
+    // (pendente == false). Marcar um item que ainda está PENDENTE (nunca foi
+    // comprado/retirado do estoque) é livre para qualquer usuário com acesso
+    // à tela, independente de já ter vindo do backend ou não.
+    final alterandoValorJaSalvo =
+        (status == 'COMPRADO' || status == 'ESTOQUE') && !pendente;
+    if (alterandoValorJaSalvo && !ehAdmin) {
       showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('Ação não permitida'),
-          content: const Text('Apenas administradores podem desmarcar um item já salvo como comprado.'),
+          content: const Text('Apenas administradores podem alterar um item já salvo como comprado ou estoque.'),
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(ctx),
@@ -2451,7 +2905,7 @@ class _MaterialCard extends StatelessWidget {
       return;
     }
 
-    onToggle(novoValor);
+    onSelecionarStatus(novoStatus);
   }
 
   @override
@@ -2464,62 +2918,23 @@ class _MaterialCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // ── Coluna: Material ──────────────────────────────────────
                 Expanded(
+                  flex: 4,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Flexible(
-                            child: Text.rich(
-                              TextSpan(
-                                children: [
-                                  TextSpan(
-                                    text: materialNome,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600, fontSize: 14),
-                                  ),
-                                  if (_medidaOuDimensao != null) ...[
-                                    TextSpan(
-                                      text: '  •  ',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w400,
-                                        color: Theme.of(context).colorScheme.outline,
-                                      ),
-                                    ),
-                                    TextSpan(
-                                      text: _medidaOuDimensao,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w500,
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  ],
-                                  if (materialEspessura != null &&
-                                      materialEspessura!.trim().isNotEmpty) ...[
-                                    TextSpan(
-                                      text: '  •  ',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w400,
-                                        color: Theme.of(context).colorScheme.outline,
-                                      ),
-                                    ),
-                                    TextSpan(
-                                      text: materialEspessura!.trim(),
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w500,
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              overflow: TextOverflow.ellipsis,
+                          Expanded(
+                            child: Text(
+                              materialNome,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 14),
+                              softWrap: true,
                             ),
                           ),
                           if (tipo == 'adicional') ...[
@@ -2552,78 +2967,169 @@ class _MaterialCard extends StatelessWidget {
                           ],
                         ],
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Quantidade: ${quantidade % 1 == 0 ? quantidade.toStringAsFixed(0) : quantidade.toStringAsFixed(2)}${materialUnidade != null ? ' $materialUnidade' : ''}',
-                        style: TextStyle(
-                            fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      ),
-                      // Atributos do material
-                      Builder(builder: (context) {
-                        final atributos = <String>[];
-                        if (materialIdentificador != null && materialIdentificador!.isNotEmpty) {
-                          atributos.add(materialIdentificador!);
-                        }
-                        if (materialCategoria != null && materialCategoria!.isNotEmpty) {
-                          atributos.add(materialCategoria!);
-                        }
-                        if (atributos.isEmpty) return const SizedBox.shrink();
-                        return Padding(
+                      if (_medidaOuDimensao != null ||
+                          (materialEspessura != null &&
+                              materialEspessura!.trim().isNotEmpty))
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 2,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              if (_medidaOuDimensao != null)
+                                Text(
+                                  _medidaOuDimensao!,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              if (_medidaOuDimensao != null &&
+                                  materialEspessura != null &&
+                                  materialEspessura!.trim().isNotEmpty)
+                                Text(
+                                  '•',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Theme.of(context).colorScheme.outline,
+                                  ),
+                                ),
+                              if (materialEspessura != null &&
+                                  materialEspessura!.trim().isNotEmpty)
+                                Text(
+                                  materialEspessura!.trim(),
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      if (materialIdentificador != null && materialIdentificador!.isNotEmpty)
+                        Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: Text(
-                            atributos.join(' · '),
+                            materialIdentificador!,
                             style: TextStyle(
                                 fontSize: 11,
                                 color: Theme.of(context).colorScheme.outline),
                             overflow: TextOverflow.ellipsis,
                           ),
-                        );
-                      }),
-                      // Estoque atual
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          'Estoque: ${materialEstoque % 1 == 0 ? materialEstoque.toStringAsFixed(0) : materialEstoque.toStringAsFixed(2)}${materialUnidade != null ? ' $materialUnidade' : ''}',
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: Theme.of(context).colorScheme.outline),
                         ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // ── Coluna: Quantidade solicitada ─────────────────────────
+                Expanded(
+                  flex: 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Qtd. solicitada',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.2,
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${quantidade % 1 == 0 ? quantidade.toStringAsFixed(0) : quantidade.toStringAsFixed(2)}${materialUnidade != null ? ' ${formatarUnidadeExibicao(materialUnidade)}' : ''}',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface),
                       ),
                     ],
                   ),
                 ),
-                _CompradoToggle(
-                  comprado: comprado,
-                  pendente: pendente,
-                  onTap: () => _handleToggle(context),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                _IconActionButton(
-                  icon: Icons.ios_share_outlined,
-                  tooltip: 'Encaminhar este material no chat',
-                  color: AppTheme.primary,
-                  onTap: onEncaminhar,
-                ),
-                if (podeEditar) ...[
-                  const SizedBox(width: 8),
-                  _IconActionButton(
-                    icon: Icons.edit_outlined,
-                    tooltip: 'Editar quantidade e observação',
-                    onTap: () => _handleEditar(context),
+                const SizedBox(width: 12),
+                // ── Coluna: Estoque atual ─────────────────────────────────
+                Expanded(
+                  flex: 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Estoque atual',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.2,
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${materialEstoque % 1 == 0 ? materialEstoque.toStringAsFixed(0) : materialEstoque.toStringAsFixed(2)}${materialUnidade != null ? ' ${formatarUnidadeExibicao(materialUnidade)}' : ''}',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  _IconActionButton(
-                    icon: Icons.delete_outline,
-                    tooltip: 'Remover este material',
-                    color: AppTheme.error,
-                    onTap: () => _handleExcluir(context),
-                  ),
-                ],
+                ),
+                const SizedBox(width: 8),
+                // ── Coluna: Pendente + ações ───────────────────────────────
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    _StatusToggle(
+                      ativo: status == 'COMPRADO',
+                      pendente: pendente && status == 'COMPRADO',
+                      label: 'COMPRADO',
+                      iconeAtivo: Icons.check_circle,
+                      iconeInativo: Icons.radio_button_unchecked,
+                      cor: AppTheme.success,
+                      onTap: () => _handleSelecionarStatus(context, 'COMPRADO'),
+                    ),
+                    const SizedBox(height: 6),
+                    _StatusToggle(
+                      ativo: status == 'ESTOQUE',
+                      pendente: pendente && status == 'ESTOQUE',
+                      label: 'ESTOQUE',
+                      iconeAtivo: Icons.inventory_2,
+                      iconeInativo: Icons.inventory_2_outlined,
+                      cor: const Color(0xFF7C3AED),
+                      onTap: () => _handleSelecionarStatus(context, 'ESTOQUE'),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _IconActionButton(
+                          icon: Icons.ios_share_outlined,
+                          tooltip: 'Encaminhar este material no chat',
+                          color: AppTheme.primary,
+                          onTap: onEncaminhar,
+                        ),
+                        if (podeEditar) ...[
+                          const SizedBox(width: 8),
+                          _IconActionButton(
+                            icon: Icons.edit_outlined,
+                            tooltip: 'Editar quantidade e observação',
+                            onTap: () => _handleEditar(context),
+                          ),
+                          const SizedBox(width: 8),
+                          _IconActionButton(
+                            icon: Icons.delete_outline,
+                            tooltip: 'Remover este material',
+                            color: AppTheme.error,
+                            onTap: () => _handleExcluir(context),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
               ],
             ),
             if (observacao != null && observacao!.isNotEmpty) ...[
@@ -2676,18 +3182,31 @@ class _MaterialCard extends StatelessWidget {
                         'Editado em ${DateFormat('dd/MM/yyyy HH:mm').format(editadoEm!)}${editadoPorNome != null ? ' por $editadoPorNome' : ''}',
                     color: const Color(0xFFB45309),
                   ),
-                if (comprado && compradoEm != null)
+                if (status == 'COMPRADO' && compradoEm != null)
                   _InfoChip(
                     icon: Icons.shopping_cart,
                     label:
                         'Comprado em ${DateFormat('dd/MM/yyyy HH:mm').format(compradoEm!)}',
                     color: AppTheme.success,
                   ),
-                if (comprado && compradoPorNome != null)
+                if (status == 'COMPRADO' && compradoPorNome != null)
                   _InfoChip(
                     icon: Icons.person,
                     label: 'Por $compradoPorNome',
                     color: AppTheme.success,
+                  ),
+                if (status == 'ESTOQUE' && estoqueEm != null)
+                  _InfoChip(
+                    icon: Icons.inventory_2,
+                    label:
+                        'Retirado do estoque em ${DateFormat('dd/MM/yyyy HH:mm').format(estoqueEm!)}',
+                    color: const Color(0xFF7C3AED),
+                  ),
+                if (status == 'ESTOQUE' && estoquePorNome != null)
+                  _InfoChip(
+                    icon: Icons.person,
+                    label: 'Por $estoquePorNome',
+                    color: const Color(0xFF7C3AED),
                   ),
               ],
             ),
@@ -2698,33 +3217,41 @@ class _MaterialCard extends StatelessWidget {
   }
 }
 
-class _CompradoToggle extends StatefulWidget {
-  final bool comprado;
+class _StatusToggle extends StatefulWidget {
+  final bool ativo;
   final bool pendente;
+  final String label;
+  final IconData iconeAtivo;
+  final IconData iconeInativo;
+  final Color cor;
   final VoidCallback onTap;
 
-  const _CompradoToggle({
-    required this.comprado,
+  const _StatusToggle({
+    required this.ativo,
+    required this.label,
+    required this.iconeAtivo,
+    required this.iconeInativo,
+    required this.cor,
     required this.onTap,
     this.pendente = false,
   });
 
   @override
-  State<_CompradoToggle> createState() => _CompradoToggleState();
+  State<_StatusToggle> createState() => _StatusToggleState();
 }
 
-class _CompradoToggleState extends State<_CompradoToggle> {
+class _StatusToggleState extends State<_StatusToggle> {
   bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
-    final comprado = widget.comprado;
+    final ativo = widget.ativo;
 
-    final corBase = comprado
-        ? AppTheme.success
+    final corBase = ativo
+        ? widget.cor
         : Theme.of(context).colorScheme.outline;
-    final corFundo = comprado
-        ? AppTheme.success.withValues(alpha: _hovered ? 0.22 : 0.15)
+    final corFundo = ativo
+        ? widget.cor.withValues(alpha: _hovered ? 0.22 : 0.15)
         : (_hovered
             ? Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.7)
             : Theme.of(context).colorScheme.surfaceContainerHighest);
@@ -2759,23 +3286,34 @@ class _CompradoToggleState extends State<_CompradoToggle> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                comprado ? Icons.check_circle : Icons.radio_button_unchecked,
+                ativo ? widget.iconeAtivo : widget.iconeInativo,
                 size: 16,
-                color: comprado
-                    ? AppTheme.success
+                color: ativo
+                    ? widget.cor
                     : Theme.of(context).colorScheme.outline,
               ),
               const SizedBox(width: 6),
               Text(
-                comprado ? 'COMPRADO' : 'PENDENTE',
+                ativo ? widget.label : widget.label,
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
-                  color: comprado
-                      ? AppTheme.success
+                  color: ativo
+                      ? widget.cor
                       : Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
+              if (widget.pendente) ...[
+                const SizedBox(width: 4),
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: widget.cor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -3052,6 +3590,7 @@ class _AbaDadosSolicitacao extends StatelessWidget {
                   readOnly: !ehAdmin,
                   decoration: const InputDecoration(labelText: 'Número OS'),
                   textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [_UpperCaseFormatter()],
                 ),
               ),
               const SizedBox(width: 12),
@@ -3098,6 +3637,7 @@ class _AbaDadosSolicitacao extends StatelessWidget {
             decoration: const InputDecoration(labelText: 'Andamento', isDense: true),
             items: const [
               DropdownMenuItem(value: 'EM_ANDAMENTO', child: Text('EM ANDAMENTO')),
+              DropdownMenuItem(value: 'EM_NEGOCIACAO', child: Text('EM NEGOCIAÇÃO')),
               DropdownMenuItem(value: 'FINALIZADO', child: Text('FINALIZADO')),
             ],
             onChanged: ehAdmin ? (v) => onAndamentoChanged(v!) : null,
@@ -3796,6 +4336,9 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                               _categoriaTemIdentificadores
                           ? 'Voltar aos identificadores'
                           : 'Voltar às categorias',
+                      style: IconButton.styleFrom().copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
                     ),
                   Expanded(
                     child: Text(
@@ -3812,10 +4355,17 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                     tooltip: 'Cadastrar material',
                     icon: const Icon(Icons.add_circle_outline, size: 20),
                     onPressed: () => _cadastrarMaterial(context),
+                    style: IconButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                   IconButton(
                     onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
                     icon: const Icon(Icons.close, size: 20),
+                    tooltip: 'Fechar',
+                    style: IconButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
                   ),
                 ],
               ),
@@ -3865,6 +4415,7 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: TextField(
                 controller: _filtroCategoriaCtrl,
+                inputFormatters: [_UpperCaseFormatter()],
                 decoration: InputDecoration(
                   hintText: 'Filtrar categorias...',
                   prefixIcon: Icon(Icons.search, size: 18,
@@ -3925,19 +4476,12 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                     flex: 4,
                     child: TextField(
                       controller: _buscaCtrl,
+                      inputFormatters: [_UpperCaseFormatter()],
                       decoration: InputDecoration(
                         hintText: 'Buscar por nome...',
                         prefixIcon: Icon(Icons.search, size: 18,
                             color: Theme.of(context).colorScheme.outline),
                         isDense: true,
-                        suffixIcon: _buscaCtrl.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.close, size: 16),
-                                onPressed: () {
-                                  _buscaCtrl.clear();
-                                  _aplicarFiltrosMateriais();
-                                })
-                            : null,
                       ),
                       onChanged: (_) {
                         _debounceTimer?.cancel();
@@ -3955,17 +4499,10 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                   Expanded(
                     child: TextField(
                       controller: _identificadorCtrl,
+                      inputFormatters: [_UpperCaseFormatter()],
                       decoration: InputDecoration(
                         hintText: 'Identificador',
                         isDense: true,
-                        suffixIcon: _identificadorCtrl.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.close, size: 16),
-                                onPressed: () {
-                                  _identificadorCtrl.clear();
-                                  _aplicarFiltrosMateriais();
-                                })
-                            : null,
                       ),
                       onChanged: (_) {
                         _debounceTimer?.cancel();
@@ -3979,17 +4516,10 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                   Expanded(
                     child: TextField(
                       controller: _medidaCtrl,
+                      inputFormatters: [_MedidaEspessuraFormatter()],
                       decoration: InputDecoration(
                         hintText: 'Medida',
                         isDense: true,
-                        suffixIcon: _medidaCtrl.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.close, size: 16),
-                                onPressed: () {
-                                  _medidaCtrl.clear();
-                                  _aplicarFiltrosMateriais();
-                                })
-                            : null,
                       ),
                       onChanged: (_) {
                         _debounceTimer?.cancel();
@@ -4003,17 +4533,10 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                   Expanded(
                     child: TextField(
                       controller: _espessuraCtrl,
+                      inputFormatters: [_MedidaEspessuraFormatter()],
                       decoration: InputDecoration(
                         hintText: 'Espessura',
                         isDense: true,
-                        suffixIcon: _espessuraCtrl.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.close, size: 16),
-                                onPressed: () {
-                                  _espessuraCtrl.clear();
-                                  _aplicarFiltrosMateriais();
-                                })
-                            : null,
                       ),
                       onChanged: (_) {
                         _debounceTimer?.cancel();
@@ -4028,17 +4551,22 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                     tooltip: 'Limpar filtros',
                     icon: Icon(Icons.filter_alt_off, size: 18,
                         color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    onPressed: () {
-                      _buscaCtrl.clear();
-                      _identificadorCtrl.clear();
-                      _medidaCtrl.clear();
-                      _espessuraCtrl.clear();
-                      setState(() {
-                        _statusFiltro = '';
-                        _identificadorSelecionado = null;
-                      });
-                      _aplicarFiltrosMateriais();
-                    },
+                    onPressed: (_buscaCtrl.text.isNotEmpty ||
+                            _identificadorCtrl.text.isNotEmpty ||
+                            _medidaCtrl.text.isNotEmpty ||
+                            _espessuraCtrl.text.isNotEmpty)
+                        ? () {
+                            _buscaCtrl.clear();
+                            _identificadorCtrl.clear();
+                            _medidaCtrl.clear();
+                            _espessuraCtrl.clear();
+                            setState(() {
+                              _statusFiltro = '';
+                              _identificadorSelecionado = null;
+                            });
+                            _aplicarFiltrosMateriais();
+                          }
+                        : null,
                     style: IconButton.styleFrom(
                       side: BorderSide(color: Theme.of(context).colorScheme.outline),
                     ).copyWith(
@@ -4056,6 +4584,35 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
           ),
         ),
         const Divider(height: 0),
+        if (!_carregandoMateriais && _materiais.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Material',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
+                  ),
+                ),
+                Text(
+                  'Estoque atual',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                ),
+                const SizedBox(width: 26),
+              ],
+            ),
+          ),
         Expanded(
           child: _carregandoMateriais
               ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
@@ -4107,6 +4664,7 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: TextField(
             controller: _filtroCategoriaCtrl,
+            inputFormatters: [_UpperCaseFormatter()],
             decoration: InputDecoration(
               hintText: 'Filtrar identificadores...',
               prefixIcon: Icon(Icons.search, size: 18,
@@ -4290,7 +4848,12 @@ class _MaterialItemSeletorState extends State<_MaterialItemSeletor> {
   @override
   Widget build(BuildContext context) {
     final m = widget.material;
-    final detalhes = [m.identificador, m.medida, m.espessura]
+    final medidaFmt = formatarMedidaOuDimensoes(
+      medida:      m.medida,
+      largura:     m.largura,
+      comprimento: m.comprimento,
+    );
+    final detalhes = [m.identificador, medidaFmt, m.espessura]
         .whereType<String>()
         .where((s) => s.trim().isNotEmpty)
         .join(' · ');
@@ -4329,23 +4892,21 @@ class _MaterialItemSeletorState extends State<_MaterialItemSeletor> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(m.nome,
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                        overflow: TextOverflow.ellipsis),
-                    if (detalhes.isNotEmpty)
-                      Text(detalhes,
-                          style: TextStyle(
-                              fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                          overflow: TextOverflow.ellipsis),
-                  ],
+                child: Text.rich(
+                  TextSpan(
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                    children: [
+                      TextSpan(text: m.nome),
+                      if (detalhes.isNotEmpty)
+                        TextSpan(text: ' · $detalhes'),
+                    ],
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               const SizedBox(width: 12),
               Text(
-                '${m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2)} ${m.unidade ?? ''}',
+                '${m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2)} ${formatarUnidadeExibicao(m.unidade)}',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,

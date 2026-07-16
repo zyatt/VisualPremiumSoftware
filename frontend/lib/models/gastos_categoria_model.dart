@@ -95,6 +95,8 @@ class GastoMaterialModel {
   final String? identificador;
   final String? medida;
   final String? espessura;
+  final double? largura;
+  final double? comprimento;
   final double  totalGasto;
   final double  qtdGasta;
 
@@ -105,6 +107,8 @@ class GastoMaterialModel {
     this.identificador,
     this.medida,
     this.espessura,
+    this.largura,
+    this.comprimento,
     required this.totalGasto,
     required this.qtdGasta,
   });
@@ -117,6 +121,8 @@ class GastoMaterialModel {
         identificador: json['identificador'],
         medida:        json['medida'],
         espessura:     json['espessura'],
+        largura:       (json['largura']     as num?)?.toDouble(),
+        comprimento:   (json['comprimento'] as num?)?.toDouble(),
         totalGasto:    (json['totalGasto'] as num?)?.toDouble() ?? 0,
         qtdGasta:      (json['qtdGasta']   as num?)?.toDouble() ?? 0,
       );

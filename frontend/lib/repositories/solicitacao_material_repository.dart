@@ -162,6 +162,30 @@ class SolicitacaoMaterialRepository {
     return AdicionalSolicitacaoModel.fromJson(data);
   }
 
+  // ── Marcar item original como retirado do estoque ──────────────────────────
+  Future<ItemSolicitacaoModel> marcarItemEstoque(
+    int itemId, {
+    required bool estoque,
+  }) async {
+    final data = await ApiClient.patch(
+      '/solicitacoes-material/itens/$itemId/estoque',
+      {'estoque': estoque},
+    );
+    return ItemSolicitacaoModel.fromJson(data);
+  }
+
+  // ── Marcar adicional como retirado do estoque ───────────────────────────────
+  Future<AdicionalSolicitacaoModel> marcarAdicionalEstoque(
+    int adicionalId, {
+    required bool estoque,
+  }) async {
+    final data = await ApiClient.patch(
+      '/solicitacoes-material/adicionais/$adicionalId/estoque',
+      {'estoque': estoque},
+    );
+    return AdicionalSolicitacaoModel.fromJson(data);
+  }
+
   // ── Editar quantidade/observação de um item original ──────────────────────
   Future<ItemSolicitacaoModel> atualizarItem(
     int itemId, {

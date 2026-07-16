@@ -15,6 +15,33 @@ import '../models/material_model.dart';
 import '../providers/material_provider.dart';
 import '../providers/solicitacao_material_provider.dart';
 
+/// Formata a unidade para exibição (o valor salvo/transmitido permanece em
+/// maiúsculo). Ex.: 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²'/'M2' → 'm²'; 'KG' →
+/// 'Kg'; 'G' → 'g'. Espelha `formatarUnidadeExibicao` usada em estoque_page.
+String _formatarUnidadeExibicao(String? unidade) {
+  if (unidade == null || unidade.trim().isEmpty) return '';
+  final u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'UNIDADE':
+      return 'Unidade';
+    case 'M/L':
+      return 'm/l';
+    case 'M':
+      return 'm';
+    case 'ML':
+      return 'ml';
+    case 'M²':
+    case 'M2':
+      return 'm²';
+    case 'KG':
+      return 'Kg';
+    case 'G':
+      return 'g';
+    default:
+      return unidade;
+  }
+}
+
 class EncaminhamentoChatCard extends StatefulWidget {
   final MensagemChat mensagem;
   final bool isMinha;
@@ -141,11 +168,11 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
       if (medida != null && medida.isNotEmpty) {
         dimensao = medida;
       } else if (largura != null && comprimento != null && largura > 0 && comprimento > 0) {
-        dimensao = '${_fmt(comprimento)}X${_fmt(largura)}M';
+        dimensao = '${_fmt(comprimento)}x${_fmt(largura)}m';
       }
 
       final quantidade = dados['quantidade'];
-      final unidade = (dados['unidade'] as String?) ?? '';
+      final unidade = _formatarUnidadeExibicao(dados['unidade'] as String?);
       final numeroOS = dados['numeroOS'] as String?;
       if (numeroOS != null && numeroOS.isNotEmpty) linhas.add('Solicitação: $numeroOS');
       if (quantidade != null) linhas.add('Qtd: $quantidade $unidade'.trim());

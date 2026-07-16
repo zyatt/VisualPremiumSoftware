@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import '../models/fornecedor_model.dart';
@@ -85,9 +86,10 @@ class FornecedorProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> criar(Map<String, dynamic> dados) async {
+  /// [imagem] é o arquivo local escolhido pelo usuário no PC (opcional).
+  Future<bool> criar(Map<String, dynamic> dados, {File? imagem}) async {
     try {
-      await _repo.criar(dados);
+      await _repo.criar(dados, imagem: imagem);
     } catch (e) {
       _erro = _mensagemErro(e);
       notifyListeners();
@@ -97,9 +99,11 @@ class FornecedorProvider extends ChangeNotifier {
     return true;
   }
 
-  Future<bool> atualizar(int id, Map<String, dynamic> dados) async {
+  /// [imagem] é o arquivo local escolhido pelo usuário no PC (opcional).
+  /// Quando informado, substitui a imagem atual do fornecedor.
+  Future<bool> atualizar(int id, Map<String, dynamic> dados, {File? imagem}) async {
     try {
-      await _repo.atualizar(id, dados);
+      await _repo.atualizar(id, dados, imagem: imagem);
     } catch (e) {
       _erro = _mensagemErro(e);
       notifyListeners();

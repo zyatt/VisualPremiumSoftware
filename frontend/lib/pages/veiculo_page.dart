@@ -72,6 +72,14 @@ class _VeiculoPageState extends State<VeiculoPage> {
     );
   }
 
+  void _abrirVeiculosDesativados() {
+    context.read<VeiculoProvider>().carregarVeiculosInativos();
+    showDialog(
+      context: context,
+      builder: (_) => const _VeiculosDesativadosDialog(),
+    );
+  }
+
   void _confirmarDesativar(VeiculoModel veiculo) {
     showDialog(
       context: context,
@@ -87,26 +95,26 @@ class _VeiculoPageState extends State<VeiculoPage> {
         actions: [
           Tooltip(
             message: 'Fechar sem desativar o veículo',
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: TextButton(
-                  onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
-                  child: const Text('Cancelar')),
-            ),
+            child: TextButton(
+                style: TextButton.styleFrom().copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+                onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
+                child: const Text('Cancelar')),
           ),
           Tooltip(
             message: 'Confirmar desativação do veículo',
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: TextButton(
-                onPressed: () async {
-                  final provider = context.read<VeiculoProvider>();
-                  Navigator.of(context, rootNavigator: true).pop();
-                  await provider.desativarVeiculo(veiculo.id);
-                },
-                child:
-                    const Text('Desativar', style: TextStyle(color: AppTheme.error)),
+            child: TextButton(
+              style: TextButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
               ),
+              onPressed: () async {
+                final provider = context.read<VeiculoProvider>();
+                Navigator.of(context, rootNavigator: true).pop();
+                await provider.desativarVeiculo(veiculo.id);
+              },
+              child:
+                  const Text('Desativar', style: TextStyle(color: AppTheme.error)),
             ),
           ),
         ],
@@ -195,6 +203,26 @@ class _VeiculoPageState extends State<VeiculoPage> {
                       label: const Text('Novo Veículo'),
                       style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.primary,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(width: 12),
+                Tooltip(
+                  message: 'Ver veículos desativados',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _abrirVeiculosDesativados(),
+                      icon: const Icon(Icons.inventory_2_outlined, size: 18),
+                      label: const Text('Desativados'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10)),
                       ).copyWith(
@@ -300,6 +328,208 @@ class _VeiculoPageState extends State<VeiculoPage> {
                             ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dialog — Veículos desativados (reativar ou excluir definitivamente)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _VeiculosDesativadosDialog extends StatelessWidget {
+  const _VeiculosDesativadosDialog();
+
+  void _confirmarExclusaoDefinitiva(BuildContext context, VeiculoModel veiculo) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: Theme.of(dialogCtx).colorScheme.surface,
+        title: Text('Excluir veículo definitivamente',
+            style: TextStyle(color: Theme.of(dialogCtx).colorScheme.onSurface)),
+        content: Text(
+          'Tem certeza que deseja excluir "${veiculo.nome}" (${veiculo.placa}) '
+          'permanentemente?\nTodo o histórico de serviços será apagado. '
+          'Essa ação não pode ser desfeita.',
+          style: TextStyle(color: Theme.of(dialogCtx).colorScheme.onSurfaceVariant),
+        ),
+        actions: [
+          Tooltip(
+            message: 'Fechar sem excluir o veículo',
+            child: TextButton(
+              style: TextButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
+              child: const Text('Cancelar'),
+            ),
+          ),
+          Tooltip(
+            message: 'Excluir permanentemente, sem possibilidade de desfazer',
+            child: TextButton(
+              style: TextButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              onPressed: () async {
+                final provider = context.read<VeiculoProvider>();
+                Navigator.of(dialogCtx, rootNavigator: true).pop();
+                await provider.excluirVeiculoDefinitivo(veiculo.id);
+              },
+              child: const Text('Excluir definitivamente',
+                  style: TextStyle(color: AppTheme.error)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 560),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.inventory_2_outlined,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  Text('Veículos desativados',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurface)),
+                  const Spacer(),
+                  Tooltip(
+                    message: 'Fechar',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: IconButton(
+                        onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
+                        icon: const Icon(Icons.close, size: 20),
+                        style: IconButton.styleFrom().copyWith(
+                          mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Reative um veículo ou exclua-o permanentemente, junto com seu histórico.',
+                style: TextStyle(
+                    fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 16),
+              Flexible(
+                child: Consumer<VeiculoProvider>(
+                  builder: (context, provider, _) {
+                    if (provider.carregandoInativos) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 40),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    if (provider.veiculosInativos.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 40),
+                        child: Center(
+                          child: Text(
+                            'Nenhum veículo desativado.',
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          ),
+                        ),
+                      );
+                    }
+                    return ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: provider.veiculosInativos.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) {
+                        final v = provider.veiculosInativos[i];
+                        return Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest
+                                .withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: Theme.of(context).colorScheme.outlineVariant),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(v.nome,
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurface)),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '${v.placa} · ${v.qtdManutencoes ?? 0} '
+                                      '${(v.qtdManutencoes ?? 0) == 1 ? "serviço" : "serviços"} no histórico',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Tooltip(
+                                message: 'Reativar veículo',
+                                child: MouseRegion(
+                                  cursor: SystemMouseCursors.click,
+                                  child: IconButton(
+                                    onPressed: () =>
+                                        context.read<VeiculoProvider>().reativarVeiculo(v.id),
+                                    icon: Icon(Icons.settings_backup_restore,
+                                        color: AppTheme.primary, size: 20),
+                                    style: IconButton.styleFrom().copyWith(
+                                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Tooltip(
+                                message: 'Excluir definitivamente',
+                                child: MouseRegion(
+                                  cursor: SystemMouseCursors.click,
+                                  child: IconButton(
+                                    onPressed: () =>
+                                        _confirmarExclusaoDefinitiva(context, v),
+                                    icon: Icon(Icons.delete_forever,
+                                        color: AppTheme.error, size: 20),
+                                    style: IconButton.styleFrom().copyWith(
+                                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -430,23 +660,28 @@ class _VeiculoCardGridState extends State<_VeiculoCardGrid> {
                       child: Icon(Icons.directions_car_rounded, color: cor, size: 24),
                     ),
                     const Spacer(),
-                    _MiniIconBtn(
-                      icon:    Icons.add_circle_outline,
-                      color:   AppTheme.primary,
-                      tooltip: 'Novo serviço',
-                      onTap:   widget.onNovoServico,
-                    ),
-                    _MiniIconBtn(
-                      icon:    Icons.edit_outlined,
-                      color:   Theme.of(context).colorScheme.onSurfaceVariant,
-                      tooltip: 'Editar',
-                      onTap:   widget.onEditar,
-                    ),
-                    _MiniIconBtn(
-                      icon:    Icons.delete_outline,
-                      color:   AppTheme.error,
-                      tooltip: 'Desativar',
-                      onTap:   widget.onDesativar,
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _MiniIconBtn(
+                          icon:    Icons.add_circle_outline,
+                          color:   AppTheme.primary,
+                          tooltip: 'Novo serviço',
+                          onTap:   widget.onNovoServico,
+                        ),
+                        _MiniIconBtn(
+                          icon:    Icons.edit_outlined,
+                          color:   Theme.of(context).colorScheme.onSurfaceVariant,
+                          tooltip: 'Editar',
+                          onTap:   widget.onEditar,
+                        ),
+                        _MiniIconBtn(
+                          icon:    Icons.delete_outline,
+                          color:   AppTheme.error,
+                          tooltip: 'Desativar',
+                          onTap:   widget.onDesativar,
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -543,12 +778,16 @@ class _MiniIconBtn extends StatelessWidget {
       message: tooltip,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(4),
-            child: Icon(icon, size: 18, color: color),
+        opaque: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(icon, size: 18, color: color),
+            ),
           ),
         ),
       ),

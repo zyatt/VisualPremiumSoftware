@@ -27,6 +27,15 @@ class VeiculoProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
+  // ── Veículos desativados ───────────────────────────────────────────────────
+  List<VeiculoModel> _veiculosInativos = [];
+  List<VeiculoModel> get veiculosInativos => _veiculosInativos;
+
+  bool _carregandoInativos = false;
+  bool get carregandoInativos => _carregandoInativos;
+  String? _erroInativos;
+  String? get erroInativos => _erroInativos;
+
   // ── Veículos com retirada hoje ────────────────────────────────────────────
   /// Retorna todos os veículos que possuem pelo menos uma manutenção cuja
   /// dataRetirada é hoje (independentemente de já terem sido retirados ou não).
@@ -121,6 +130,51 @@ class VeiculoProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _erro = _mensagemErro(e);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> carregarVeiculosInativos() async {
+    _carregandoInativos = true;
+    _erroInativos       = null;
+    notifyListeners();
+    try {
+      final list        = await ApiClient.getList('/veiculos/inativos');
+      _veiculosInativos = list
+          .map((e) => VeiculoModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      _erroInativos = _mensagemErro(e);
+    } finally {
+      _carregandoInativos = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> reativarVeiculo(int id) async {
+    try {
+      await ApiClient.put('/veiculos/$id/reativar', {});
+      await carregarVeiculosInativos();
+      await carregarVeiculos();
+      return true;
+    } catch (e) {
+      _erroInativos = _mensagemErro(e);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Exclui o veículo permanentemente, junto com seu histórico de
+  /// manutenções. Ação irreversível — só deve ser chamada a partir da lista
+  /// de veículos desativados, com confirmação explícita do usuário.
+  Future<bool> excluirVeiculoDefinitivo(int id) async {
+    try {
+      await ApiClient.delete('/veiculos/$id/definitivo');
+      await carregarVeiculosInativos();
+      return true;
+    } catch (e) {
+      _erroInativos = _mensagemErro(e);
       notifyListeners();
       return false;
     }

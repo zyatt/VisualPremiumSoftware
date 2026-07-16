@@ -36,24 +36,14 @@ model MensagemChat {
   conteudo       String   @db.Text
   lida           Boolean  @default(false)
   criadoEm       DateTime @default(now())
-  // idUsuario (string) -> emoji. Uma reação por usuário por mensagem;
-  // reagir de novo com outro emoji substitui a anterior.
   reacoes        Json     @default("{}")
-  // Preenchido quando a mensagem é editada após o envio original (ver
-  // rota PATCH /chat/mensagem/:id).
   editadaEm      DateTime?
-  // Exclusão lógica: quando true, `conteudo` é esvaziado e `reacoes`
-  // zeradas no backend, e a UI mostra "Mensagem apagada" no lugar (ver
-  // rota DELETE /chat/mensagem/:id).
   apagada        Boolean  @default(false)
-  // Mensagem original citada, quando esta é uma resposta a outra mensagem
-  // da mesma conversa (feature "responder mensagem"). Auto-relação: uma
-  // MensagemChat pode responder a outra MensagemChat.
   respondendoAId Int?
-  respondendoA   MensagemChat?  @relation("RespostaMensagem", fields: [respondendoAId], references: [id])
+  respondendoA   MensagemChat?  @relation("RespostaMensagem", fields: [respondendoAId], references: [id], onDelete: SetNull)
   respostas      MensagemChat[] @relation("RespostaMensagem")
-  remetente      Usuario  @relation("MensagemRemetente",    fields: [remetenteId],    references: [id])
-  destinatario   Usuario  @relation("MensagemDestinatario", fields: [destinatarioId], references: [id])
+  remetente      Usuario  @relation("MensagemRemetente",    fields: [remetenteId],    references: [id], onDelete: Cascade)
+  destinatario   Usuario  @relation("MensagemDestinatario", fields: [destinatarioId], references: [id], onDelete: Cascade)
 
   @@index([remetenteId, destinatarioId])
   @@index([destinatarioId, lida])
@@ -93,6 +83,8 @@ model Material {
   orcamentoVendaItemMateriais OrcamentoVendaItemMaterial[]
   itensSolicitacao            ItemSolicitacaoMaterial[]
   adicionaisSolicitacao       AdicionalSolicitacaoMaterial[]
+  estoqueProducao             EstoqueProducao?
+  movimentacoesProducao       MovimentacaoProducao[]
 
   @@unique([nome, identificador, medida, espessura])
   @@map("materiais")
@@ -123,6 +115,7 @@ model Fornecedor {
   cnpj            String?                  @unique
   razaoSocial     String?
   nomeVendedor    String?
+  imagemUrl       String?
   ativo           Boolean                  @default(true)
   criadoEm        DateTime                 @default(now())
   atualizadoEm    DateTime                 @updatedAt
@@ -271,8 +264,6 @@ model MovimentacaoEstoque {
   descricaoItem    String?
   larguraUsada     Decimal?     @db.Decimal(15, 6)
   comprimentoUsado Decimal?     @db.Decimal(15, 6)
-  /// Quando esta movimentação é uma ENTRADA de retalho (sobra de uma saída),
-  /// aponta para o materialId que foi consumido na saída original.
   materialOrigemId Int?
   criadoEm         DateTime     @default(now())
   material         Material     @relation("MovimentacaoMaterial", fields: [materialId], references: [id])
@@ -282,6 +273,40 @@ model MovimentacaoEstoque {
 
   @@index([materialOrigemId])
   @@map("movimentacoes_estoque")
+}
+
+/// Saldo de material fisicamente transferido do estoque normal para a
+/// produção. Um registro por material (1:1). Não interfere no cálculo de
+/// status (OK/LIMITE/CRITICO) do estoque normal — é um saldo à parte, sem
+/// estoque mínimo próprio.
+model EstoqueProducao {
+  id           Int      @id @default(autoincrement())
+  materialId   Int      @unique
+  quantidade   Decimal  @default(0) @db.Decimal(10, 3)
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+  material     Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@map("estoque_producao")
+}
+
+/// Histórico de movimentações do estoque de produção:
+/// - TRANSFERENCIA: entrada vinda do estoque normal (Controle de Estoque).
+/// - BAIXA: saída para uma OS específica (registrada pela página de Produção).
+model MovimentacaoProducao {
+  id          Int      @id @default(autoincrement())
+  materialId  Int
+  tipo        String   // 'TRANSFERENCIA' | 'BAIXA'
+  quantidade  Decimal  @db.Decimal(10, 3)
+  numeroOS    String?  // preenchido apenas em BAIXA
+  observacao  String?
+  usuarioNome String?
+  criadoEm    DateTime @default(now())
+  material    Material @relation(fields: [materialId], references: [id])
+
+  @@index([materialId])
+  @@index([numeroOS])
+  @@map("movimentacoes_producao")
 }
 
 model SolicitacaoProducao {
@@ -317,16 +342,25 @@ model BaixaProducao {
 }
 
 model AuditLogMaterial {
-  id          Int      @id @default(autoincrement())
-  materialId  Int
+  id          Int       @id @default(autoincrement())
+  materialId  Int?
   acao        String
   campo       String?
   valorAntes  String?
   valorDepois String?
   usuarioId   Int?
   usuarioNome String?
-  criadoEm    DateTime @default(now())
-  material    Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  criadoEm    DateTime  @default(now())
+  material    Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+
+  materialNomeSnap          String?
+  materialCategoriaSnap     String?
+  materialUnidadeSnap       String?
+  materialMedidaSnap        String?
+  materialEspessuraSnap     String?
+  materialIdentificadorSnap String?
+  materialLarguraSnap       String?
+  materialComprimentoSnap   String?
 
   @@index([materialId])
   @@index([criadoEm])
@@ -353,12 +387,10 @@ model ManutencaoVeiculo {
   valor        Decimal   @db.Decimal(10, 2)
   dataEnvio    DateTime
   dataRetirada DateTime?
-  /// Marcado manualmente pelo usuário quando o serviço é concluído/retirado,
-  /// independente da data de retirada já ter chegado ou não.
   finalizada   Boolean   @default(false)
   finalizadaEm DateTime?
   criadoEm     DateTime  @default(now())
-  veiculo      Veiculo   @relation(fields: [veiculoId], references: [id])
+  veiculo      Veiculo   @relation(fields: [veiculoId], references: [id], onDelete: Cascade)
 
   @@map("manutencoes_veiculo")
 }
@@ -380,7 +412,6 @@ model Cliente {
 
 model SolicitacaoMaterial {
   id               Int                          @id @default(autoincrement())
-  /// OS única — não é permitido criar duas solicitações com a mesma numeroOS.
   numeroOS         String                       @unique
   nomeCliente      String
   dataNecessidade  DateTime
@@ -402,8 +433,6 @@ model SolicitacaoMaterial {
   @@map("solicitacoes_material")
 }
  
-/// Item original da solicitação (criado junto com a solicitação).
-/// Imutável após a criação — só ADMIN pode editar via flag isAdmin no service.
 model ItemSolicitacaoMaterial {
   id              Int                  @id @default(autoincrement())
   solicitacaoId   Int
@@ -412,15 +441,19 @@ model ItemSolicitacaoMaterial {
   observacao      String?
   imagemUrl       String?
  
-  /// Se comprado = true, registra quem e quando marcou.
   comprado        Boolean              @default(false)
   compradoEm      DateTime?
   compradoPorId   Int?
   compradoPorNome String?
+
+  // Retirado do estoque em vez de comprado — mutuamente exclusivo com `comprado`.
+  estoque         Boolean              @default(false)
+  estoqueEm       DateTime?
+  estoquePorId    Int?
+  estoquePorNome  String?
  
   criadoEm        DateTime             @default(now())
 
-  /// Se editado (quantidade/observação), registra quando e por quem.
   editadoEm       DateTime?
   editadoPorNome  String?
  
@@ -431,8 +464,6 @@ model ItemSolicitacaoMaterial {
   @@map("itens_solicitacao_material")
 }
  
-/// Adicional: novos materiais incluídos APÓS a criação da solicitação.
-/// Qualquer usuário autorizado pode adicionar; só ADMIN pode editar depois.
 model AdicionalSolicitacaoMaterial {
   id              Int                  @id @default(autoincrement())
   solicitacaoId   Int
@@ -445,13 +476,17 @@ model AdicionalSolicitacaoMaterial {
   adicionadoPorNome String
   adicionadoEm      DateTime           @default(now())
  
-  /// Se comprado = true, registra quem e quando marcou.
   comprado        Boolean              @default(false)
   compradoEm      DateTime?
   compradoPorId   Int?
   compradoPorNome String?
 
-  /// Se editado (quantidade/observação), registra quando e por quem.
+  // Retirado do estoque em vez de comprado — mutuamente exclusivo com `comprado`.
+  estoque         Boolean              @default(false)
+  estoqueEm       DateTime?
+  estoquePorId    Int?
+  estoquePorNome  String?
+
   editadoEm       DateTime?
   editadoPorNome  String?
  
@@ -481,13 +516,9 @@ model LogEdicaoSolicitacao {
   solicitacaoId   Int
   editorId        Int
   editorNome      String
-  /// Snapshot JSON dos campos ANTES da edição.
   antes           Json
-  /// Snapshot JSON dos campos DEPOIS da edição.
   depois          Json
   editadoEm       DateTime            @default(now())
-  /// Contexto opcional: nome do material editado, quando o log se refere a
-  /// um item/adicional em vez dos dados do cabeçalho da solicitação.
   item            String?
   solicitacao     SolicitacaoMaterial @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
   editor          Usuario             @relation("LogEdicaoEditor", fields: [editorId], references: [id])
@@ -510,12 +541,10 @@ model Produto {
   @@map("produtos")
 }
 
-/// Vincula um material a um produto com a quantidade padrão por unidade do produto.
 model ProdutoMaterial {
   id         Int      @id @default(autoincrement())
   produtoId  Int
   materialId Int
-  /// Quantidade do material necessária para 1 unidade do produto.
   quantidade Decimal  @default(1) @db.Decimal(10, 4)
   observacao String?
   criadoEm   DateTime @default(now())
@@ -535,7 +564,6 @@ model OrcamentoVenda {
   status       StatusOrcamentoVenda @default(EM_ANDAMENTO)
   observacao   String?
   valorTotal   Decimal              @default(0) @db.Decimal(15, 2)
-  /// Percentual de margem global aplicado sobre o custo (opcional).
   margemLucro  Decimal?             @db.Decimal(5, 2)
   criadoEm     DateTime             @default(now())
   atualizadoEm DateTime             @updatedAt
@@ -546,7 +574,6 @@ model OrcamentoVenda {
   @@map("orcamentos_venda")
 }
 
-/// Produto selecionado dentro de um orçamento de venda.
 model OrcamentoVendaItem {
   id               Int                        @id @default(autoincrement())
   orcamentoVendaId Int
@@ -561,19 +588,14 @@ model OrcamentoVendaItem {
   @@map("orcamento_venda_itens")
 }
 
-/// Detalhe de material dentro de um item do orçamento de venda.
 model OrcamentoVendaItemMaterial {
   id                   Int                @id @default(autoincrement())
   orcamentoVendaItemId Int
   materialId           Int
-  /// Quantidade ajustada pelo usuário.
   quantidade           Decimal            @db.Decimal(10, 4)
-  /// Snapshot do preço médio dos fornecedores no momento do orçamento.
   precoMedio           Decimal?           @db.Decimal(15, 6)
   precoMedioM2         Decimal?           @db.Decimal(15, 6)
-  /// Preço unitário final (pode ser editado manualmente).
   precoUnitario        Decimal?           @db.Decimal(15, 6)
-  /// Dimensões informadas pelo usuário no orçamento (para cálculo de área).
   largura              Decimal?           @db.Decimal(10, 4)
   comprimento          Decimal?           @db.Decimal(10, 4)
   usarM2               Boolean            @default(false)
@@ -585,7 +607,6 @@ model OrcamentoVendaItemMaterial {
   @@map("orcamento_venda_item_materiais")
 }
 
-/// Faixas de markup: para valorTotal entre valorMin e valorMax aplica-se percentual.
 model MarkupFaixa {
   id           Int      @id @default(autoincrement())
   ordem        Int
@@ -598,7 +619,6 @@ model MarkupFaixa {
   @@map("markup_faixas")
 }
 
-/// Configuracoes globais do sistema (chave/valor).
 model ConfiguracaoSistema {
   chave        String   @id
   valor        String
@@ -606,8 +626,6 @@ model ConfiguracaoSistema {
 
   @@map("configuracoes_sistema")
 }
-
-// ─── ENUMS ────────────────────────────────────
 
 enum Role {
   ADMIN

@@ -11,6 +11,51 @@ import '../providers/fornecedor_provider.dart';
 import '../repositories/ordem_compra_repository.dart';
 import '../repositories/fornecedor_repository.dart';
 import '../theme/app_theme.dart';
+import 'controle_estoque_page.dart' show formatarMedidaOuDimensoes;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UNIDADE: exibição em minúsculo (ex.: M/L -> m/l, ML -> ml, KG -> kg, M2/M² -> m²)
+// O valor salvo/comparado no banco continua maiúsculo; isto é só para exibição.
+// ─────────────────────────────────────────────────────────────────────────────
+
+String unidadeExibicao(String? unidade) {
+  final u = (unidade ?? '').trim();
+  if (u.isEmpty) return '';
+  final norm = u.toUpperCase();
+  switch (norm) {
+    case 'M/L':  return 'm/l';
+    case 'ML':   return 'ml';
+    case 'M2':
+    case 'M²':   return 'm²';
+    case 'KG':   return 'kg';
+    case 'UN':
+    case 'UNID':
+    case 'UNIDADE': return u.length <= 4 ? norm.toLowerCase() : 'unidade';
+    default:     return u.toLowerCase();
+  }
+}
+
+// Igual a unidadeExibicao, mas com o nome por extenso entre parênteses
+// (ex.: "ml (mililitro)", "m/l (metro linear)"), no mesmo padrão usado
+// no dropdown de Unidade da tela de Estoque.
+String unidadeDescricaoCompleta(String? unidade) {
+  final u = (unidade ?? '').trim();
+  if (u.isEmpty) return '';
+  final norm = u.toUpperCase();
+  switch (norm) {
+    case 'M/L':     return 'm/l (metro linear)';
+    case 'M':        return 'm (metro)';
+    case 'ML':       return 'ml (mililitro)';
+    case 'M2':
+    case 'M²':       return 'm² (metro quadrado)';
+    case 'G':        return 'g (grama)';
+    case 'KG':       return 'kg (quilograma)';
+    case 'UN':
+    case 'UNID':
+    case 'UNIDADE':  return u.length <= 4 ? norm.toLowerCase() : 'unidade';
+    default:         return u.toLowerCase();
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FORMATTER: MAIÚSCULAS SEM ACENTOS
@@ -440,15 +485,6 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                       hintText: 'Nome do material...',
                       prefixIcon: Icon(Icons.inventory_2_outlined, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
-                      suffixIcon: _filtroBuscaNome.isNotEmpty
-                          ? IconButton(
-                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
-                              onPressed: () {
-                                _buscaNomeCtrl.clear();
-                                setState(() => _filtroBuscaNome = '');
-                              },
-                            )
-                          : null,
                     ),
                     onChanged: (v) => setState(() => _filtroBuscaNome = v),
                   ),
@@ -570,18 +606,22 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                 color: Theme.of(context).colorScheme.surface,
                 border: Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
               ),
-              child: TabBar(
-                controller: _tabController,
-                labelColor: AppTheme.primary,
-                unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                indicatorColor: AppTheme.primary,
-                indicatorWeight: 2,
-                labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                tabs: const [
-                  Tab(text: 'Em Andamento'),
-                  Tab(text: 'Finalizadas'),
-                  Tab(text: 'Canceladas'),
-                ],
+              child: Consumer<OrdemCompraProvider>(
+                builder: (_, p, __) {
+                  return TabBar(
+                    controller: _tabController,
+                    labelColor: AppTheme.primary,
+                    unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                    indicatorColor: AppTheme.primary,
+                    indicatorWeight: 2,
+                    labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                    tabs: [
+                      _tabComContagem('Em Andamento', p.emAndamento.length),
+                      _tabComContagem('Finalizadas', p.finalizadas.length),
+                      _tabComContagem('Canceladas', p.canceladas.length),
+                    ],
+                  );
+                },
               ),
             ),
 
@@ -937,6 +977,37 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TAB COM CONTAGEM
+// ─────────────────────────────────────────────────────────────────────────────
+
+Tab _tabComContagem(String texto, int contagem) {
+  return Tab(
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(texto),
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            '$contagem',
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.primary,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // LIST WIDGET
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1167,8 +1238,15 @@ class _OcCardState extends State<_OcCard> {
                       : ((item.descricaoItem ?? '').isNotEmpty
                           ? item.descricaoItem!
                           : 'Material excluído');
+                  final medidaOuDimensao = (item.materialMedida ?? '').isNotEmpty
+                      ? item.materialMedida
+                      : formatarMedidaOuDimensoes(
+                          medida:      null,
+                          largura:     item.materialLargura,
+                          comprimento: item.materialComprimento,
+                        );
                   final partes = <String>[
-                    if ((item.materialMedida ?? '').isNotEmpty) item.materialMedida!,
+                    if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
                     if ((item.materialEspessura ?? '').isNotEmpty) item.materialEspessura!,
                     if ((item.materialIdentificador ?? '').isNotEmpty) item.materialIdentificador!,
                   ];
@@ -1413,8 +1491,16 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
         title: Text('Finalizar Ordem'),
         content: Text('Ao finalizar, os itens serão adicionados ao estoque. Confirmar?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancelar', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: AppTheme.success), child: const Text('Finalizar')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: Text('Cancelar', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.success).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: const Text('Finalizar'),
+          ),
         ],
       ),
     );
@@ -1443,8 +1529,16 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
         title: Text('Cancelar Ordem'),
         content: Text('Tem certeza que deseja cancelar esta ordem de compra?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Voltar', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: AppTheme.error), child: const Text('Cancelar OC')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: Text('Voltar', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: const Text('Cancelar OC'),
+          ),
         ],
       ),
     );
@@ -1473,10 +1567,14 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
         title: Text('Reverter Ordem Finalizada'),
         content: Text('Esta ação irá desfazer a finalização: os itens serão removidos do estoque e a ordem voltará para "Em Andamento". Confirmar?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Voltar', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: Text('Voltar', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB45309)),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB45309)).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             child: const Text('Reverter'),
           ),
         ],
@@ -1501,18 +1599,25 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
   }
 
   Future<void> _abrirEdicao() async {
-    final atualizado = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => _EditarOrdemCompraPage(ordem: _ordem)));
-    if (atualizado == true && mounted) {
+    final editado = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => _EditarOrdemCompraPage(ordem: _ordem)));
+    if (editado == true && mounted) {
       await context.read<OrdemCompraProvider>().carregar();
       if (!mounted) return;
       final provider = context.read<OrdemCompraProvider>();
       final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
-      final raw = todas.firstWhere((o) {
-        final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
-        return m.id == _ordem.id;
-      }, orElse: () => _ordem);
-      final atualizado = raw;
-      if (mounted) setState(() { _ordem = atualizado; });
+      final raw = todas.firstWhere(
+        (o) {
+          final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
+          return m.id == _ordem.id;
+        },
+        orElse: () => null,
+      );
+      if (raw != null && mounted) {
+        final atualizado = raw is OrdemCompraModel
+            ? raw
+            : OrdemCompraModel.fromJson(raw as Map<String, dynamic>);
+        setState(() => _ordem = atualizado);
+      }
     }
   }
 
@@ -1678,20 +1783,29 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          item.materialNome.isNotEmpty ? item.materialNome : (item.descricaoItem ?? 'Material excluído'),
-                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
-                        ),
                         Builder(builder: (_) {
-                          final sub = [
-                            if (item.materialMedida != null && item.materialMedida!.isNotEmpty) item.materialMedida!,
+                          final nomeBase = item.materialNome.isNotEmpty ? item.materialNome : (item.descricaoItem ?? 'Material excluído');
+                          final medidaOuDimensao = (item.materialMedida ?? '').isNotEmpty
+                              ? item.materialMedida
+                              : formatarMedidaOuDimensoes(
+                                  medida:      null,
+                                  largura:     item.materialLargura,
+                                  comprimento: item.materialComprimento,
+                                );
+                          final detalhe = [
+                            if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
                             if (item.materialEspessura != null && item.materialEspessura!.isNotEmpty) item.materialEspessura!,
                             if (item.materialIdentificador != null && item.materialIdentificador!.isNotEmpty) item.materialIdentificador!,
                           ].join(' · ');
-                          if (sub.isEmpty) return SizedBox.shrink();
-                          return Padding(
-                            padding: EdgeInsets.only(top: 2),
-                            child: Text(sub, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                          return Text.rich(
+                            TextSpan(
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
+                              children: [
+                                TextSpan(text: nomeBase),
+                                if (detalhe.isNotEmpty)
+                                  TextSpan(text: '  ·  $detalhe'),
+                              ],
+                            ),
                           );
                         }),
                         if (item.materialNome.isNotEmpty && item.descricaoItem != null && item.descricaoItem!.isNotEmpty)
@@ -1722,14 +1836,14 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                     if (item.qtdUnidade != null && item.qtdUnidade! > 0)
                       _itemChipDestaque(
                         Icons.inventory_2_outlined,
-                        '${item.qtdUnidade! % 1 == 0 ? item.qtdUnidade!.toInt() : item.qtdUnidade} ${item.materialUnidade ?? 'unid.'}/unidade',
+                        '${item.qtdUnidade! % 1 == 0 ? item.qtdUnidade!.toInt() : item.qtdUnidade} ${unidadeExibicao(item.materialUnidade).isEmpty ? 'unid.' : unidadeExibicao(item.materialUnidade)}/unidade',
                         ativo: true,
                       ),
                     _itemChipDestaque(
                       Icons.attach_money,
                       () {
                         if (item.qtdUnidade != null && item.qtdUnidade! > 0) {
-                          return 'R\$ ${item.precoUnitario.toStringAsFixed(6).replaceAll('.', ',')}/${item.materialUnidade ?? 'unid.'}';
+                          return 'R\$ ${item.precoUnitario.toStringAsFixed(6).replaceAll('.', ',')}/${unidadeExibicao(item.materialUnidade).isEmpty ? 'unid.' : unidadeExibicao(item.materialUnidade)}';
                         }
                         return item.precoUnitario > 0
                             ? 'Preço: R\$ ${item.precoUnitario.toStringAsFixed(6).replaceAll('.', ',')}'
@@ -1765,8 +1879,19 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
     if (!mounted) return;
     final provider = context.read<OrdemCompraProvider>();
     final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
-    final atualizada = todas.cast<OrdemCompraModel>().where((o) => o.id == _ordem.id).firstOrNull;
-    if (atualizada != null && mounted) setState(() => _ordem = atualizada);
+    final raw = todas.firstWhere(
+      (o) {
+        final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
+        return m.id == _ordem.id;
+      },
+      orElse: () => null,
+    );
+    if (raw != null && mounted) {
+      final atualizada = raw is OrdemCompraModel
+          ? raw
+          : OrdemCompraModel.fromJson(raw as Map<String, dynamic>);
+      setState(() => _ordem = atualizada);
+    }
   }
 
   Widget _secaoCard(String titulo, IconData icon, List<Widget> children) => Container(
@@ -3979,18 +4104,8 @@ class _ItemRascunho {
   }
 
   String get labelQtdUnidade {
-    final u = (materialUnidade ?? '').toUpperCase().trim();
-    switch (u) {
-      case 'M/L':    return 'M/L por unidade';
-      case 'ML':     return 'ML por unidade';
-      case 'KG':     return 'KG por unidade';
-      case 'G':      return 'g por unidade';
-      case 'L':      return 'L por unidade';
-      case 'M':      return 'M por unidade';
-      case 'M2':
-      case 'M²':     return 'M² por unidade';
-      default:       return '$u por unidade';
-    }
+    final u = unidadeDescricaoCompleta(materialUnidade);
+    return u.isEmpty ? 'Qtd por unidade' : '$u por unidade';
   }
 
   double get quantidadeEstoque {
@@ -4217,7 +4332,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   Widget build(BuildContext context) {
     final item = widget.item;
     final total = item.precoTotal;
-    final unidade = (item.materialUnidade ?? '').toUpperCase().trim();
+    final unidade = unidadeExibicao(item.materialUnidade);
     final labelQtd = 'Quantidade';
 
     return Container(
@@ -4238,24 +4353,38 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(item.materialNome,
-                        style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                            color: Theme.of(context).colorScheme.onSurface)),
                     Builder(builder: (_) {
-                      final sub = [
-                        if (item.materialMedida != null && item.materialMedida!.isNotEmpty) item.materialMedida!,
+                      final medidaOuDimensao = (item.materialMedida ?? '').isNotEmpty
+                          ? item.materialMedida
+                          : formatarMedidaOuDimensoes(
+                              medida:      null,
+                              largura:     item.materialLargura,
+                              comprimento: item.materialComprimento,
+                            );
+                      final detalhe = [
+                        if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
                         if (item.materialEspessura != null && item.materialEspessura!.isNotEmpty) item.materialEspessura!,
                         if (item.materialIdentificador != null && item.materialIdentificador!.isNotEmpty) item.materialIdentificador!,
-                        if (unidade.isNotEmpty) unidade,
                       ].join(' · ');
-                      if (sub.isEmpty) return SizedBox.shrink();
-                      return Padding(
-                        padding: EdgeInsets.only(top: 2),
-                        child: Text(sub, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      return Text.rich(
+                        TextSpan(
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                              color: Theme.of(context).colorScheme.onSurface),
+                          children: [
+                            TextSpan(text: item.materialNome),
+                            if (detalhe.isNotEmpty)
+                              TextSpan(text: '  ·  $detalhe'),
+                          ],
+                        ),
                       );
                     }),
+                    if (unidade.isNotEmpty)
+                      Padding(
+                        padding: EdgeInsets.only(top: 2),
+                        child: Text(unidade, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      ),
                   ],
                 ),
               ),
@@ -4268,6 +4397,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                   tooltip: 'Excluir item',
                   padding: EdgeInsets.zero,
                   constraints: BoxConstraints(),
+                  style: IconButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                 ),
               ),
             ],
@@ -4899,7 +5029,7 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
                       onPressed: _adicionarLinha,
                       icon: const Icon(Icons.add, size: 14, color: AppTheme.primary),
                       label: Text('Adicionar OS', style: TextStyle(fontSize: 12, color: AppTheme.primary)),
-                      style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      style: TextButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ),
                 ),
@@ -4912,7 +5042,7 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
                       onPressed: _limpar,
                       icon: Icon(Icons.close, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       label: Text('Limpar distribuição', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                      style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ),
                 ),
@@ -5491,8 +5621,15 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                 final m = filtradosTodos[i];
                                 final mid = m['id'] as int;
                                 final eNovo = !vinculadosIds.contains(mid);
+                                final medidaOuDimensao = (m['medida'] ?? '').toString().isNotEmpty
+                                    ? m['medida'].toString()
+                                    : formatarMedidaOuDimensoes(
+                                        medida:      null,
+                                        largura:     m['largura'] != null ? double.tryParse(m['largura'].toString()) : null,
+                                        comprimento: m['comprimento'] != null ? double.tryParse(m['comprimento'].toString()) : null,
+                                      );
                                 final partes = <String>[
-                                  if ((m['medida'] ?? '').toString().isNotEmpty) m['medida'].toString(),
+                                  if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
                                   if ((m['espessura'] ?? '').toString().isNotEmpty) m['espessura'].toString(),
                                   if ((m['identificador'] ?? '').toString().isNotEmpty) m['identificador'].toString(),
                                 ];

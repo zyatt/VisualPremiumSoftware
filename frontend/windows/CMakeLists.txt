@@ -45,6 +45,12 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
 endfunction()
 
+# Workaround for printing plugin's default pdfium release download 404ing.
+# Pin to a known-good pdfium-binaries release/arch. See:
+# https://github.com/bblanchon/pdfium-binaries/releases
+set(PDFIUM_VERSION "6259" CACHE STRING "" FORCE)
+set(PDFIUM_ARCH "x64" CACHE STRING "" FORCE)
+
 # Flutter library and tool build rules.
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})

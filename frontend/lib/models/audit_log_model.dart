@@ -5,8 +5,17 @@ class AuditLogModel {
   final int materialId;
   final String? materialNome;
   final String? materialCategoria;
+  final String? materialUnidade;
   final String? materialMedida;
   final String? materialEspessura;
+  final String? materialIdentificador;
+  final double? materialLargura;
+  final double? materialComprimento;
+
+  /// true quando o material referenciado por este log já foi excluído do
+  /// banco. Os dados acima, nesse caso, vêm do snapshot gravado no momento
+  /// da ação (ver backend), não do material em si (que não existe mais).
+  final bool materialExcluido;
 
   /// 'CADASTRO' | 'EDICAO' | 'DESATIVACAO' | 'REATIVACAO' | 'EXCLUSAO'
   /// | 'ESTOQUE_CONFIRMADO' | 'FILHO_EDITADO' | 'FILHO_EXCLUIDO'
@@ -30,8 +39,13 @@ class AuditLogModel {
     required this.materialId,
     this.materialNome,
     this.materialCategoria,
+    this.materialUnidade,
     this.materialMedida,
     this.materialEspessura,
+    this.materialIdentificador,
+    this.materialLargura,
+    this.materialComprimento,
+    this.materialExcluido = false,
     required this.acao,
     this.campo,
     this.valorAntes,
@@ -44,10 +58,19 @@ class AuditLogModel {
   factory AuditLogModel.fromJson(Map<String, dynamic> json) => AuditLogModel(
         id:                (json['id'] as num?)?.toInt() ?? 0,
         materialId:        (json['materialId'] as num?)?.toInt() ?? 0,
-        materialNome:      json['material']?['nome'],
-        materialCategoria: json['material']?['categoria'],
-        materialMedida:    json['material']?['medida'],
-        materialEspessura: json['material']?['espessura'],
+        materialNome:          json['material']?['nome'],
+        materialCategoria:     json['material']?['categoria'],
+        materialUnidade:       json['material']?['unidade'],
+        materialMedida:        json['material']?['medida'],
+        materialEspessura:     json['material']?['espessura'],
+        materialIdentificador: json['material']?['identificador'],
+        materialLargura:       json['material']?['largura'] != null
+            ? double.tryParse(json['material']['largura'].toString())
+            : null,
+        materialComprimento:   json['material']?['comprimento'] != null
+            ? double.tryParse(json['material']['comprimento'].toString())
+            : null,
+        materialExcluido:      json['materialExcluido'] == true,
         acao:              json['acao'] ?? '',
         campo:             json['campo'],
         valorAntes:        json['valorAntes'],
@@ -92,4 +115,46 @@ class AuditLogModel {
   }
 
   bool get temDiff => valorAntes != null || valorDepois != null;
+
+  /// Formata um número sem casas decimais desnecessárias (2.0 -> '2', 2.5 -> '2.5').
+  static String _numFmt(double v) {
+    if (v == v.truncateToDouble()) return v.toInt().toString();
+    return v.toString();
+  }
+
+  /// Linha secundária exibida ao lado do nome do material no histórico:
+  /// identificador, unidade (minúscula), medida OU comprimento×largura
+  /// (quando não há medida cadastrada), e espessura — separados por " · ".
+  ///
+  /// Regra de comprimento/largura: só é exibido quando NÃO há [materialMedida]
+  /// preenchida (medida e dimensões são formas alternativas de descrever o
+  /// tamanho do material; não faz sentido mostrar as duas). Formato: "2x1m".
+  String get materialInfoLine {
+    final partes = <String>[];
+
+    if (materialIdentificador != null && materialIdentificador!.trim().isNotEmpty) {
+      partes.add(materialIdentificador!.trim());
+    }
+
+    if (materialUnidade != null && materialUnidade!.trim().isNotEmpty) {
+      partes.add(materialUnidade!.trim().toLowerCase());
+    }
+
+    if (materialMedida != null && materialMedida!.trim().isNotEmpty) {
+      partes.add(materialMedida!.trim().toLowerCase());
+    } else if (materialComprimento != null &&
+        materialComprimento! > 0 &&
+        materialLargura != null &&
+        materialLargura! > 0) {
+      partes.add(
+        '${_numFmt(materialComprimento!)}x${_numFmt(materialLargura!)}m',
+      );
+    }
+
+    if (materialEspessura != null && materialEspessura!.trim().isNotEmpty) {
+      partes.add(materialEspessura!.trim().toLowerCase());
+    }
+
+    return partes.join(' · ');
+  }
 }

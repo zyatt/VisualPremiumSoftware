@@ -19,7 +19,14 @@ class WelcomeBanner extends StatelessWidget {
   /// Exibe o banner como um overlay sobre a tela atual.
   /// Chame após o login ou logo após navegar para /inicio.
   static void show(BuildContext context, String nomeUsuario) {
-    final overlay = Overlay.of(context);
+    // rootOverlay: true força o Overlay do MaterialApp.router (que
+    // sobrevive a qualquer navegação do GoRouter), em vez do Overlay mais
+    // próximo — que pode pertencer a uma parte da árvore sendo desmontada
+    // no exato momento de uma troca de rota/usuário. maybeOf evita lançar
+    // exceção e derrubar o app se, por algum motivo, nenhum Overlay
+    // estiver mais disponível nesse instante.
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
     late OverlayEntry entry;
     entry = OverlayEntry(
       builder: (_) => _BannerOverlay(
