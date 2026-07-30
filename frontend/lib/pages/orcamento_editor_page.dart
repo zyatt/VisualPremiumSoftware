@@ -3,6 +3,7 @@ import 'dart:developer' as dev;
 import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
@@ -14,18 +15,13 @@ import '../providers/material_provider.dart';
 import '../providers/fornecedor_provider.dart';
 import '../providers/orcamento_provider.dart';
 import '../providers/ordem_compra_provider.dart';
+import '../providers/robo_helper_provider.dart';
 import '../repositories/fornecedor_repository.dart';
 import '../repositories/orcamento_repository.dart';
 import '../rotas/app_router.dart';
 
 import '../theme/app_theme.dart';
 
-// ─── Log de diagnóstico (rastreável em produção via `flutter logs` /
-// console do app empacotado, e visível também no DevTools). Não usamos
-// print() porque print() é descartado/limita em alguns builds release;
-// dev.log() sempre fica disponível e inclui timestamp automaticamente.
-// Prefixamos tudo com [Orcamento] + o nome do orçamento (quando houver)
-// para facilitar grep nos logs do usuário quando ele reportar um travamento.
 void _logOrc(String mensagem, {Object? erro, StackTrace? stack, int? level}) {
   dev.log(
     mensagem,
@@ -53,10 +49,6 @@ String _mensagemErro(Object e, {required String acao}) {
   return 'Erro ao $acao: $msg';
 }
 
-// Detecta se o erro veio de uma validação de status no backend (ex: o
-// orçamento foi aprovado/enviado por outro usuário entre o momento em que
-// esta tela carregou e a ação ser confirmada). Esses são os textos exatos
-// lançados por orcamento.service.js em enviarParaAprovacao/aprovar/rejeitar.
 bool _isErroDeStatusDesatualizado(Object e) {
   final raw = e.toString();
   return raw.contains('Apenas orçamentos abertos podem ser enviados') ||
@@ -106,30 +98,46 @@ class _NoCommaFormatter extends TextInputFormatter {
   }
 }
 
+class _DecimalInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var text = newValue.text.replaceAll(',', '.');
+
+    text = text.replaceAll(RegExp(r'[^\d.]'), '');
+
+    text = text.replaceAll(RegExp(r'\.{2,}'), '.');
+
+    final primeiroPonto = text.indexOf('.');
+    if (primeiroPonto != -1) {
+      text = text.substring(0, primeiroPonto + 1) +
+          text.substring(primeiroPonto + 1).replaceAll('.', '');
+    }
+
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
+
 String _brl(double? v) {
   if (v == null || v == 0) return '—';
   return 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
 }
 
-/// Formata uma quantidade removendo zeros decimais desnecessários.
-/// Ex: 2.0 → "2", 1.5 → "1,5"
 String _formatQtd(double v) {
   if (v == v.truncateToDouble()) return v.toInt().toString();
   return v.toString().replaceAll('.', ',');
 }
 
-/// Formata uma quantidade seguida da unidade de medida em minúsculo,
-/// ex.: "50 m/l", "20 kg". Se a unidade não estiver definida, retorna
-/// apenas o número.
 String _formatQtdComUnidade(double v, String? unidade) {
   final u = _formatarUnidadeExibicao(unidade).toLowerCase();
   return u.isEmpty ? _formatQtd(v) : '${_formatQtd(v)} $u';
 }
 
-/// Formata a dimensão (largura x comprimento) de um material como "50x1.27m",
-/// mesma convenção usada em [ItemOrcamentoData.materialDimensaoFormatada]
-/// (comprimento x largura, minúsculo). Retorna null se largura/comprimento
-/// não estiverem cadastrados.
 String? _materialDimensaoFormatada(double? largura, double? comprimento) {
   if (largura == null || comprimento == null || largura <= 0 || comprimento <= 0) return null;
   String fmt(double v) =>
@@ -137,8 +145,14 @@ String? _materialDimensaoFormatada(double? largura, double? comprimento) {
   return '${fmt(comprimento)}x${fmt(largura)}m';
 }
 
-/// Formata a unidade para exibição (o valor salvo permanece em maiúsculo).
-/// Ex.: 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²'/'M2' → 'm²'; 'KG' → 'Kg'; 'G' → 'g'.
+String? _formatarEspessura(String? esp) {
+  if (esp == null) return null;
+  final v = esp.trim();
+  if (v.isEmpty) return v;
+  if (v.toLowerCase().endsWith('mm')) return v;
+  return '${v}mm';
+}
+
 String _formatarUnidadeExibicao(String? unidade) {
   if (unidade == null || unidade.trim().isEmpty) return '';
   final u = unidade.trim().toUpperCase();
@@ -155,8 +169,6 @@ String _formatarUnidadeExibicao(String? unidade) {
   }
 }
 
-/// Nome da unidade por extenso, entre parênteses, no mesmo padrão usado
-/// na tela de Ordem de Compra (ex.: "ml (mililitro)", "m/l (metro linear)").
 String _unidadeDescricaoCompleta(String? unidade) {
   if (unidade == null || unidade.trim().isEmpty) return '';
   final u = unidade.trim().toUpperCase();
@@ -175,6 +187,30 @@ String _unidadeDescricaoCompleta(String? unidade) {
   }
 }
 
+_OrcamentoEditorPageState? _editorStateAtivo;
+
+GlobalKey get criarOrcamentoTourKeyBlocoFiltros =>
+    _editorStateAtivo?._tourKeys.blocoFiltros ?? GlobalKey();
+
+VoidCallback? criarOrcamentoTourAoAbrirEditor;
+
+class _TourKeys {
+  final campoNome                = GlobalKey();
+  final blocoFiltros             = GlobalKey();
+  final primeiroResultadoDropdown = GlobalKey();
+  final primeiroResultado        = GlobalKey();
+  final botaoAdicionarFornecedor = GlobalKey();
+  final buscaFornecedorDialog    = GlobalKey();
+  final primeiroFornecedorDialog = GlobalKey();
+  final editarPreco              = GlobalKey();
+  final camposPrecoEDisponibilidadeDialog = GlobalKey();
+  final celulaFornecedor         = GlobalKey();
+  final campoQuantidadeMaterial1 = GlobalKey();
+  final campoQtdUnidadeMaterial2 = GlobalKey();
+  final botaoOrcarPor            = GlobalKey();
+  final botaoEnviarParaAprovacao = GlobalKey();
+}
+
 class OrcamentoEditorPage extends StatefulWidget {
   const OrcamentoEditorPage({super.key});
 
@@ -183,30 +219,26 @@ class OrcamentoEditorPage extends StatefulWidget {
 }
 
 class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsBindingObserver {
+
+  final _tourKeys = _TourKeys();
+
   final _searchNomeCtrl = TextEditingController();
   final _searchIdentificadorCtrl = TextEditingController();
   final _searchMedidaCtrl = TextEditingController();
+  final _searchComprimentoCtrl = TextEditingController();
+  final _searchLarguraCtrl = TextEditingController();
   final _searchEspCtrl = TextEditingController();
   final _abasScrollCtrl = ScrollController();
   final _tabelaHScrollCtrl = ScrollController();
   final _pageScrollCtrl = ScrollController();
   Timer? _debounceMatBusca;
-  // Sincroniza periodicamente o status do orçamento (aprovado/rejeitado/
-  // aguardando aprovação) com o servidor, para que os botões de ação não
-  // fiquem desatualizados quando outro usuário (ou outra aba) altera o
-  // status enquanto esta tela permanece aberta. Sem isso, a única forma de
-  // ver o estado correto era fechar e reabrir a aba do orçamento.
+
   Timer? _autoSyncTimer;
-  // Evita que múltiplas chamadas de sincronização rodem sobrepostas (ex:
-  // timer de 30s disparando ao mesmo tempo que um clique manual em
-  // "Atualizar" ou um resume do app). Sem isso, em sessões longas com várias
-  // abas de orçamento abertas, as chamadas podem se acumular e travar a UI.
+
   bool _syncing = false;
   late final _ScrollMetricsNotifier _abasScrollHintNotifier;
   late final _ScrollMetricsNotifier _tabelaHScrollHintNotifier;
 
-  // ── Renomear guia inline ──────────────────────────────────────────────────
-  // Índice da aba atualmente em edição de nome (null = nenhuma).
   int? _abaRenomeando;
   TextEditingController? _renomeCtrl;
   final _renomeFocusNode = FocusNode();
@@ -219,10 +251,33 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
   final Set<String> _itensSelecionados = {};
   final Set<String> _materiaisParaBulk = {};
 
+  RoboHelperProvider? _roboHelperPagina;
+
+  bool _dialogFornecedorTourAberto = false;
+  bool _dialogFornecedorTourEmTransicao = false;
+
+  Future<List<int>?>? _futureDialogFornecedorTour;
+
+  Future<Map<String, dynamic>?>? _futureDialogPrecoTour;
+  bool _dialogPrecoTourAberto = false;
+  bool _dialogPrecoTourEmTransicao = false;
+
+  bool _materialTourAdicionado = false;
+
+  bool _tourEntrouNoEditor = false;
+
+  String? _itemIdTourFake;
+
+  String? _itemIdTourFake2;
+
+  bool _mostrarResultadoFakeNoDropdown = false;
+
+  static const _fornecedorIdTourFake = -999999;
+
   static String _textoMaterial(dynamic item) {
     final partes = <String>[item.materialNome as String];
     final medida = item.materialMedida as String?;
-    final esp    = item.materialEspessura as String?;
+    final esp    = _formatarEspessura(item.materialEspessura as String?);
     final dimensao = item.materialDimensaoFormatada as String?;
     if (medida != null && medida.isNotEmpty) partes.add(medida);
     if (esp    != null && esp.isNotEmpty)    partes.add(esp);
@@ -246,6 +301,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
   @override
   void initState() {
     super.initState();
+
+    _editorStateAtivo = this;
     WidgetsBinding.instance.addObserver(this);
     _abasScrollHintNotifier = _ScrollMetricsNotifier();
     _tabelaHScrollHintNotifier = _ScrollMetricsNotifier();
@@ -260,6 +317,12 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
           _abasScrollHintNotifier.update(_abasScrollCtrl);
         }
       });
+
+      final helper = context.read<RoboHelperProvider>();
+      _roboHelperPagina = helper;
+      _roboHelperPagina!.addListener(_onRoboHelperPaginaChanged);
+
+      helper.definirTelaSobreposta(true);
     });
     _tabelaHScrollCtrl.addListener(() {
       if (mounted) _tabelaHScrollHintNotifier.update(_tabelaHScrollCtrl);
@@ -267,9 +330,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     _abasScrollCtrl.addListener(() {
       if (mounted) _abasScrollHintNotifier.update(_abasScrollCtrl);
     });
-    // Reconfere o status no servidor a cada 30s enquanto a tela estiver
-    // aberta, para refletir aprovações/rejeições feitas por outro usuário
-    // (ou em outra aba) sem precisar fechar e reabrir o orçamento.
+
     _logOrc('initState: iniciando _autoSyncTimer (30s)');
     _iniciarAutoSyncTimer();
   }
@@ -281,13 +342,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     });
   }
 
-  // Chamado quando o app volta ao primeiro plano (ex: usuário alterna de
-  // app/aba e retorna). Reconfere o status, já que pode ter mudado enquanto
-  // o app estava em segundo plano. Também pausamos o timer periódico
-  // enquanto o app está em background e o recriamos ao voltar — isso evita
-  // que, em sessões longas, ticks "atrasados" se acumulem e disparem em
-  // rajada (várias requisições simultâneas) assim que o app volta ao
-  // primeiro plano, o que pode travar a UI por alguns segundos.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _logOrc('didChangeAppLifecycleState: $state');
@@ -317,12 +371,16 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
   @override
   void dispose() {
     _logOrc('dispose: cancelando _autoSyncTimer e liberando controllers');
+
+    if (_editorStateAtivo == this) _editorStateAtivo = null;
     WidgetsBinding.instance.removeObserver(this);
     _autoSyncTimer?.cancel();
     _debounceMatBusca?.cancel();
     _searchNomeCtrl.dispose();
     _searchIdentificadorCtrl.dispose();
     _searchMedidaCtrl.dispose();
+    _searchComprimentoCtrl.dispose();
+    _searchLarguraCtrl.dispose();
     _searchEspCtrl.dispose();
     _abasScrollCtrl.dispose();
     _tabelaHScrollCtrl.dispose();
@@ -331,7 +389,76 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     _tabelaHScrollHintNotifier.dispose();
     _renomeCtrl?.dispose();
     _renomeFocusNode.dispose();
+    _roboHelperPagina?.removeListener(_onRoboHelperPaginaChanged);
+
+    final helperAoFechar = _roboHelperPagina;
+    final opcoesAoFechar = helperAoFechar?.opcoesAtuais;
+    final opcaoAtualAoFechar = opcoesAoFechar
+        ?.where((o) => o.titulo == 'Como criar um orçamento')
+        .firstOrNull;
+    final paradasBaseParaTruncar =
+        (opcaoAtualAoFechar != null && opcaoAtualAoFechar.paradas.length > 2)
+            ? opcaoAtualAoFechar.paradas.sublist(0, 2)
+            : null;
+    if (helperAoFechar != null) {
+      scheduleMicrotask(() {
+        helperAoFechar.definirTelaSobreposta(false);
+
+        if (paradasBaseParaTruncar != null) {
+          helperAoFechar.registrarOpcoes('/orcamento', [
+            RoboHelpOption(
+              titulo: 'Como criar um orçamento',
+              paradas: paradasBaseParaTruncar,
+            ),
+          ]);
+        }
+      });
+    }
     super.dispose();
+  }
+
+  void _onRoboHelperPaginaChanged() {
+    if (!mounted) return;
+    if (_roboHelperPagina!.tourAtivo) return;
+
+    if (_dialogFornecedorTourAberto) {
+      _dialogFornecedorTourAberto = false;
+      Navigator.of(context, rootNavigator: true).maybePop();
+    }
+    if (_dialogPrecoTourAberto) {
+      _dialogPrecoTourAberto = false;
+      Navigator.of(context, rootNavigator: true).maybePop();
+    }
+    _removerSimulacaoDoTour();
+    _materialTourAdicionado = false;
+    _mostrarResultadoFakeNoDropdown = false;
+
+    if (_tourEntrouNoEditor) {
+      _tourEntrouNoEditor = false;
+      final provider = context.read<OrcamentoProvider>();
+      provider.fecharAbaAposOperacao();
+      Navigator.of(context).pop();
+    }
+  }
+
+  void _removerSimulacaoDoTour() {
+    final itemId = _itemIdTourFake;
+    _itemIdTourFake = null;
+    if (itemId != null) {
+      try {
+        context.read<OrcamentoProvider>().removerItem(itemId);
+      } catch (_) {
+
+      }
+    }
+
+    final itemId2 = _itemIdTourFake2;
+    _itemIdTourFake2 = null;
+    if (itemId2 != null) {
+      try {
+        context.read<OrcamentoProvider>().removerItem(itemId2);
+      } catch (_) {}
+    }
   }
 
   void _agendarBuscaMateriais() {
@@ -343,9 +470,12 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     final nome = _searchNomeCtrl.text.trim();
     final identificador = _searchIdentificadorCtrl.text.trim();
     final medida = _searchMedidaCtrl.text.trim();
+    final comprimento = _searchComprimentoCtrl.text.trim();
+    final largura = _searchLarguraCtrl.text.trim();
     final esp = _searchEspCtrl.text.trim();
 
-    final algumFiltro = nome.isNotEmpty || identificador.isNotEmpty || medida.isNotEmpty || esp.isNotEmpty;
+    final algumFiltro = nome.isNotEmpty || identificador.isNotEmpty || medida.isNotEmpty ||
+        comprimento.isNotEmpty || largura.isNotEmpty || esp.isNotEmpty;
 
     if (!algumFiltro) {
       setState(() { _resultadosBusca = []; _mostrarResultados = false; });
@@ -357,6 +487,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         busca: nome.isNotEmpty ? nome : '',
         identificador: identificador.isNotEmpty ? identificador : '',
         medida: medida.isNotEmpty ? medida : '',
+        comprimento: comprimento.isNotEmpty ? comprimento : '',
+        largura: largura.isNotEmpty ? largura : '',
         espessura: esp.isNotEmpty ? esp : '',
         ativo: true,
       );
@@ -398,8 +530,449 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     _searchNomeCtrl.clear();
     _searchIdentificadorCtrl.clear();
     _searchMedidaCtrl.clear();
+    _searchComprimentoCtrl.clear();
+    _searchLarguraCtrl.clear();
     _searchEspCtrl.clear();
     setState(() { _resultadosBusca = []; _mostrarResultados = false; });
+  }
+
+  Future<void> _mostrarCardFakeNoDropdown() async {
+
+    _tourEntrouNoEditor = true;
+    if (_materialTourAdicionado || _itemIdTourFake != null) return;
+    try {
+
+      setState(() {
+        _mostrarResultados = true;
+        _mostrarResultadoFakeNoDropdown = true;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _inserirMaterialTourFakeNaTabela() async {
+    if (_materialTourAdicionado || _itemIdTourFake != null) return;
+    final provider = context.read<OrcamentoProvider>();
+    try {
+
+      if (!mounted) return;
+      if (_materialTourAdicionado || _itemIdTourFake != null) return;
+
+      final antes = provider.tabAtual?.itens.length ?? 0;
+      provider.adicionarItem(ItemOrcamentoData(
+        materialId: _materialIdTourFake,
+        materialNome: 'MATERIAL EXEMPLO',
+        materialUnidade: 'Unidade',
+        materialCategoria: '',
+        materialMedida: null,
+        materialEspessura: '2',
+        materialIdentificador: '',
+        materialStatus: null,
+        materialLargura: 1.0,
+        materialComprimento: 2.0,
+        estoqueMinimo: null,
+        precos: const {},
+      ));
+
+      provider.adicionarItem(ItemOrcamentoData(
+        materialId: _materialIdTourFake2,
+        materialNome: 'ADESIVO',
+        materialUnidade: 'm/l',
+        materialCategoria: '',
+        materialMedida: '50x1,27m',
+        materialEspessura: '0.08',
+        materialIdentificador: '',
+        materialStatus: null,
+        estoqueMinimo: 50.0,
+        precos: const {},
+      ));
+      _searchNomeCtrl.clear();
+      if (!mounted) return;
+      setState(() {
+        _resultadosBusca = [];
+        _mostrarResultados = false;
+        _mostrarResultadoFakeNoDropdown = false;
+      });
+
+      final itens = provider.tabAtual?.itens ?? const [];
+      if (itens.length > antes) {
+
+        _itemIdTourFake = itens[itens.length - 2].itemId;
+        _itemIdTourFake2 = itens.last.itemId;
+      }
+      _materialTourAdicionado = true;
+    } catch (_) {
+
+    }
+  }
+
+  Future<void> _fecharDropdownTourFakeSeAberto() async {
+    if (!mounted) return;
+    setState(() {
+      _resultadosBusca = [];
+      _mostrarResultados = false;
+      _mostrarResultadoFakeNoDropdown = false;
+    });
+  }
+
+  Future<void> _voltarParaDropdownDoMaterialFake() async {
+    if (_itemIdTourFake == null) return;
+    try {
+      context.read<OrcamentoProvider>().removerItem(_itemIdTourFake!);
+      _itemIdTourFake = null;
+      if (_itemIdTourFake2 != null) {
+        try { context.read<OrcamentoProvider>().removerItem(_itemIdTourFake2!); } catch (_) {}
+        _itemIdTourFake2 = null;
+      }
+      _materialTourAdicionado = false;
+
+      setState(() {
+        _mostrarResultados = true;
+        _mostrarResultadoFakeNoDropdown = true;
+      });
+    } catch (_) {}
+    return;
+  }
+
+  static const _materialIdTourFake = -999999;
+  static const _materialIdTourFake2 = -999998;
+
+  Future<void> _aguardarFramesReais({int quantidade = 3}) async {
+    for (var i = 0; i < quantidade; i++) {
+      final completer = Completer<void>();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!completer.isCompleted) completer.complete();
+      });
+
+      SchedulerBinding.instance.scheduleFrame();
+      await completer.future.timeout(
+        const Duration(milliseconds: 200),
+        onTimeout: () {},
+      );
+    }
+  }
+
+  Future<void> _abrirDialogFornecedorTour() async {
+    if (_dialogFornecedorTourAberto || _dialogFornecedorTourEmTransicao) return;
+
+    await _aguardarFramesReais();
+    if (!mounted || _dialogFornecedorTourAberto || _dialogFornecedorTourEmTransicao) return;
+    final provider = context.read<OrcamentoProvider>();
+    final tab = provider.tabAtual;
+    if (tab == null || tab.itens.isEmpty) return;
+
+    final itemId = _itemIdTourFake;
+    if (itemId == null) return;
+    final item = tab.itens.where((i) => i.itemId == itemId).firstOrNull;
+    if (item == null) return;
+
+    await context.read<FornecedorProvider>().carregar();
+    if (!mounted) return;
+    final fornecedores = context.read<FornecedorProvider>().fornecedores;
+    final vinculadosNoServidor =
+        await context.read<FornecedorProvider>().listarPorMaterial(item.materialId);
+    if (!mounted) return;
+    final idsJaVinculados = {
+      ...item.precos.keys,
+      ...vinculadosNoServidor.map((f) => f.id),
+    };
+
+    _dialogFornecedorTourAberto = true;
+    _dialogFornecedorTourEmTransicao = true;
+    final future = showDialog<List<int>>(
+      context: context,
+
+      barrierDismissible: !_dialogFornecedorTourAberto,
+      builder: (_) => _DialogVincularFornecedores(
+        fornecedores: fornecedores,
+        idsJaVinculados: idsJaVinculados,
+        materialNome: item.materialNome,
+        ehTourAssistente: true,
+      ),
+    );
+    _futureDialogFornecedorTour = future;
+    future.then((selecionados) async {
+
+      final aindaEhODialogAtual = identical(_futureDialogFornecedorTour, future);
+      if (mounted && aindaEhODialogAtual) _dialogFornecedorTourAberto = false;
+      if (selecionados == null || selecionados.isEmpty || !mounted) return;
+      final novosPrecos = Map<int, PrecoFornecedorData>.from(item.precos);
+      for (final fId in selecionados) {
+        if (novosPrecos.containsKey(fId)) continue;
+
+        if (fId == _fornecedorIdTourFake) {
+          novosPrecos[fId] = PrecoFornecedorData(fornecedorNome: 'Fornecedor Exemplo');
+          continue;
+        }
+        FornecedorModel? f;
+        for (final cand in fornecedores) {
+          if (cand.id == fId) { f = cand; break; }
+        }
+        if (f == null) continue;
+        novosPrecos[fId] = PrecoFornecedorData(fornecedorNome: f.nomeFantasia);
+      }
+      provider.atualizarItemParcial(item.itemId, precos: novosPrecos);
+      final repo = FornecedorRepository();
+      for (final fId in selecionados) {
+
+        if (fId == _fornecedorIdTourFake) continue;
+        if (!idsJaVinculados.contains(fId)) {
+          try { await repo.vincularMaterial(fId, {'materialId': item.materialId}); } catch (_) {}
+        }
+      }
+      if (identical(_futureDialogFornecedorTour, future)) {
+        _futureDialogFornecedorTour = null;
+      }
+    });
+
+    await _aguardarFramesReais(quantidade: 1);
+    _dialogFornecedorTourEmTransicao = false;
+  }
+
+  Future<void> _fecharDialogFornecedorTourSeAberto() async {
+    if (!_dialogFornecedorTourAberto || _dialogFornecedorTourEmTransicao) return;
+    _dialogFornecedorTourAberto = false;
+    _dialogFornecedorTourEmTransicao = true;
+
+    Navigator.of(context, rootNavigator: true)
+        .maybePop<List<int>>([_fornecedorIdTourFake]);
+
+    await _aguardarFramesReais();
+    _dialogFornecedorTourEmTransicao = false;
+  }
+
+  Future<void> _abrirDialogPrecoTour() async {
+    if (_dialogPrecoTourAberto || _dialogPrecoTourEmTransicao) return;
+
+    await _aguardarFramesReais();
+    if (!mounted || _dialogPrecoTourAberto || _dialogPrecoTourEmTransicao) return;
+    final provider = context.read<OrcamentoProvider>();
+    final tab = provider.tabAtual;
+    if (tab == null || tab.itens.isEmpty) return;
+
+    final itemId = _itemIdTourFake;
+    if (itemId == null) return;
+    final item = tab.itens.where((i) => i.itemId == itemId).firstOrNull;
+    if (item == null) return;
+    if (item.precos.isEmpty) return;
+    final fornecedorId = item.precos.keys.first;
+    final pf = item.precos[fornecedorId]!;
+
+    _dialogPrecoTourAberto = true;
+    _dialogPrecoTourEmTransicao = true;
+    final future = showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: !_dialogPrecoTourAberto,
+      builder: (_) => _DialogEditarMaterial(
+        fornecedorNome: pf.fornecedorNome,
+        materialNome: item.materialNome,
+        precoAtual: pf.preco,
+        observacaoAtual: pf.observacao,
+        tourKeyCamposPrecoEDisponibilidade: _tourKeys.camposPrecoEDisponibilidadeDialog,
+      ),
+    );
+    _futureDialogPrecoTour = future;
+    future.then((result) {
+
+      final aindaEhODialogAtual = identical(_futureDialogPrecoTour, future);
+      if (mounted && aindaEhODialogAtual) _dialogPrecoTourAberto = false;
+      if (result == null || !mounted) return;
+      final novosPrecos = Map<int, PrecoFornecedorData>.from(item.precos);
+      novosPrecos[fornecedorId] = PrecoFornecedorData(
+        fornecedorNome: pf.fornecedorNome,
+        preco: result['preco'] as double?,
+        observacao: result['observacao'] as String?,
+      );
+      provider.atualizarItemParcial(item.itemId, precos: novosPrecos);
+      if (identical(_futureDialogPrecoTour, future)) {
+        _futureDialogPrecoTour = null;
+      }
+    });
+
+    await _aguardarFramesReais(quantidade: 1);
+    _dialogPrecoTourEmTransicao = false;
+  }
+
+  Future<void> _fecharDialogPrecoTourSeAberto() async {
+    if (!_dialogPrecoTourAberto || _dialogPrecoTourEmTransicao) return;
+    _dialogPrecoTourAberto = false;
+    _dialogPrecoTourEmTransicao = true;
+    await Navigator.of(context, rootNavigator: true).maybePop<Map<String, dynamic>>(
+      const {'preco': 99.9, 'observacao': null},
+    );
+    _dialogPrecoTourEmTransicao = false;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+
+  Future<void> _fecharDialogPrecoSemSalvar() async {
+    if (!_dialogPrecoTourAberto || _dialogPrecoTourEmTransicao) return;
+    _dialogPrecoTourAberto = false;
+    _dialogPrecoTourEmTransicao = true;
+
+    await Navigator.of(context, rootNavigator: true).maybePop<Map<String, dynamic>>();
+    _dialogPrecoTourEmTransicao = false;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    _resetarPrecoFornecedorFake();
+  }
+
+  void _resetarPrecoFornecedorFake() {
+    final itemId = _itemIdTourFake;
+    if (itemId == null) return;
+    try {
+      final provider = context.read<OrcamentoProvider>();
+      final tab = provider.tabAtual;
+      if (tab == null) return;
+      final item = tab.itens.where((i) => i.itemId == itemId).firstOrNull;
+      if (item == null || item.precos.isEmpty) return;
+      final fornecedorId = item.precos.keys.first;
+      final pf = item.precos[fornecedorId]!;
+      final novosPrecos = Map<int, PrecoFornecedorData>.from(item.precos);
+      novosPrecos[fornecedorId] = PrecoFornecedorData(
+        fornecedorNome: pf.fornecedorNome,
+        preco: null,
+        observacao: null,
+      );
+      provider.atualizarItemParcial(itemId, precos: novosPrecos);
+    } catch (_) {}
+  }
+
+  Future<void> _desvincularFornecedorFakeEVoltarParaDialog() async {
+
+    final itemId = _itemIdTourFake;
+    if (itemId != null) {
+      try {
+        final provider = context.read<OrcamentoProvider>();
+        final tab = provider.tabAtual;
+        if (tab != null) {
+          final item = tab.itens.where((i) => i.itemId == itemId).firstOrNull;
+          if (item != null) {
+            final novosPrecos = Map<int, PrecoFornecedorData>.from(item.precos)
+              ..remove(_fornecedorIdTourFake);
+            provider.atualizarItemParcial(itemId, precos: novosPrecos);
+          }
+        }
+      } catch (_) {}
+    }
+
+    await _abrirDialogFornecedorTour();
+  }
+
+  Future<void> _reabrirDialogPrecoAoVoltar() async {
+    _resetarPrecoFornecedorFake();
+    await _abrirDialogPrecoTour();
+  }
+
+  Future<void> _fecharDialogFornecedorSemVincular() async {
+    if (!_dialogFornecedorTourAberto || _dialogFornecedorTourEmTransicao) return;
+    _dialogFornecedorTourAberto = false;
+    _dialogFornecedorTourEmTransicao = true;
+
+    Navigator.of(context, rootNavigator: true).maybePop<List<int>>();
+
+    await _aguardarFramesReais();
+    _dialogFornecedorTourEmTransicao = false;
+  }
+
+  void _anexarParadasDoEditorAoTour() {
+    final rota = ModalRoute.of(context);
+    if (rota == null || !rota.isCurrent) return;
+
+    final helper = context.read<RoboHelperProvider>();
+    final opcoesAtuais = helper.opcoesAtuais;
+    final opcaoBase = opcoesAtuais.where((o) => o.titulo == 'Como criar um orçamento').firstOrNull;
+
+    const totalParadasBase = 2;
+    if (opcaoBase == null || opcaoBase.paradas.length < totalParadasBase) return;
+    if (opcaoBase.paradas.length > totalParadasBase) return;
+
+    final paradasBase = opcaoBase.paradas;
+
+    helper.registrarOpcoes('/orcamento', [
+      RoboHelpOption(
+        titulo: 'Como criar um orçamento',
+        paradas: [
+
+          ...paradasBase,
+          RoboTourStop(
+            key: () => _tourKeys.primeiroResultadoDropdown,
+            texto: 'Ao encontrar o material desejado na lista de '
+                'sugestões, toque nele para adicioná-lo ao orçamento.',
+            aoEntrar: _mostrarCardFakeNoDropdown,
+            aoSair: _fecharDropdownTourFakeSeAberto,
+          ),
+          RoboTourStop(
+            key: () => _tourKeys.botaoAdicionarFornecedor,
+            texto: 'Com o material adicionado, toque aqui para vincular '
+                'fornecedores a ele e poder comparar preços.',
+            aoEntrar: _inserirMaterialTourFakeNaTabela,
+            aoSair: _voltarParaDropdownDoMaterialFake,
+          ),
+          RoboTourStop(
+            key: () => _tourKeys.buscaFornecedorDialog,
+            texto: 'Busque pelo nome do fornecedor que deseja adicionar.',
+
+            aoEntrar: _abrirDialogFornecedorTour,
+
+            aoSair: _fecharDialogFornecedorSemVincular,
+          ),
+          RoboTourStop(
+            key: () => _tourKeys.primeiroFornecedorDialog,
+            texto: 'Marque um ou mais fornecedores e toque em "Adicionar".',
+          ),
+          RoboTourStop(
+            key: () => _tourKeys.campoQuantidadeMaterial1,
+            texto: 'Aqui você informa a quantidade deste material. Como '
+                'a unidade dele é "Unidade", não existe o campo '
+                '"Quantidade por Unidade" — ele só aparece para materiais '
+                'medidos em m/l, g, ml, etc., como no material logo abaixo.',
+
+            aoEntrar: _fecharDialogFornecedorTourSeAberto,
+
+            aoSair: _desvincularFornecedorFakeEVoltarParaDialog,
+          ),
+          RoboTourStop(
+            key: () => _tourKeys.campoQtdUnidadeMaterial2,
+            texto: 'Para materiais como este (m/l, g, ml, etc.), informe '
+                'aqui a quantidade de m/l, g, ml, etc. que vem em cada '
+                'unidade/embalagem — esse valor é repassado para a Ordem '
+                'de Compra ao gerá-la.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeys.editarPreco,
+            texto: 'O fornecedor aparece como "Sem preço" até você '
+                'informar o valor — toque em "editar" para cadastrá-lo.',
+
+          ),
+          RoboTourStop(
+            key: () => _tourKeys.camposPrecoEDisponibilidadeDialog,
+            texto: 'Informe o preço e a disponibilidade (opcional) '
+                'deste fornecedor para o material e toque em "Salvar".',
+            aoEntrar: _abrirDialogPrecoTour,
+
+            aoSair: _fecharDialogPrecoSemSalvar,
+          ),
+          RoboTourStop(
+            key: () => _tourKeys.celulaFornecedor,
+            texto: 'Agora, toque no preço do fornecedor desejado para '
+                'escolhê-lo como o fornecedor deste material no orçamento.',
+
+            aoEntrar: _fecharDialogPrecoTourSeAberto,
+
+            aoSair: _reabrirDialogPrecoAoVoltar,
+          ),
+          RoboTourStop(
+            key: () => _tourKeys.botaoOrcarPor,
+            texto: 'Aqui você pode escolher a forma de orçamento: por '
+                'Unidade (preço por peça/rolo) ou por Metro Linear.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeys.botaoEnviarParaAprovacao,
+            texto: 'Pronto! Agora é só tocar em "Enviar para aprovação" '
+                'para concluir o orçamento.',
+          ),
+        ],
+      ),
+    ]);
   }
 
   Future<void> _adicionarFornecedoresBulk() async {
@@ -450,22 +1023,15 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     if (tab == null || itemIndex >= tab.itens.length) return;
     final item = tab.itens[itemIndex];
 
-    // Recarrega a lista de fornecedores do servidor antes de abrir o diálogo,
-    // garantindo que fornecedores cadastrados por outros usuários apareçam
-    // (e que vínculos novos não sejam erroneamente exibidos como "já vinculados").
     await context.read<FornecedorProvider>().carregar();
     if (!mounted) return;
 
     final fornecedores = context.read<FornecedorProvider>().fornecedores;
 
-    // Busca do servidor os fornecedores já vinculados a ESTE material específico.
-    // Usar só item.precos.keys não é suficiente: o cache local pode ter IDs de
-    // outro material (situação que ocorreu com ABS ACO ESCOVADO PRATA vs DOURADO).
     final vinculadosNoServidor =
         await context.read<FornecedorProvider>().listarPorMaterial(item.materialId);
     if (!mounted) return;
 
-    // União: já está no orçamento local OU já está vinculado ao material no servidor.
     final idsJaVinculados = {
       ...item.precos.keys,
       ...vinculadosNoServidor.map((f) => f.id),
@@ -535,14 +1101,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     }
   }
 
-  /// Garante que a lista de fornecedores ocultos da aba esteja persistida no
-  /// servidor para o orçamento [orcId]. Necessário porque, enquanto o
-  /// orçamento ainda não existe no banco (servidorId nulo), o usuário pode
-  /// ocultar fornecedores só localmente — ao salvar pela primeira vez, essa
-  /// lista precisa ser enviada para já nascer compartilhada com outros
-  /// usuários. Para orçamentos já existentes, as ocultações já são
-  /// persistidas individualmente em `_alternarFornecedorOculto`, então isto
-  /// é apenas uma garantia idempotente (reenviar o mesmo id não tem efeito).
   Future<void> _sincronizarFornecedoresOcultos(int orcId, OrcamentoTab tab) async {
     if (tab.fornecedoresOcultos.isEmpty) return;
     final repo = OrcamentoRepository();
@@ -604,12 +1162,12 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       int orcId;
       if (tab.servidorId != null) {
         orcId = tab.servidorId!;
-        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
+        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo, 'modoPrecificacao': tab.modoPrecificacao});
         await repo.limparItens(orcId);
       } else {
         final criado = await repo.criar(novoTitulo);
         orcId = criado['id'] as int;
-        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
+        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo, 'modoPrecificacao': tab.modoPrecificacao});
       }
       final tabAtualizado = provider.tabAtual!;
       await _sincronizarFornecedoresOcultos(orcId, tabAtualizado);
@@ -632,8 +1190,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       if (mounted) setState(() => _salvando = false);
     }
   }
-
-  // ── Renomear guia (inline, clicando no título da aba, ou pelo botão) ────────
 
   void _iniciarRenomeacaoAba(int index) {
     final provider = context.read<OrcamentoProvider>();
@@ -661,7 +1217,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
 
     provider.renomearAba(index, novoTitulo);
 
-    // Se o orçamento já existe no servidor, persiste o novo título também lá.
     final servidorId = aba.servidorId;
     if (servidorId != null) {
       try {
@@ -726,12 +1281,12 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       final sid = provider.tabAtual?.servidorId;
       if (sid != null) {
         orcId = sid;
-        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
+        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo, 'modoPrecificacao': tab.modoPrecificacao});
         await repo.limparItens(orcId);
       } else {
         final criado = await repo.criar(novoTitulo);
         orcId = criado['id'] as int;
-        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo});
+        await repo.atualizarOrcamento(orcId, {'titulo': novoTitulo, 'modoPrecificacao': tab.modoPrecificacao});
       }
       await _sincronizarFornecedoresOcultos(orcId, tab);
       for (final item in tab.itens) {
@@ -748,8 +1303,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Orçamento #$orcId enviado para aprovação com sucesso!'), backgroundColor: AppTheme.success));
       provider.atualizarFlagsTab(aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
-      // Retorna um sinal para a OrcamentoPage saber que deve abrir/focar
-      // a aba "Aguardando Aprovação" ao voltar.
+
       Navigator.of(context).pop('enviadoParaAprovacao');
     } catch (e) {
       if (mounted) {
@@ -794,6 +1348,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     try {
       if (tab != null) {
         final repo = OrcamentoRepository();
+        _logOrc('aprovarOrcamento: salvando modo de precificação orcamentoId=$id modo=${tab.modoPrecificacao}');
+        await repo.atualizarOrcamento(id, {'modoPrecificacao': tab.modoPrecificacao});
         _logOrc('aprovarOrcamento: limpando itens no servidor orcamentoId=$id');
         await repo.limparItens(id);
         _logOrc('aprovarOrcamento: regravando ${tab.itens.length} itens orcamentoId=$id');
@@ -819,8 +1375,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       provider.atualizarFlagsTab(aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
       provider.fecharAbaAposOperacao();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Orçamento #$id aprovado com sucesso!'), backgroundColor: AppTheme.success));
-      // Retorna um sinal para a OrcamentoPage saber que deve abrir/focar
-      // a aba "Aprovados" ao voltar.
+
       Navigator.of(context).pop('aprovado');
     } catch (e, st) {
       _logOrc('aprovarOrcamento: ERRO após ${DateTime.now().difference(inicio).inMilliseconds}ms orcamentoId=$id',
@@ -855,15 +1410,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     _syncing = true;
     final inicio = DateTime.now();
     try {
-      // O status (aguardando aprovação/aprovado/etc.) só existe no servidor,
-      // então só faz sentido buscá-lo quando o orçamento já foi salvo
-      // (servidorId != null). Um rascunho ainda não salvo simplesmente não
-      // tem status remoto para sincronizar.
+
       if (sid != null) {
         _logOrc('sincronizarStatusServidor[$origem]: iniciando GET /orcamentos/$sid');
-        // ApiClient já aplica timeout de 15s em toda chamada HTTP — se a
-        // requisição nunca responder, ela mesma lança TimeoutException aqui,
-        // caindo no catch abaixo (sem deixar o `_syncing` travado em true).
+
         final orc = await OrcamentoRepository().buscarPorId(sid);
         if (!mounted) {
           _logOrc('sincronizarStatusServidor[$origem]: resposta chegou mas widget já foi desmontado, ignorando orcamentoId=$sid');
@@ -882,11 +1432,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
             'pulando sync de status, mas atualizando dados dos materiais mesmo assim');
       }
 
-      // Atualiza nome/unidade/categoria/estoque mínimo/dimensões/etc. dos
-      // itens já adicionados, já que esses dados podem ter mudado no módulo
-      // de estoque desde que o item foi colocado neste orçamento. Isso vale
-      // tanto para orçamentos já salvos quanto para rascunhos locais — os
-      // itens já estão na aba independente de o orçamento ter sido salvo.
       final materialProvider = context.read<MaterialProvider>();
       await materialProvider.carregar();
       if (!mounted) return;
@@ -911,6 +1456,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     if (sid != null && aba.itens.isNotEmpty) {
       try {
         final repo = OrcamentoRepository();
+        await repo.atualizarOrcamento(sid, {'modoPrecificacao': aba.modoPrecificacao});
         await repo.limparItens(sid);
         for (final item in aba.itens) {
           if (item.precos.isEmpty) {
@@ -937,7 +1483,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
           }
         }
       } catch (_) {
-        // Falha silenciosa — fecha a aba de qualquer jeito
+
       }
     }
 
@@ -958,8 +1504,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
           title: const Text('Descartar Orçamento', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
           content: const Text('Este orçamento ainda não foi salvo no servidor.\nDeseja descartar o rascunho?', style: TextStyle(fontSize: 13)),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Não')),
-            FilledButton(style: FilledButton.styleFrom(backgroundColor: AppTheme.error), onPressed: () => Navigator.pop(ctx, true), child: const Text('Descartar')),
+            TextButton(style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)), onPressed: () => Navigator.pop(ctx, false), child: const Text('Não')),
+            FilledButton(style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)), onPressed: () => Navigator.pop(ctx, true), child: const Text('Descartar')),
           ],
         ),
       );
@@ -983,11 +1529,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     }
   }
 
-  /// Monta a lista de itens para envio ao serviço de PDF, removendo os preços
-  /// de fornecedores ocultos. Um fornecedor oculto não deve aparecer na
-  /// matriz do PDF nem entrar em nenhum cálculo de melhor preço/total — sem
-  /// isso, o filtro de "ocultar" feito na tela não se refletiria no PDF
-  /// gerado, já que o serviço de PDF só conhece o que é enviado no payload.
   List<Map<String, dynamic>> _itensParaPdf(OrcamentoTab tab) {
     final ocultos = tab.fornecedoresOcultos.toSet();
     if (ocultos.isEmpty) return tab.itens.map((i) => i.toJson()).toList();
@@ -1011,12 +1552,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Adicione ao menos um material antes de exportar.')));
       return;
     }
-    // Mesmo padrão da Ordem de Compra: SnackBar laranja avisando que o PDF
-    // está sendo gerado, sem depender do flag `_salvando` (que também
-    // controla o spinner compartilhado da barra de abas). Usar `_salvando`
-    // aqui fazia o spinner aparecer durante a exportação do PDF e dava a
-    // impressão de que outras ações (como o botão "Atualizar") também
-    // estavam em loading, mesmo sem nenhuma relação real entre elas.
+
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Gerando PDF…'),
@@ -1029,6 +1565,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         'titulo': tab.titulo,
         'itens': _itensParaPdf(tab),
         'fornecedoresOcultos': tab.fornecedoresOcultos,
+        'modoPrecificacao': tab.modoPrecificacao,
       });
       final hoje = DateTime.now();
       final dataStr = '${hoje.day.toString().padLeft(2, '0')}-${hoje.month.toString().padLeft(2, '0')}-${hoje.year}';
@@ -1087,6 +1624,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     try {
       if (tab.servidorId != null) {
         orcId = tab.servidorId!;
+        await repo.atualizarOrcamento(orcId, {'modoPrecificacao': tab.modoPrecificacao});
         await _sincronizarFornecedoresOcultos(orcId, tab);
         await repo.limparItens(orcId);
         for (final item in tab.itens) {
@@ -1101,7 +1639,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       } else {
         final criado = await repo.criar(tab.titulo);
         orcId = criado['id'] as int;
-        await repo.atualizarOrcamento(orcId, {'titulo': tab.titulo});
+        await repo.atualizarOrcamento(orcId, {'titulo': tab.titulo, 'modoPrecificacao': tab.modoPrecificacao});
         await _sincronizarFornecedoresOcultos(orcId, tab);
         for (final item in tab.itens) {
           if (item.precos.isEmpty) {
@@ -1120,7 +1658,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     }
 
     try {
-      final result = await repo.gerarOrdemCompra(orcId);
+      final result = await repo.gerarOrdemCompra(orcId, modoPreco: tab.modoPrecificacao);
       if (!mounted) return;
 
       if (result['pronto'] == true) {
@@ -1128,8 +1666,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         final qtdOCs = ocsCriadas?.length ?? porFornecedor.length;
         final primeiraOcId = ocsCriadas?.isNotEmpty == true ? (ocsCriadas!.first['id'] as int?) : null;
 
-        // Fecha a aba antes de navegar para que, ao voltar para /orcamento-compras,
-        // o usuário veja o painel de aprovação/lista — não o editor sem abas.
         provider.fecharAbaAposOperacao();
         if (!mounted) return;
 
@@ -1139,30 +1675,20 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
           duration: const Duration(seconds: 3),
         ));
 
-        // Sempre sinaliza primeiro: cobre o caso de primeira visita à página
-        // (initState ainda não rodou e a key abaixo ainda não está anexada).
         if (primeiraOcId != null && mounted) {
           context.read<OrdemCompraProvider>().sinalizarOcParaAbrir(primeiraOcId);
         }
 
         context.go('/ordem-compra');
 
-        // Caso a página de Ordem de Compra já esteja viva (StatefulShellRoute
-        // preserva estado entre navegações), nem initState nem
-        // didChangeDependencies são re-executados só porque trocamos de branch.
-        // Chamamos o método diretamente pela GlobalKey para recarregar a lista
-        // e abrir os detalhes da OC certa de forma síncrona e confiável —
-        // inclusive fechando os detalhes de outra OC que estivessem abertos.
         if (primeiraOcId != null) {
           final state = ordemCompraPageKey.currentState;
           if (state != null) {
-            // Página já montada: consome o sinal nós mesmos (evita reabertura)
-            // e chamamos diretamente, sem depender de lifecycle hooks.
+
             context.read<OrdemCompraProvider>().consumirOcPendente();
             await state.abrirOcPorId(primeiraOcId);
           }
-          // Se state for null, é a primeira visita: o initState da página vai
-          // consumir o sinal já setado acima através do postFrameCallback.
+
         }
       }
     } catch (e) {
@@ -1181,9 +1707,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
   int _fornecedoresSelecionados(List<ItemOrcamentoData> itens) =>
       itens.where((i) => i.fornecedorSelecionado != null).map((i) => i.fornecedorSelecionado!).toSet().length;
 
-  /// IDs de fornecedores presentes nos itens, EXCLUINDO os ocultados na aba
-  /// ativa. Usado pela matriz, totais, melhor preço e payload do PDF — ou
-  /// seja, em todo lugar que não deve "ver" um fornecedor oculto.
   Set<int> _todosFornecedoresIds(List<ItemOrcamentoData> itens) {
     final ocultos = context.read<OrcamentoProvider>().tabAtual?.fornecedoresOcultos.toSet() ?? const <int>{};
     final ids = <int>{};
@@ -1195,21 +1718,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     return ids;
   }
 
-  /// Oculta ou reexibe um fornecedor na visualização deste orçamento (matriz,
-  /// totais, melhor preço e PDF). Não remove o fornecedor nem nenhum item ou
-  /// preço — é reversível e fica salvo no orçamento, visível para qualquer
-  /// usuário que o abrir depois (inclusive após enviar para aprovação).
   Future<void> _alternarFornecedorOculto(int fornecedorId, bool oculto) async {
     final provider = context.read<OrcamentoProvider>();
     final tab = provider.tabAtual;
     if (tab == null) return;
 
-    // Atualiza localmente de imediato para resposta instantânea na UI.
     provider.definirFornecedorOcultoLocal(fornecedorId, oculto);
 
-    // Se ocultando um fornecedor que estava selecionado em algum item, limpa
-    // a seleção desses itens — um fornecedor oculto não pode permanecer
-    // "escolhido" para fins de geração de OC.
     if (oculto) {
       for (final item in List.of(tab.itens)) {
         if (item.fornecedorSelecionado == fornecedorId) {
@@ -1218,15 +1733,12 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       }
     }
 
-    // Persiste no servidor apenas se o orçamento já existe lá. Se ainda é um
-    // rascunho local (servidorId nulo), a lista será enviada junto ao salvar.
     if (tab.servidorId != null) {
       try {
         await OrcamentoRepository().definirFornecedorOculto(tab.servidorId!, fornecedorId, oculto);
       } catch (e) {
         if (!mounted) return;
-        // Reverte o estado local se o servidor não confirmar, para não ficar
-        // dessincronizado entre os usuários.
+
         provider.definirFornecedorOcultoLocal(fornecedorId, !oculto);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(_mensagemErro(e, acao: oculto ? 'ocultar fornecedor' : 'reexibir fornecedor')),
@@ -1236,9 +1748,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     }
   }
 
-  /// Mostra a lista de fornecedores ocultos do orçamento, com opção de
-  /// reexibir cada um. É o único jeito de reverter uma ocultação, já que a
-  /// coluna do fornecedor desaparece da matriz assim que ele é ocultado.
   Future<void> _gerenciarFornecedoresOcultos(List<ItemOrcamentoData> itens) async {
     final provider = context.read<OrcamentoProvider>();
 
@@ -1314,6 +1823,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
 
   @override
   Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _anexarParadasDoEditorAoTour();
+    });
     return Consumer<OrcamentoProvider>(
       builder: (context, provider, _) {
         final abas = provider.abas;
@@ -1505,20 +2017,29 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
           ),
           body: tab == null
               ? Center(child: Text('Nenhuma aba aberta', style: TextStyle(color: Theme.of(context).colorScheme.outline)))
-              : SingleChildScrollView(
-                  controller: _pageScrollCtrl,
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildBarraAcoes(provider, itens, tab),
-                      const SizedBox(height: 8),
-                      _buildSelecaoMateriais(provider, itens),
-                      const SizedBox(height: 8),
-                      itens.isEmpty ? _buildEmptyState() : _buildConteudo(provider, itens),
-                      const SizedBox(height: 16),
-                    ],
-                  ),
+              : Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildBarraAcoes(provider, itens, tab),
+                          const SizedBox(height: 8),
+                          _buildSelecaoMateriais(provider, itens),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: itens.isEmpty
+                          ? _buildEmptyState()
+                          : SingleChildScrollView(
+                              controller: _pageScrollCtrl,
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                              child: _buildConteudo(provider, itens),
+                            ),
+                    ),
+                  ],
                 ),
         );
       },
@@ -1534,81 +2055,158 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     const btnStyle12 = TextStyle(fontSize: 11);
     const iconSize = 13.0;
 
+    final outline = Theme.of(context).colorScheme.outlineVariant;
+    final onSurfaceVariant = Theme.of(context).colorScheme.onSurfaceVariant;
+    const iconOnlySize = 16.0;
+
+    Widget iconOnlyBtn({
+      required String tooltip,
+      required IconData icon,
+      required VoidCallback? onPressed,
+      Color? color,
+    }) {
+      return Tooltip(
+        message: tooltip,
+        child: SizedBox(
+          width: 34,
+          height: 34,
+          child: IconButton(
+            onPressed: onPressed,
+            icon: Icon(icon, size: iconOnlySize),
+            color: color ?? onSurfaceVariant,
+            disabledColor: onSurfaceVariant.withValues(alpha: 0.35),
+            padding: EdgeInsets.zero,
+            style: IconButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
+        ),
+      );
+    }
+
     return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(8), border: Border.all(color: Theme.of(context).colorScheme.outlineVariant)),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(8), border: Border.all(color: outline)),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.shopping_cart_outlined, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 4),
-              Text('${itens.length} mat. · $fornsSel forn.', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              Icon(Icons.shopping_cart_outlined, size: 14, color: onSurfaceVariant),
+              const SizedBox(width: 5),
+              Text('${itens.length} materiais · $fornsSel fornecedores', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: onSurfaceVariant)),
             ],
           ),
-          Tooltip(
-            message: 'Salvar orçamento',
-            child: OutlinedButton.icon(onPressed: _salvarOrcamento, icon: Icon(Icons.save_outlined, size: iconSize), label: Text('Salvar', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: AppTheme.success, side: const BorderSide(color: AppTheme.success), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click))),
-          ),
-          Tooltip(
-            message: 'Cancelar orçamento',
-            child: OutlinedButton.icon(onPressed: _cancelarOrcamento, icon: Icon(Icons.delete_outline, size: iconSize), label: Text('Cancelar', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: BorderSide(color: AppTheme.error), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click))),
-          ),
-          Tooltip(
-            message: 'Renomear orçamento',
-            child: OutlinedButton.icon(onPressed: () => _iniciarRenomeacaoAba(provider.abaAtiva), icon: Icon(Icons.edit_outlined, size: iconSize), label: Text('Renomear', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant, side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click))),
-          ),
-          Tooltip(
-            message: 'Baixar PDF do orçamento',
-            child: OutlinedButton.icon(onPressed: itens.isEmpty ? null : _exportarPdf, icon: Icon(Icons.picture_as_pdf_outlined, size: iconSize), label: Text('PDF', style: btnStyle12), style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant, side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click))),
-          ),
-          Tooltip(
-            message: 'Atualizar dados do orçamento',
-            child: OutlinedButton.icon(
-              onPressed: () => _sincronizarStatusServidor(origem: 'botaoAtualizarManual'),
-              icon: Icon(Icons.refresh, size: iconSize),
-              label: Text('Atualizar', style: btnStyle12),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                padding: btnPad,
-              ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+
+          const SizedBox(width: 12),
+
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+
+              Tooltip(
+                message: 'Renomear orçamento',
+                child: OutlinedButton.icon(
+                  onPressed: () => _iniciarRenomeacaoAba(provider.abaAtiva),
+                  icon: Icon(Icons.edit_outlined, size: iconSize),
+                  label: Text('Renomear', style: btnStyle12),
+                  style: OutlinedButton.styleFrom(foregroundColor: onSurfaceVariant, side: BorderSide(color: outline), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: 'Baixar PDF do orçamento',
+                child: OutlinedButton.icon(
+                  onPressed: itens.isEmpty ? null : _exportarPdf,
+                  icon: Icon(Icons.picture_as_pdf_outlined, size: iconSize),
+                  label: Text('PDF', style: btnStyle12),
+                  style: OutlinedButton.styleFrom(foregroundColor: onSurfaceVariant, side: BorderSide(color: outline), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                ),
+              ),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: SizedBox(height: 22, child: VerticalDivider(width: 1, color: outline)),
+              ),
+
+              Tooltip(
+                message: 'Cancelar orçamento',
+                child: OutlinedButton.icon(
+                  onPressed: _cancelarOrcamento,
+                  icon: Icon(Icons.delete_outline, size: iconSize),
+                  label: Text('Cancelar', style: btnStyle12),
+                  style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: BorderSide(color: AppTheme.error.withValues(alpha: 0.5)), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: 'Salvar orçamento',
+                child: OutlinedButton.icon(
+                  onPressed: _salvarOrcamento,
+                  icon: Icon(Icons.save_outlined, size: iconSize),
+                  label: Text('Salvar', style: btnStyle12),
+                  style: OutlinedButton.styleFrom(foregroundColor: AppTheme.success, side: BorderSide(color: AppTheme.success), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              if (tab.modoGerarOC)
+                Tooltip(
+                  message: podeGerar ? 'Gerar Ordens de Compra' : 'Selecione um fornecedor para cada material',
+                  child: FilledButton.icon(
+                    onPressed: podeGerar ? () => _gerarOrdemCompra(itens) : null,
+                    icon: const Icon(Icons.shopping_cart_checkout, size: iconSize),
+                    label: Text('Gerar OC (${_fornecedoresSelecionados(itens)})', style: btnStyle12),
+                    style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                  ),
+                )
+              else if (mostrarBotaoAprovar)
+                Tooltip(
+                  message: 'Aprovar orçamento',
+                  child: FilledButton.icon(
+                    onPressed: itens.isEmpty ? null : () async { final sid = provider.tabAtual?.servidorId; if (sid == null) return; await _aprovarOrcamento(sid, provider.tabAtual?.titulo ?? ''); },
+                    icon: Icon(Icons.check_circle_outline, size: iconSize),
+                    label: Text('Aprovar', style: btnStyle12),
+                    style: FilledButton.styleFrom(backgroundColor: AppTheme.success, foregroundColor: Colors.white, padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                  ),
+                )
+              else
+                Tooltip(
+                  message: tab.jaFinalizado ? 'Orçamento já aprovado/não aprovado. Reabra para reenviar.' : 'Enviar orçamento para aprovação',
+                  child: FilledButton.icon(
+                    key: _tourKeys.botaoEnviarParaAprovacao,
+                    onPressed: (itens.isEmpty || tab.jaFinalizado) ? null : _enviarParaAprovacao,
+                    icon: Icon(Icons.send_outlined, size: iconSize),
+                    label: Text('Enviar para aprovação', style: btnStyle12),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: tab.jaFinalizado ? Theme.of(context).colorScheme.surfaceContainerHighest : AppTheme.warning,
+                      foregroundColor: tab.jaFinalizado ? onSurfaceVariant : Colors.white,
+                      padding: btnPad,
+                    ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                  ),
+                ),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: SizedBox(height: 22, child: VerticalDivider(width: 1, color: outline)),
+              ),
+
+              iconOnlyBtn(
+                tooltip: 'Atualizar dados do orçamento',
+                icon: Icons.refresh,
+                onPressed: () => _sincronizarStatusServidor(origem: 'botaoAtualizarManual'),
+              ),
+                ],
+              ),
             ),
           ),
-          if (mostrarBotaoAprovar)
-            Tooltip(
-              message: 'Aprovar orçamento',
-              child: OutlinedButton.icon(
-                onPressed: itens.isEmpty ? null : () async { final sid = provider.tabAtual?.servidorId; if (sid == null) return; await _aprovarOrcamento(sid, provider.tabAtual?.titulo ?? ''); },
-                icon: Icon(Icons.check_circle_outline, size: iconSize),
-                label: Text('Aprovar', style: btnStyle12),
-                style: OutlinedButton.styleFrom(foregroundColor: AppTheme.success, side: const BorderSide(color: AppTheme.success), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-              ),
-            )
-          else if (!tab.modoGerarOC)
-            Tooltip(
-              message: tab.jaFinalizado ? 'Orçamento já aprovado/não aprovado. Reabra para reenviar.' : 'Enviar orçamento para aprovação',
-              child: OutlinedButton.icon(
-                onPressed: (itens.isEmpty || tab.jaFinalizado) ? null : _enviarParaAprovacao,
-                icon: Icon(Icons.send_outlined, size: iconSize),
-                label: Text('Enviar para aprovação', style: btnStyle12),
-                style: OutlinedButton.styleFrom(foregroundColor: tab.jaFinalizado ? Theme.of(context).colorScheme.outline : AppTheme.warning, side: BorderSide(color: tab.jaFinalizado ? Theme.of(context).colorScheme.outlineVariant : AppTheme.warning), padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-              ),
-            ),
-          if (tab.modoGerarOC)
-            Tooltip(
-              message: podeGerar ? 'Gerar Ordens de Compra' : 'Selecione um fornecedor para cada material',
-              child: FilledButton.icon(
-                onPressed: podeGerar ? () => _gerarOrdemCompra(itens) : null,
-                icon: const Icon(Icons.shopping_cart_checkout, size: iconSize),
-                label: Text('Gerar OC (${_fornecedoresSelecionados(itens)})', style: btnStyle12),
-                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, padding: btnPad).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-              ),
-            ),
         ],
       ),
     );
@@ -1619,10 +2217,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 80, height: 80, decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(24)), child: Icon(Icons.inventory_2_outlined, size: 40, color: AppTheme.primary)),
-          SizedBox(height: 20),
+          Container(width: 88, height: 88, decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(24)), child: Icon(Icons.inventory_2_outlined, size: 42, color: AppTheme.primary)),
+          const SizedBox(height: 22),
           Text('Nenhum material adicionado', style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           Text('Busque um material acima para começar o orçamento.', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ],
       ),
@@ -1709,7 +2307,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
           ),
         ),
 
-        Padding(
+        KeyedSubtree(
+          key: _tourKeys.blocoFiltros,
+          child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -1717,11 +2317,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               Expanded(
                 flex: 3,
                 child: TextField(
+                  key: _tourKeys.campoNome,
                   controller: _searchNomeCtrl,
-                  autofocus: true,
+
+                  autofocus: !context.watch<RoboHelperProvider>().tourAtivo,
                   inputFormatters: [_NoCommaFormatter()],
                   decoration: InputDecoration(
-                    labelText: 'Nome',
+                    labelText: 'Nome do material',
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 6,
@@ -1760,7 +2362,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                   controller: _searchIdentificadorCtrl,
                   inputFormatters: [_NoCommaFormatter()],
                   decoration: const InputDecoration(
-                    labelText: 'Identif.',
+                    labelText: 'Identificador',
                     prefixIcon: Icon(
                       Icons.qr_code_outlined,
                       size: 13,
@@ -1809,8 +2411,62 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               Expanded(
                 flex: 2,
                 child: TextField(
+                  controller: _searchComprimentoCtrl,
+                  inputFormatters: [_DecimalInputFormatter()],
+                  decoration: const InputDecoration(
+                    labelText: 'Comprimento',
+                    suffixText: 'm',
+                    prefixIcon: Icon(
+                      Icons.height,
+                      size: 13,
+                    ),
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 8,
+                    ),
+                  ),
+                  onChanged: (_) {
+                    setState(() {});
+                    _agendarBuscaMateriais();
+                  },
+                ),
+              ),
+
+              const SizedBox(width: 6),
+
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: _searchLarguraCtrl,
+                  inputFormatters: [_DecimalInputFormatter()],
+                  decoration: const InputDecoration(
+                    labelText: 'Largura',
+                    suffixText: 'm',
+                    prefixIcon: Icon(
+                      Icons.width_normal,
+                      size: 13,
+                    ),
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 8,
+                    ),
+                  ),
+                  onChanged: (_) {
+                    setState(() {});
+                    _agendarBuscaMateriais();
+                  },
+                ),
+              ),
+
+              const SizedBox(width: 6),
+
+              Expanded(
+                flex: 2,
+                child: TextField(
                   controller: _searchEspCtrl,
-                  inputFormatters: [_NoCommaFormatter()],
+                  inputFormatters: [_DecimalInputFormatter()],
                   decoration: const InputDecoration(
                     labelText: 'Espessura',
                     prefixIcon: Icon(
@@ -1837,6 +2493,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                   final temFiltro = _searchNomeCtrl.text.isNotEmpty ||
                       _searchIdentificadorCtrl.text.isNotEmpty ||
                       _searchMedidaCtrl.text.isNotEmpty ||
+                      _searchComprimentoCtrl.text.isNotEmpty ||
+                      _searchLarguraCtrl.text.isNotEmpty ||
                       _searchEspCtrl.text.isNotEmpty;
                   return IconButton.outlined(
                     tooltip: 'Limpar filtros',
@@ -1849,6 +2507,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                             _searchNomeCtrl.clear();
                             _searchIdentificadorCtrl.clear();
                             _searchMedidaCtrl.clear();
+                            _searchComprimentoCtrl.clear();
+                            _searchLarguraCtrl.clear();
                             _searchEspCtrl.clear();
 
                             setState(() {
@@ -1872,15 +2532,38 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               ),
             ],
           ),
+          ),
         ),
-        if (_mostrarResultados && (_buscando || _resultadosBusca.isNotEmpty))
+        if (_mostrarResultados &&
+            (_buscando || _resultadosBusca.isNotEmpty || _mostrarResultadoFakeNoDropdown))
           Container(
             constraints: BoxConstraints(maxHeight: 200),
             margin: EdgeInsets.fromLTRB(10, 0, 10, 10),
             decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(6), border: Border.all(color: Theme.of(context).colorScheme.outlineVariant), boxShadow: [BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 3))]),
             child: _buscando
                 ? Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator(color: AppTheme.primary)))
-                : _resultadosBusca.isEmpty
+                : _mostrarResultadoFakeNoDropdown
+                    ? Material(
+                        color: Theme.of(context).colorScheme.surface,
+                        child: ListTile(
+                          key: _tourKeys.primeiroResultadoDropdown,
+                          dense: true,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                          title: RichText(
+                            overflow: TextOverflow.ellipsis,
+                            text: TextSpan(
+                              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface),
+                              children: const [
+                                TextSpan(text: 'MATERIAL EXEMPLO', style: TextStyle(fontWeight: FontWeight.w600)),
+                                TextSpan(text: ' • 2x1m • 2mm • Unidade', style: TextStyle(fontWeight: FontWeight.w400)),
+                              ],
+                            ),
+                          ),
+                          trailing: const _StatusChip(status: ''),
+                          onTap: null,
+                        ),
+                      )
+                    : _resultadosBusca.isEmpty
                     ? Padding(padding: EdgeInsets.all(14), child: Row(children: [Icon(Icons.search_off, size: 15, color: Theme.of(context).colorScheme.outline), SizedBox(width: 6), Text('Nenhum material encontrado.', style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12))]))
                     : Material(
                         color: Theme.of(context).colorScheme.surface,
@@ -1893,8 +2576,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                           final medidaOuDimensao = (m.medida != null && m.medida!.isNotEmpty)
                               ? m.medida
                               : _materialDimensaoFormatada(m.largura, m.comprimento);
-                          final sub = [m.categoria, medidaOuDimensao, m.espessura, m.identificador, _formatarUnidadeExibicao(m.unidade)].where((s) => s != null && s.isNotEmpty).join(' • ');
+                          final sub = [m.categoria, medidaOuDimensao, _formatarEspessura(m.espessura), m.identificador, _formatarUnidadeExibicao(m.unidade)].where((s) => s != null && s.isNotEmpty).join(' • ');
                           return ListTile(
+                            key: i == 0 ? _tourKeys.primeiroResultado : null,
                             dense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                             title: RichText(
                               overflow: TextOverflow.ellipsis,
@@ -1962,6 +2646,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     });
     final fornIdsRaw = _todosFornecedoresIds(itens).toList();
 
+    final orcarPorMetroLinear = provider.tabAtual?.orcarPorMetroLinear ?? false;
+    double fatorItem(ItemOrcamentoData item) {
+      if (!orcarPorMetroLinear) return 1;
+      final q = item.qtdUnidade;
+      return (q != null && q > 0) ? q : 1;
+    }
+
     Map<int, double> totaisForn = {};
     Map<int, int> cobertura = {};
     for (final fId in fornIdsRaw) {
@@ -1972,7 +2663,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         if (pf != null) {
           final preco = pf.preco;
           if (preco != null) {
-            soma += preco * item.quantidade;
+            soma += preco * item.quantidade * fatorItem(item);
             cnt++;
           }
         }
@@ -1981,7 +2672,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       cobertura[fId] = cnt;
     }
 
-    // Nome de cada fornecedor (usado apenas para ordenação alfabética das colunas).
     Map<int, String> nomesForn = {};
     for (final fId in fornIdsRaw) {
       final nome = itens
@@ -2011,7 +2701,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     for (int i = 0; i < itens.length; i++) {
       final m = melhorPorMaterial[i];
       if (m != null) {
-        totalMelhor += m * itens[i].quantidade;
+        totalMelhor += m * itens[i].quantidade * fatorItem(itens[i]);
         materiaisComMelhor++;
       }
     }
@@ -2045,7 +2735,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
 
     final double scrollableWidth = 12 + (colFornMin * todosFornIds.length) + todosFornIds.length.toDouble() + 1 + colMelhor;
 
-    // ── Cabecalho fixo (Material + Qtd) ──────────────────────────────────────
     Widget cabecalhoFixo() => Container(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Row(children: [
@@ -2066,7 +2755,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       ]),
     );
 
-    // ── Cabecalho scrollável (fornecedores + melhor preço) ────────────────────
     Widget cabecalhoScroll() => Container(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Row(children: [
@@ -2110,8 +2798,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       ]),
     );
 
-
-    // ── Totais fixo ───────────────────────────────────────────────────────────
     Widget totaisFixo() => Container(
       decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest, border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant, width: 1.5))),
       child: Row(children: [
@@ -2126,7 +2812,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       ]),
     );
 
-    // ── Totais scrollável ─────────────────────────────────────────────────────
     Widget totaisScroll() => Container(
       decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest, border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant, width: 1.5))),
       child: Row(children: [
@@ -2154,7 +2839,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       ]),
     );
 
-    // ── Row builder para coluna fixa ──────────────────────────────────────────
     Widget itemFixo(int idx) {
       final item = itens[idx];
       final isSelected = item.fornecedorSelecionado != null;
@@ -2196,7 +2880,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Flexible(child: Text(item.materialNome, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), softWrap: true)),
                       if ([item.materialMedida, item.materialDimensaoFormatada, item.materialEspessura, item.materialIdentificador].any((s) => s != null && s.isNotEmpty))
-                        Text([item.materialMedida ?? item.materialDimensaoFormatada, item.materialEspessura, item.materialIdentificador].where((s) => s != null && s.isNotEmpty).join(' · '), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), softWrap: true),
+                        Text([item.materialMedida ?? item.materialDimensaoFormatada, _formatarEspessura(item.materialEspessura), item.materialIdentificador].where((s) => s != null && s.isNotEmpty).join(' · '), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), softWrap: true),
                     const SizedBox(height: 3),
                     FittedBox(
                       fit: BoxFit.scaleDown,
@@ -2206,6 +2890,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                         child: MouseRegion(
                           cursor: SystemMouseCursors.click,
                           child: GestureDetector(
+                            key: idx == 0 ? _tourKeys.botaoAdicionarFornecedor : null,
                             onTap: () => _vincularFornecedores(idx),
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
@@ -2254,7 +2939,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
             width: colQtd,
             alignment: Alignment.center,
             padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 3),
-            child: _QuantidadeField(key: ValueKey('qtd_${item.itemId}'), value: item.quantidade, onChanged: (q) => provider.atualizarItemParcial(item.itemId, quantidade: q)),
+            child: _QuantidadeField(key: ValueKey('qtd_${item.itemId}'), tourKey: idx == 0 ? _tourKeys.campoQuantidadeMaterial1 : null, value: item.quantidade, onChanged: (q) => provider.atualizarItemParcial(item.itemId, quantidade: q)),
           ),
           Container(width: 1, color: Theme.of(context).colorScheme.outlineVariant),
           Container(
@@ -2268,6 +2953,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                         : '${_unidadeDescricaoCompleta(item.materialUnidade)} por unidade',
                     child: _QtdUnidadeField(
                       key: ValueKey('qtdUnidade_${item.itemId}'),
+                      tourKey: idx == 1 ? _tourKeys.campoQtdUnidadeMaterial2 : null,
                       value: item.qtdUnidade,
                       unidade: item.materialUnidade,
                       onChanged: (q) => provider.atualizarItemParcial(item.itemId, qtdUnidade: q),
@@ -2280,7 +2966,6 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       );
     }
 
-    // ── Row builder para coluna scrollável (fornecedores) ─────────────────────
     Widget itemScroll(int idx) {
       final item = itens[idx];
       final isSelected = item.fornecedorSelecionado != null;
@@ -2304,11 +2989,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               ]);
             }
             final preco = pf.preco;
-            final total = preco != null ? preco * item.quantidade : null;
+            final total = preco != null ? preco * item.quantidade * fatorItem(item) : null;
             final isMenorNaLinha = melhor != null && preco != null && preco == melhor;
             final isSelectedForn = item.fornecedorSelecionado == fId;
+            final ehPrimeiraCelulaTour = idx == 0 && fId == todosFornIds.first;
             return Row(mainAxisSize: MainAxisSize.min, children: [
               GestureDetector(
+                key: ehPrimeiraCelulaTour ? _tourKeys.celulaFornecedor : null,
                 onTap: () {
                   if (isSelectedForn) { provider.atualizarItemParcial(item.itemId, clearFornecedor: true); }
                   else { provider.atualizarItemParcial(item.itemId, fornecedorSelecionado: fId); }
@@ -2337,6 +3024,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                     MouseRegion(
                       cursor: SystemMouseCursors.click,
                       child: GestureDetector(
+                        key: ehPrimeiraCelulaTour ? _tourKeys.editarPreco : null,
                         onTap: () => _editarPreco(idx, fId),
                         child: const Text(
                           'editar',
@@ -2364,7 +3052,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(5), border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2))),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
                   Text(_brl(melhor), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppTheme.primary), textAlign: TextAlign.center),
-                  Text(_brl(melhor * item.quantidade), style: TextStyle(fontSize: 9, color: AppTheme.primary.withValues(alpha: 0.7)), textAlign: TextAlign.center),
+                  Text(_brl(melhor * item.quantidade * fatorItem(item)), style: TextStyle(fontSize: 9, color: AppTheme.primary.withValues(alpha: 0.7)), textAlign: TextAlign.center),
                 ]))
             : Text('—', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline), textAlign: TextAlign.center),
           )),
@@ -2423,13 +3111,57 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 ),
               ],
               Tooltip(
+                message: 'Define como os preços dos fornecedores são interpretados no comparativo e na OC gerada',
+                child: IntrinsicWidth(child: SizedBox(
+                  key: _tourKeys.botaoOrcarPor,
+                  height: 30,
+                  child: PopupMenuButton<String>(
+                    onSelected: (modo) => provider.definirModoPrecificacao(modo),
+                    itemBuilder: (ctx) => [
+                      CheckedPopupMenuItem(
+                        value: 'UNIDADE',
+                        checked: !orcarPorMetroLinear,
+                        mouseCursor: SystemMouseCursors.click,
+                        child: const Text('Unidade (preço por peça/rolo)', style: TextStyle(fontSize: 12)),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'METRO_LINEAR',
+                        checked: orcarPorMetroLinear,
+                        mouseCursor: SystemMouseCursors.click,
+                        child: const Text('Metro Linear (preço por m/l)', style: TextStyle(fontSize: 12)),
+                      ),
+                    ],
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Container(
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: AppTheme.primary),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.straighten, size: 12, color: AppTheme.primary),
+                          const SizedBox(width: 4),
+                          Text('Orçar por: ${orcarPorMetroLinear ? "Metro Linear" : "Unidade"}', style: const TextStyle(fontSize: 10, color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                          const Icon(Icons.arrow_drop_down, size: 14, color: AppTheme.primary),
+                        ]),
+                      ),
+                    ),
+                  ),
+                )),
+              ),
+              Tooltip(
                 message: 'Aplicar sugestão de orçamento otimizado',
-                child: OutlinedButton.icon(
-                  onPressed: () => _aplicarSugestaoOtimizada(itens),
-                  icon: const Icon(Icons.auto_awesome, size: 12),
-                  label: const Text('Sugestão de melhor preço', style: TextStyle(fontSize: 10)),
-                  style: OutlinedButton.styleFrom(foregroundColor: AppTheme.primary, side: const BorderSide(color: AppTheme.primary), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-                ),
+                child: IntrinsicWidth(child: SizedBox(
+                  height: 30,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _aplicarSugestaoOtimizada(itens),
+                    icon: const Icon(Icons.auto_awesome, size: 12),
+                    label: const Text('Sugestão de melhor preço', style: TextStyle(fontSize: 10)),
+                    style: OutlinedButton.styleFrom(foregroundColor: AppTheme.primary, side: const BorderSide(color: AppTheme.primary), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0), tapTargetSize: MaterialTapTargetSize.shrinkWrap).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                  ),
+                )),
               ),
               if (provider.tabAtual?.fornecedoresOcultos.isNotEmpty ?? false)
                 Tooltip(
@@ -2445,10 +3177,12 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
           ),
         ),
         _buildScrollHint(),
-        // ── Tabela: scroll horizontal único, linhas com altura sincronizada ────
+
         ScrollConfiguration(
           behavior: _HorizontalScrollBehavior(),
-          child: Scrollbar(
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: Scrollbar(
             controller: _tabelaHScrollCtrl,
             child: SingleChildScrollView(
               controller: _tabelaHScrollCtrl,
@@ -2457,7 +3191,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
               child: SizedBox(
                 width: colMaterial + 1 + colQtdMin + 1 + colQtd + 1 + colQtdUnidade + 1 + scrollableWidth,
                 child: Column(children: [
-                  // Cabeçalho completo numa única Row
+
                   IntrinsicHeight(
                     child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                       cabecalhoFixo(),
@@ -2465,7 +3199,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                     ]),
                   ),
                   Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
-                  // Corpo: lista vertical com cada linha unindo fixo + scrollável
+
                   SizedBox(
                     height: 500,
                     child: ListView.separated(
@@ -2479,7 +3213,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                       ),
                     ),
                   ),
-                  // Linha de totais completa numa única Row
+
                   IntrinsicHeight(
                     child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                       totaisFixo(),
@@ -2489,6 +3223,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 ]),
               ),
             ),
+          ),
           ),
         ),
         if (diferenca != null && diferenca > 0 && nomeFornComTodos != null)
@@ -2551,7 +3286,9 @@ class _StatusChip extends StatelessWidget {
 class _QuantidadeField extends StatefulWidget {
   final double value;
   final ValueChanged<double> onChanged;
-  const _QuantidadeField({super.key, required this.value, required this.onChanged});
+
+  final GlobalKey? tourKey;
+  const _QuantidadeField({super.key, required this.value, required this.onChanged, this.tourKey});
 
   @override
   State<_QuantidadeField> createState() => _QuantidadeFieldState();
@@ -2589,6 +3326,7 @@ class _QuantidadeFieldState extends State<_QuantidadeField> {
   @override
   Widget build(BuildContext context) {
     return TextField(
+      key: widget.tourKey,
       controller: _ctrl,
       keyboardType: TextInputType.numberWithOptions(decimal: true),
       inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
@@ -2608,14 +3346,13 @@ class _QuantidadeFieldState extends State<_QuantidadeField> {
   }
 }
 
-/// Campo para a quantidade da unidade de medida por embalagem/peça (ex: "M/L
-/// por unidade"). Diferente de [_QuantidadeField], aceita valor nulo/vazio —
-/// nem todo material precisa deste campo preenchido.
 class _QtdUnidadeField extends StatefulWidget {
   final double? value;
   final String? unidade;
   final ValueChanged<double?> onChanged;
-  const _QtdUnidadeField({super.key, required this.value, this.unidade, required this.onChanged});
+
+  final GlobalKey? tourKey;
+  const _QtdUnidadeField({super.key, required this.value, this.unidade, required this.onChanged, this.tourKey});
 
   @override
   State<_QtdUnidadeField> createState() => _QtdUnidadeFieldState();
@@ -2657,6 +3394,7 @@ class _QtdUnidadeFieldState extends State<_QtdUnidadeField> {
   Widget build(BuildContext context) {
     final unidade = widget.unidade?.trim();
     return TextField(
+      key: widget.tourKey,
       controller: _ctrl,
       keyboardType: TextInputType.numberWithOptions(decimal: true),
       inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
@@ -2690,7 +3428,8 @@ class _QtdUnidadeFieldState extends State<_QtdUnidadeField> {
       onTap: () => setState(() => _editando = true),
       onChanged: (v) {
         if (v.trim().isEmpty) {
-          widget.onChanged(null);
+
+          widget.onChanged(0);
           return;
         }
         final parsed = double.tryParse(v.replaceAll(',', '.'));
@@ -2772,6 +3511,7 @@ class _DialogSelecionarFornecedoresBulkState extends State<_DialogSelecionarForn
                         final f = filtrados[i];
                         return CheckboxListTile(
                           dense: true,
+                          mouseCursor: SystemMouseCursors.click,
                           title: Text(f.nomeFantasia, style: const TextStyle(fontSize: 13)),
                           subtitle: f.cnpj != null ? Text(f.cnpj!, style: const TextStyle(fontSize: 11)) : null,
                           value: _selecionados.contains(f.id),
@@ -2787,9 +3527,13 @@ class _DialogSelecionarFornecedoresBulkState extends State<_DialogSelecionarForn
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        TextButton(
+          style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
           onPressed: _selecionados.isEmpty ? null : () => Navigator.pop(context, _selecionados.toList()),
           child: const Text('Adicionar'),
         ),
@@ -2803,7 +3547,14 @@ class _DialogVincularFornecedores extends StatefulWidget {
   final Set<int> idsJaVinculados;
   final String materialNome;
 
-  const _DialogVincularFornecedores({required this.fornecedores, required this.idsJaVinculados, required this.materialNome});
+  final bool ehTourAssistente;
+
+  const _DialogVincularFornecedores({
+    required this.fornecedores,
+    required this.idsJaVinculados,
+    required this.materialNome,
+    this.ehTourAssistente = false,
+  });
 
   @override
   State<_DialogVincularFornecedores> createState() => _DialogVincularFornecedoresState();
@@ -2820,8 +3571,75 @@ class _DialogVincularFornecedoresState extends State<_DialogVincularFornecedores
     super.dispose();
   }
 
+  static const _nomeFornecedorDemo = 'FORNECEDOR EXEMPLO';
+  static const _cnpjFornecedorDemo = '00.000.000/0000-00';
+
+  static const _fornecedorIdTourFake = -999999;
+
   @override
   Widget build(BuildContext context) {
+
+    if (widget.ehTourAssistente) {
+      final selecionadoDemo = _selecionados.contains(_fornecedorIdTourFake);
+      return AlertDialog(
+        title: Text('Adicionar Fornecedores — ${widget.materialNome}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                key: _editorStateAtivo?._tourKeys.buscaFornecedorDialog,
+                controller: _buscaCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Buscar fornecedor...',
+                  prefixIcon: Icon(Icons.search, size: 18),
+                  isDense: true,
+                ),
+                onChanged: (v) => setState(() => _filtro = v),
+              ),
+              const SizedBox(height: 8),
+              if (_selecionados.isNotEmpty)
+                Padding(padding: const EdgeInsets.only(bottom: 6), child: Row(children: [const Icon(Icons.check_circle, size: 13, color: AppTheme.primary), const SizedBox(width: 6), Text('${_selecionados.length} selecionado', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primary))])),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 280),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    CheckboxListTile(
+                      key: _editorStateAtivo?._tourKeys.primeiroFornecedorDialog,
+                      dense: true,
+                      mouseCursor: SystemMouseCursors.click,
+                      title: const Text(_nomeFornecedorDemo, style: TextStyle(fontSize: 13)),
+                      subtitle: const Text(_cnpjFornecedorDemo, style: TextStyle(fontSize: 11)),
+                      value: selecionadoDemo,
+                      activeColor: AppTheme.primary,
+                      onChanged: (v) => setState(() {
+                        if (v == true) { _selecionados.add(_fornecedorIdTourFake); } else { _selecionados.remove(_fornecedorIdTourFake); }
+                      }),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: _selecionados.isEmpty ? null : () => Navigator.pop(context, _selecionados.toList()),
+            child: const Text('Adicionar'),
+          ),
+        ],
+      );
+    }
+
     final disponiveis = widget.fornecedores.where((f) => !widget.idsJaVinculados.contains(f.id)).toList();
     final filtrados = _filtro.isEmpty ? disponiveis : disponiveis.where((f) => f.nomeFantasia.toLowerCase().contains(_filtro.toLowerCase()) || (f.cnpj != null && f.cnpj!.contains(_filtro))).toList();
 
@@ -2860,6 +3678,7 @@ class _DialogVincularFornecedoresState extends State<_DialogVincularFornecedores
                             final f = filtrados[i];
                             return CheckboxListTile(
                               dense: true,
+                              mouseCursor: SystemMouseCursors.click,
                               title: Text(f.nomeFantasia, style: const TextStyle(fontSize: 13)),
                               subtitle: f.cnpj != null ? Text(f.cnpj!, style: const TextStyle(fontSize: 11)) : null,
                               value: _selecionados.contains(f.id),
@@ -2875,8 +3694,16 @@ class _DialogVincularFornecedoresState extends State<_DialogVincularFornecedores
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-        FilledButton(style: FilledButton.styleFrom(backgroundColor: AppTheme.primary), onPressed: _selecionados.isEmpty ? null : () => Navigator.pop(context, _selecionados.toList()), child: const Text('Adicionar')),
+        TextButton(
+          style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          onPressed: _selecionados.isEmpty ? null : () => Navigator.pop(context, _selecionados.toList()),
+          child: const Text('Adicionar'),
+        ),
       ],
     );
   }
@@ -2888,11 +3715,14 @@ class _DialogEditarMaterial extends StatefulWidget {
   final double? precoAtual;
   final String? observacaoAtual;
 
+  final GlobalKey? tourKeyCamposPrecoEDisponibilidade;
+
   const _DialogEditarMaterial({
     required this.fornecedorNome,
     required this.materialNome,
     this.precoAtual,
     this.observacaoAtual,
+    this.tourKeyCamposPrecoEDisponibilidade,
   });
 
   @override
@@ -2931,32 +3761,44 @@ class _DialogEditarMaterialState extends State<_DialogEditarMaterial> {
           children: [
             Text(widget.materialNome, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
             const SizedBox(height: 16),
-            TextField(
-              controller: _precoCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
-              decoration: const InputDecoration(labelText: 'Preço (R\$)', prefixText: 'R\$ ', isDense: true),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _observacaoCtrl,
-              maxLines: 3,
-              minLines: 1,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Disponibilidade / Observação',
-                hintText: 'Ex: Em falta, prazo 5 dias, sob consulta…',
-                isDense: true,
-                alignLabelWithHint: true,
-              ),
+            Column(
+              key: widget.tourKeyCamposPrecoEDisponibilidade,
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: TextField(
+                    controller: _precoCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
+                    decoration: const InputDecoration(labelText: 'Preço (R\$)', prefixText: 'R\$ ', isDense: true),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: TextField(
+                    controller: _observacaoCtrl,
+                    maxLines: 3,
+                    minLines: 1,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: const InputDecoration(
+                      labelText: 'Disponibilidade / Observação',
+                      isDense: true,
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        TextButton(style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)), onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
           onPressed: () {
             final preco = double.tryParse(_precoCtrl.text.replaceAll(',', '.'));
             final obs = _observacaoCtrl.text.trim().isEmpty ? null : _observacaoCtrl.text.trim();
@@ -3060,8 +3902,7 @@ class _TabNavBtn extends StatelessWidget {
     );
   }
 }
-// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
-// Mesmo padrão usado no cabeçalho das páginas de estoque / histórico.
+
 class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;
@@ -3083,7 +3924,6 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
@@ -3096,33 +3936,31 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
           borderRadius: BorderRadius.circular(10),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: _hovered
-                  ? _accent.withValues(alpha: 0.10)
-                  : Colors.transparent,
+                  ? _accent.withValues(alpha: 0.15)
+                  : _accent.withValues(alpha: 0.08),
               border: Border.all(
-                color: _hovered
-                    ? _accent.withValues(alpha: 0.6)
-                    : scheme.outlineVariant,
+                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
               ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
+                const Icon(
                   Icons.arrow_back,
                   size: 18,
-                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                  color: _accent,
                 ),
-                SizedBox(width: 6),
+                const SizedBox(width: 6),
                 Text(
                   widget.label,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 13,
-                    color: _hovered ? _accent : scheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
+                    color: _accent,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],

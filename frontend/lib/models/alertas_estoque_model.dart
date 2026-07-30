@@ -1,4 +1,3 @@
-/// Representa um material com estoque crítico.
 class AlertaEstoqueModel {
   final int id;
   final String nome;

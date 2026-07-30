@@ -4,6 +4,7 @@ import '../models/usuario_model.dart';
 import '../repositories/usuario_repository.dart';
 import '../utils/api_client.dart';
 import 'solicitacao_material_provider.dart';
+import 'chat_provider.dart';
 
 /// Converte exceções técnicas (SocketException, ClientException, TimeoutException
 /// etc.) em uma mensagem amigável para o usuário. Mensagens de erro vindas do
@@ -27,10 +28,16 @@ class UsuarioProvider extends ChangeNotifier {
   final UsuarioRepository _repo = UsuarioRepository();
   OrcamentoProvider? _orcamentoProvider;
   SolicitacaoMaterialProvider? _solicitacaoMaterialProvider;
+  ChatProvider? _chatProvider;
 
   void setOrcamentoProvider(OrcamentoProvider p) => _orcamentoProvider = p;
   void setSolicitacaoMaterialProvider(SolicitacaoMaterialProvider p) =>
       _solicitacaoMaterialProvider = p;
+  /// Liga o ChatProvider global a este provider, para que login/logout/troca
+  /// de usuário controlem diretamente o ciclo de vida da conexão de chat
+  /// (SSE + heartbeat + lista de usuários), em vez de depender da ChatPage
+  /// ter sido aberta pelo menos uma vez.
+  void setChatProvider(ChatProvider p) => _chatProvider = p;
 
   UsuarioModel? _usuarioLogado;
   UsuarioModel? get usuarioLogado => _usuarioLogado;
@@ -73,12 +80,14 @@ class UsuarioProvider extends ChangeNotifier {
           ApiClient.setToken(novoToken);
           await _repo.salvarSessao(novoToken, sessao.usuario);
           await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
+          await _chatProvider?.inicializar(_usuarioLogado!.id, novoToken);
         } catch (_) {
           // Token rejeitado pelo servidor — limpa e vai para login
           _token         = null;
           _usuarioLogado = null;
           ApiClient.setToken(null);
           await _repo.limparSessao();
+          _chatProvider?.limparToken();
         }
       }
     } catch (_) {
@@ -105,6 +114,7 @@ class UsuarioProvider extends ChangeNotifier {
       // Garante que não existe SSE/estado residual de uma sessão anterior
       // antes de autenticar o novo usuário.
       await _solicitacaoMaterialProvider?.resetarConexao();
+      _chatProvider?.limparToken();
       final result   = await _repo.login(username, senha);
       _token         = result.token;
       _usuarioLogado = result.usuario;
@@ -112,6 +122,7 @@ class UsuarioProvider extends ChangeNotifier {
       await _repo.adicionarUsuarioSalvo(result.usuario);
       await _refreshUsuariosSalvos();
       await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
+      await _chatProvider?.inicializar(_usuarioLogado!.id, _token!);
       return true;
     } catch (e) {
       _erro = _mensagemErro(e);
@@ -128,6 +139,7 @@ class UsuarioProvider extends ChangeNotifier {
     ApiClient.setToken(null);
     await _repo.limparSessao();
     _orcamentoProvider?.trocarUsuario(null);
+    _chatProvider?.limparToken();
     // Encerra a conexão SSE e zera o estado de solicitações do usuário que
     // saiu, para que o próximo usuário a logar comece do zero.
     await _solicitacaoMaterialProvider?.resetarConexao();
@@ -148,6 +160,10 @@ class UsuarioProvider extends ChangeNotifier {
     _erro       = null;
     try {
       await _solicitacaoMaterialProvider?.resetarConexao();
+      // Zera o estado de chat do usuário anterior (SSE, heartbeat, lista de
+      // usuários e conversas) ANTES de logar como o novo usuário, para não
+      // vazar dados de uma sessão para a outra durante a troca.
+      _chatProvider?.limparToken();
       final data    = await ApiClient.post('/auth/trocar-usuario', {'id': alvo.id});
       final token   = data['token'] as String;
       final usuario = UsuarioModel.fromJson(data['usuario'] as Map<String, dynamic>);
@@ -158,6 +174,7 @@ class UsuarioProvider extends ChangeNotifier {
       await _repo.adicionarUsuarioSalvo(usuario);
       await _refreshUsuariosSalvos();
       await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
+      await _chatProvider?.inicializar(_usuarioLogado!.id, token);
       return true;
     } catch (e) {
       _erro = _mensagemErro(e);
@@ -181,6 +198,7 @@ class UsuarioProvider extends ChangeNotifier {
     ApiClient.setToken(null);
     await _repo.limparSessao();
     _orcamentoProvider?.trocarUsuario(null);
+    _chatProvider?.limparToken();
     await _solicitacaoMaterialProvider?.resetarConexao();
     notifyListeners();
   }

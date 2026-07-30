@@ -1,16 +1,13 @@
 import 'produto_model.dart';
 
-// ── Material dentro de um item do orçamento de venda ─────────────────────────
-
 class OrcamentoVendaItemMaterialModel {
   final int id;
   final int materialId;
-  double quantidade; // mutável — editado pelo usuário
+  double quantidade;
   final double? precoMedio;
   final double? precoMedioM2;
-  double? precoUnitario; // mutável — pode ser editado
+  double? precoUnitario;
   final bool usarM2;
-  /// Dimensões da peça informadas pelo usuário no orçamento.
   final double? largura;
   final double? comprimento;
   final MaterialItemEmbutido material;
@@ -28,7 +25,6 @@ class OrcamentoVendaItemMaterialModel {
     required this.material,
   });
 
-  /// Preço de referência: prefere precoUnitario, depois último valor pago, depois médio.
   double? get precoRef {
     if (precoUnitario != null && precoUnitario! > 0) return precoUnitario;
     if (usarM2) return precoMedioM2 ?? material.precoRefM2;
@@ -65,8 +61,6 @@ class OrcamentoVendaItemMaterialModel {
     'comprimento':   comprimento,
   };
 }
-
-// ── Item (produto) do orçamento de venda ─────────────────────────────────────
 
 class OrcamentoVendaItemModel {
   final int id;
@@ -106,8 +100,6 @@ class OrcamentoVendaItemModel {
   }
 }
 
-// ── Orçamento de Venda ────────────────────────────────────────────────────────
-
 class OrcamentoVendaModel {
   final int id;
   final String numero;
@@ -120,8 +112,6 @@ class OrcamentoVendaModel {
   final String? criadorNome;
   final List<OrcamentoVendaItemModel> itens;
 
-  /// Percentual de markup aplicado ao calcular o valorTotal (ex: 400 = 400%).
-  /// Null quando o orçamento ainda não foi salvo ou não há faixas configuradas.
   final double? percentualMarkup;
 
   OrcamentoVendaModel({
@@ -142,7 +132,6 @@ class OrcamentoVendaModel {
     final cliente = json['cliente'] as Map<String, dynamic>?;
     final criador = json['criador'] as Map<String, dynamic>?;
 
-    // Prioriza o campo direto clienteNome, depois o nome do relacionamento cliente
     final nomeCliente = json['clienteNome'] as String? ?? cliente?['nome'] as String?;
 
     return OrcamentoVendaModel(

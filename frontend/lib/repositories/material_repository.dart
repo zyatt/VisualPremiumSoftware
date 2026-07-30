@@ -10,7 +10,12 @@ class MaterialRepository {
     String? identificador,
     String? medida,
     String? espessura,
+    String? largura,
+    String? comprimento,
     bool? ativo,
+    /// Limita a quantidade retornada diretamente no banco (ex.: autocomplete).
+    /// Sem isso, a busca trazia a tabela inteira e cortava no client.
+    int? limite,
   }) async {
     final params = <String, String>{};
     if (busca != null && busca.isNotEmpty)               params['busca']        = busca;
@@ -24,7 +29,10 @@ class MaterialRepository {
     if (identificador != null && identificador.isNotEmpty) params['identificador'] = identificador;
     if (medida != null && medida.isNotEmpty)             params['medida']       = medida;
     if (espessura != null && espessura.isNotEmpty)       params['espessura']    = espessura;
+    if (largura != null && largura.isNotEmpty)           params['largura']      = largura;
+    if (comprimento != null && comprimento.isNotEmpty)   params['comprimento']  = comprimento;
     if (ativo != null)                                   params['ativo']        = ativo.toString();
+    if (limite != null)                                  params['limite']       = limite.toString();
 
     final query = params.entries
         .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
@@ -37,13 +45,93 @@ class MaterialRepository {
         .toList();
   }
 
-   Future<List<MaterialModel>> listarParaMovimentacao({
+  Map<String, String> _paramsComuns({
+    String? busca,
+    String? categoria,
+    String? status,
+    String? id,
+    String? identificador,
+    String? medida,
+    String? espessura,
+    bool? ativo,
+    bool? comFornecedor,
+  }) {
+    final params = <String, String>{};
+    if (busca != null && busca.isNotEmpty)               params['busca']        = busca;
+    if (categoria != null && categoria.isEmpty) {
+      params['semCategoria'] = 'true';
+    } else if (categoria != null && categoria.isNotEmpty)  {
+      params['categoria']    = categoria;
+    }
+    if (status != null && status.isNotEmpty)             params['status']       = status;
+    if (id != null && id.isNotEmpty)                     params['id']           = id;
+    if (identificador != null && identificador.isNotEmpty) params['identificador'] = identificador;
+    if (medida != null && medida.isNotEmpty)             params['medida']       = medida;
+    if (espessura != null && espessura.isNotEmpty)       params['espessura']    = espessura;
+    if (ativo != null)                                   params['ativo']        = ativo.toString();
+    if (comFornecedor == true)                           params['comFornecedor'] = 'true';
+    return params;
+  }
+
+  /// Busca uma única página de materiais direto do servidor — ordenação e
+  /// corte acontecem no banco (GET /materiais/paginado), então o payload
+  /// fica do tamanho de [porPagina], não da tabela inteira.
+  Future<MateriaisPaginadosModel> listarPaginado({
+    String? busca,
+    String? categoria,
+    String? status,
+    String? id,
+    String? identificador,
+    String? medida,
+    String? espessura,
+    String? largura,
+    String? comprimento,
+    bool? ativo,
+    bool? comFornecedor,
+    required int pagina,
+    int porPagina = 50,
+    String? ordenarPor,
+    String? direcao,
+  }) async {
+    final params = _paramsComuns(
+      busca: busca,
+      categoria: categoria,
+      status: status,
+      id: id,
+      identificador: identificador,
+      medida: medida,
+      espessura: espessura,
+      ativo: ativo,
+      comFornecedor: comFornecedor,
+    );
+    if (largura != null && largura.isNotEmpty)       params['largura']      = largura;
+    if (comprimento != null && comprimento.isNotEmpty) params['comprimento'] = comprimento;
+    params['pagina']    = pagina.toString();
+    params['porPagina'] = porPagina.toString();
+    if (ordenarPor != null && ordenarPor.isNotEmpty) params['ordenarPor'] = ordenarPor;
+    if (direcao != null && direcao.isNotEmpty)       params['direcao']    = direcao;
+
+    final query = params.entries
+        .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+    final data = await ApiClient.get('/materiais/paginado?$query');
+
+    final itens = (data['data'] as List? ?? [])
+        .map((e) => MaterialModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final total = (data['total'] as num?)?.toInt() ?? itens.length;
+    return MateriaisPaginadosModel(itens: itens, total: total);
+  }
+
+  Future<List<MaterialModel>> listarParaMovimentacao({
     String? busca,
     String? categoria,
     String? id,
     String? identificador,
     String? medida,
     String? espessura,
+    String? largura,
+    String? comprimento,
   }) async {
     final params = <String, String>{};
     if (busca != null && busca.isNotEmpty)                 params['busca']         = busca;
@@ -51,6 +139,8 @@ class MaterialRepository {
     if (identificador != null && identificador.isNotEmpty) params['identificador'] = identificador;
     if (medida != null && medida.isNotEmpty)               params['medida']        = medida;
     if (espessura != null && espessura.isNotEmpty)         params['espessura']     = espessura;
+    if (largura != null && largura.isNotEmpty)             params['largura']       = largura;
+    if (comprimento != null && comprimento.isNotEmpty)     params['comprimento']   = comprimento;
     if (categoria != null && categoria.isEmpty) {
       params['semCategoria'] = 'true';
     } else if (categoria != null && categoria.isNotEmpty) {

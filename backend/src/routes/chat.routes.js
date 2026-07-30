@@ -5,6 +5,57 @@ const { authMiddleware: autenticar } = require('../middlewares/auth.middleware')
 
 const sseClients = new Map();
 
+// ── Presença baseada em heartbeat (TTL) ─────────────────────────────────────
+// Antes, "online" dependia inteiramente de existir uma conexão SSE viva no
+// Map acima. Se a reconexão do app travar num estado intermediário (erro
+// silencioso, rede oscilando), o cliente pode nunca voltar a entrar nesse
+// Map — mesmo com o app aberto — deixando o usuário preso como offline.
+// Agora a presença é decidida por um "último heartbeat" recebido via
+// POST /chat/heartbeat, enviado periodicamente pelo app independente do
+// estado da conexão SSE. Um sweep periódico marca como offline quem parou
+// de mandar heartbeat.
+const PRESENCA_TTL_MS   = 45_000; // sem heartbeat há mais que isso = offline
+const PRESENCA_SWEEP_MS = 15_000;
+
+const presenca = new Map(); // usuarioId -> timestamp (ms) do último heartbeat
+const jaOnline = new Set(); // usuarioId atualmente online (evita broadcast repetido a cada heartbeat)
+
+function marcarOnline(userId) {
+  presenca.set(userId, Date.now());
+  if (!jaOnline.has(userId)) {
+    jaOnline.add(userId);
+    broadcastTodos({ tipo: 'usuario_online', usuarioId: userId });
+  }
+}
+
+function estaOnline(userId) {
+  const ts = presenca.get(userId);
+  return ts != null && (Date.now() - ts) < PRESENCA_TTL_MS;
+}
+
+function verificarPresencaExpirada() {
+  const agora = Date.now();
+  for (const [userId, ts] of presenca) {
+    if (agora - ts > PRESENCA_TTL_MS) {
+      presenca.delete(userId);
+      jaOnline.delete(userId);
+
+      const ultimoAcesso = new Date();
+      prisma.usuario
+        .update({ where: { id: userId }, data: { ultimoAcesso } })
+        .then(() => {
+          broadcastTodos({
+            tipo: 'usuario_offline',
+            usuarioId: userId,
+            ultimoAcesso,
+          });
+        })
+        .catch((err) => console.error('Erro ao registrar último acesso:', err));
+    }
+  }
+}
+setInterval(verificarPresencaExpirada, PRESENCA_SWEEP_MS);
+
 router.get('/sse', autenticar, (req, res) => {
   const userId = req.usuario.id;
 
@@ -22,29 +73,27 @@ router.get('/sse', autenticar, (req, res) => {
 
   sseClients.set(userId, res);
 
-  // A conexão SSE só existe enquanto o app está aberto/em primeiro plano,
-  // então ela serve como sinal de presença: conectou = está online.
-  broadcastTodos({ tipo: 'usuario_online', usuarioId: userId });
+  // Abrir a conexão SSE também conta como sinal de presença, mas quem
+  // efetivamente mantém o status "online" atualizado é o heartbeat HTTP
+  // abaixo — não a conexão em si.
+  marcarOnline(userId);
 
   req.on('close', () => {
     clearInterval(heartbeat);
     sseClients.delete(userId);
-
-    // Ao desconectar (app fechado, aba fechada, perda de rede etc.),
-    // registra o momento como "último acesso" e avisa os demais usuários
-    // conectados para que atualizem o indicador de status na hora.
-    const agora = new Date();
-    prisma.usuario
-      .update({ where: { id: userId }, data: { ultimoAcesso: agora } })
-      .then(() => {
-        broadcastTodos({
-          tipo: 'usuario_offline',
-          usuarioId: userId,
-          ultimoAcesso: agora,
-        });
-      })
-      .catch((err) => console.error('Erro ao registrar último acesso:', err));
+    // Não marca offline aqui de propósito: perder a conexão SSE não
+    // significa necessariamente que o app foi fechado (rede oscilando,
+    // troca de rede, app em background momentâneo etc.). Quem decide
+    // offline agora é exclusivamente o sweep de presença acima.
   });
+});
+
+// Ping periódico enviado pelo app enquanto está aberto, independente do
+// estado da conexão SSE. É isso que evita o usuário ficar preso como
+// offline quando o SSE está com problema de reconexão.
+router.post('/heartbeat', autenticar, (req, res) => {
+  marcarOnline(req.usuario.id);
+  res.json({ ok: true });
 });
 
 function notificarUsuario(destinatarioId, evento) {
@@ -91,9 +140,10 @@ router.get('/usuarios', autenticar, async (req, res) => {
         const naoLidas = await prisma.mensagemChat.count({
           where: { remetenteId: u.id, destinatarioId: meuId, lida: false },
         });
-        // "Online" = tem uma conexão SSE ativa neste momento (app aberto
-        // em primeiro plano). Não depende de nenhum campo no banco.
-        return { ...u, naoLidas, online: sseClients.has(u.id) };
+        // "Online" = recebemos um heartbeat desse usuário há menos que
+        // PRESENCA_TTL_MS. Não depende mais de existir uma conexão SSE
+        // viva no Map (ver bloco de presença acima).
+        return { ...u, naoLidas, online: estaOnline(u.id) };
       })
     );
 

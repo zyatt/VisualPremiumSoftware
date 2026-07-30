@@ -26,6 +26,13 @@ String _fmtHora(DateTime? dt) {
 String _fmtDim(double v) =>
     v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
 
+/// Formata uma quantidade sem arredondar/cortar a precisão real do valor.
+/// Diferente de `toStringAsFixed(2)`, que exibia apenas 2 casas mesmo quando
+/// o valor real tinha mais precisão (ex.: 3.696 aparecia como "3.70").
+/// Ex.: 3.696 → "3.696"; 4.0 → "4".
+String _formatarQuantidade(double v) =>
+    v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
+
 /// Retorna a exibição de medida de um material: usa o campo [medida] quando
 /// preenchido; caso contrário, monta a partir de [largura]/[comprimento]
 /// cadastrados diretamente no material.
@@ -141,13 +148,78 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
+// ── Formatter: medida (vírgula -> ponto, minúsculas, 1 ponto por número) ──
+
+class _MedidaEspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text.replaceAll(',', '.');
+    texto = _UpperCaseFormatter._removerAcentos(texto).toLowerCase();
+    texto = texto.replaceAllMapped(RegExp(r'[\d.]+'), (m) {
+      final partes = m.group(0)!.split('.');
+      if (partes.length > 2) {
+        return '${partes[0]}.${partes.sublist(1).join('')}';
+      }
+      return m.group(0)!;
+    });
+    final sel = newValue.selection.copyWith(
+      baseOffset:  newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
+/// Formata um valor de espessura garantindo o sufixo "mm" sem duplicar.
+String? formatarEspessuraComSufixo(String? valor) {
+  final v = valor?.trim();
+  if (v == null || v.isEmpty) return null;
+  final numero = v.replaceAll(RegExp(r'\s*mm\s*$', caseSensitive: false), '').trim();
+  if (numero.isEmpty) return null;
+  return '${numero}mm';
+}
+
+class _EspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text.replaceAll(',', '.');
+    texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
+    final partes = texto.split('.');
+    if (partes.length > 2) {
+      texto = '${partes[0]}.${partes.sublist(1).join('')}';
+    }
+    final sel = newValue.selection.copyWith(
+      baseOffset: newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
 // ── Origem da movimentação ─────────────────────────────────────────────────
-// Detectada pelo prefixo gravado automaticamente no campo observacao:
+// Fonte primária: o campo estruturado mov.origemProducao ('TRANSFERENCIA' /
+// 'BAIXA'), preenchido pelo backend sempre que a movimentação faz parte do
+// fluxo de produção — mais confiável que ler texto livre.
+// Fallback (movimentações antigas sem esse campo): prefixo gravado
+// automaticamente no campo observacao:
 //   "Entrada/Saída via controle de estoque – {nome}"  → estoque
 //   "Saída via produção – {nome}"                     → producao
 //   "Entrada via OC #{id} – {nome}"                   → ordemCompra
 
 enum _OrigemMov { estoque, producao, ordemCompra, desconhecida }
+
+_OrigemMov _detectarOrigemMov(MovimentacaoModel mov) {
+  if (mov.origemProducao != null && mov.origemProducao!.isNotEmpty) {
+    return _OrigemMov.producao;
+  }
+  return _detectarOrigem(mov.observacao);
+}
 
 _OrigemMov _detectarOrigem(String? obs) {
   if (obs == null || obs.isEmpty) return _OrigemMov.desconhecida;
@@ -159,12 +231,15 @@ _OrigemMov _detectarOrigem(String? obs) {
 }
 
 ({String label, IconData icon, Color cor}) _origemInfo(
-    _OrigemMov origem, BuildContext context) {
+    _OrigemMov origem, BuildContext context, {String? producao}) {
   switch (origem) {
     case _OrigemMov.estoque:
       return (label: 'Estoque', icon: Icons.inventory_2_outlined, cor: const Color(0xFF2196F3));
     case _OrigemMov.producao:
-      return (label: 'Produção', icon: Icons.precision_manufacturing_outlined, cor: const Color(0xFFFF9800));
+      final label = (producao != null && producao.isNotEmpty)
+          ? 'Produção $producao'
+          : 'Produção';
+      return (label: label, icon: Icons.precision_manufacturing_outlined, cor: const Color(0xFFFF9800));
     case _OrigemMov.ordemCompra:
       return (label: 'Ordem de Compra', icon: Icons.receipt_long_outlined, cor: const Color(0xFF4CAF50));
     case _OrigemMov.desconhecida:
@@ -204,6 +279,9 @@ class _HistoricoMovimentacoesPageState
   final TextEditingController _buscaOSCtrl       = TextEditingController();
   final TextEditingController _buscaMaterialCtrl  = TextEditingController();
   final TextEditingController _buscaUsuarioCtrl   = TextEditingController();
+  final TextEditingController _identificadorCtrl  = TextEditingController();
+  final TextEditingController _medidaCtrl         = TextEditingController();
+  final TextEditingController _espessuraCtrl      = TextEditingController();
   Timer? _debounceTimer;
 
   _FiltroTipo _filtroTipo   = _FiltroTipo.todos;
@@ -224,6 +302,9 @@ class _HistoricoMovimentacoesPageState
     _buscaOSCtrl.dispose();
     _buscaMaterialCtrl.dispose();
     _buscaUsuarioCtrl.dispose();
+    _identificadorCtrl.dispose();
+    _medidaCtrl.dispose();
+    _espessuraCtrl.dispose();
     _debounceTimer?.cancel();
     super.dispose();
   }
@@ -239,6 +320,9 @@ class _HistoricoMovimentacoesPageState
     _buscaOSCtrl.clear();
     _buscaMaterialCtrl.clear();
     _buscaUsuarioCtrl.clear();
+    _identificadorCtrl.clear();
+    _medidaCtrl.clear();
+    _espessuraCtrl.clear();
     setState(() {
       _filtroTipo   = _FiltroTipo.todos;
       _filtroOrigem = null;
@@ -248,20 +332,40 @@ class _HistoricoMovimentacoesPageState
   }
 
   List<_ItemHistorico> _itensFiltrados(List<RelacaoOSModel> relacoes) {
-    final os       = _buscaOSCtrl.text.trim().toUpperCase();
-    final material = _buscaMaterialCtrl.text.trim().toLowerCase();
-    final usuario  = _buscaUsuarioCtrl.text.trim().toLowerCase();
+    final os             = _buscaOSCtrl.text.trim().toUpperCase();
+    final material       = _buscaMaterialCtrl.text.trim().toLowerCase();
+    final usuario        = _buscaUsuarioCtrl.text.trim().toLowerCase();
+    final identificador  = _identificadorCtrl.text.trim().toLowerCase();
+    final medida         = _medidaCtrl.text.trim().toLowerCase();
+    final espessura      = _espessuraCtrl.text.trim().toLowerCase();
 
     final itens = <_ItemHistorico>[];
     for (final r in relacoes) {
       for (final m in r.movimentacoes) {
         if (_filtroTipo == _FiltroTipo.entrada && m.tipo != 'ENTRADA') continue;
         if (_filtroTipo == _FiltroTipo.saida && m.tipo != 'SAIDA') continue;
-        if (_filtroOrigem != null && _detectarOrigem(m.observacao) != _filtroOrigem) continue;
+        if (_filtroOrigem != null && _detectarOrigemMov(m) != _filtroOrigem) continue;
         if (os.isNotEmpty && !r.numeroOS.toUpperCase().contains(os)) continue;
         if (material.isNotEmpty &&
             !m.materialNome.toLowerCase().contains(material)) {
           continue;
+        }
+        if (identificador.isNotEmpty) {
+          final v = (m.materialIdentificador ?? '').toLowerCase();
+          if (!v.contains(identificador)) continue;
+        }
+        if (medida.isNotEmpty) {
+          final medidaFmt = _formatarMedidaOuDimensoes(
+                medida:      m.materialMedida,
+                largura:     m.materialLargura,
+                comprimento: m.materialComprimento,
+              ) ??
+              '';
+          if (!medidaFmt.toLowerCase().contains(medida)) continue;
+        }
+        if (espessura.isNotEmpty) {
+          final v = (m.materialEspessura ?? '').toLowerCase();
+          if (!v.contains(espessura)) continue;
         }
         if (usuario.isNotEmpty) {
           final nomeUsuario = (_extrairUsuario(m.observacao) ?? '').toLowerCase();
@@ -423,6 +527,9 @@ class _HistoricoMovimentacoesPageState
                     final temFiltro = _buscaOSCtrl.text.isNotEmpty ||
                         _buscaMaterialCtrl.text.isNotEmpty ||
                         _buscaUsuarioCtrl.text.isNotEmpty ||
+                        _identificadorCtrl.text.isNotEmpty ||
+                        _medidaCtrl.text.isNotEmpty ||
+                        _espessuraCtrl.text.isNotEmpty ||
                         _filtroTipo != _FiltroTipo.todos ||
                         _filtroOrigem != null ||
                         _dataInicio != null ||
@@ -444,6 +551,56 @@ class _HistoricoMovimentacoesPageState
                       ),
                     );
                   },
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // ── Filtros de material: identificador, medida, espessura ────
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _identificadorCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    onChanged: _onFiltroDigitado,
+                    decoration: InputDecoration(
+                      hintText: 'Identificador...',
+                      prefixIcon: Icon(Icons.qr_code,
+                          color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _medidaCtrl,
+                    inputFormatters: [_MedidaEspessuraFormatter()],
+                    onChanged: _onFiltroDigitado,
+                    decoration: InputDecoration(
+                      hintText: 'Medida...',
+                      prefixIcon: Icon(Icons.straighten,
+                          color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _espessuraCtrl,
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: _onFiltroDigitado,
+                    decoration: InputDecoration(
+                      hintText: 'Espessura...',
+                      suffixText: 'mm',
+                      prefixIcon: Icon(Icons.layers,
+                          color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -697,23 +854,28 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
     final icon = isEntrada ? Icons.arrow_upward : Icons.arrow_downward;
     final usuario = _extrairUsuario(mov.observacao);
     final obsExtra = _extrairObsExtra(mov.observacao);
-    final origem = _detectarOrigem(mov.observacao);
-    final origemInfo = _origemInfo(origem, context);
+    final origem = _detectarOrigemMov(mov);
+    final origemInfo = _origemInfo(origem, context, producao: mov.producao);
     final scheme = Theme.of(context).colorScheme;
 
-    final qtdStr = mov.quantidade == mov.quantidade.truncate()
-        ? mov.quantidade.toStringAsFixed(0)
-        : mov.quantidade.toStringAsFixed(2);
+    final qtdStr = _formatarQuantidade(mov.quantidade);
+    final temDimensaoUsada = mov.usouModoDimensional == true &&
+        mov.comprimentoUsado != null &&
+        mov.larguraUsada != null;
+    final dimensaoUsadaStr = temDimensaoUsada
+        ? ' (${_fmtDim(mov.comprimentoUsado!)}x${_fmtDim(mov.larguraUsada!)}m)'
+        : '';
     final medidaFmt = _formatarMedidaOuDimensoes(
       medida:      mov.materialMedida,
       largura:     mov.materialLargura,
       comprimento: mov.materialComprimento,
     );
+    final espessuraFmt = formatarEspessuraComSufixo(mov.materialEspessura);
+    final temIdentificador = mov.materialIdentificador != null && mov.materialIdentificador!.isNotEmpty;
     final detalhesMaterial = [
-      if (mov.materialIdentificador != null && mov.materialIdentificador!.isNotEmpty) mov.materialIdentificador!,
       if (medidaFmt != null) medidaFmt,
-      if (mov.materialEspessura != null && mov.materialEspessura!.isNotEmpty) mov.materialEspessura!,
-    ].join(' • ');
+      if (espessuraFmt != null) espessuraFmt,
+    ].join(' · ');
 
     final bgColor = _hovered
         ? const Color(0xFFFF9800).withValues(alpha: 0.10)
@@ -739,7 +901,7 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Ícone entrada/saída (32px fixo) ─────────────────────────────
           SizedBox(
@@ -757,24 +919,26 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
           ),
           const SizedBox(width: 10),
 
-          // ── Material (máx 160px) ─────────────────────────────────────────
-          SizedBox(
-            width: 160,
+          // ── Material (flexível, com bastante espaço para o nome) ─────────
+          Expanded(
+            flex: 3,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  mov.materialNome,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (detalhesMaterial.isNotEmpty)
-                  Text(
-                    detalhesMaterial,
-                    style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                    overflow: TextOverflow.ellipsis,
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      if (temIdentificador)
+                        TextSpan(text: '${mov.materialIdentificador!} · '),
+                      TextSpan(text: mov.materialNome),
+                      if (detalhesMaterial.isNotEmpty)
+                        TextSpan(text: ' · $detalhesMaterial'),
+                    ],
                   ),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  softWrap: true,
+                ),
                 if (obsExtra != null)
                   Text(
                     obsExtra,
@@ -783,19 +947,19 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
                       fontStyle: FontStyle.italic,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
               ],
             ),
           ),
-          const Spacer(),
+          const SizedBox(width: 10),
 
-          // ── Quantidade (100px fixo) ──────────────────────────────────────
+          // ── Quantidade (150px fixo) ──────────────────────────────────────
           SizedBox(
-            width: 100,
+            width: 150,
             child: Text(
-              '${isEntrada ? '+' : '-'}$qtdStr${mov.materialUnidade != null ? ' ${formatarUnidadeExibicao(mov.materialUnidade)}' : ''}',
+              '${isEntrada ? '+' : '-'}$qtdStr${mov.materialUnidade != null ? ' ${formatarUnidadeExibicao(mov.materialUnidade)}' : ''}$dimensaoUsadaStr',
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: cor),
               overflow: TextOverflow.ellipsis,
             ),
@@ -924,7 +1088,6 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
@@ -937,33 +1100,31 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
           borderRadius: BorderRadius.circular(10),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: _hovered
-                  ? _accent.withValues(alpha: 0.10)
-                  : Colors.transparent,
+                  ? _accent.withValues(alpha: 0.15)
+                  : _accent.withValues(alpha: 0.08),
               border: Border.all(
-                color: _hovered
-                    ? _accent.withValues(alpha: 0.6)
-                    : scheme.outlineVariant,
+                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
               ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
+                const Icon(
                   Icons.arrow_back,
                   size: 18,
-                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                  color: _accent,
                 ),
-                SizedBox(width: 6),
+                const SizedBox(width: 6),
                 Text(
                   widget.label,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 13,
-                    color: _hovered ? _accent : scheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
+                    color: _accent,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],

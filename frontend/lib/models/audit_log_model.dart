@@ -1,5 +1,3 @@
-// audit_log_model.dart
-
 class AuditLogModel {
   final int id;
   final int materialId;
@@ -12,22 +10,14 @@ class AuditLogModel {
   final double? materialLargura;
   final double? materialComprimento;
 
-  /// true quando o material referenciado por este log já foi excluído do
-  /// banco. Os dados acima, nesse caso, vêm do snapshot gravado no momento
-  /// da ação (ver backend), não do material em si (que não existe mais).
   final bool materialExcluido;
 
-  /// 'CADASTRO' | 'EDICAO' | 'DESATIVACAO' | 'REATIVACAO' | 'EXCLUSAO'
-  /// | 'ESTOQUE_CONFIRMADO' | 'FILHO_EDITADO' | 'FILHO_EXCLUIDO'
   final String acao;
 
-  /// Campo alterado — presente em EDICAO e FILHO_*
   final String? campo;
 
-  /// Valor antes da alteração (string serializada)
   final String? valorAntes;
 
-  /// Novo valor após a alteração
   final String? valorDepois;
 
   final int? usuarioId;
@@ -80,8 +70,6 @@ class AuditLogModel {
         criadoEm:          DateTime.parse(json['criadoEm']),
       );
 
-  // ── Helpers de exibição ────────────────────────────────────────────────────
-
   String get acaoLabel {
     switch (acao) {
       case 'CADASTRO':           return 'Cadastro';
@@ -97,38 +85,28 @@ class AuditLogModel {
     }
   }
 
-  // Cor associada à ação para badge visual
-  // Retorna um código de cor hex que o widget irá parsear
   String get acaoCor {
     switch (acao) {
-      case 'CADASTRO':           return '#15803D'; // verde
-      case 'EDICAO':             return '#1E88E5'; // azul
-      case 'DESATIVACAO':        return '#D97706'; // amarelo
-      case 'REATIVACAO':         return '#7C3AED'; // roxo
-      case 'EXCLUSAO':           return '#DC2626'; // vermelho
-      case 'ESTOQUE_CONFIRMADO': return '#0891B2'; // ciano
-      case 'CUSTO_MANUAL':       return '#7C3AED'; // roxo
-      case 'FILHO_EDITADO':      return '#1E88E5'; // azul
-      case 'FILHO_EXCLUIDO':     return '#E85D04'; // laranja
-      default:                   return '#6B7280'; // cinza
+      case 'CADASTRO':           return '#15803D';
+      case 'EDICAO':             return '#1E88E5';
+      case 'DESATIVACAO':        return '#D97706';
+      case 'REATIVACAO':         return '#7C3AED';
+      case 'EXCLUSAO':           return '#DC2626';
+      case 'ESTOQUE_CONFIRMADO': return '#0891B2';
+      case 'CUSTO_MANUAL':       return '#7C3AED';
+      case 'FILHO_EDITADO':      return '#1E88E5';
+      case 'FILHO_EXCLUIDO':     return '#E85D04';
+      default:                   return '#6B7280';
     }
   }
 
   bool get temDiff => valorAntes != null || valorDepois != null;
 
-  /// Formata um número sem casas decimais desnecessárias (2.0 -> '2', 2.5 -> '2.5').
   static String _numFmt(double v) {
     if (v == v.truncateToDouble()) return v.toInt().toString();
     return v.toString();
   }
 
-  /// Linha secundária exibida ao lado do nome do material no histórico:
-  /// identificador, unidade (minúscula), medida OU comprimento×largura
-  /// (quando não há medida cadastrada), e espessura — separados por " · ".
-  ///
-  /// Regra de comprimento/largura: só é exibido quando NÃO há [materialMedida]
-  /// preenchida (medida e dimensões são formas alternativas de descrever o
-  /// tamanho do material; não faz sentido mostrar as duas). Formato: "2x1m".
   String get materialInfoLine {
     final partes = <String>[];
 

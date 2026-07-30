@@ -45,6 +45,44 @@ const _materialSelect = {
   largura: true, comprimento: true,
 };
 
+// Formata um número Decimal/number: sem casas decimais se for inteiro, senão
+// até 2 casas (sem zeros à direita) — mesma regra usada no app Flutter.
+function _formatarNumero(valor) {
+  const n = Number(valor);
+  if (!Number.isFinite(n)) return String(valor);
+  if (n % 1 === 0) return n.toFixed(0);
+  let s = n.toFixed(2);
+  if (s.endsWith('0')) s = s.slice(0, -1);
+  if (s.endsWith('.')) s = s.slice(0, -1);
+  return s;
+}
+
+// Monta o snapshot de um material (item ou adicional) para ser gravado no
+// campo `depois` de um log — inclui unidade e medida/dimensões formatadas,
+// para a aba Histórico exibir "25 m/l", "1.4X2M", etc. sem precisar buscar
+// o material de novo depois (que pode ter mudado ou sido excluído).
+function _snapshotMaterial(registro) {
+  const mat = registro.material || {};
+  const largura     = mat.largura     != null ? Number(mat.largura)     : null;
+  const comprimento = mat.comprimento != null ? Number(mat.comprimento) : null;
+
+  let medidaOuDimensao = null;
+  if (mat.medida && String(mat.medida).trim()) {
+    medidaOuDimensao = String(mat.medida).trim();
+  } else if (largura && comprimento && largura > 0 && comprimento > 0) {
+    medidaOuDimensao = `${_formatarNumero(comprimento)}X${_formatarNumero(largura)}M`;
+  }
+
+  return {
+    materialNome:      mat.nome ?? null,
+    materialUnidade:   mat.unidade ?? null,
+    materialMedida:    medidaOuDimensao,
+    materialEspessura: mat.espessura ?? null,
+    quantidade:        registro.quantidade != null ? Number(registro.quantidade) : null,
+    observacao:        registro.observacao ?? null,
+  };
+}
+
 const _includeBase = {
   usuario: { select: { id: true, nome: true, role: true } },
   itens: {
@@ -172,6 +210,28 @@ async function criar(data, usuarioId, usuarioNome) {
 
   console.log(`[Solicitações] Nova solicitação criada: OS=${nova.numeroOS} por usuário ${usuarioId}`);
 
+  // Log de criação — primeira entrada do histórico, registra quem abriu a
+  // solicitação e com quais materiais, servindo de "marco zero" antes de
+  // qualquer edição/adição futura.
+  if (usuarioId) {
+    await prisma.logEdicaoSolicitacao.create({
+      data: {
+        solicitacaoId: nova.id,
+        editorId:      usuarioId,
+        editorNome:    usuarioNome ?? 'Desconhecido',
+        antes:  {},
+        depois: {
+          criada:          true,
+          numeroOS:        nova.numeroOS,
+          nomeCliente:     nova.nomeCliente,
+          dataNecessidade: nova.dataNecessidade,
+          observacao:      nova.observacao,
+          materiais:       nova.itens.map((i) => _snapshotMaterial(i)),
+        },
+      },
+    });
+  }
+
   _broadcast('nova_solicitacao', {
     id:          nova.id,
     numeroOS:    nova.numeroOS,
@@ -289,6 +349,29 @@ async function adicionarMateriais(solicitacaoId, itens, usuarioId, usuarioNome, 
     where: { id: solicitacaoId },
     include: _includeBase,
   });
+
+  // Log de histórico — um registro por material adicionado, para que a aba
+  // Histórico mostre exatamente quais itens entraram e quando, igual ao que
+  // já é feito para edição/exclusão de materiais.
+  if (usuarioId) {
+    await prisma.$transaction(
+      criados.map((c) =>
+        prisma.logEdicaoSolicitacao.create({
+          data: {
+            solicitacaoId,
+            editorId:   usuarioId,
+            editorNome: usuarioNome ?? 'Desconhecido',
+            antes:  {},
+            depois: {
+              adicionado: true,
+              ..._snapshotMaterial(c),
+            },
+            item: `${c.material?.nome ?? 'Material'} (adicional)`,
+          },
+        })
+      )
+    );
+  }
 
   _broadcast('solicitacao_atualizada', {
     id:          solicitacaoId,

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/estoque_model.dart';
 import '../models/material_model.dart';
+import '../models/estoque_producao_model.dart';
 import '../providers/estoque_provider.dart';
 import '../providers/estoque_producao_provider.dart';
 import '../providers/material_provider.dart';
@@ -32,10 +33,22 @@ String _brl6(double v) {
   return 'R\$ ${partes[0].replaceAll('.', ',')},$decFinal';
 }
 
-/// Formata um valor de dimensão (metros) sem casas decimais desnecessárias.
-/// Ex.: 1.0 → "1"; 0.5 → "0.5".
+/// Formata um valor de dimensão/quantidade sem arredondar ou cortar a
+/// precisão real do valor. Antes usava `toStringAsFixed(2)`, que exibia
+/// apenas 2 casas decimais mesmo quando o valor real tinha mais precisão
+/// (ex.: 3.696 aparecia como "3.70" na tela, escondendo o valor exato
+/// armazenado). Agora: inteiro sem casas quando não há parte decimal, ou
+/// a representação decimal completa e mínima do double (via toString())
+/// quando há.
+/// Ex.: 1.0 → "1"; 0.5 → "0.5"; 3.696 → "3.696".
 String _fmtDim(double v) =>
-    v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
+    v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
+
+/// Formata uma quantidade de material sem arredondar/cortar a precisão
+/// real do valor (mesma lógica de _fmtDim, exposta com nome mais claro
+/// para os pontos que exibem quantidade em estoque, não dimensão).
+/// Ex.: 3.696 → "3.696"; 4.0 → "4".
+String formatarQuantidade(double v) => _fmtDim(v);
 
 /// Retorna a exibição de medida de um material: usa o campo [medida] quando
 /// preenchido; caso contrário, monta a partir de [largura]/[comprimento]
@@ -279,6 +292,40 @@ class _MedidaEspessuraFormatter extends TextInputFormatter {
   }
 }
 
+/// Formata um valor de espessura garantindo o sufixo "mm" sem duplicar.
+/// Dados antigos podem já ter sido salvos com "mm"/"MM" digitado manualmente
+/// (ex.: "2MM", "2 mm"); removemos esse sufixo antes de reanexar o nosso.
+String? formatarEspessuraComSufixo(String? valor) {
+  final v = valor?.trim();
+  if (v == null || v.isEmpty) return null;
+  final numero = v.replaceAll(RegExp(r'\s*mm\s*$', caseSensitive: false), '').trim();
+  if (numero.isEmpty) return null;
+  return '${numero}mm';
+}
+
+/// Formatter para o campo Espessura: aceita apenas dígitos, ponto e vírgula
+/// (vírgula é convertida em ponto), bloqueando letras e qualquer outro
+/// caractere.
+class _EspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text.replaceAll(',', '.');
+    texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
+    final partes = texto.split('.');
+    if (partes.length > 2) {
+      texto = '${partes[0]}.${partes.sublist(1).join('')}';
+    }
+    final sel = newValue.selection.copyWith(
+      baseOffset: newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
 // ── Formatter: números decimais (aceita vírgula ou ponto) ─────────────────────
 
 class _DecimalInputFormatter extends TextInputFormatter {
@@ -365,6 +412,8 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
   final TextEditingController _buscaNomeCtrl    = TextEditingController();
   final TextEditingController _identificadorCtrl = TextEditingController();
   final TextEditingController _medidaCtrl        = TextEditingController();
+  final TextEditingController _comprimentoCtrl   = TextEditingController();
+  final TextEditingController _larguraCtrl       = TextEditingController();
   final TextEditingController _espessuraCtrl     = TextEditingController();
   late TabController _tabController;
   Timer? _timerFechamentoAutomatico;
@@ -449,6 +498,9 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await context.read<EstoqueProvider>().carregarRelacoesOS();
+      if (!mounted) return;
+      await context.read<EstoqueProducaoProvider>().carregarContadorPendentes();
+      if (!mounted) return;
       await _fecharOSTextuaisAtrasadas();
       _agendarFechamentoAutomatico();
     });
@@ -463,6 +515,8 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     _buscaNomeCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
+    _comprimentoCtrl.dispose();
+    _larguraCtrl.dispose();
     _espessuraCtrl.dispose();
     super.dispose();
   }
@@ -554,11 +608,15 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     final nome          = _buscaNomeCtrl.text.trim().toLowerCase();
     final identificador = _identificadorCtrl.text.trim().toUpperCase();
     final medida        = _medidaCtrl.text.trim().toUpperCase();
+    final comprimento   = _comprimentoCtrl.text.trim().toUpperCase();
+    final largura       = _larguraCtrl.text.trim().toUpperCase();
     final espessura     = _espessuraCtrl.text.trim().toUpperCase();
 
     final temFiltro = nome.isNotEmpty ||
         identificador.isNotEmpty ||
         medida.isNotEmpty ||
+        comprimento.isNotEmpty ||
+        largura.isNotEmpty ||
         espessura.isNotEmpty;
 
     if (!temFiltro) return lista;
@@ -576,6 +634,14 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
         if (medida.isNotEmpty) {
           final v = (m.materialMedida ?? '').toUpperCase();
           if (!v.contains(medida)) return false;
+        }
+        if (comprimento.isNotEmpty) {
+          final v = (m.materialComprimento?.toString() ?? '').toUpperCase();
+          if (!v.contains(comprimento)) return false;
+        }
+        if (largura.isNotEmpty) {
+          final v = (m.materialLargura?.toString() ?? '').toUpperCase();
+          if (!v.contains(largura)) return false;
         }
         if (espessura.isNotEmpty) {
           final v = (m.materialEspessura ?? '').toUpperCase();
@@ -629,19 +695,47 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                 const Spacer(),
                 Tooltip(
                   message: 'Transferir material do estoque normal para o estoque de produção',
-                  child: FilledButton.icon(
-                    onPressed: _abrirTransferenciaProducao,
-                    icon: const Icon(Icons.factory_outlined, size: 18),
-                    label: const Text('Saída p/ Produção'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.warning,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 12),
-                    ).copyWith(
-                      mouseCursor:
-                          WidgetStateProperty.all(SystemMouseCursors.click),
-                    ),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: _abrirTransferenciaProducao,
+                        icon: const Icon(Icons.factory_outlined, size: 18),
+                        label: const Text('Saída p/ Produção'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.warning,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                        ).copyWith(
+                          mouseCursor:
+                              WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                      ),
+                      if (context.watch<EstoqueProducaoProvider>().totalPendentes > 0)
+                        Positioned(
+                          top: -6,
+                          right: -6,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppTheme.error,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.white, width: 1.5),
+                            ),
+                            constraints: const BoxConstraints(minWidth: 20),
+                            child: Text(
+                              '${context.watch<EstoqueProducaoProvider>().totalPendentes}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -739,6 +833,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
+                  flex: 2,
                   child: TextField(
                     controller: _buscaCtrl,
                     onChanged: (v) {
@@ -748,7 +843,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
                     decoration: InputDecoration(
-                      hintText: 'Buscar por número da OS...',
+                      hintText: 'Buscar por número da OS',
                       prefixIcon: Icon(Icons.search,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
@@ -757,12 +852,13 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                 ),
                 const SizedBox(width: 10),
                 Expanded(
+                  flex: 3,
                   child: TextField(
                     controller: _buscaNomeCtrl,
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
                     decoration: InputDecoration(
-                      hintText: 'Nome do material...',
+                      hintText: 'Nome do material',
                       prefixIcon: Icon(Icons.filter_alt_outlined,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
@@ -783,6 +879,8 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                         _buscaNomeCtrl.text.isNotEmpty ||
                         _identificadorCtrl.text.isNotEmpty ||
                         _medidaCtrl.text.isNotEmpty ||
+                        _comprimentoCtrl.text.isNotEmpty ||
+                        _larguraCtrl.text.isNotEmpty ||
                         _espessuraCtrl.text.isNotEmpty ||
                         _temFiltroData ||
                         _ordenacao != _OrdenacaoOS.recente ||
@@ -797,6 +895,8 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                               _buscaNomeCtrl.clear();
                               _identificadorCtrl.clear();
                               _medidaCtrl.clear();
+                              _comprimentoCtrl.clear();
+                              _larguraCtrl.clear();
                               _espessuraCtrl.clear();
                               setState(() {
                                 _dataInicio = null;
@@ -827,10 +927,11 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
             Row(
               children: [
                 Expanded(
+                  flex: 3,
                   child: TextField(
                     controller: _identificadorCtrl,
                     decoration: InputDecoration(
-                      hintText:   'Identificador...',
+                      hintText:   'Identificador',
                       prefixIcon: Icon(Icons.qr_code,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -848,10 +949,11 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                 ),
                 SizedBox(width: 10),
                 Expanded(
+                  flex: 3,
                   child: TextField(
                     controller: _medidaCtrl,
                     decoration: InputDecoration(
-                      hintText:   'Medida...',
+                      hintText:   'Medida',
                       prefixIcon: Icon(Icons.straighten,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -868,15 +970,63 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                 ),
                 SizedBox(width: 10),
                 Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _comprimentoCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      hintText:   'Comprimento',
+                      suffixText: 'm',
+                      prefixIcon: Icon(Icons.height,
+                          color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                    ),
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: (_) {
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                        const Duration(milliseconds: 300),
+                        () => setState(() {}),
+                      );
+                    },
+                  ),
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _larguraCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      hintText:   'Largura',
+                      suffixText: 'm',
+                      prefixIcon: Icon(Icons.width_normal,
+                          color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                    ),
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: (_) {
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                        const Duration(milliseconds: 300),
+                        () => setState(() {}),
+                      );
+                    },
+                  ),
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
                   child: TextField(
                     controller: _espessuraCtrl,
                     decoration: InputDecoration(
-                      hintText:   'Espessura...',
+                      hintText:   'Espessura',
+                      suffixText: 'mm',
                       prefixIcon: Icon(Icons.layers,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
-                    inputFormatters: [_MedidaEspessuraFormatter()],
+                    inputFormatters: [_EspessuraFormatter()],
                     onChanged: (_) {
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
@@ -2336,7 +2486,7 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
             textCapitalization: TextCapitalization.characters,
             inputFormatters: [_UpperCaseFormatter()],
             decoration: InputDecoration(
-              hintText: 'Filtrar materiais por nome, identificador, medida ou espessura...',
+              hintText: 'Filtrar materiais por nome, identificador, medida ou espessura',
               prefixIcon: Icon(Icons.filter_alt_outlined,
                   color: Theme.of(context).colorScheme.outline, size: 20),
               isDense: true,
@@ -2434,16 +2584,14 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
         _primeira.materialIdentificador!,
       if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty)
         medidaOuDimensao,
-      if ((_primeira.materialEspessura ?? '').isNotEmpty)
-        _primeira.materialEspessura!,
+      if (formatarEspessuraComSufixo(_primeira.materialEspessura) != null)
+        formatarEspessuraComSufixo(_primeira.materialEspessura)!,
     ];
     return partes.join(' · ');
   }
 
   String _formatQtd(double qtd, String? unidade) {
-    final qStr = qtd == qtd.truncate()
-        ? qtd.toStringAsFixed(0)
-        : qtd.toStringAsFixed(2);
+    final qStr = formatarQuantidade(qtd);
     final unFmt = formatarUnidadeExibicao(unidade);
     return unFmt.isNotEmpty ? '$qStr $unFmt' : qStr;
   }
@@ -2886,9 +3034,9 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                     material.materialNome,
                     style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                   ),
-                  if ((material.materialEspessura ?? '').isNotEmpty)
+                  if (formatarEspessuraComSufixo(material.materialEspessura) != null)
                     Text(
-                      material.materialEspessura!,
+                      formatarEspessuraComSufixo(material.materialEspessura)!,
                       style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                     ),
                   const SizedBox(height: 12),
@@ -4274,6 +4422,8 @@ class _MovimentacaoGlobalDialogState
   final _nomeCtrl          = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
+  final _comprimentoCtrl   = TextEditingController();
+  final _larguraCtrl       = TextEditingController();
   final _espessuraCtrl     = TextEditingController();
   String? _categoriaFiltro;
   List<String> _categorias = [];
@@ -4286,7 +4436,14 @@ class _MovimentacaoGlobalDialogState
   @override
   void initState() {
     super.initState();
-    _carregarCategorias();
+    // Adia para depois do build atual: chamar direto aqui faria o
+    // notifyListeners() do MaterialProvider disparar ainda dentro do
+    // initState (antes de qualquer await real), o que tenta reconstruir
+    // widgets enquanto o Flutter ainda está montando a árvore — gerando
+    // "setState()/markNeedsBuild() called during build".
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _carregarCategorias();
+    });
     if (widget.numeroOSFixo != null) {
       final raw = widget.numeroOSFixo!;
       final candidates = [raw.indexOf('#OC'), raw.indexOf('#S'), raw.indexOf('#E')]
@@ -4305,6 +4462,8 @@ class _MovimentacaoGlobalDialogState
     _nomeCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
+    _comprimentoCtrl.dispose();
+    _larguraCtrl.dispose();
     _espessuraCtrl.dispose();
     _debounce?.cancel();
     for (final i in _itensSelecionados) {
@@ -4331,6 +4490,8 @@ class _MovimentacaoGlobalDialogState
     final temValor = _nomeCtrl.text.isNotEmpty ||
         _identificadorCtrl.text.isNotEmpty ||
         _medidaCtrl.text.isNotEmpty ||
+        _comprimentoCtrl.text.isNotEmpty ||
+        _larguraCtrl.text.isNotEmpty ||
         _espessuraCtrl.text.isNotEmpty;
     if (!temValor && _categoriaFiltro == null) {
       setState(() {
@@ -4357,6 +4518,8 @@ class _MovimentacaoGlobalDialogState
         busca:         _nomeCtrl.text.trim(),
         identificador: _identificadorCtrl.text.trim(),
         medida:        _medidaCtrl.text.trim(),
+        comprimento:   _comprimentoCtrl.text.trim(),
+        largura:       _larguraCtrl.text.trim(),
         espessura:     _espessuraCtrl.text.trim(),
         categoria:     _categoriaFiltro,
       );
@@ -4375,6 +4538,8 @@ class _MovimentacaoGlobalDialogState
     _nomeCtrl.clear();
     _identificadorCtrl.clear();
     _medidaCtrl.clear();
+    _comprimentoCtrl.clear();
+    _larguraCtrl.clear();
     _espessuraCtrl.clear();
     _debounce?.cancel();
     setState(() {
@@ -4433,6 +4598,20 @@ class _MovimentacaoGlobalDialogState
         final l = double.tryParse(item.larguraUsadaCtrl.text.replaceAll(',', '.'));
         final c = double.tryParse(item.alturaUsadaCtrl.text.replaceAll(',', '.'));
         if (l != null && l > 0 && c != null && c > 0) {
+          if (l > item.material.largura! || c > item.material.comprimento!) {
+            todosOk = false;
+            final compMax = item.material.comprimento!;
+            final largMax = item.material.largura!;
+            String fmtDim(double v) => v == v.truncateToDouble()
+                ? v.toStringAsFixed(0)
+                : v.toStringAsFixed(2);
+            setState(() {
+              item.erroEstoque = 'Dimensão usada não pode ultrapassar a da chapa '
+                  '(${fmtDim(compMax)}×${fmtDim(largMax)} m)';
+            });
+            _formKey.currentState!.validate();
+            continue;
+          }
           largUsada = l;
           compUsado = c;
         }
@@ -4493,7 +4672,7 @@ class _MovimentacaoGlobalDialogState
       insetPadding:
           const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: SizedBox(
-        width: 1100,
+        width: 1320,
         height: MediaQuery.of(context).size.height * 0.88,
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -4594,19 +4773,18 @@ class _MovimentacaoGlobalDialogState
                     children: [
 
                       Expanded(
-                        flex: 5,
+                        flex: 7,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
                               children: [
                                 Expanded(
-                                  flex: 3,
                                   child: TextField(
                                     controller: _nomeCtrl,
                                     autofocus: true,
                                     decoration: InputDecoration(
-                                      hintText: 'Buscar por nome...',
+                                      hintText: 'Buscar por nome',
                                       prefixIcon: Icon(Icons.search,
                                           color: Theme.of(context).colorScheme.outline, size: 18),
                                       isDense: true,
@@ -4618,9 +4796,9 @@ class _MovimentacaoGlobalDialogState
                                     onSubmitted: (_) => _buscar(),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  flex: 2,
+                                SizedBox(width: 8),
+                                SizedBox(
+                                  width: 190,
                                   child: _CategoriaFiltroDropdownCE(
                                     categorias: _categorias,
                                     valorSelecionado: _categoriaFiltro,
@@ -4636,6 +4814,8 @@ class _MovimentacaoGlobalDialogState
                                     final temFiltro = _nomeCtrl.text.isNotEmpty ||
                                         _identificadorCtrl.text.isNotEmpty ||
                                         _medidaCtrl.text.isNotEmpty ||
+                                        _comprimentoCtrl.text.isNotEmpty ||
+                                        _larguraCtrl.text.isNotEmpty ||
                                         _espessuraCtrl.text.isNotEmpty ||
                                         _categoriaFiltro != null;
                                     return IconButton.outlined(
@@ -4666,7 +4846,7 @@ class _MovimentacaoGlobalDialogState
                                   child: TextField(
                                     controller: _identificadorCtrl,
                                     decoration: InputDecoration(
-                                      hintText: 'Identificador...',
+                                      hintText: 'Identificador',
                                       prefixIcon: Icon(Icons.qr_code,
                                           color: Theme.of(context).colorScheme.outline, size: 16),
                                       isDense: true,
@@ -4683,7 +4863,7 @@ class _MovimentacaoGlobalDialogState
                                   child: TextField(
                                     controller: _medidaCtrl,
                                     decoration: InputDecoration(
-                                      hintText: 'Medida...',
+                                      hintText: 'Medida',
                                       prefixIcon: Icon(Icons.straighten,
                                           color: Theme.of(context).colorScheme.outline, size: 16),
                                       isDense: true,
@@ -4693,17 +4873,57 @@ class _MovimentacaoGlobalDialogState
                                     onSubmitted: (_) => _buscar(),
                                   ),
                                 ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _comprimentoCtrl,
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    decoration: InputDecoration(
+                                      hintText: 'Comprimento',
+                                      suffixText: 'm',
+                                      prefixIcon: Icon(Icons.height,
+                                          color: Theme.of(context).colorScheme.outline, size: 16),
+                                      isDense: true,
+                                    ),
+                                    inputFormatters: [_EspessuraFormatter()],
+                                    onChanged: (_) => _agendarBusca(),
+                                    onSubmitted: (_) => _buscar(),
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _larguraCtrl,
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    decoration: InputDecoration(
+                                      hintText: 'Largura',
+                                      suffixText: 'm',
+                                      prefixIcon: Icon(Icons.width_normal,
+                                          color: Theme.of(context).colorScheme.outline, size: 16),
+                                      isDense: true,
+                                    ),
+                                    inputFormatters: [_EspessuraFormatter()],
+                                    onChanged: (_) => _agendarBusca(),
+                                    onSubmitted: (_) => _buscar(),
+                                  ),
+                                ),
                                 SizedBox(width: 8),
                                 Expanded(
                                   child: TextField(
                                     controller: _espessuraCtrl,
                                     decoration: InputDecoration(
-                                      hintText: 'Espessura...',
+                                      hintText: 'Espessura',
+                                      suffixText: 'mm',
                                       prefixIcon: Icon(Icons.layers,
                                           color: Theme.of(context).colorScheme.outline, size: 16),
                                       isDense: true,
                                     ),
-                                    inputFormatters: [_MedidaEspessuraFormatter()],
+                                    inputFormatters: [_EspessuraFormatter()],
                                     onChanged: (_) => _agendarBusca(),
                                     onSubmitted: (_) => _buscar(),
                                   ),
@@ -4791,7 +5011,7 @@ class _MovimentacaoGlobalDialogState
                       const VerticalDivider(width: 24, thickness: 1),
 
                       Expanded(
-                        flex: 4,
+                        flex: 5,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -4975,10 +5195,110 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
 
     // Campos que entram na comparação de duplicidade: qualquer alteração
     // reagenda a verificação (debounced).
-    for (final c in [_nome, _identificador, _medida, _espessura]) {
+    for (final c in [_nome, _identificador, _medida, _espessura, _largura, _comprimento]) {
       c.addListener(_agendarVerificacaoDuplicata);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) => _agendarVerificacaoDuplicata());
+
+    // ── Snapshot inicial para detectar alterações não salvas ──────────────
+    // Usado para decidir se, ao tentar fechar o diálogo (X, "Cancelar",
+    // clique fora ou tecla Esc), é preciso confirmar com o usuário antes de
+    // descartar o que foi digitado.
+    _snapshotInicial = _capturarEstadoAtual();
+  }
+
+  /// Estado "assinatura" de todos os campos editáveis do formulário, usado
+  /// para comparar com o estado atual e saber se houve alguma alteração.
+  late String _snapshotInicial;
+
+  String _capturarEstadoAtual() => [
+        _nome.text,
+        _identificador.text,
+        _unidade ?? '',
+        _categoria.text,
+        _medida.text,
+        _espessura.text,
+        _largura.text,
+        _comprimento.text,
+        _estoqueMinimo.text,
+        _custoCtrl.text,
+        _modoRetalho.toString(),
+      ].join('␟');
+
+  /// true se algum campo foi alterado em relação ao estado com que o
+  /// diálogo foi aberto.
+  bool get _temAlteracoesNaoSalvas => _capturarEstadoAtual() != _snapshotInicial;
+
+  /// Verifica se há alterações não salvas e, em caso positivo, pergunta ao
+  /// usuário se deseja descartá-las antes de fechar o diálogo. Retorna
+  /// `true` quando o diálogo pode ser fechado (sem alterações, ou usuário
+  /// confirmou o descarte / optou por salvar), e `false` quando o
+  /// fechamento deve ser cancelado.
+  Future<bool> _confirmarFechamento() async {
+    if (!_temAlteracoesNaoSalvas) return true;
+
+    final resultado = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text('Descartar alterações?'),
+        content: const Text(
+          'Você preencheu dados deste material que ainda não foram salvos. '
+          'O que deseja fazer?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'continuar'),
+            style: TextButton.styleFrom().copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: const Text('Continuar cadastrando'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'descartar'),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: const Text('Descartar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, 'salvar'),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: const Text('Cadastrar'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) return false;
+
+    switch (resultado) {
+      case 'descartar':
+        return true;
+      case 'salvar':
+        // _salvar() já cuida de dar Navigator.pop(context, true) quando
+        // a operação for concluída com sucesso; se falhar, o diálogo
+        // permanece aberto para o usuário corrigir/tentar de novo.
+        await _salvar();
+        return false;
+      case 'continuar':
+      default:
+        return false;
+    }
+  }
+
+  /// Tenta fechar o diálogo, passando pela confirmação de alterações não
+  /// salvas quando necessário. Usado pelo botão "X", pelo botão "Cancelar"
+  /// e pelo PopScope (Esc / clique fora / botão voltar).
+  Future<void> _tentarFechar() async {
+    if (_salvando) return;
+    final podeFechar = await _confirmarFechamento();
+    if (!mounted) return;
+    if (podeFechar) {
+      Navigator.pop(context);
+    }
   }
 
   @override
@@ -5023,6 +5343,24 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     final medidaNorm        = _normalizarTextoComparacaoCE(_medida.text);
     final espessuraNorm     = _normalizarTextoComparacaoCE(_espessura.text);
 
+    // Dimensões digitadas: usa os campos numéricos Comprimento/Largura/
+    // Espessura como fonte principal e, quando algum deles estiver vazio,
+    // cai para o que der pra extrair do texto livre "medida" (que pode
+    // trazer tudo junto, em qualquer grafia: com ou sem "m"/"mm", com ou
+    // sem casas decimais, com ou sem um terceiro "x" pra espessura).
+    final medidaDigitadaExtraida = _extrairDimensoesMedidaCE(_medida.text);
+    final comprimentoDigitado = double.tryParse(_comprimento.text.trim().replaceAll(',', '.'))
+        ?? medidaDigitadaExtraida.comprimento;
+    final larguraDigitada = double.tryParse(_largura.text.trim().replaceAll(',', '.'))
+        ?? medidaDigitadaExtraida.largura;
+    final espessuraDigitadaNum = _extrairNumeroDeTextoCE(_espessura.text)
+        ?? medidaDigitadaExtraida.espessura;
+
+    bool dimensaoBate(double? a, double? b) {
+      if (a == null || b == null) return false;
+      return (a - b).abs() < 0.001;
+    }
+
     final encontrados = <_PossivelDuplicataCE>[];
     for (final m in candidatos) {
       final mNomeNorm          = _normalizarTextoComparacaoCE(m.nome);
@@ -5030,29 +5368,76 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
       final mMedidaNorm        = _normalizarTextoComparacaoCE(m.medida);
       final mEspessuraNorm     = _normalizarTextoComparacaoCE(m.espessura);
 
+      // Mesma lógica de fallback do lado do material cadastrado: prioriza os
+      // campos numéricos e, na falta deles, extrai do texto "medida" salvo.
+      final mMedidaExtraida = _extrairDimensoesMedidaCE(m.medida);
+      final mComprimentoFinal = m.comprimento ?? mMedidaExtraida.comprimento;
+      final mLarguraFinal     = m.largura ?? mMedidaExtraida.largura;
+      final mEspessuraFinal   = _extrairNumeroDeTextoCE(m.espessura) ?? mMedidaExtraida.espessura;
+
+      // Comprimento/largura batem se os valores numéricos coincidirem,
+      // não importa como cada lado escreveu a medida (com/sem "m", com/sem
+      // decimais, com/sem espessura embutida no texto).
+      final dimensoesBatem = dimensaoBate(comprimentoDigitado, mComprimentoFinal) &&
+          dimensaoBate(larguraDigitada, mLarguraFinal);
+      final medidaOuDimensaoBate = mMedidaNorm == medidaNorm || dimensoesBatem;
+
+      // Espessura: compara numericamente (ignorando "mm" e formatação) e só
+      // cai para comparação de texto puro quando nenhum lado tem número
+      // reconhecível (ex.: valor não numérico digitado por engano). Quando
+      // ambos os lados estão vazios, conta como igual.
+      final espessuraBate = (espessuraNorm.isEmpty && mEspessuraNorm.isEmpty)
+          ? true
+          : (espessuraDigitadaNum != null && mEspessuraFinal != null)
+              ? dimensaoBate(espessuraDigitadaNum, mEspessuraFinal)
+              : mEspessuraNorm == espessuraNorm;
+
+      // Mesma regra de unicidade usada no backend (nome + identificador +
+      // medida + espessura, normalizados): se bater, o cadastro será
+      // rejeitado com 409 ao salvar.
       final exata = mNomeNorm == nomeNorm &&
           mIdentificadorNorm == identificadorNorm &&
-          mMedidaNorm == medidaNorm &&
-          mEspessuraNorm == espessuraNorm;
+          medidaOuDimensaoBate &&
+          espessuraBate;
 
       final similaridadeNome = _similaridadeTextoCE(nomeNorm, mNomeNorm);
       final mesmoIdentificador =
           identificadorNorm.isNotEmpty && identificadorNorm == mIdentificadorNorm;
 
+      // Detecta se um nome é prefixo/trecho do outro. Importante para quando
+      // o usuário ainda está no início da digitação (ex.: "ABS ACO" digitado
+      // com "ABS ACO ESCOVADO DOURADO" já cadastrado): a similaridade
+      // Levenshtein do texto inteiro fica baixa (o nome cadastrado é bem mais
+      // longo), mas o texto digitado é claramente o começo de um nome já
+      // existente, então isso também conta como "similar". Exige um mínimo
+      // de 4 caracteres no texto mais curto pra não disparar em prefixos
+      // genéricos demais (ex.: "AB").
+      final curto = nomeNorm.length <= mNomeNorm.length ? nomeNorm : mNomeNorm;
+      final longo = nomeNorm.length <= mNomeNorm.length ? mNomeNorm : nomeNorm;
+      final contido = curto.length >= 4 && curto.isNotEmpty && longo.contains(curto);
+
+      // "Similar": nome muito parecido (>=72%), mesmo identificador com
+      // alguma semelhança (evita falso-positivo de identificadores genéricos
+      // reutilizados em materiais bem diferentes), ou um nome é prefixo/
+      // trecho do outro (digitação em andamento).
       final similar = !exata &&
-          (similaridadeNome >= 0.72 || (mesmoIdentificador && similaridadeNome >= 0.4));
+          (similaridadeNome >= 0.72 ||
+              (mesmoIdentificador && similaridadeNome >= 0.4) ||
+              contido);
 
       if (exata || similar) {
         encontrados.add(_PossivelDuplicataCE(
           material: m,
           exata: exata,
           similaridade: similaridadeNome,
+          contido: contido,
         ));
       }
     }
 
     encontrados.sort((a, b) {
       if (a.exata != b.exata) return a.exata ? -1 : 1;
+      if (a.contido != b.contido) return a.contido ? -1 : 1;
       return b.similaridade.compareTo(a.similaridade);
     });
 
@@ -5087,6 +5472,19 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     if (!_formKey.currentState!.validate()) return;
     if (!_modoRetalho && (_unidade == null || _unidade!.isEmpty)) {
       setState(() => _erroDialog = 'Selecione uma unidade antes de salvar.');
+      return;
+    }
+    // Garante que a verificação de duplicidade mais recente já foi
+    // concluída antes de decidir se pode salvar (evita salvar durante o
+    // debounce, quando _possiveisDuplicatas ainda reflete o texto anterior).
+    _debounceDuplicata?.cancel();
+    await _verificarDuplicatas();
+    if (!mounted) return;
+    if (_possiveisDuplicatas.any((d) => d.exata)) {
+      setState(() {
+        _erroDialog = 'Já existe um material idêntico cadastrado. '
+            'Ajuste a medida/espessura ou edite o material existente.';
+      });
       return;
     }
     setState(() { _salvando = true; _erroDialog = null; });
@@ -5130,7 +5528,17 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
+    // Intercepta qualquer tentativa de fechar o diálogo que não passe pelos
+    // botões (X/Cancelar), como a tecla Esc ou o gesto/botão "voltar":
+    // sempre barra o pop automático e decide via _confirmarFechamento se
+    // deve realmente fechar.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        await _tentarFechar();
+      },
+      child: Dialog(
       backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
@@ -5212,7 +5620,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                   ),
                   const Spacer(),
                   IconButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: _salvando ? null : _tentarFechar,
                     icon: const Icon(Icons.close, size: 20),
                     tooltip: 'Fechar',
                     style: IconButton.styleFrom().copyWith(
@@ -5498,8 +5906,13 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         Expanded(
                           child: TextFormField(
                             controller: _espessura,
-                            decoration: const InputDecoration(labelText: 'Espessura'),
-                            inputFormatters: [_MedidaEspessuraFormatter()],
+                            decoration: const InputDecoration(
+                              labelText: 'Espessura',
+                              suffixText: 'mm',
+                              floatingLabelBehavior: FloatingLabelBehavior.always,
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [_EspessuraFormatter()],
                             onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                           ),
                         ),
@@ -5585,7 +5998,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                   Tooltip(
                     message: 'Cancelar cadastro',
                     child: TextButton(
-                      onPressed: _salvando ? null : () => Navigator.pop(context),
+                      onPressed: _salvando ? null : _tentarFechar,
                       style: TextButton.styleFrom().copyWith(
                         mouseCursor:
                             WidgetStateProperty.all(SystemMouseCursors.click),
@@ -5619,6 +6032,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
           ],
         ),
       ),
+      ),
     );
   }
 }
@@ -5641,11 +6055,15 @@ class _TransferenciaProducaoDialog extends StatefulWidget {
 }
 
 class _TransferenciaProducaoDialogState
-    extends State<_TransferenciaProducaoDialog> {
+    extends State<_TransferenciaProducaoDialog> with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+
   // ── Filtros de busca ──────────────────────────────────────────────────
   final _nomeCtrl         = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl       = TextEditingController();
+  final _comprimentoCtrl  = TextEditingController();
+  final _larguraCtrl      = TextEditingController();
   final _espessuraCtrl    = TextEditingController();
   Timer? _debounce;
   bool _buscando = false;
@@ -5656,15 +6074,33 @@ class _TransferenciaProducaoDialogState
   MaterialModel? _selecionado;
   final _quantCtrl            = TextEditingController();
   final _obsCtrl              = TextEditingController();
+  // Linha de produção de destino ('1' ou '2'). Obrigatório escolher antes
+  // de confirmar — não há mais um "estoque de produção" único.
+  String? _producaoSelecionada;
 
   bool _enviando = false;
   String? _erro;
 
+  // ── Card "Pendentes de confirmação" ────────────────────────────────────
+  int? _resolvendoPendenteId;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<EstoqueProducaoProvider>().carregarPendentes();
+    });
+  }
+
   @override
   void dispose() {
+    _tabController.dispose();
     _nomeCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
+    _comprimentoCtrl.dispose();
+    _larguraCtrl.dispose();
     _espessuraCtrl.dispose();
     _quantCtrl.dispose();
     _obsCtrl.dispose();
@@ -5672,9 +6108,31 @@ class _TransferenciaProducaoDialogState
     super.dispose();
   }
 
+  Future<void> _confirmarPendente(EntradaPendenteModel p) async {
+    setState(() => _resolvendoPendenteId = p.id);
+    final provider  = context.read<EstoqueProducaoProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await provider.confirmarPendente(p.id);
+    if (!mounted) return;
+    setState(() => _resolvendoPendenteId = null);
+    if (ok) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Entrada de ${p.materialNome} confirmada e adicionada ao estoque'),
+        backgroundColor: AppTheme.success,
+      ));
+    } else {
+      messenger.showSnackBar(SnackBar(
+        content: Text(provider.erro ?? 'Erro ao confirmar entrada'),
+        backgroundColor: AppTheme.error,
+      ));
+    }
+  }
+
   bool get _temFiltroAtivo =>
       _identificadorCtrl.text.trim().isNotEmpty ||
       _medidaCtrl.text.trim().isNotEmpty ||
+      _comprimentoCtrl.text.trim().isNotEmpty ||
+      _larguraCtrl.text.trim().isNotEmpty ||
       _espessuraCtrl.text.trim().isNotEmpty;
 
   void _agendarBusca() {
@@ -5682,6 +6140,8 @@ class _TransferenciaProducaoDialogState
     final temQualquerFiltro = _nomeCtrl.text.trim().isNotEmpty ||
         _identificadorCtrl.text.trim().isNotEmpty ||
         _medidaCtrl.text.trim().isNotEmpty ||
+        _comprimentoCtrl.text.trim().isNotEmpty ||
+        _larguraCtrl.text.trim().isNotEmpty ||
         _espessuraCtrl.text.trim().isNotEmpty;
     if (!temQualquerFiltro) {
       setState(() {
@@ -5704,6 +6164,8 @@ class _TransferenciaProducaoDialogState
         busca:         _nomeCtrl.text.trim(),
         identificador: _identificadorCtrl.text.trim(),
         medida:        _medidaCtrl.text.trim(),
+        comprimento:   _comprimentoCtrl.text.trim(),
+        largura:       _larguraCtrl.text.trim(),
         espessura:     _espessuraCtrl.text.trim(),
       );
       if (mounted) {
@@ -5720,6 +6182,8 @@ class _TransferenciaProducaoDialogState
   void _limparFiltros() {
     _identificadorCtrl.clear();
     _medidaCtrl.clear();
+    _comprimentoCtrl.clear();
+    _larguraCtrl.clear();
     _espessuraCtrl.clear();
     _agendarBusca();
   }
@@ -5743,6 +6207,11 @@ class _TransferenciaProducaoDialogState
       setState(() => _erro = 'Informe uma quantidade válida');
       return;
     }
+    final producao = _producaoSelecionada;
+    if (producao == null) {
+      setState(() => _erro = 'Selecione para qual produção transferir');
+      return;
+    }
 
     setState(() { _enviando = true; _erro = null; });
 
@@ -5753,6 +6222,7 @@ class _TransferenciaProducaoDialogState
     final ok = await provider.transferir(
       materialId:       material.id,
       quantidade:       qtd,
+      producao:         producao,
       observacao:       _obsCtrl.text.trim().isEmpty ? null : _obsCtrl.text.trim(),
     );
 
@@ -5764,7 +6234,7 @@ class _TransferenciaProducaoDialogState
       messenger.showSnackBar(SnackBar(
         content: Text(
           '${qtd.toStringAsFixed(qtd == qtd.truncateToDouble() ? 0 : 3)} '
-          '${formatarUnidadeExibicao(material.unidade)} de ${material.nome} transferido(s) para o estoque de produção',
+          '${formatarUnidadeExibicao(material.unidade)} de ${material.nome} transferido(s) para a produção $producao',
         ),
         backgroundColor: AppTheme.success,
       ));
@@ -5773,29 +6243,15 @@ class _TransferenciaProducaoDialogState
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: SizedBox(
-        width: 620,
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
+  Widget _buildAbaSaida(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Cabeçalho ─────────────────────────────────────────────
-              Row(
-                children: [
-                  const Icon(Icons.factory_outlined, color: AppTheme.warning),
-                  const SizedBox(width: 8),
-                  Text('Saída para Produção', style: Theme.of(context).textTheme.headlineSmall),
-                ],
-              ),
-              const SizedBox(height: 4),
               Text(
-                'Move uma quantidade do estoque para o estoque de produção. '
+                'Move uma quantidade do estoque para a produção 1 ou produção 2. '
                 'Não é necessário informar OS agora.',
                 style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
@@ -5808,7 +6264,7 @@ class _TransferenciaProducaoDialogState
                   controller: _nomeCtrl,
                   autofocus: true,
                   decoration: InputDecoration(
-                    hintText: 'Buscar material por nome...',
+                    hintText: 'Buscar material por nome',
                     prefixIcon: Icon(Icons.search, size: 18, color: Theme.of(context).colorScheme.outline),
                     isDense: true,
                   ),
@@ -5825,7 +6281,7 @@ class _TransferenciaProducaoDialogState
                       child: TextField(
                         controller: _identificadorCtrl,
                         decoration: InputDecoration(
-                          hintText:   'Identificador...',
+                          hintText:   'Identificador',
                           prefixIcon: Icon(Icons.qr_code,
                               color: Theme.of(context).colorScheme.outline, size: 18),
                           isDense: true,
@@ -5841,7 +6297,7 @@ class _TransferenciaProducaoDialogState
                       child: TextField(
                         controller: _medidaCtrl,
                         decoration: InputDecoration(
-                          hintText:   'Medida...',
+                          hintText:   'Medida',
                           prefixIcon: Icon(Icons.straighten,
                               color: Theme.of(context).colorScheme.outline, size: 18),
                           isDense: true,
@@ -5851,17 +6307,57 @@ class _TransferenciaProducaoDialogState
                         onSubmitted: (_) => _buscar(),
                       ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _comprimentoCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: InputDecoration(
+                          hintText:   'Comprimento',
+                          suffixText: 'm',
+                          prefixIcon: Icon(Icons.height,
+                              color: Theme.of(context).colorScheme.outline, size: 18),
+                          isDense: true,
+                        ),
+                        inputFormatters: [_EspessuraFormatter()],
+                        onChanged: (_) { _agendarBusca(); setState(() {}); },
+                        onSubmitted: (_) => _buscar(),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: _larguraCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: InputDecoration(
+                          hintText:   'Largura',
+                          suffixText: 'm',
+                          prefixIcon: Icon(Icons.width_normal,
+                              color: Theme.of(context).colorScheme.outline, size: 18),
+                          isDense: true,
+                        ),
+                        inputFormatters: [_EspessuraFormatter()],
+                        onChanged: (_) { _agendarBusca(); setState(() {}); },
+                        onSubmitted: (_) => _buscar(),
+                      ),
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: TextField(
                         controller: _espessuraCtrl,
                         decoration: InputDecoration(
-                          hintText:   'Espessura...',
+                          hintText:   'Espessura',
+                          suffixText: 'mm',
                           prefixIcon: Icon(Icons.layers,
                               color: Theme.of(context).colorScheme.outline, size: 18),
                           isDense: true,
                         ),
-                        inputFormatters: [_MedidaEspessuraFormatter()],
+                        inputFormatters: [_EspessuraFormatter()],
                         onChanged: (_) { _agendarBusca(); setState(() {}); },
                         onSubmitted: (_) => _buscar(),
                       ),
@@ -5935,11 +6431,9 @@ class _TransferenciaProducaoDialogState
                                       final detalhes = [
                                         if (m.identificador != null && m.identificador!.isNotEmpty) m.identificador!,
                                         if (medidaFmt != null) medidaFmt,
-                                        if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
+                                        if (formatarEspessuraComSufixo(m.espessura) != null) formatarEspessuraComSufixo(m.espessura)!,
                                       ].join(' • ');
-                                      final qtdStr = m.quantidade.toStringAsFixed(
-                                        m.quantidade == m.quantidade.truncateToDouble() ? 0 : 2,
-                                      );
+                                      final qtdStr = formatarQuantidade(m.quantidade);
                                       final corQtd = m.quantidade <= 0
                                           ? AppTheme.error
                                           : Theme.of(context).colorScheme.onSurfaceVariant;
@@ -5978,7 +6472,7 @@ class _TransferenciaProducaoDialogState
                                 style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                             Text(
                               [
-                                'Disponível: ${_selecionado!.quantidade.toStringAsFixed(_selecionado!.quantidade == _selecionado!.quantidade.truncateToDouble() ? 0 : 2)} ${formatarUnidadeExibicao(_selecionado!.unidade)}',
+                                'Disponível: ${formatarQuantidade(_selecionado!.quantidade)} ${formatarUnidadeExibicao(_selecionado!.unidade)}',
                                 if (_selecionado!.identificador != null && _selecionado!.identificador!.isNotEmpty)
                                   _selecionado!.identificador!,
                                 if (formatarMedidaOuDimensoes(
@@ -5992,8 +6486,8 @@ class _TransferenciaProducaoDialogState
                                     largura:     _selecionado!.largura,
                                     comprimento: _selecionado!.comprimento,
                                   )!,
-                                if (_selecionado!.espessura != null && _selecionado!.espessura!.isNotEmpty)
-                                  _selecionado!.espessura!,
+                                if (formatarEspessuraComSufixo(_selecionado!.espessura) != null)
+                                  formatarEspessuraComSufixo(_selecionado!.espessura)!,
                               ].join(' • '),
                               style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                             ),
@@ -6033,37 +6527,306 @@ class _TransferenciaProducaoDialogState
                   controller: _obsCtrl,
                   decoration: const InputDecoration(labelText: 'Observação (opcional)', isDense: true),
                 ),
+
+                const SizedBox(height: 14),
+                Text(
+                  'Transferir para *',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _CartaoProducaoSelecionavel(
+                        label: 'Produção 1',
+                        selecionado: _producaoSelecionada == '1',
+                        onTap: () => setState(() => _producaoSelecionada = '1'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _CartaoProducaoSelecionavel(
+                        label: 'Produção 2',
+                        selecionado: _producaoSelecionada == '2',
+                        onTap: () => setState(() => _producaoSelecionada = '2'),
+                      ),
+                    ),
+                  ],
+                ),
               ],
 
               if (_erro != null) ...[
                 const SizedBox(height: 12),
                 Text(_erro!, style: const TextStyle(color: AppTheme.error, fontSize: 12.5)),
               ],
+            ],
+      ),
+    );
+  }
 
-              const SizedBox(height: 20),
+  Widget _buildAbaPendentes(BuildContext context) {
+    final provider = context.watch<EstoqueProducaoProvider>();
+    final pendentes = provider.pendentes;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Retalhos gerados por baixas e devoluções aguardando confirmação antes de '
+            'entrarem no estoque padrão.',
+            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 380,
+            child: provider.carregandoPendentes
+                ? const Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary))
+                : pendentes.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.inbox_outlined, size: 32, color: Theme.of(context).colorScheme.outlineVariant),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Nenhuma entrada aguardando confirmação',
+                              style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.separated(
+                        itemCount: pendentes.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (_, i) {
+                          final p = pendentes[i];
+                          final resolvendo = _resolvendoPendenteId == p.id;
+                          final corTipo = p.ehRetalho ? AppTheme.primary : AppTheme.warning;
+
+                          final medidaFmt = formatarMedidaOuDimensoes(
+                            medida:      p.materialMedida,
+                            largura:     p.materialLargura,
+                            comprimento: p.materialComprimento,
+                          );
+                          final espessuraFmt = formatarEspessuraComSufixo(p.materialEspessura);
+                          final detalhes = [
+                            if (medidaFmt != null) medidaFmt,
+                            if (espessuraFmt != null) espessuraFmt,
+                          ].join(' • ');
+
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: corTipo.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: corTipo.withValues(alpha: 0.25)),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  p.ehRetalho ? Icons.content_cut : Icons.undo,
+                                  size: 16,
+                                  color: corTipo,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Row(
+                                              children: [
+                                                if (p.materialIdentificador != null && p.materialIdentificador!.isNotEmpty) ...[
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: corTipo.withValues(alpha: 0.14),
+                                                      borderRadius: BorderRadius.circular(5),
+                                                    ),
+                                                    child: Text(
+                                                      p.materialIdentificador!,
+                                                      style: TextStyle(
+                                                        fontSize: 10.5,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: corTipo,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                ],
+                                                Flexible(
+                                                  child: Text(
+                                                    p.materialNome,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Text(
+                                            '${formatarQuantidade(p.quantidade)} ${formatarUnidadeExibicao(p.materialUnidade)}',
+                                            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: corTipo),
+                                          ),
+                                        ],
+                                      ),
+                                      if (detalhes.isNotEmpty) ...[
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          detalhes,
+                                          style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        [
+                                          p.descricaoTipo,
+                                          if (p.numeroOS != null && p.numeroOS!.isNotEmpty) 'OS ${p.numeroOS}',
+                                        ].join(' • '),
+                                        style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                      ),
+                                      if (p.usuarioNome != null && p.usuarioNome!.isNotEmpty)
+                                        Text(
+                                          p.usuarioNome!,
+                                          style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                if (resolvendo)
+                                  const SizedBox(
+                                    width: 18, height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary),
+                                  )
+                                else
+                                  FilledButton(
+                                    onPressed: () => _confirmarPendente(p),
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: AppTheme.success,
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                    ).copyWith(
+                                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                    ),
+                                    child: const Text('Confirmar', style: TextStyle(fontSize: 12.5)),
+                                  ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final totalPendentes = context.watch<EstoqueProducaoProvider>().totalPendentes;
+
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: SizedBox(
+        width: 880,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Cabeçalho ─────────────────────────────────────────────
               Row(
-                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    style: TextButton.styleFrom().copyWith(
-                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                    ),
-                    child: const Text('Cancelar'),
-                  ),
+                  const Icon(Icons.factory_outlined, color: AppTheme.warning),
                   const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: (_selecionado == null || _enviando) ? null : _confirmar,
-                    style: FilledButton.styleFrom(backgroundColor: AppTheme.warning).copyWith(
-                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                  Text('Saída para Produção', style: Theme.of(context).textTheme.headlineSmall),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TabBar(
+                controller: _tabController,
+                isScrollable: false,
+                labelColor: AppTheme.warning,
+                indicatorColor: AppTheme.warning,
+                tabs: [
+                  const Tab(text: 'Saída'),
+                  Tab(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Pendentes de confirmação'),
+                        if (totalPendentes > 0) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: AppTheme.error,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '$totalPendentes',
+                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                    child: _enviando
-                        ? const SizedBox(
-                            width: 18, height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('Confirmar Transferência'),
                   ),
                 ],
+              ),
+              SizedBox(
+                height: 560,
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    SingleChildScrollView(child: _buildAbaSaida(context)),
+                    SingleChildScrollView(child: _buildAbaPendentes(context)),
+                  ],
+                ),
+              ),
+              AnimatedBuilder(
+                animation: _tabController,
+                builder: (context, _) {
+                  if (_tabController.index != 0) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          style: TextButton.styleFrom().copyWith(
+                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                          ),
+                          child: const Text('Cancelar'),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          onPressed: (_selecionado == null || _producaoSelecionada == null || _enviando) ? null : _confirmar,
+                          style: FilledButton.styleFrom(backgroundColor: AppTheme.warning).copyWith(
+                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                          ),
+                          child: _enviando
+                              ? const SizedBox(
+                                  width: 18, height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const Text('Confirmar Transferência'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
             ],
           ),
@@ -6071,6 +6834,78 @@ class _TransferenciaProducaoDialogState
       ),
     );
   }
+}
+
+/// Cartão selecionável simples usado para escolher a linha de produção
+/// ('1' ou '2') de destino no diálogo de transferência.
+class _CartaoProducaoSelecionavel extends StatelessWidget {
+  final String label;
+  final bool selecionado;
+  final VoidCallback onTap;
+
+  const _CartaoProducaoSelecionavel({
+    required this.label,
+    required this.selecionado,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      mouseCursor: SystemMouseCursors.click,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: selecionado
+              ? AppTheme.warning.withValues(alpha: 0.10)
+              : Theme.of(context).colorScheme.surface,
+          border: Border.all(
+            color: selecionado
+                ? AppTheme.warning
+                : Theme.of(context).colorScheme.outlineVariant,
+            width: selecionado ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              selecionado ? Icons.check_circle : Icons.factory_outlined,
+              size: 16,
+              color: selecionado ? AppTheme.warning : Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: selecionado ? FontWeight.w700 : FontWeight.w500,
+                color: selecionado ? AppTheme.warning : Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Corrige o texto de um campo de dimensão usada para não ultrapassar o
+/// [maximo] da chapa. Se o valor digitado exceder o máximo, o controller é
+/// truncado para o próprio máximo (formatado) e a seleção movida para o fim.
+void _limitarDimensao(TextEditingController ctrl, double maximo) {
+  final v = double.tryParse(ctrl.text.replaceAll(',', '.'));
+  if (v == null || v <= maximo) return;
+  final fmt = maximo == maximo.truncateToDouble()
+      ? maximo.toStringAsFixed(0)
+      : maximo.toStringAsFixed(2);
+  ctrl.value = TextEditingValue(
+    text: fmt,
+    selection: TextSelection.collapsed(offset: fmt.length),
+  );
 }
 
 class _ItemMovimentacao {
@@ -6271,7 +7106,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
     );
     final partes = <String>[
       if (medidaFmt != null) medidaFmt,
-      if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
+      if (formatarEspessuraComSufixo(m.espessura) != null) formatarEspessuraComSufixo(m.espessura)!,
       if (m.categoria != null && m.categoria!.isNotEmpty) m.categoria!,
     ].join(' · ');
 
@@ -6487,7 +7322,9 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                       suffixStyle: TextStyle(
                           fontSize: 11, color: Theme.of(context).colorScheme.outline),
                     ),
-                    onChanged: (_) => setState(() {}),
+                    onChanged: (_) => setState(() {
+                      _limitarDimensao(item.alturaUsadaCtrl, chapa.$2);
+                    }),
                   ),
                 ),
                 Padding(
@@ -6510,7 +7347,9 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                       suffixStyle: TextStyle(
                           fontSize: 11, color: Theme.of(context).colorScheme.outline),
                     ),
-                    onChanged: (_) => setState(() {}),
+                    onChanged: (_) => setState(() {
+                      _limitarDimensao(item.larguraUsadaCtrl, chapa.$1);
+                    }),
                   ),
                 ),
               ],
@@ -6651,7 +7490,7 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
       if (m.identificador != null && m.identificador!.isNotEmpty)
         '${m.identificador}',
       if (medidaFmt != null) medidaFmt,
-      if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
+      if (formatarEspessuraComSufixo(m.espessura) != null) formatarEspessuraComSufixo(m.espessura)!,
       if (m.categoria != null && m.categoria!.isNotEmpty) m.categoria!,
     ].join(' · ');
 
@@ -6721,8 +7560,7 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    m.quantidade.toStringAsFixed(
-                        m.quantidade % 1 == 0 ? 0 : 2),
+                    formatarQuantidade(m.quantidade),
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -6784,6 +7622,42 @@ class _StatusBadgeMini extends StatelessWidget {
 // HELPERS — Detecção de materiais semelhantes (Cadastro de Material)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Extrai o primeiro número de um texto, aceitando vírgula ou ponto como
+/// separador decimal e ignorando qualquer sufixo de unidade colado nele
+/// (ex.: "1.22m" -> 1.22, "3mm" -> 3, "2,00" -> 2.0). Retorna null se não
+/// houver número reconhecível.
+double? _extrairNumeroDeTextoCE(String? s) {
+  if (s == null) return null;
+  final match = RegExp(r'[-+]?\d+(?:[.,]\d+)?').firstMatch(s.trim());
+  if (match == null) return null;
+  return double.tryParse(match.group(0)!.replaceAll(',', '.'));
+}
+
+/// Dimensões numéricas extraídas do texto livre "medida".
+class _DimensoesMedidaCE {
+  final double? comprimento;
+  final double? largura;
+  final double? espessura;
+  const _DimensoesMedidaCE({this.comprimento, this.largura, this.espessura});
+}
+
+/// Faz o parse do campo "medida" (texto livre) em até 3 números separados
+/// por "x"/"X"/"×", tolerando qualquer combinação de: presença ou não do
+/// sufixo de unidade ("m", "mm"), formatação decimal (2 vs 2.00 vs 2,00), e
+/// um terceiro segmento opcional com a espessura embutida (ex.: "5x1.22x3mm",
+/// "2x1x2mm", "2.00x1.00m", "2x1"). Todas essas grafias devem ser
+/// reconhecidas como a mesma medida física.
+_DimensoesMedidaCE _extrairDimensoesMedidaCE(String? medida) {
+  if (medida == null || medida.trim().isEmpty) return const _DimensoesMedidaCE();
+  final partes = medida.trim().split(RegExp(r'[xX×]'));
+  final numeros = partes.map(_extrairNumeroDeTextoCE).toList();
+  return _DimensoesMedidaCE(
+    comprimento: numeros.isNotEmpty ? numeros[0] : null,
+    largura:     numeros.length > 1 ? numeros[1] : null,
+    espessura:   numeros.length > 2 ? numeros[2] : null,
+  );
+}
+
 /// Normaliza texto para comparação: remove acentos, converte para maiúsculas
 /// e colapsa espaços múltiplos.
 String _normalizarTextoComparacaoCE(String? v) {
@@ -6837,11 +7711,15 @@ class _PossivelDuplicataCE {
   /// coincidem exatamente — o backend rejeitaria esse cadastro com 409.
   final bool exata;
   final double similaridade;
+  /// true quando o nome digitado é prefixo/trecho do nome já cadastrado
+  /// (ou vice-versa) — indica digitação em andamento.
+  final bool contido;
 
   _PossivelDuplicataCE({
     required this.material,
     required this.exata,
     required this.similaridade,
+    this.contido = false,
   });
 }
 
@@ -6908,15 +7786,29 @@ class _AvisoPossivelDuplicataCE extends StatelessWidget {
           const SizedBox(height: 8),
           ...duplicatas.map((d) {
             final m = d.material;
+
+            // Formata comprimento x largura (ex.: "2x1m") quando ambos os
+            // valores numéricos estiverem disponíveis. Nesse caso, o texto
+            // livre "medida" é omitido, para não repetir a mesma informação
+            // em formatos diferentes.
+            String? dimensaoFormatada;
+            if (m.comprimento != null && m.largura != null &&
+                m.comprimento! > 0 && m.largura! > 0) {
+              String fmt(double v) =>
+                  v % 1 == 0 ? v.toStringAsFixed(0) : v.toString();
+              dimensaoFormatada = '${fmt(m.comprimento!)}x${fmt(m.largura!)}m';
+            }
+
             final detalhes = [
               if (m.identificador != null && m.identificador!.trim().isNotEmpty) m.identificador!.trim(),
-              if (m.medida      != null && m.medida!.trim().isNotEmpty)      m.medida!.trim(),
-              if (m.espessura   != null && m.espessura!.trim().isNotEmpty)   m.espessura!.trim(),
+              if (dimensaoFormatada != null)
+                dimensaoFormatada
+              else if (m.medida != null && m.medida!.trim().isNotEmpty)
+                m.medida!.trim(),
+              if (formatarEspessuraComSufixo(m.espessura) != null)   formatarEspessuraComSufixo(m.espessura)!,
             ].join(' • ');
 
-            final qtdTxt = m.quantidade % 1 == 0
-                ? m.quantidade.toStringAsFixed(0)
-                : m.quantidade.toStringAsFixed(2);
+            final qtdTxt = formatarQuantidade(m.quantidade);
 
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 3),
@@ -7051,7 +7943,7 @@ class _CategoriaFiltroDropdownCEState extends State<_CategoriaFiltroDropdownCE> 
                       autofocus: true,
                       inputFormatters: [_UpperCaseFormatter()],
                       decoration: InputDecoration(
-                        hintText:   'Buscar categoria...',
+                        hintText:   'Buscar categoria',
                         isDense:    true,
                         prefixIcon: Icon(Icons.search, size: 18, color: scheme.outline),
                       ),
@@ -7182,7 +8074,6 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
@@ -7195,33 +8086,31 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
           borderRadius: BorderRadius.circular(10),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: _hovered
-                  ? _accent.withValues(alpha: 0.10)
-                  : Colors.transparent,
+                  ? _accent.withValues(alpha: 0.15)
+                  : _accent.withValues(alpha: 0.08),
               border: Border.all(
-                color: _hovered
-                    ? _accent.withValues(alpha: 0.6)
-                    : scheme.outlineVariant,
+                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
               ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
+                const Icon(
                   Icons.arrow_back,
                   size: 18,
-                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                  color: _accent,
                 ),
-                SizedBox(width: 6),
+                const SizedBox(width: 6),
                 Text(
                   widget.label,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 13,
-                    color: _hovered ? _accent : scheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
+                    color: _accent,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],

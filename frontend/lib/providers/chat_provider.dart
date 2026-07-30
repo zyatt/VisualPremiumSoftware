@@ -24,6 +24,14 @@ class ChatProvider extends ChangeNotifier {
   StreamSubscription<String>? _sseSub;
   int? _meuId;
 
+  // Ping periódico ao backend (POST /chat/heartbeat) enquanto o app está
+  // aberto, independente do estado da conexão SSE — evita que o usuário
+  // fique preso como offline se a reconexão do SSE travar em algum ponto
+  // (rede oscilando etc.), já que o servidor decide online/offline pelo
+  // último heartbeat recebido, não pela conexão SSE em si.
+  Timer? _heartbeatTimer;
+  static const _heartbeatIntervalo = Duration(seconds: 20);
+
   List<UsuarioChat> get usuarios          => List.unmodifiable(_usuarios);
   int?             get usuarioAtivoId     => _usuarioAtivoId;
   bool             get paginaChatVisivel  => _paginaChatVisivel || _widgetFlutuanteVisivel;
@@ -132,6 +140,27 @@ class ChatProvider extends ChangeNotifier {
     _meuId = meuId;
     await carregarUsuarios();
     _conectarSSE();
+    _iniciarHeartbeat();
+  }
+
+  void _iniciarHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _enviarHeartbeat(); // imediato, não espera o primeiro intervalo
+    _heartbeatTimer = Timer.periodic(
+      _heartbeatIntervalo,
+      (_) => _enviarHeartbeat(),
+    );
+  }
+
+  Future<void> _enviarHeartbeat() async {
+    if (_meuId == null) return;
+    try {
+      await ApiClient.post('/chat/heartbeat', {});
+    } catch (e) {
+      // Falha aqui é inofensiva (o próximo heartbeat tenta de novo em
+      // até _heartbeatIntervalo), então não vale a pena propagar erro.
+      debugPrint('ChatProvider._enviarHeartbeat erro: $e');
+    }
   }
 
   Future<void> carregarUsuarios() async {
@@ -546,6 +575,7 @@ class ChatProvider extends ChangeNotifier {
   void limparToken() {
     _meuId = null;
     _sseSub?.cancel();
+    _heartbeatTimer?.cancel();
     _usuarios.clear();
     _conversas.clear();
     _usuarioAtivoId = null;
@@ -555,11 +585,18 @@ class ChatProvider extends ChangeNotifier {
     }
     _digitandoTimers.clear();
     _usuariosDigitando.clear();
+    // Sem isso, quem estiver ouvindo o provider (ex.: ChatFloatingWidget
+    // exibido em qualquer página do app) só descobre que a lista de
+    // usuários/conversas foi zerada na próxima vez que algo mais disparar
+    // notifyListeners() — deixando badges e status "presos" no estado do
+    // usuário anterior até então.
+    notifyListeners();
   }
 
   @override
   void dispose() {
     _sseSub?.cancel();
+    _heartbeatTimer?.cancel();
     for (final t in _digitandoTimers.values) {
       t.cancel();
     }

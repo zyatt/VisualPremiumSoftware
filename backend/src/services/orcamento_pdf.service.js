@@ -43,6 +43,18 @@ function formatDimensao(medida, largura, comprimento) {
   return `${fmt(c)}x${fmt(l)}m`;
 }
 
+/**
+ * Formata a espessura do material para exibição, acrescentando o sufixo
+ * "mm". Ex.: "1" -> "1mm". Se já terminar com "mm" (case-insensitive) ou
+ * estiver vazio/nulo, retorna como está.
+ */
+function formatEspessura(espessura) {
+  if (!espessura) return null;
+  const v = String(espessura).trim();
+  if (!v) return null;
+  return /mm$/i.test(v) ? v : `${v}mm`;
+}
+
 const C = {
   black:     '#1A1A1A',
   gray:      '#6B7280',
@@ -412,8 +424,19 @@ function aplicarFornecedoresOcultos(itens, fornecedoresOcultos) {
 }
 
 async function gerarPdfDeItens(dados) {
-  const { titulo = 'Orçamento', fornecedoresOcultos = [] } = dados;
+  const { titulo = 'Orçamento', fornecedoresOcultos = [], modoPrecificacao = 'UNIDADE' } = dados;
   const itens = aplicarFornecedoresOcultos(dados.itens ?? [], fornecedoresOcultos);
+
+  // No modo METRO_LINEAR (botão "Orçar por" do comparativo), o total de
+  // cada item multiplica também pela Quantidade por Unidade (mesma lógica
+  // usada no editor e na geração da OC). Itens sem qtdUnidade preenchida
+  // usam fator 1 (comportam-se como no modo Unidade).
+  const orcarPorMetroLinear = modoPrecificacao === 'METRO_LINEAR';
+  const fatorItem = (item) => {
+    if (!orcarPorMetroLinear) return 1;
+    const q = item.qtdUnidade;
+    return (q != null && q > 0) ? q : 1;
+  };
 
   return new Promise((resolve, reject) => {
     const fornecedores = coletarFornecedores(itens);
@@ -484,8 +507,9 @@ async function gerarPdfDeItens(dados) {
     });
 
     itens.forEach((item, iIdx) => {
-      const qtd    = item.quantidade ?? 1;
-      let   menor  = null;
+      const qtd      = item.quantidade ?? 1;
+      const qtdTotal = qtd * fatorItem(item);
+      let   menor    = null;
 
       fornecedores.forEach(({ id }) => {
         const pf = (item.precos ?? {})[id];
@@ -493,7 +517,7 @@ async function gerarPdfDeItens(dados) {
         totaisForn[id].vinculados += 1;
         const p = precoEfetivo(pf);
         if (p != null) {
-          totaisForn[id].total    += p * qtd;
+          totaisForn[id].total    += p * qtdTotal;
           totaisForn[id].comPreco += 1;
           if (menor === null || p < menor) menor = p;
         }
@@ -511,7 +535,7 @@ async function gerarPdfDeItens(dados) {
     itens.forEach((item, i) => {
       const m = menorPorItem[i];
       if (m != null) {
-        totalMelhorPreco  += m * (item.quantidade ?? 1);
+        totalMelhorPreco  += m * (item.quantidade ?? 1) * fatorItem(item);
         matComMelhorPreco += 1;
       }
     });
@@ -738,6 +762,7 @@ async function gerarPdfDeItens(dados) {
 
       itens.forEach((item, iIdx) => {
         const qtd  = item.quantidade ?? 1;
+        const qtdTotal = qtd * fatorItem(item);
         const menor = menorPorItem[iIdx];
 
         doc.font('Helvetica-Bold').fontSize(FONT_SZ);
@@ -763,7 +788,7 @@ async function gerarPdfDeItens(dados) {
            .text(item.materialNome, xMat + 4, tyTop, { width: COL_MAT - 8, lineBreak: true });
 
         const dimensao = formatDimensao(item.materialMedida, item.materialLargura, item.materialComprimento);
-        const subparts = [item.materialCategoria, dimensao, item.materialEspessura, item.materialIdentificador]
+        const subparts = [item.materialCategoria, dimensao, formatEspessura(item.materialEspessura), item.materialIdentificador]
           .filter(Boolean).join(' · ');
         if (subparts) {
           doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
@@ -806,7 +831,7 @@ async function gerarPdfDeItens(dados) {
           }
 
           const preco  = precoEfetivo(pf);
-          const total  = preco != null ? preco * qtd : null;
+          const total  = preco != null ? preco * qtdTotal : null;
           const isMen  = menor != null && preco != null && preco === menor;
 
           if (isMen) {
@@ -854,7 +879,7 @@ async function gerarPdfDeItens(dados) {
            .moveTo(xMelhor, y + 4).lineTo(xMelhor, y + rowH - 4).stroke();
 
         if (menor != null) {
-          const melhorTotal = menor * qtd;
+          const melhorTotal = menor * qtdTotal;
           fillR(xMelhor + 2, y + 3, COL_MELHOR - 4, rowH - 6, '#EFF6FF');
           doc.rect(xMelhor + 2, y + 3, COL_MELHOR - 4, rowH - 6)
              .strokeColor('#BFDBFE').lineWidth(0.4).stroke();

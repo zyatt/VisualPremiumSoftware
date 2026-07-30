@@ -17,16 +17,16 @@ const listarSolicitacoes = async (req, res, next) => {
   try {
     const { status, busca } = req.query;
     const statusArr = status ? status.split(',').map((s) => s.trim()) : undefined;
-    const usuarioId = req.usuario.role === 'PRODUCAO' ? req.usuario.id : undefined;
-    res.json(await svc.listarSolicitacoes({ usuarioId, status: statusArr, busca }));
+    // Rota legada — não é mais acessível pelos cargos PRODUCAO1/PRODUCAO2
+    // (ver producao.routes.js), então não há mais filtro por usuarioId aqui.
+    res.json(await svc.listarSolicitacoes({ status: statusArr, busca }));
   } catch (e) { next(e); }
 };
 
 const listarHistorico = async (req, res, next) => {
   try {
     const { busca } = req.query;
-    const usuarioId = req.usuario.role === 'PRODUCAO' ? req.usuario.id : undefined;
-    res.json(await svc.listarSolicitacoes({ usuarioId, status: ['FINALIZADA'], busca }));
+    res.json(await svc.listarSolicitacoes({ status: ['FINALIZADA'], busca }));
   } catch (e) { next(e); }
 };
 

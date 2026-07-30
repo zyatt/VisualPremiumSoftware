@@ -63,6 +63,13 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final chatProv = context.read<ChatProvider>();
+      // Se o ChatProvider já foi inicializado (login/restaurarSessao chamou
+      // via UsuarioProvider), só garante que a lista de usuários está
+      // atualizada — não precisa reconectar SSE/heartbeat de novo.
+      if (chatProv.meuId != null) {
+        chatProv.carregarUsuarios();
+        return;
+      }
       final usuarioProv = context.read<UsuarioProvider>();
       final meuId = usuarioProv.usuarioLogado?.id;
       final token = usuarioProv.token;

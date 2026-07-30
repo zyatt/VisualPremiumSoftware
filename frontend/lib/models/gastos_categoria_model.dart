@@ -1,7 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// SEÇÃO 1 — Valor em estoque (quantidade atual × custo última compra)
-// ─────────────────────────────────────────────────────────────────────────────
-
 class EstoqueMaterialModel {
   final int     id;
   final String  nome;
@@ -84,10 +80,6 @@ class EstoqueCategoriaModel {
       );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SEÇÃO 2 — Gastos reais (saídas com origem em OC, em OS fechadas)
-// ─────────────────────────────────────────────────────────────────────────────
-
 class GastoMaterialModel {
   final int     id;
   final String  nome;
@@ -150,10 +142,6 @@ class GastoCategoriaModel {
             .toList(),
       );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SEÇÃO 3 — Gasto mensal (gráfico)
-// ─────────────────────────────────────────────────────────────────────────────
 
 class GastoMensalModel {
   final String mesAno;

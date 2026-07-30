@@ -102,8 +102,8 @@ class OrcamentoRepository {
 
   // ── Gerar OC (validação server-side) ─────────────────────────────────────────
 
-  Future<Map<String, dynamic>> gerarOrdemCompra(int id) async {
-    return ApiClient.post('/orcamentos/$id/gerar-oc', {});
+  Future<Map<String, dynamic>> gerarOrdemCompra(int id, {String modoPreco = 'UNIDADE'}) async {
+    return ApiClient.post('/orcamentos/$id/gerar-oc', {'modoPreco': modoPreco});
   }
 
   // ── Gerar PDF ─────────────────────────────────

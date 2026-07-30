@@ -42,6 +42,8 @@ class RelatorioOSProvider extends ChangeNotifier {
   String? _materialNomeAtivo;
   String? _materialIdentificadorAtivo;
   String? _materialMedidaAtiva;
+  String? _materialComprimentoAtivo;
+  String? _materialLarguraAtiva;
   String? _materialEspessuraAtiva;
   DateTime? _dataInicioAtiva;
   DateTime? _dataFimAtiva;
@@ -51,6 +53,8 @@ class RelatorioOSProvider extends ChangeNotifier {
       (_materialNomeAtivo?.isNotEmpty ?? false) ||
       (_materialIdentificadorAtivo?.isNotEmpty ?? false) ||
       (_materialMedidaAtiva?.isNotEmpty ?? false) ||
+      (_materialComprimentoAtivo?.isNotEmpty ?? false) ||
+      (_materialLarguraAtiva?.isNotEmpty ?? false) ||
       (_materialEspessuraAtiva?.isNotEmpty ?? false);
 
   Future<void> carregar({
@@ -59,6 +63,8 @@ class RelatorioOSProvider extends ChangeNotifier {
     String? materialNome,
     String? materialIdentificador,
     String? materialMedida,
+    String? materialComprimento,
+    String? materialLargura,
     String? materialEspessura,
     DateTime? dataInicio,
     DateTime? dataFim,
@@ -68,6 +74,8 @@ class RelatorioOSProvider extends ChangeNotifier {
     _materialNomeAtivo           = materialNome;
     _materialIdentificadorAtivo  = materialIdentificador;
     _materialMedidaAtiva         = materialMedida;
+    _materialComprimentoAtivo    = materialComprimento;
+    _materialLarguraAtiva        = materialLargura;
     _materialEspessuraAtiva      = materialEspessura;
     _dataInicioAtiva             = dataInicio;
     _dataFimAtiva                = dataFim;
@@ -81,6 +89,8 @@ class RelatorioOSProvider extends ChangeNotifier {
         materialNome:          materialNome,
         materialIdentificador: materialIdentificador,
         materialMedida:        materialMedida,
+        materialComprimento:   materialComprimento,
+        materialLargura:       materialLargura,
         materialEspessura:     materialEspessura,
         dataInicio:            dataInicio,
         dataFim:               dataFim,
@@ -100,6 +110,8 @@ class RelatorioOSProvider extends ChangeNotifier {
         materialNome:          _materialNomeAtivo,
         materialIdentificador: _materialIdentificadorAtivo,
         materialMedida:        _materialMedidaAtiva,
+        materialComprimento:   _materialComprimentoAtivo,
+        materialLargura:       _materialLarguraAtiva,
         materialEspessura:     _materialEspessuraAtiva,
         dataInicio:            _dataInicioAtiva,
         dataFim:               _dataFimAtiva,

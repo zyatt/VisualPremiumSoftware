@@ -18,6 +18,16 @@ class WelcomeBanner extends StatelessWidget {
 
   /// Exibe o banner como um overlay sobre a tela atual.
   /// Chame após o login ou logo após navegar para /inicio.
+  ///
+  /// IMPORTANTE: [context] precisa ser um contexto de dentro da árvore do
+  /// Navigator (ex: o context de build() do AppShell), NUNCA
+  /// `navigatorKey.currentContext` — esse é o contexto do próprio widget
+  /// Navigator, e o Overlay que ele gerencia é filho dele na árvore, não
+  /// ancestral. Overlay.maybeOf busca para cima, então usar o contexto do
+  /// Navigator faz a busca falhar silenciosamente (retorna null) e o banner
+  /// nunca aparece. Se precisar de um "contexto estável" que sobreviva a uma
+  /// desmontagem, use [showOnOverlay] com o OverlayState obtido via
+  /// `navigatorKey.currentState?.overlay`.
   static void show(BuildContext context, String nomeUsuario) {
     // rootOverlay: true força o Overlay do MaterialApp.router (que
     // sobrevive a qualquer navegação do GoRouter), em vez do Overlay mais
@@ -27,6 +37,15 @@ class WelcomeBanner extends StatelessWidget {
     // estiver mais disponível nesse instante.
     final overlay = Overlay.maybeOf(context, rootOverlay: true);
     if (overlay == null) return;
+    showOnOverlay(overlay, nomeUsuario);
+  }
+
+  /// Mesmo comportamento de [show], mas recebendo o [OverlayState]
+  /// diretamente — sem passar por busca de ancestral via BuildContext.
+  /// Use esta variante quando obtiver o overlay via
+  /// `rootNavigatorKey.currentState?.overlay`, que continua válido mesmo
+  /// que o contexto de onde a chamada partiu já tenha sido desmontado.
+  static void showOnOverlay(OverlayState overlay, String nomeUsuario) {
     late OverlayEntry entry;
     entry = OverlayEntry(
       builder: (_) => _BannerOverlay(

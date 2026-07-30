@@ -309,9 +309,19 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
       final repo = OrcamentoRepository();
       final completo = await repo.buscarPorId(orc['id'] as int);
 
-      // Monta payload idêntico ao do editor
-      final itens = (completo['itens'] as List? ?? []).map((raw) {
+      // Monta payload idêntico ao do editor.
+      // IMPORTANTE: no banco, cada fornecedor cotado pra um material vira
+      // uma linha própria em `itens` (constraint orcamentoId+materialId+
+      // fornecedorId). Se não agrupar por materialId aqui, o mesmo material
+      // aparece duplicado/triplicado no PDF — uma vez por fornecedor, cada
+      // uma com só 1 preço preenchido — em vez de uma linha só com todos os
+      // fornecedores comparados lado a lado.
+      final itensRaw = (completo['itens'] as List? ?? []);
+      final Map<int, Map<String, dynamic>> itensPorMaterial = {};
+
+      for (final raw in itensRaw) {
         final item = raw as Map<String, dynamic>;
+        final materialId = item['materialId'] as int;
         final fornecedorId = item['fornecedorId'];
         final precoUnitario = item['precoUnitario'] != null
             ? double.tryParse(item['precoUnitario'].toString())
@@ -320,27 +330,37 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
             (item['fornecedor'] as Map<String, dynamic>?)?['nomeFantasia']
                 as String? ??
                 '';
-        return {
-          'materialId': item['materialId'],
-          'materialNome': item['material']?['nome'] ?? '',
-          'materialUnidade': item['material']?['unidade'],
-          'materialCategoria': item['material']?['categoria'],
-          'materialMedida': item['material']?['medida'],
-          'materialEspessura': item['material']?['espessura'],
-          'materialIdentificador': item['material']?['identificador'],
-          'quantidade': double.tryParse(item['quantidade'].toString()) ?? 1,
-          'fornecedorSelecionado':
-              (item['selecionado'] as bool? ?? false) ? fornecedorId : null,
-          'precos': fornecedorId != null
-              ? {
-                  '$fornecedorId': {
-                    'fornecedorNome': fornecedorNome,
-                    'preco': precoUnitario,
-                  }
-                }
-              : <String, dynamic>{},
-        };
-      }).toList();
+
+        final existente = itensPorMaterial[materialId];
+        if (existente == null) {
+          itensPorMaterial[materialId] = {
+            'materialId': item['materialId'],
+            'materialNome': item['material']?['nome'] ?? '',
+            'materialUnidade': item['material']?['unidade'],
+            'materialCategoria': item['material']?['categoria'],
+            'materialMedida': item['material']?['medida'],
+            'materialEspessura': item['material']?['espessura'],
+            'materialIdentificador': item['material']?['identificador'],
+            'quantidade': double.tryParse(item['quantidade'].toString()) ?? 1,
+            'fornecedorSelecionado':
+                (item['selecionado'] as bool? ?? false) ? fornecedorId : null,
+            'precos': <String, dynamic>{},
+          };
+        } else if (item['selecionado'] as bool? ?? false) {
+          existente['fornecedorSelecionado'] = fornecedorId;
+        }
+
+        if (fornecedorId != null) {
+          (itensPorMaterial[materialId]!['precos']
+                  as Map<String, dynamic>)['$fornecedorId'] =
+              {
+            'fornecedorNome': fornecedorNome,
+            'preco': precoUnitario,
+          };
+        }
+      }
+
+      final itens = itensPorMaterial.values.toList();
 
       final titulo = completo['titulo'] as String? ?? 'Orçamento';
       final fornecedoresOcultos =

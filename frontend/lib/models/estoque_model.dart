@@ -15,17 +15,15 @@ class MovimentacaoModel {
   final double? precoM2;
   final String? observacao;
   final DateTime criadoEm;
-  // Presentes apenas em saídas de material UNIDADE com modo dimensional ativo.
-  // Quando não nulos, indicam que precoM2 é o custo proporcional da área usada
-  // (não o custo/m² do material), e o valor correto da saída é precoM2 × 1.
+
   final double? larguraUsada;
   final double? comprimentoUsado;
-  // Presente apenas em ENTRADAs de retalho (reentrada manual via controle de
-  // estoque): aponta para o materialId que foi consumido na saída original.
-  // Usado para abater o valor desta entrada do custo líquido da saída
-  // original em relatórios e gastos, mesmo sendo materiais diferentes.
+  
   final int? materialOrigemId;
   final String? materialOrigemNome;
+
+  final String? origemProducao;
+  final String? producao;
 
   MovimentacaoModel({
     required this.id,
@@ -48,23 +46,31 @@ class MovimentacaoModel {
     this.comprimentoUsado,
     this.materialOrigemId,
     this.materialOrigemNome,
+    this.origemProducao,
+    this.producao,
   });
 
-  /// Nesse caso, [precoM2] é o custo proporcional total da área consumida, não o custo/m².
   bool get usouModoDimensional =>
       larguraUsada != null && larguraUsada! > 0 &&
       comprimentoUsado != null && comprimentoUsado! > 0;
 
-  /// true quando esta movimentação é uma entrada de retalho vinculada a um
-  /// material de origem (ou seja, devolução de sobra de uma saída anterior).
   bool get ehRetalhoDeOrigem => materialOrigemId != null;
+ 
+  String? get descricaoOrigemProducao {
+    if (origemProducao == null || producao == null) return null;
+    if (origemProducao == 'TRANSFERENCIA') {
+      return 'Transferência do estoque padrão para produção $producao';
+    }
+    if (origemProducao == 'DEVOLUCAO') {
+      return 'Devolução da produção $producao para o estoque padrão';
+    }
+    return 'Baixa da produção $producao';
+  }
 
   factory MovimentacaoModel.fromJson(Map<String, dynamic> json) =>
       MovimentacaoModel(
         id:                    (json['id'] as num?)?.toInt() ?? 0,
         materialId:            (json['materialId'] as num?)?.toInt() ?? 0,
-        // Quando material é null (excluído), usa descricaoItem como fallback
-        // para preservar o nome histórico da movimentação.
         materialNome:          (json['material']?['nome'] as String?)
                                ?? (json['descricaoItem']?.toString().trim().isNotEmpty == true
                                    ? json['descricaoItem'].toString().trim()
@@ -98,6 +104,8 @@ class MovimentacaoModel {
             : null,
         materialOrigemId:      (json['materialOrigemId'] as num?)?.toInt(),
         materialOrigemNome:    json['materialOrigem']?['nome'],
+        origemProducao:        json['origemProducao']?.toString(),
+        producao:              json['producao']?.toString(),
       );
 }
 
@@ -105,7 +113,6 @@ class RelacaoOSModel {
   final int id;
   final String numeroOS;
   final String? descricao;
-  // 'EM_ANDAMENTO' | 'FECHADA'
   final String status;
   final DateTime? criadoEm;
   final DateTime? atualizadoEm;

@@ -114,6 +114,12 @@ class _ThemeLoadingOverlayState extends State<ThemeLoadingOverlay>
   }
 
   Widget _buildThemeIcon(ThemeData theme) {
+    // Cor do círculo = oposta ao fundo, para dar contraste com a logo:
+    // fundo escuro (dark) -> círculo claro; fundo claro (light) -> círculo escuro.
+    final circleColor = theme.brightness == Brightness.dark
+        ? Colors.white
+        : theme.colorScheme.onSurface;
+
     return Container(
       width: 80,
       height: 80,
@@ -121,24 +127,24 @@ class _ThemeLoadingOverlayState extends State<ThemeLoadingOverlay>
         shape: BoxShape.circle,
         gradient: RadialGradient(
           colors: [
-            theme.colorScheme.primary,
-            theme.colorScheme.primary.withValues(alpha: 0.8),
+            circleColor,
+            circleColor.withValues(alpha: 0.85),
           ],
         ),
         boxShadow: [
           BoxShadow(
-            color: theme.colorScheme.primary.withValues(alpha: 0.4),
+            color: circleColor.withValues(alpha: 0.4),
             blurRadius: 30,
             spreadRadius: 5,
           ),
         ],
       ),
-      child: Icon(
-        theme.brightness == Brightness.dark
-            ? Icons.dark_mode_rounded
-            : Icons.light_mode_rounded,
-        color: theme.colorScheme.onPrimary,
-        size: 36,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Image.asset(
+          'assets/images/logo.png',
+          fit: BoxFit.contain,
+        ),
       ),
     );
   }

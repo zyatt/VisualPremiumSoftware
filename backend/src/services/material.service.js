@@ -107,7 +107,7 @@ const _includeFornecedores = {
   },
 };
 
-async function listar(filtros = {}) {
+function _montarWhere(filtros = {}) {
   const { busca, categoria, semCategoria, status, comFornecedor, id, medida, espessura, largura, comprimento, identificador, ativo } = filtros;
 
   const where = {};
@@ -126,7 +126,13 @@ async function listar(filtros = {}) {
   }
   if (identificador) where.identificador = { contains: identificador, mode: 'insensitive' };
   if (medida)        where.medida        = { contains: medida,        mode: 'insensitive' };
-  if (espessura)     where.espessura     = { contains: espessura,     mode: 'insensitive' };
+  if (espessura) {
+    // Extrai só a parte numérica digitada (ex.: "2mm", "2 mm", "2" -> "2")
+    // e busca por essa substring, para que qualquer uma dessas formas
+    // encontre um material cadastrado como "2", "2mm" ou "2 mm".
+    const espessuraNum = espessura.replace(',', '.').match(/[\d.]+/)?.[0];
+    where.espessura = { contains: espessuraNum ?? espessura, mode: 'insensitive' };
+  }
   if (largura !== undefined && largura !== '')     where.largura     = Number(largura);
   if (comprimento !== undefined && comprimento !== '') where.comprimento = Number(comprimento);
   if (semCategoria === 'true') {
@@ -139,13 +145,128 @@ async function listar(filtros = {}) {
     where.fornecedorMateriais = { some: { ativo: true } };
   }
 
+  return where;
+}
+
+// Colunas reais da tabela `materiais` que podem ser usadas em orderBy do
+// Prisma diretamente. `precoMediano` e `precoM2Mediano` ficam de fora
+// porque são médias calculadas em cima de fornecedorMateriais — não
+// existem como coluna, então precisam de uma query separada (ver
+// `_listarPaginadoPorMedia` abaixo).
+const _colunasOrdenaveis = new Set([
+  'id', 'identificador', 'nome', 'categoria', 'medida', 'espessura',
+  'largura', 'comprimento', 'quantidade', 'estoqueMinimo', 'unidade',
+  'ultimoValorPago', 'ultimoValorPagoM2', 'status',
+]);
+
+function _resolverOrderBy(ordenarPor, direcao) {
+  const dir = direcao === 'desc' ? 'desc' : 'asc';
+  if (ordenarPor && _colunasOrdenaveis.has(ordenarPor)) {
+    return [{ [ordenarPor]: dir }, { id: 'asc' }];
+  }
+  // padrão atual da tela: ativos primeiro, por nome
+  return [{ ativo: 'desc' }, { nome: 'asc' }];
+}
+
+async function listar(filtros = {}) {
+  const { limite, pagina, porPagina } = filtros;
+  const where = _montarWhere(filtros);
+
+  // Paginação/limite opcionais:
+  //  - `limite` (ex.: autocomplete) → aplica só `take`, direto no banco,
+  //    em vez de trazer a tabela inteira e cortar no client.
+  //  - `pagina` + `porPagina` → paginação completa para telas de listagem.
+  // Quando nenhum dos dois é informado, mantém o comportamento atual
+  // (retorna tudo) para não quebrar telas que ainda não migraram.
+  const take = limite != null && limite !== ''
+    ? Number(limite)
+    : (porPagina != null && porPagina !== '' ? Number(porPagina) : undefined);
+  const skip = (pagina != null && pagina !== '' && porPagina != null && porPagina !== '')
+    ? (Number(pagina) - 1) * Number(porPagina)
+    : undefined;
+
   const materiais = await prisma.material.findMany({
     where,
     include: _includeFornecedores,
     orderBy: [{ ativo: 'desc' }, { nome: 'asc' }],
+    ...(take !== undefined ? { take } : {}),
+    ...(skip !== undefined ? { skip } : {}),
   });
 
   return materiais.map(_mapearMaterial);
+}
+
+/// Ordena/pagina por `precoMediano` ou `precoM2Mediano` — colunas que só
+/// existem calculadas (média dos preços dos fornecedores ativos), então
+/// não dá pra usar orderBy direto do Prisma. Busca os ids já ordenados via
+/// SQL com AVG(), pagina esses ids, e só então busca os materiais completos.
+async function _listarPaginadoPorMedia(where, { campoMedia, direcao, take, skip, total }) {
+  // Ids que batem no filtro (query leve — só a coluna id).
+  const filtrados = await prisma.material.findMany({ where, select: { id: true } });
+  const ids = filtrados.map((m) => m.id);
+
+  if (ids.length === 0) return { data: [], total };
+
+  const colunaPreco = campoMedia === 'precoM2Mediano' ? 'precoMetroQuadrado' : 'preco';
+  const dir = direcao === 'desc' ? 'DESC' : 'ASC';
+
+  // Query construída com o nome da coluna fixo (não vem do usuário — só
+  // 2 valores possíveis acima), e ids/limit/offset como parâmetros.
+  const idsPagina = await prisma.$queryRawUnsafe(
+    `
+      SELECT m.id
+      FROM materiais m
+      LEFT JOIN fornecedor_materiais fm
+        ON fm."materialId" = m.id AND fm.ativo = true AND fm."${colunaPreco}" > 0
+      WHERE m.id = ANY($1::int[])
+      GROUP BY m.id
+      ORDER BY AVG(fm."${colunaPreco}") ${dir} NULLS LAST, m.id ASC
+      LIMIT $2 OFFSET $3
+    `,
+    ids,
+    take,
+    skip,
+  );
+
+  const idsOrdenados = idsPagina.map((r) => r.id);
+  if (idsOrdenados.length === 0) return { data: [], total };
+
+  const materiais = await prisma.material.findMany({
+    where: { id: { in: idsOrdenados } },
+    include: _includeFornecedores,
+  });
+  const porId = new Map(materiais.map((m) => [m.id, m]));
+  const emOrdem = idsOrdenados.map((id) => porId.get(id)).filter(Boolean);
+
+  return { data: emOrdem.map(_mapearMaterial), total };
+}
+
+/// Versão paginada de `listar`, para telas de listagem: retorna
+/// `{ data, total }` em vez da tabela inteira. `ordenarPor`/`direcao`
+/// controlam a ordenação no banco (exceto para as 2 colunas calculadas,
+/// tratadas à parte em `_listarPaginadoPorMedia`).
+async function listarPaginado(filtros = {}) {
+  const { pagina = 1, porPagina = 50, ordenarPor, direcao } = filtros;
+  const where = _montarWhere(filtros);
+
+  const take = Number(porPagina) || 50;
+  const skip = (Number(pagina) - 1) * take;
+
+  const total = await prisma.material.count({ where });
+
+  if (ordenarPor === 'precoMediano' || ordenarPor === 'precoM2Mediano') {
+    return _listarPaginadoPorMedia(where, { campoMedia: ordenarPor, direcao, take, skip, total });
+  }
+
+  const materiais = await prisma.material.findMany({
+    where,
+    include: _includeFornecedores,
+    orderBy: _resolverOrderBy(ordenarPor, direcao),
+    take,
+    skip,
+  });
+
+  return { data: materiais.map(_mapearMaterial), total };
 }
 
 async function listarParaMovimentacao(filtros = {}) {
@@ -471,6 +592,7 @@ module.exports = {
   calcularStatus,
   notificarSeCritico,
   listar,
+  listarPaginado,
   listarParaMovimentacao,
   buscarPorId,
   criar,

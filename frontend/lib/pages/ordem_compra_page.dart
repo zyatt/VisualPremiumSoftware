@@ -11,12 +11,24 @@ import '../providers/fornecedor_provider.dart';
 import '../repositories/ordem_compra_repository.dart';
 import '../repositories/fornecedor_repository.dart';
 import '../theme/app_theme.dart';
-import 'controle_estoque_page.dart' show formatarMedidaOuDimensoes;
+import 'controle_estoque_page.dart' show formatarMedidaOuDimensoes, formatarQuantidade;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UNIDADE: exibição em minúsculo (ex.: M/L -> m/l, ML -> ml, KG -> kg, M2/M² -> m²)
 // O valor salvo/comparado no banco continua maiúsculo; isto é só para exibição.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ESPESSURA: exibição sempre com sufixo "mm" (o valor salvo é só o número,
+// ex.: "1" -> "1mm"). Evita duplicar o sufixo caso já venha salvo com "mm".
+// ─────────────────────────────────────────────────────────────────────────────
+String espessuraExibicao(String? espessura) {
+  final e = (espessura ?? '').trim();
+  if (e.isEmpty) return '';
+  final semSufixo = e.replaceAll(RegExp(r'\s*mm\s*$', caseSensitive: false), '').trim();
+  if (semSufixo.isEmpty) return '';
+  return '${semSufixo}mm';
+}
 
 String unidadeExibicao(String? unidade) {
   final u = (unidade ?? '').trim();
@@ -154,6 +166,38 @@ class _NumeroBrFormatter extends TextInputFormatter {
   ) {
     if (newValue.text.isEmpty) return newValue;
 
+    // Permite digitar '.' como atalho para a vírgula decimal. Não podemos
+    // simplesmente trocar todo '.' por ',' no texto inteiro, pois o texto já
+    // formatado contém pontos de milhar (ex.: "1.580") que não devem virar
+    // vírgula. Por isso, comparamos com oldValue e convertemos em vírgula
+    // apenas o(s) ponto(s) recém-inserido(s) nesta edição.
+    if (newValue.text.length > oldValue.text.length) {
+      final cursorFim = newValue.selection.baseOffset < 0
+          ? newValue.text.length
+          : newValue.selection.baseOffset;
+      final qtdInserida = newValue.text.length - oldValue.text.length;
+      final inicioInserido = (cursorFim - qtdInserida).clamp(0, newValue.text.length);
+      final trechoInserido = newValue.text.substring(
+        inicioInserido.clamp(0, newValue.text.length),
+        cursorFim.clamp(0, newValue.text.length),
+      );
+      if (trechoInserido.contains('.')) {
+        final novoTrecho = trechoInserido.replaceAll('.', ',');
+        final novoTexto = newValue.text.replaceRange(
+          inicioInserido,
+          cursorFim.clamp(0, newValue.text.length),
+          novoTrecho,
+        );
+        final delta = novoTrecho.length - trechoInserido.length;
+        newValue = TextEditingValue(
+          text: novoTexto,
+          selection: TextSelection.collapsed(
+            offset: (cursorFim + delta).clamp(0, novoTexto.length),
+          ),
+        );
+      }
+    }
+
     // Mantém só dígitos e, no máximo, uma vírgula.
     var texto = newValue.text.replaceAll(RegExp(r'[^\d,]'), '');
     final primeiraVirgula = texto.indexOf(',');
@@ -211,6 +255,60 @@ class _NumeroBrFormatter extends TextInputFormatter {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FORMATTER: MEDIDA / ESPESSURA
+// Converte vírgula em ponto e impede dois pontos consecutivos.
+// Permite: dígitos, ponto, vírgula (convertida em ponto), espaço, 'x', 'X'.
+// ─────────────────────────────────────────────────────────────────────────────
+class _MedidaEspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    // Converte vírgula em ponto
+    var texto = newValue.text.replaceAll(',', '.');
+    // Remove pontos duplos (ou mais) consecutivos
+    texto = texto.replaceAll(RegExp(r'\.{2,}'), '.');
+
+    final offset = newValue.selection.baseOffset.clamp(0, texto.length);
+    return newValue.copyWith(
+      text: texto,
+      selection: TextSelection.collapsed(offset: offset),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FORMATTER: ESPESSURA
+// Converte vírgula em ponto, impede pontos em sequência e não permite
+// letras nem qualquer outro caractere — só dígitos e um único ponto decimal
+// (ex: "2mm" vira "2", "2,,5" vira "2.5").
+// ─────────────────────────────────────────────────────────────────────────────
+class _EspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text.replaceAll(',', '.');
+    // Remove tudo que não for dígito ou ponto (bloqueia letras, "mm" etc.)
+    texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
+    // Remove pontos duplos (ou mais) consecutivos
+    texto = texto.replaceAll(RegExp(r'\.{2,}'), '.');
+    // Permite no máximo um ponto decimal: mantém o primeiro, remove os demais
+    final primeiroPonto = texto.indexOf('.');
+    if (primeiroPonto != -1) {
+      texto = texto.substring(0, primeiroPonto + 1) +
+          texto.substring(primeiroPonto + 1).replaceAll('.', '');
+    }
+
+    return TextEditingValue(
+      text: texto,
+      selection: TextSelection.collapsed(offset: texto.length),
+    );
+  }
+}
 
 
 class OrdemCompraPage extends StatefulWidget {
@@ -228,12 +326,14 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
   late TabController _tabController;
   final _buscaNumeroCtrl      = TextEditingController();
   final _buscaNomeCtrl        = TextEditingController();
-  final _buscaMedidaCtrl      = TextEditingController();
+  final _buscaComprimentoCtrl = TextEditingController();
+  final _buscaLarguraCtrl     = TextEditingController();
   final _buscaEspessuraCtrl   = TextEditingController();
   final _buscaIdentificadorCtrl = TextEditingController();
   String _filtroBuscaNumero      = '';
   String _filtroBuscaNome        = '';
-  String _filtroBuscaMedida      = '';
+  String _filtroBuscaComprimento = '';
+  String _filtroBuscaLargura     = '';
   String _filtroBuscaEspessura   = '';
   String _filtroBuscaIdentificador = '';
 
@@ -324,7 +424,8 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
     _tabController.dispose();
     _buscaNumeroCtrl.dispose();
     _buscaNomeCtrl.dispose();
-    _buscaMedidaCtrl.dispose();
+    _buscaComprimentoCtrl.dispose();
+    _buscaLarguraCtrl.dispose();
     _buscaEspessuraCtrl.dispose();
     _buscaIdentificadorCtrl.dispose();
     super.dispose();
@@ -347,10 +448,11 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
   List<dynamic> _filtrar(List<dynamic> lista) {
     final qNum  = _filtroBuscaNumero.trim();
     final qNome = _filtroBuscaNome.trim().toLowerCase();
-    final qMed  = _filtroBuscaMedida.trim().toLowerCase();
+    final qComp = _filtroBuscaComprimento.trim().toLowerCase();
+    final qLarg = _filtroBuscaLargura.trim().toLowerCase();
     final qEsp  = _filtroBuscaEspessura.trim().toLowerCase();
     final qId   = _filtroBuscaIdentificador.trim().toUpperCase();
-    if (qNum.isEmpty && qNome.isEmpty && qMed.isEmpty && qEsp.isEmpty && qId.isEmpty) return lista;
+    if (qNum.isEmpty && qNome.isEmpty && qComp.isEmpty && qLarg.isEmpty && qEsp.isEmpty && qId.isEmpty) return lista;
     return lista.where((o) {
       final raw = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
       if (qNum.isNotEmpty && !raw.id.toString().contains(qNum)) return false;
@@ -358,8 +460,12 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
         final tem = raw.itens.any((item) => item.materialNome.toLowerCase().contains(qNome));
         if (!tem) return false;
       }
-      if (qMed.isNotEmpty) {
-        final tem = raw.itens.any((item) => item.materialMedida?.toLowerCase().contains(qMed) ?? false);
+      if (qComp.isNotEmpty) {
+        final tem = raw.itens.any((item) => item.materialComprimento?.toString().toLowerCase().contains(qComp) ?? false);
+        if (!tem) return false;
+      }
+      if (qLarg.isNotEmpty) {
+        final tem = raw.itens.any((item) => item.materialLargura?.toString().toLowerCase().contains(qLarg) ?? false);
         if (!tem) return false;
       }
       if (qEsp.isNotEmpty) {
@@ -427,7 +533,7 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                   child: FilledButton.icon(
                     onPressed: _abrirCriacaoOC,
                     icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Nova OC'),
+                    label: const Text('Nova Ordem de Compra'),
                     style: FilledButton.styleFrom(
                       backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
@@ -458,18 +564,9 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                   child: TextField(
                     controller: _buscaNumeroCtrl,
                     decoration: InputDecoration(
-                      hintText: 'Nº da OC...',
+                      hintText: 'Nº da OC',
                       prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
-                      suffixIcon: _filtroBuscaNumero.isNotEmpty
-                          ? IconButton(
-                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
-                              onPressed: () {
-                                _buscaNumeroCtrl.clear();
-                                setState(() => _filtroBuscaNumero = '');
-                              },
-                            )
-                          : null,
                     ),
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
@@ -482,7 +579,7 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                   child: TextField(
                     controller: _buscaNomeCtrl,
                     decoration: InputDecoration(
-                      hintText: 'Nome do material...',
+                      hintText: 'Nome do material',
                       prefixIcon: Icon(Icons.inventory_2_outlined, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),
@@ -495,18 +592,9 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                   child: TextField(
                     controller: _buscaIdentificadorCtrl,
                     decoration: InputDecoration(
-                      hintText: 'Identificador...',
+                      hintText: 'Identificador',
                       prefixIcon: Icon(Icons.qr_code, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
-                      suffixIcon: _filtroBuscaIdentificador.isNotEmpty
-                          ? IconButton(
-                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
-                              onPressed: () {
-                                _buscaIdentificadorCtrl.clear();
-                                setState(() => _filtroBuscaIdentificador = '');
-                              },
-                            )
-                          : null,
                     ),
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
@@ -517,22 +605,32 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                 Expanded(
                   flex: 2,
                   child: TextField(
-                    controller: _buscaMedidaCtrl,
+                    controller: _buscaComprimentoCtrl,
                     decoration: InputDecoration(
-                      hintText: 'Medida...',
-                      prefixIcon: Icon(Icons.straighten_outlined, color: Theme.of(context).colorScheme.outline, size: 18),
+                      hintText: 'Comprimento',
+                      suffixText: 'm',
+                      prefixIcon: Icon(Icons.height, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
-                      suffixIcon: _filtroBuscaMedida.isNotEmpty
-                          ? IconButton(
-                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
-                              onPressed: () {
-                                _buscaMedidaCtrl.clear();
-                                setState(() => _filtroBuscaMedida = '');
-                              },
-                            )
-                          : null,
                     ),
-                    onChanged: (v) => setState(() => _filtroBuscaMedida = v),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: (v) => setState(() => _filtroBuscaComprimento = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _buscaLarguraCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Largura',
+                      suffixText: 'm',
+                      prefixIcon: Icon(Icons.width_normal, color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: (v) => setState(() => _filtroBuscaLargura = v),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -541,26 +639,20 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                   child: TextField(
                     controller: _buscaEspessuraCtrl,
                     decoration: InputDecoration(
-                      hintText: 'Espessura...',
-                      prefixIcon: Icon(Icons.layers_outlined, color: Theme.of(context).colorScheme.outline, size: 18),
+                      hintText: 'Espessura',
+                      suffixText: 'mm',
+                      prefixIcon: Icon(Icons.layers, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
-                      suffixIcon: _filtroBuscaEspessura.isNotEmpty
-                          ? IconButton(
-                              icon: Icon(Icons.clear, size: 18, color: Theme.of(context).colorScheme.outline),
-                              onPressed: () {
-                                _buscaEspessuraCtrl.clear();
-                                setState(() => _filtroBuscaEspessura = '');
-                              },
-                            )
-                          : null,
                     ),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
                     onChanged: (v) => setState(() => _filtroBuscaEspessura = v),
                   ),
                 ),
                 const SizedBox(width: 4),
                 Builder(
                   builder: (context) {
-                    final temFiltro = _filtroBuscaNumero.isNotEmpty || _filtroBuscaNome.isNotEmpty || _filtroBuscaMedida.isNotEmpty || _filtroBuscaEspessura.isNotEmpty || _filtroBuscaIdentificador.isNotEmpty;
+                    final temFiltro = _filtroBuscaNumero.isNotEmpty || _filtroBuscaNome.isNotEmpty || _filtroBuscaComprimento.isNotEmpty || _filtroBuscaLargura.isNotEmpty || _filtroBuscaEspessura.isNotEmpty || _filtroBuscaIdentificador.isNotEmpty;
                     return IconButton.outlined(
                       tooltip: 'Limpar filtros',
                       icon: Icon(
@@ -571,13 +663,15 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                           ? () {
                               _buscaNumeroCtrl.clear();
                               _buscaNomeCtrl.clear();
-                              _buscaMedidaCtrl.clear();
+                              _buscaComprimentoCtrl.clear();
+                              _buscaLarguraCtrl.clear();
                               _buscaEspessuraCtrl.clear();
                               _buscaIdentificadorCtrl.clear();
                               setState(() {
                                 _filtroBuscaNumero = '';
                                 _filtroBuscaNome = '';
-                                _filtroBuscaMedida = '';
+                                _filtroBuscaComprimento = '';
+                                _filtroBuscaLargura = '';
                                 _filtroBuscaEspessura = '';
                                 _filtroBuscaIdentificador = '';
                               });
@@ -1247,12 +1341,14 @@ class _OcCardState extends State<_OcCard> {
                         );
                   final partes = <String>[
                     if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
-                    if ((item.materialEspessura ?? '').isNotEmpty) item.materialEspessura!,
-                    if ((item.materialIdentificador ?? '').isNotEmpty) item.materialIdentificador!,
+                    if ((item.materialEspessura ?? '').isNotEmpty) espessuraExibicao(item.materialEspessura),
                   ];
+                  final nomeComIdentificador = (item.materialIdentificador ?? '').isNotEmpty
+                      ? '${item.materialIdentificador} · $nomeBase'
+                      : nomeBase;
                   final desc = partes.isEmpty
-                      ? nomeBase
-                      : '$nomeBase · ${partes.join(' · ')}';
+                      ? nomeComIdentificador
+                      : '$nomeComIdentificador · ${partes.join(' · ')}';
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 2),
                     child: Text(
@@ -1612,10 +1708,8 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
         },
         orElse: () => null,
       );
-      if (raw != null && mounted) {
-        final atualizado = raw is OrdemCompraModel
-            ? raw
-            : OrdemCompraModel.fromJson(raw as Map<String, dynamic>);
+      if (mounted) {
+        final atualizado = raw;
         setState(() => _ordem = atualizado);
       }
     }
@@ -1794,14 +1888,16 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                                 );
                           final detalhe = [
                             if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
-                            if (item.materialEspessura != null && item.materialEspessura!.isNotEmpty) item.materialEspessura!,
-                            if (item.materialIdentificador != null && item.materialIdentificador!.isNotEmpty) item.materialIdentificador!,
+                            if (item.materialEspessura != null && item.materialEspessura!.isNotEmpty) espessuraExibicao(item.materialEspessura),
                           ].join(' · ');
+                          final prefixoIdentificador = (item.materialIdentificador != null && item.materialIdentificador!.isNotEmpty)
+                              ? '${item.materialIdentificador}  ·  '
+                              : '';
                           return Text.rich(
                             TextSpan(
                               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
                               children: [
-                                TextSpan(text: nomeBase),
+                                TextSpan(text: '$prefixoIdentificador$nomeBase'),
                                 if (detalhe.isNotEmpty)
                                   TextSpan(text: '  ·  $detalhe'),
                               ],
@@ -1886,10 +1982,8 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
       },
       orElse: () => null,
     );
-    if (raw != null && mounted) {
-      final atualizada = raw is OrdemCompraModel
-          ? raw
-          : OrdemCompraModel.fromJson(raw as Map<String, dynamic>);
+    if (mounted) {
+      final atualizada = raw;
       setState(() => _ordem = atualizada);
     }
   }
@@ -2230,7 +2324,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       _erroItensVazio = false;
       _itens.add(_ItemRascunho(
         materialId:             vinculo.materialId,
-        materialNome:           vinculo.descricaoCompleta,
+        materialNome:           vinculo.materialNome ?? '',
         materialUnidade:        vinculo.materialUnidade,
         materialMedida:         vinculo.materialMedida,
         materialEspessura:      vinculo.materialEspessura,
@@ -2330,7 +2424,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         setState(() => item.erroQtd = true);
         _scrollToKey(item.cardKey);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('A quantidade distribuída (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) excede a quantidade do item "${item.materialNome}" (${item.quantidade % 1 == 0 ? item.quantidade.toInt() : item.quantidade}).'),
+          content: Text('A quantidade distribuída (${formatarQuantidade(totalDistribuido)}) excede a quantidade do item "${item.materialNome}" (${formatarQuantidade(item.quantidade)}).'),
           backgroundColor: AppTheme.error,
         ));
         return;
@@ -2340,9 +2434,9 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         _scrollToKey(item.cardKey);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
-            'A soma das quantidades distribuídas (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) '
+            'A soma das quantidades distribuídas (${formatarQuantidade(totalDistribuido)}) '
             'está abaixo da quantidade do item "${item.materialNome}" '
-            '(${item.quantidade % 1 == 0 ? item.quantidade.toInt() : item.quantidade}). '
+            '(${formatarQuantidade(item.quantidade)}). '
             'O total distribuído deve ser igual à quantidade.',
           ),
           backgroundColor: AppTheme.error,
@@ -2975,16 +3069,16 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       if (diff > 0.0001) {
         setState(() => item.erroQtd = true);
         _scrollToKey(item.cardKey);
-        _showErro('A quantidade distribuída (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) excede a quantidade do item "${item.materialNome}" (${item.quantidade % 1 == 0 ? item.quantidade.toInt() : item.quantidade}).');
+        _showErro('A quantidade distribuída (${formatarQuantidade(totalDistribuido)}) excede a quantidade do item "${item.materialNome}" (${formatarQuantidade(item.quantidade)}).');
         return;
       }
       if (diff < -0.0001) {
         setState(() => item.erroQtd = true);
         _scrollToKey(item.cardKey);
         _showErro(
-          'A soma das quantidades distribuídas (${totalDistribuido % 1 == 0 ? totalDistribuido.toInt() : totalDistribuido.toStringAsFixed(2)}) '
+          'A soma das quantidades distribuídas (${formatarQuantidade(totalDistribuido)}) '
           'está abaixo da quantidade do item "${item.materialNome}" '
-          '(${item.quantidade % 1 == 0 ? item.quantidade.toInt() : item.quantidade}). '
+          '(${formatarQuantidade(item.quantidade)}). '
           'O total distribuído deve ser igual à quantidade.',
         );
         return;
@@ -3100,7 +3194,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       _erroItensVazio = false;
       _itens.add(_ItemRascunho(
         materialId:             vinculo.materialId,
-        materialNome:           vinculo.descricaoCompleta,
+        materialNome:           vinculo.materialNome ?? '',
         materialUnidade:        vinculo.materialUnidade,
         materialMedida:         vinculo.materialMedida,
         materialEspessura:      vinculo.materialEspessura,
@@ -4363,9 +4457,11 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                             );
                       final detalhe = [
                         if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
-                        if (item.materialEspessura != null && item.materialEspessura!.isNotEmpty) item.materialEspessura!,
-                        if (item.materialIdentificador != null && item.materialIdentificador!.isNotEmpty) item.materialIdentificador!,
+                        if (item.materialEspessura != null && item.materialEspessura!.isNotEmpty) espessuraExibicao(item.materialEspessura),
                       ].join(' · ');
+                      final prefixoIdentificador = (item.materialIdentificador != null && item.materialIdentificador!.isNotEmpty)
+                          ? '${item.materialIdentificador}  ·  '
+                          : '';
                       return Text.rich(
                         TextSpan(
                           style: TextStyle(
@@ -4373,7 +4469,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                               fontSize: 14,
                               color: Theme.of(context).colorScheme.onSurface),
                           children: [
-                            TextSpan(text: item.materialNome),
+                            TextSpan(text: '$prefixoIdentificador${item.materialNome}'),
                             if (detalhe.isNotEmpty)
                               TextSpan(text: '  ·  $detalhe'),
                           ],
@@ -4563,7 +4659,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       Icon(Icons.inventory_2_outlined, size: 13, color: AppTheme.primary),
                       SizedBox(width: 5),
                       Text(
-                        'Entrará no estoque: ${item.quantidadeEstoque % 1 == 0 ? item.quantidadeEstoque.toInt() : item.quantidadeEstoque.toStringAsFixed(2)} $unidade',
+                        'Entrará no estoque: ${formatarQuantidade(item.quantidadeEstoque)} $unidade',
                         style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w600),
                       ),
                     ],
@@ -4887,7 +4983,7 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      'Excede em ${excesso % 1 == 0 ? excesso.toInt() : excesso.toStringAsFixed(2)}',
+                      'Excede em ${formatarQuantidade(excesso)}',
                       style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700),
                     ),
                   ),
@@ -5181,8 +5277,8 @@ class _AdicionarItemDialog extends StatefulWidget {
 class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
   final _identificadorCtrl = TextEditingController();
   final _nomeCtrl          = TextEditingController();
-  final _categoriaCtrl     = TextEditingController();
-  final _medidaCtrl        = TextEditingController();
+  final _comprimentoCtrl   = TextEditingController();
+  final _larguraCtrl       = TextEditingController();
   final _espessuraCtrl     = TextEditingController();
 
   // materialId → quantidade de cópias a adicionar
@@ -5209,8 +5305,8 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
   void dispose() {
     _identificadorCtrl.dispose();
     _nomeCtrl.dispose();
-    _categoriaCtrl.dispose();
-    _medidaCtrl.dispose();
+    _comprimentoCtrl.dispose();
+    _larguraCtrl.dispose();
     _espessuraCtrl.dispose();
     super.dispose();
   }
@@ -5218,11 +5314,11 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
   // ── lista filtrada para o modo "só vinculados" ─────────────────────────────
   List<FornecedorMaterialVinculoModel> get _filtradosVinculados {
     var lista = widget.materiais;
-    final ident     = _identificadorCtrl.text.trim().toLowerCase();
-    final nome      = _nomeCtrl.text.trim().toLowerCase();
-    final categoria = _categoriaCtrl.text.trim().toLowerCase();
-    final medida    = _medidaCtrl.text.trim().toLowerCase();
-    final espessura = _espessuraCtrl.text.trim().toLowerCase();
+    final ident       = _identificadorCtrl.text.trim().toLowerCase();
+    final nome        = _nomeCtrl.text.trim().toLowerCase();
+    final comprimento = _comprimentoCtrl.text.trim().toLowerCase();
+    final largura     = _larguraCtrl.text.trim().toLowerCase();
+    final espessura   = _espessuraCtrl.text.trim().toLowerCase();
 
     if (ident.isNotEmpty)     lista = lista.where((m) => (m.materialIdentificador ?? '').toLowerCase().contains(ident)).toList();
     if (nome.isNotEmpty) {
@@ -5232,23 +5328,25 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
         return tokens.every((t) => desc.contains(t));
       }).toList();
     }
-    if (categoria.isNotEmpty) lista = lista.where((m) => m.descricaoCompleta.toLowerCase().contains(categoria)).toList();
-    if (medida.isNotEmpty)    lista = lista.where((m) => m.descricaoCompleta.toLowerCase().contains(medida)).toList();
-    if (espessura.isNotEmpty) lista = lista.where((m) => m.descricaoCompleta.toLowerCase().contains(espessura)).toList();
+    if (comprimento.isNotEmpty) lista = lista.where((m) => m.descricaoCompleta.toLowerCase().contains(comprimento)).toList();
+    if (largura.isNotEmpty)     lista = lista.where((m) => m.descricaoCompleta.toLowerCase().contains(largura)).toList();
+    if (espessura.isNotEmpty)   lista = lista.where((m) => m.descricaoCompleta.toLowerCase().contains(espessura)).toList();
     return lista;
   }
 
   // ── lista filtrada para o modo "todo o estoque" (client-side após fetch) ──
   List<Map<String, dynamic>> get _filtradosTodos {
     var lista = _todosOsMateriais;
-    final ident     = _identificadorCtrl.text.trim().toLowerCase();
-    final nome      = _nomeCtrl.text.trim().toLowerCase();
-    final medida    = _medidaCtrl.text.trim().toLowerCase();
-    final espessura = _espessuraCtrl.text.trim().toLowerCase();
+    final ident       = _identificadorCtrl.text.trim().toLowerCase();
+    final nome        = _nomeCtrl.text.trim().toLowerCase();
+    final comprimento = _comprimentoCtrl.text.trim().toLowerCase();
+    final largura     = _larguraCtrl.text.trim().toLowerCase();
+    final espessura   = _espessuraCtrl.text.trim().toLowerCase();
 
     if (ident.isNotEmpty)     lista = lista.where((m) => (m['identificador'] ?? '').toString().toLowerCase().contains(ident)).toList();
     if (espessura.isNotEmpty) lista = lista.where((m) => (m['espessura'] ?? '').toString().toLowerCase().contains(espessura)).toList();
-    if (medida.isNotEmpty)    lista = lista.where((m) => (m['medida'] ?? '').toString().toLowerCase().contains(medida)).toList();
+    if (comprimento.isNotEmpty) lista = lista.where((m) => (m['comprimento'] ?? '').toString().toLowerCase().contains(comprimento)).toList();
+    if (largura.isNotEmpty)     lista = lista.where((m) => (m['largura'] ?? '').toString().toLowerCase().contains(largura)).toList();
     if (nome.isNotEmpty) {
       final tokens = nome.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
       lista = lista.where((m) {
@@ -5278,15 +5376,15 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
   bool get _temFiltro =>
       _identificadorCtrl.text.isNotEmpty ||
       _nomeCtrl.text.isNotEmpty ||
-      _categoriaCtrl.text.isNotEmpty ||
-      _medidaCtrl.text.isNotEmpty ||
+      _comprimentoCtrl.text.isNotEmpty ||
+      _larguraCtrl.text.isNotEmpty ||
       _espessuraCtrl.text.isNotEmpty;
 
   void _limparFiltros() => setState(() {
         _identificadorCtrl.clear();
         _nomeCtrl.clear();
-        _categoriaCtrl.clear();
-        _medidaCtrl.clear();
+        _comprimentoCtrl.clear();
+        _larguraCtrl.clear();
         _espessuraCtrl.clear();
       });
 
@@ -5333,10 +5431,12 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
     Navigator.pop(context);
   }
 
-  InputDecoration _deco(String hint, {IconData? icon}) => InputDecoration(
+  InputDecoration _deco(String hint, {IconData? icon, String? suffix}) => InputDecoration(
         hintText: hint,
         hintStyle: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
         prefixIcon: icon != null ? Icon(icon, size: 15, color: Theme.of(context).colorScheme.outline) : null,
+        suffixText: suffix,
+        suffixStyle: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
         filled: true,
         fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
         isDense: true,
@@ -5488,7 +5588,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
       ),
       contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       content: SizedBox(
-        width: 580,
+        width: 700,
         height: 580,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -5526,7 +5626,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                   child: TextField(
                     controller: _nomeCtrl,
                     autofocus: true,
-                    decoration: _deco('Buscar por nome...', icon: Icons.search),
+                    decoration: _deco('Nome do material', icon: Icons.inventory_2_outlined),
                     onChanged: (_) => setState(() {}),
                   ),
                 ),
@@ -5536,36 +5636,45 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
             Row(
               children: [
                 Expanded(
+                  flex: 3,
                   child: TextField(
                     controller: _identificadorCtrl,
-                    decoration: _deco('Identificador...', icon: Icons.qr_code),
+                    decoration: _deco('Identificador', icon: Icons.qr_code),
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
                     onChanged: (_) => setState(() {}),
                   ),
                 ),
                 const SizedBox(width: 6),
-                if (!_verTodoEstoque)
-                  Expanded(
-                    child: TextField(
-                      controller: _categoriaCtrl,
-                      decoration: _deco('Categoria', icon: Icons.category_outlined),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                if (!_verTodoEstoque) const SizedBox(width: 6),
                 Expanded(
+                  flex: 4,
                   child: TextField(
-                    controller: _medidaCtrl,
-                    decoration: _deco('Medida', icon: Icons.straighten_outlined),
+                    controller: _comprimentoCtrl,
+                    decoration: _deco('Comprimento', icon: Icons.height, suffix: 'm'),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
                     onChanged: (_) => setState(() {}),
                   ),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
+                  flex: 3,
+                  child: TextField(
+                    controller: _larguraCtrl,
+                    decoration: _deco('Largura', icon: Icons.width_normal, suffix: 'm'),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  flex: 3,
                   child: TextField(
                     controller: _espessuraCtrl,
-                    decoration: _deco('Espessura', icon: Icons.layers_outlined),
+                    decoration: _deco('Espessura', icon: Icons.layers, suffix: 'mm'),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
                     onChanged: (_) => setState(() {}),
                   ),
                 ),
@@ -5630,12 +5739,14 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                       );
                                 final partes = <String>[
                                   if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
-                                  if ((m['espessura'] ?? '').toString().isNotEmpty) m['espessura'].toString(),
-                                  if ((m['identificador'] ?? '').toString().isNotEmpty) m['identificador'].toString(),
+                                  if ((m['espessura'] ?? '').toString().isNotEmpty) espessuraExibicao(m['espessura'].toString()),
                                 ];
+                                final nomeComIdentificador = (m['identificador'] ?? '').toString().isNotEmpty
+                                    ? '${m['identificador']} · ${m['nome'] ?? ''}'
+                                    : (m['nome'] ?? '').toString();
                                 final desc = partes.isEmpty
-                                    ? (m['nome'] ?? '').toString()
-                                    : '${m['nome']} · ${partes.join(' · ')}';
+                                    ? nomeComIdentificador
+                                    : '$nomeComIdentificador · ${partes.join(' · ')}';
 
                                 // Preço do vínculo existente, se houver
                                 final vinculo = widget.materiais.cast<FornecedorMaterialVinculoModel?>()
@@ -5739,7 +5850,6 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
@@ -5752,33 +5862,31 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
           borderRadius: BorderRadius.circular(10),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: _hovered
-                  ? _accent.withValues(alpha: 0.10)
-                  : Colors.transparent,
+                  ? _accent.withValues(alpha: 0.15)
+                  : _accent.withValues(alpha: 0.08),
               border: Border.all(
-                color: _hovered
-                    ? _accent.withValues(alpha: 0.6)
-                    : scheme.outlineVariant,
+                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
               ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
+                const Icon(
                   Icons.arrow_back,
                   size: 18,
-                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                  color: _accent,
                 ),
-                SizedBox(width: 6),
+                const SizedBox(width: 6),
                 Text(
                   widget.label,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 13,
-                    color: _hovered ? _accent : scheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
+                    color: _accent,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],

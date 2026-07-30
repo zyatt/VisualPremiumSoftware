@@ -178,13 +178,13 @@ function drawMateriaisTable(doc, materiais, startY) {
     { key: 'id',            label: 'ID',              w: 32,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'identificador', label: 'IDENTIFICADOR',   w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'nome',          label: 'MATERIAL',        w: 120, hAlign: 'left',   cAlign: 'left',   pad: 4 },
-    { key: 'unidade',       label: 'UNIDADE',         w: 42,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'medida',        label: 'MEDIDA',          w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'espessura',     label: 'ESPESSURA',       w: 52,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'comprimento',   label: 'COMPRIMENTO',     w: 62,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'largura',       label: 'LARGURA',         w: 56,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'estMin',        label: 'EST. MÍN.',       w: 46,  hAlign: 'center', cAlign: 'center', pad: 3 },
-    { key: 'qtd',           label: 'QUANTIDADE',      w: 56,  hAlign: 'center', cAlign: 'center', pad: 3 },
+    { key: 'qtd',           label: 'ESTOQUE ATUAL',      w: 56,  hAlign: 'center', cAlign: 'center', pad: 3 },
+    { key: 'estMin',        label: 'ESTOQUE MÍNIMO',       w: 46,  hAlign: 'center', cAlign: 'center', pad: 3 },
+    { key: 'unidade',       label: 'UNIDADE',         w: 42,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'custoUltimo',   label: 'CUSTO ÚLT.',      w: 60,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'custoM2Ultimo', label: 'CUSTO M² ÚLT.',   w: 62,  hAlign: 'center', cAlign: 'center', pad: 3 },
     { key: 'status',        label: 'STATUS',          w: 51,  hAlign: 'center', cAlign: 'center', pad: 3 },
@@ -259,35 +259,47 @@ function drawMateriaisTable(doc, materiais, startY) {
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
        .text(nomeBase, c2.x, tyMulti, { width: c2.w, align: 'left', lineBreak: true });
 
-    const c3 = get(cols[3]);
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.black)
-       .text(formatUnidade(mat.unidade), c3.x, tySingle, { width: c3.w, align: 'center', lineBreak: false });
-
-    const c4 = get(cols[4]);
+    const c4 = get(cols[3]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(mat.medida || '—', c4.x, tySingle, { width: c4.w, align: 'center', lineBreak: false });
 
-    const c5 = get(cols[5]);
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(mat.espessura || '—', c5.x, tySingle, { width: c5.w, align: 'center', lineBreak: false });
+    const c5 = get(cols[4]);
 
-    const c6 = get(cols[6]);
+    const espessura =
+    mat.espessura != null && mat.espessura !== ''
+      ? `${mat.espessura}mm`
+      : '—';
+
+    doc.font('Helvetica')
+      .fontSize(FONT_SZ)
+      .fillColor(C.gray)
+      .text(espessura, c5.x, tySingle, {
+        width: c5.w,
+        align: 'center',
+        lineBreak: false,
+      });
+
+    const c6 = get(cols[5]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(mat.comprimento != null ? formatNumber(mat.comprimento) : '—',
              c6.x, tySingle, { width: c6.w, align: 'center', lineBreak: false });
 
-    const c7 = get(cols[7]);
+    const c7 = get(cols[6]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(mat.largura != null ? formatNumber(mat.largura) : '—',
              c7.x, tySingle, { width: c7.w, align: 'center', lineBreak: false });
+
+    const c9 = get(cols[7]);
+    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
+       .text(formatNumber(mat.quantidade), c9.x, tySingle, { width: c9.w, align: 'center', lineBreak: false });
 
     const c8 = get(cols[8]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(formatNumber(mat.estoqueMinimo), c8.x, tySingle, { width: c8.w, align: 'center', lineBreak: false });
 
-    const c9 = get(cols[9]);
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(formatNumber(mat.quantidade), c9.x, tySingle, { width: c9.w, align: 'center', lineBreak: false });
+    const c3 = get(cols[9]);
+    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.black)
+       .text(formatUnidade(mat.unidade), c3.x, tySingle, { width: c3.w, align: 'center', lineBreak: false });
 
     const c10 = get(cols[10]);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)

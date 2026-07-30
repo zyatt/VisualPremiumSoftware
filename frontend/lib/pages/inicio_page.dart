@@ -31,14 +31,6 @@ class InicioPage extends StatelessWidget {
                 color: scheme.onSurface,
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              'Bem-vindo à Visual Premium',
-              style: GoogleFonts.nunito(
-                color: scheme.onSurfaceVariant,
-                fontSize: 14,
-              ),
-            ),
             const SizedBox(height: 32),
 
             Expanded(

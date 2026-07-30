@@ -1,3 +1,10 @@
+class MateriaisPaginadosModel {
+  final List<MaterialModel> itens;
+  final int total;
+
+  const MateriaisPaginadosModel({required this.itens, required this.total});
+}
+
 class HistoricoPrecoModel {
   final int id;
   final int materialId;
@@ -57,12 +64,9 @@ class FornecedorMaterialModel {
   final double preco;
   final double precoMetroQuadrado;
   final bool ativo;
-  /// Largura do material (m) — preenchido quando o material tem dimensões cadastradas.
   final double? materialLargura;
-  /// Comprimento do material (m) — preenchido quando o material tem dimensões cadastradas.
   final double? materialComprimento;
 
-  /// True quando o preço de referência é por m²; false quando é por unidade.
   bool get usarM2 => precoMetroQuadrado > 0;
 
   FornecedorMaterialModel({
@@ -97,10 +101,6 @@ class FornecedorMaterialModel {
       );
 }
 
-/// Notificação recebida via SSE quando um material entra em status CRÍTICO
-/// (quantidade abaixo do estoque mínimo). Disparada apenas na transição para
-/// crítico (veja `notificarSeCritico` no backend) — não repete enquanto o
-/// material permanece crítico. Consumida pelo MaterialCriticoBanner.
 class MaterialCriticoNotificacao {
   final int materialId;
   final String nome;
@@ -189,20 +189,12 @@ class MaterialModel {
     this.historicoPrecos = const [],
   });
 
-  /// Soma das quantidades dos filhos específicos.
-  /// Para materiais não-específicos retorna [quantidade] normalmente.
-
-  /// Retorna a área total em m² para materiais do tipo UNIDADE que possuam
-  /// largura e comprimento cadastrados.
-  /// Fórmula: largura × comprimento × quantidade
-  /// Para materiais sem dimensões ou de outra unidade, retorna null.
   double? get qtdM2 {
     if (largura == null || comprimento == null) return null;
     if (largura! <= 0 || comprimento! <= 0) return null;
     return largura! * comprimento! * quantidade;
   }
 
-  /// Área de UMA unidade em m² (largura × comprimento).
   double? get areaUnitariaM2 {
     if (largura == null || comprimento == null) return null;
     if (largura! <= 0 || comprimento! <= 0) return null;

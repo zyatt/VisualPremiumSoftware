@@ -123,10 +123,19 @@ const rejeitar = async (req, res, next) => {
 const gerarOrdemCompra = async (req, res, next) => {
   try {
     const orcamentoId = +req.params.id;
-    
+    // 'UNIDADE' (padrão): precoUnitario do item é por unidade/peça (ex: por
+    // rolo) — precisa dividir por qtdUnidade para virar o "Valor/M.L" da OC.
+    // 'METRO_LINEAR': precoUnitario do item já é por m/l (ou pela unidade de
+    // medida do material), então vai direto pra OC, sem dividir.
+    // A fonte da verdade é o campo persistido no orçamento (definido pelo
+    // botão "Orçar por" e salvo junto com ele) — não o body da requisição,
+    // que pode vir de uma aba desatualizada (ex: outro usuário reabriu o
+    // orçamento em outra sessão antes de gerar a OC).
+
     await svc.validarParaOC(orcamentoId);
     
     const orcamento = await svc.buscarPorId(orcamentoId);
+    const modoPreco = orcamento.modoPrecificacao === 'METRO_LINEAR' ? 'METRO_LINEAR' : 'UNIDADE';
 
     const ocultos = new Set(orcamento.fornecedoresOcultos || []);
 
@@ -166,18 +175,23 @@ const gerarOrdemCompra = async (req, res, next) => {
       }
       
       const itensOC = grupo.itens.map(item => {
-        // No orçamento, o preço do item é "por quantidade" (ex: preço por rolo):
-        // total do orçamento = quantidade * precoUnitario.
-        // Na OC, precoUnitario é "por M/L" (Valor/M.L):
-        // total da OC = quantidade * qtdUnidade * precoUnitario.
-        // Por isso é preciso dividir pelo qtdUnidade aqui, senão o valor do
-        // orçamento acaba multiplicado duas vezes (por quantidade E por qtdUnidade)
-        // e o total na OC fica inflado.
+        // No orçamento, o preço do item pode estar em dois modos (escolhido
+        // pelo usuário no botão "Orçar por" do comparativo):
+        // - 'UNIDADE' (padrão): preço é "por unidade/peça" (ex: preço por
+        //   rolo) — total do orçamento = quantidade * precoUnitario. Na OC,
+        //   precoUnitario é "por M/L" (Valor/M.L): total da OC = quantidade *
+        //   qtdUnidade * precoUnitario. Por isso é preciso dividir pelo
+        //   qtdUnidade aqui, senão o valor do orçamento acaba multiplicado
+        //   duas vezes (por quantidade E por qtdUnidade) e o total na OC
+        //   fica inflado.
+        // - 'METRO_LINEAR': preço já é "por M/L" (mesmo padrão usado na OC),
+        //   então vai direto, sem dividir — o total do orçamento já foi
+        //   calculado como quantidade * qtdUnidade * precoUnitario.
         const qtdUnidade = item.qtdUnidade ?? null;
         const precoOrcamento = item.precoUnitario || 0;
-        const precoUnitarioOC = qtdUnidade && qtdUnidade > 0
-          ? precoOrcamento / qtdUnidade
-          : precoOrcamento;
+        const precoUnitarioOC = modoPreco === 'METRO_LINEAR'
+          ? precoOrcamento
+          : (qtdUnidade && qtdUnidade > 0 ? precoOrcamento / qtdUnidade : precoOrcamento);
 
         return {
           materialId: item.materialId,

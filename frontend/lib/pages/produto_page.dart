@@ -2056,4 +2056,4 @@ String _fmtBrl(double v) {
 }
 
 String _fmtQtd(double v) =>
-    v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+    v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();

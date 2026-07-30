@@ -80,6 +80,30 @@ class MaterialProvider extends ChangeNotifier {
   bool _carregando = false;
   bool get carregando => _carregando;
 
+  // ─── Página atual (tabela com paginação real no servidor) ─────────────────
+  /// Diferente de [_materiais] (lista completa, usada por PDF/orçamento em
+  /// lote), isto guarda só os itens da página pedida — o payload fica do
+  /// tamanho de [porPagina], não da tabela inteira.
+  List<MaterialModel> _materiaisPagina = [];
+  List<MaterialModel> get materiaisPagina => _materiaisPagina;
+
+  int _totalItensPagina = 0;
+  int get totalItensPagina => _totalItensPagina;
+
+  bool _carregandoPagina = false;
+  bool get carregandoPagina => _carregandoPagina;
+
+  // ─── Materiais recentes (página inicial) ──────────────────────────────────
+  /// Lista separada de [_materiaisPagina] — usada exclusivamente pela
+  /// InicioPage para exibir os 10 materiais mais recentes (ordenados por
+  /// id desc). Nunca é sobrescrita pela EstoquePage, evitando que a
+  /// ordenação da tabela principal contamine o painel inicial.
+  List<MaterialModel> _materiaisRecentes = [];
+  List<MaterialModel> get materiaisRecentes => _materiaisRecentes;
+
+  bool _carregandoRecentes = false;
+  bool get carregandoRecentes => _carregandoRecentes;
+
   String? _erro;
   String? get erro => _erro;
 
@@ -91,6 +115,8 @@ class MaterialProvider extends ChangeNotifier {
   String _identificadorFiltro = '';
   String _medidaFiltro = '';
   String _espessuraFiltro = '';
+  String _larguraFiltro = '';
+  String _comprimentoFiltro = '';
 
   // ─── SSE ──────────────────────────────────────────────────────────────────
   bool _paginaAberta = false;
@@ -355,6 +381,8 @@ class MaterialProvider extends ChangeNotifier {
     String identificador = '',
     String medida = '',
     String espessura = '',
+    String largura = '',
+    String comprimento = '',
     bool? ativo,
   }) async {
     _busca = busca;
@@ -364,6 +392,8 @@ class MaterialProvider extends ChangeNotifier {
     _identificadorFiltro = identificador;
     _medidaFiltro = medida;
     _espessuraFiltro = espessura;
+    _larguraFiltro = largura;
+    _comprimentoFiltro = comprimento;
     _carregando = true;
     _erro = null;
     notifyListeners();
@@ -376,6 +406,8 @@ class MaterialProvider extends ChangeNotifier {
         identificador: identificador,
         medida:       medida,
         espessura:    espessura,
+        largura:      largura,
+        comprimento:  comprimento,
         ativo:        ativo,
       );
     } catch (e) {
@@ -395,7 +427,77 @@ class MaterialProvider extends ChangeNotifier {
       identificador: _identificadorFiltro,
       medida:       _medidaFiltro,
       espessura:    _espessuraFiltro,
+      largura:      _larguraFiltro,
+      comprimento:  _comprimentoFiltro,
     );
+  }
+
+  /// Busca só a página pedida, ordenada no servidor — usar na tabela
+  /// principal de listagem. Não mexe em [_materiais] (lista completa),
+  /// que continua servindo PDF e orçamento em lote.
+  Future<void> carregarPaginado({
+    String busca = '',
+    String? categoria,
+    String status = '',
+    String identificador = '',
+    String medida = '',
+    String espessura = '',
+    String largura = '',
+    String comprimento = '',
+    bool? ativo,
+    bool comFornecedor = false,
+    required int pagina,
+    int porPagina = 50,
+    String? ordenarPor,
+    String? direcao,
+  }) async {
+    _carregandoPagina = true;
+    _erro = null;
+    notifyListeners();
+    try {
+      final resultado = await _repo.listarPaginado(
+        busca:         busca,
+        categoria:     categoria,
+        status:        status,
+        identificador: identificador,
+        medida:        medida,
+        espessura:     espessura,
+        largura:       largura.isEmpty ? null : largura,
+        comprimento:   comprimento.isEmpty ? null : comprimento,
+        ativo:         ativo,
+        comFornecedor: comFornecedor,
+        pagina:        pagina,
+        porPagina:     porPagina,
+        ordenarPor:    ordenarPor,
+        direcao:       direcao,
+      );
+      _materiaisPagina   = resultado.itens;
+      _totalItensPagina  = resultado.total;
+    } catch (e) {
+      _erro = _mensagemErro(e, acao: 'carregar estoque');
+    } finally {
+      _carregandoPagina = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> carregarRecentes() async {
+    _carregandoRecentes = true;
+    notifyListeners();
+    try {
+      final resultado = await _repo.listarPaginado(
+        pagina:     1,
+        porPagina:  8,
+        ordenarPor: 'atualizadoEm',
+        direcao:    'desc',
+      );
+      _materiaisRecentes = resultado.itens;
+    } catch (_) {
+      // Falha silenciosa — não afeta o estado de erro da EstoquePage.
+    } finally {
+      _carregandoRecentes = false;
+      notifyListeners();
+    }
   }
 
   Future<void> carregarCategorias() async {
@@ -431,6 +533,8 @@ class MaterialProvider extends ChangeNotifier {
     String identificador = '',
     String medida = '',
     String espessura = '',
+    String largura = '',
+    String comprimento = '',
   }) async {
     try {
       return await _repo.listarParaMovimentacao(
@@ -439,6 +543,8 @@ class MaterialProvider extends ChangeNotifier {
         identificador: identificador.isEmpty ? null : identificador,
         medida:        medida.isEmpty        ? null : medida,
         espessura:     espessura.isEmpty     ? null : espessura,
+        largura:       largura.isEmpty       ? null : largura,
+        comprimento:   comprimento.isEmpty   ? null : comprimento,
         categoria:     categoria,
       );
     } catch (_) {
@@ -520,10 +626,16 @@ class MaterialProvider extends ChangeNotifier {
 
   /// Busca rápida para autocomplete — retorna até [limite] materiais sem
   /// alterar o estado da lista principal nem disparar notifyListeners.
+  /// O corte agora acontece no banco (`limite` vira `take` no Prisma),
+  /// em vez de trazer a tabela inteira e truncar aqui no client — antes
+  /// disso cada tecla digitada disparava uma busca completa (~800KB).
   Future<List<MaterialModel>> buscarSugestoes(String busca, {int limite = 10, bool apenasAtivos = false}) async {
     try {
-      final lista = await _repo.listar(busca: busca, ativo: apenasAtivos ? true : null);
-      return lista.take(limite).toList();
+      return await _repo.listar(
+        busca: busca,
+        ativo: apenasAtivos ? true : null,
+        limite: limite,
+      );
     } catch (_) {
       return [];
     }

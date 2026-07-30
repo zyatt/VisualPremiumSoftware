@@ -28,6 +28,7 @@ import 'providers/chat_provider.dart';
 
 import 'widgets/update_checker_widget.dart';
 import 'widgets/theme_transition.dart';
+import 'providers/robo_helper_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,8 +37,15 @@ Future<void> main() async {
   final usuarioProvider             = UsuarioProvider();
   final orcamentoProvider           = OrcamentoProvider();
   final solicitacaoMaterialProvider = SolicitacaoMaterialProvider();
+  // Criado aqui (e não dentro do MultiProvider) para poder ser ligado ao
+  // UsuarioProvider via setChatProvider ANTES de restaurarSessao() rodar —
+  // do contrário, a restauração de sessão no boot do app não teria como
+  // inicializar a conexão de chat (SSE + heartbeat) do usuário já logado.
+  final chatProvider                = ChatProvider();
+
   usuarioProvider.setOrcamentoProvider(orcamentoProvider);
   usuarioProvider.setSolicitacaoMaterialProvider(solicitacaoMaterialProvider);
+  usuarioProvider.setChatProvider(chatProvider);
 
   await usuarioProvider.restaurarSessao();
 
@@ -45,6 +53,7 @@ Future<void> main() async {
     usuarioProvider:             usuarioProvider,
     orcamentoProvider:           orcamentoProvider,
     solicitacaoMaterialProvider: solicitacaoMaterialProvider,
+    chatProvider:                chatProvider,
   ));
 }
 
@@ -52,12 +61,14 @@ class VisualPremiumApp extends StatefulWidget {
   final UsuarioProvider             usuarioProvider;
   final OrcamentoProvider           orcamentoProvider;
   final SolicitacaoMaterialProvider solicitacaoMaterialProvider;
+  final ChatProvider                chatProvider;
 
   const VisualPremiumApp({
     super.key,
     required this.usuarioProvider,
     required this.orcamentoProvider,
     required this.solicitacaoMaterialProvider,
+    required this.chatProvider,
   });
 
   @override
@@ -90,8 +101,16 @@ class _VisualPremiumAppState extends State<VisualPremiumApp> {
         ChangeNotifierProvider(create: (_) => VeiculoProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => OrcamentoVendaProvider()),
+        ChangeNotifierProvider(create: (_) => RoboHelperProvider()),
         ChangeNotifierProvider.value(value: widget.solicitacaoMaterialProvider),
-        ChangeNotifierProvider(create: (_) => ChatProvider()),
+        // .value (e não create) porque a MESMA instância já foi ligada ao
+        // UsuarioProvider em main() e pode já estar inicializada (sessão
+        // restaurada no boot). Usar create: (_) => ChatProvider() aqui
+        // criaria uma SEGUNDA instância desconectada, que era exatamente o
+        // bug original: o widget flutuante (que lê via context.watch)
+        // acabava enxergando um ChatProvider "vazio" diferente do que a
+        // ChatPage inicializava.
+        ChangeNotifierProvider.value(value: widget.chatProvider),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, _) {
@@ -112,6 +131,13 @@ class _VisualPremiumAppState extends State<VisualPremiumApp> {
                 data: themeProvider.isDark ? AppTheme.dark : AppTheme.light,
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeInOut,
+                // O robô assistente (RoboHelperWidget) NÃO entra aqui: ele
+                // é gerenciado pelo AppShell via OverlayEntry inserido no
+                // Overlay raiz (mesmo padrão do WelcomeBanner, ver
+                // widgets/app_shell.dart) — assim ele só existe quando o
+                // AppShell está montado (nunca aparece em loading/login) e
+                // ainda fica acima de qualquer showDialog, sem precisar
+                // morar fora do MaterialApp.router.
                 child: UpdateChecker(child: child!),
               ),
             ),

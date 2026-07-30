@@ -6,8 +6,6 @@ class OrcamentoItemModel {
   final String? fornecedorNome;
   double quantidade;
   double? precoUnitario;
-  /// Quantidade da unidade de medida por embalagem/peça (ex: 50 M/L por
-  /// lona) — mesmo conceito da Ordem de Compra. Repassado ao gerar OC.
   final double? qtdUnidade;
   final double? materialLargura;
   final double? materialComprimento;
@@ -25,10 +23,6 @@ class OrcamentoItemModel {
     this.materialComprimento,
   });
 
-  /// Dimensão formatada como "3X5M" (comprimento X largura) quando largura e
-  /// comprimento do material estão cadastrados. Não há campo `medida` neste
-  /// modelo (vem só do material), então a formatação é sempre feita quando
-  /// os dados estiverem disponíveis.
   String? get materialDimensaoFormatada {
     final l = materialLargura;
     final c = materialComprimento;
@@ -73,9 +67,6 @@ class OrcamentoModel {
   final String? motivoRejeicao;
   final DateTime criadoEm;
 
-  /// IDs de fornecedores ocultados da visualização deste orçamento.
-  /// Compartilhado entre todos os usuários: quem ocultar, todos que abrirem
-  /// este orçamento verão oculto também. Não afeta os dados em si.
   final List<int> fornecedoresOcultos;
 
   OrcamentoModel({
@@ -113,7 +104,6 @@ class OrcamentoModel {
             .toList(),
       );
 
-  /// Label legível para o status
   String get statusLabel {
     switch (status) {
       case 'ABERTO':

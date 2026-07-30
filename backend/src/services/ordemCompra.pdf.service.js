@@ -27,6 +27,56 @@ function formatNumber(value) {
   }).format(value ?? 0);
 }
 
+// Mapa de caracteres Unicode comuns (fora do WinAnsi/CP1252 usado pela fonte
+// base Helvetica do PDFKit) para seus equivalentes ASCII mais próximos.
+// Sem isso, qualquer caractere fora do WinAnsi é renderizado como um glifo
+// de outra posição da tabela (lixo visual), em vez de aparecer como espaço
+// ou ser omitido — foi o que causou o texto ilegível nas Observações.
+const MAPA_CARACTERES_ESPECIAIS = {
+  '\u2018': "'", '\u2019': "'", '\u201A': "'",
+  '\u201C': '"', '\u201D': '"', '\u201E': '"',
+  '\u2013': '-', '\u2014': '-', '\u2212': '-',
+  '\u2022': '-', '\u25CF': '-', '\u25AA': '-', '\u25E6': '-',
+  '\u2026': '...',
+  '\u00A0': ' ', '\u2009': ' ', '\u200B': '',
+  '\u2192': '->', '\u2190': '<-',
+  '\u2705': '', '\u274C': '', '\u26A0': '',
+};
+
+/// Remove/substitui caracteres que a fonte Helvetica (WinAnsi/CP1252) do
+/// PDFKit não sabe desenhar. Caracteres não mapeados e fora do intervalo
+/// Latin-1 (0x00–0xFF) são descartados, para nunca imprimir um glifo
+/// incorreto no lugar (ex.: emojis, símbolos tipográficos "inteligentes"
+/// colados de Word/WhatsApp, etc.).
+function sanitizarTextoPdf(texto) {
+  if (!texto) return texto;
+  // Normaliza quebras de linha estilo Windows/Excel (\r\n) e Mac clássico (\r)
+  // para \n ANTES de tudo. Sem isso, um \r "solto" (de texto colado de
+  // planilha/editor que mistura \r\n com \n) sobrevive como caractere
+  // separado — como o resto do código só faz split('\n'), esse \r órfão
+  // fica grudado no fim da linha anterior e é desenhado como texto de
+  // verdade. A fonte Helvetica/WinAnsi não tem glifo pra 0x0D, e o PDFKit
+  // desenha o glifo de outra posição da tabela no lugar (efeito "Ð" lixo).
+  const textoNormalizado = texto.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  let resultado = '';
+  for (const char of textoNormalizado) {
+    const code = char.codePointAt(0);
+    if (MAPA_CARACTERES_ESPECIAIS[char] !== undefined) {
+      resultado += MAPA_CARACTERES_ESPECIAIS[char];
+    } else if (code === 0x09) {
+      // TAB (0x09): a fonte base Helvetica/WinAnsi do PDFKit não tem glifo
+      // definido pra esse código — desenhá-lo cru produz um glifo lixo
+      // (ex.: texto colado de planilha/Excel, gerando o efeito "'ÒVçF–FFR").
+      // Substitui por espaço para preservar o espaçamento sem quebrar o glifo.
+      resultado += ' ';
+    } else if (code === 0x0A || (code >= 0x20 && code <= 0xFF)) {
+      resultado += char;
+    }
+    // demais caracteres (emojis, símbolos fora do Latin-1, etc.) são omitidos
+  }
+  return resultado;
+}
+
 const C = {
   black:     '#1A1A1A',
   gray:      '#6B7280',
@@ -143,6 +193,21 @@ function drawInfoRow(doc, y, label, value) {
      .text(label, MARGIN, y, { width: 130 });
   doc.font('Helvetica-Bold').fontSize(7.5).fillColor(C.black)
      .text(value || '—', MARGIN + 135, y, { width: CONTENT_W - 135 });
+}
+
+function drawFornecedorDestaque(doc, y, nomeFornecedor) {
+  const blockH = 30;
+  const padH   = 14;
+
+  fillRect(doc, MARGIN, y, CONTENT_W, blockH, C.bgHeader);
+  fillRect(doc, MARGIN, y, 4, blockH, C.accent);
+
+  doc.font('Helvetica-Bold').fontSize(7).fillColor(C.gray)
+     .text('FORNECEDOR', MARGIN + padH, y + 6, { width: CONTENT_W - padH * 2, lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(13).fillColor(C.black)
+     .text(nomeFornecedor || '—', MARGIN + padH, y + 15, { width: CONTENT_W - padH * 2, lineBreak: false });
+
+  return y + blockH;
 }
 
 function drawAvisoNotaFiscal(doc, y) {
@@ -283,9 +348,9 @@ function drawItensTable(doc, itens, startY) {
   drawHeader();
 
   itens.forEach((item, idx) => {
-    const nome    = item.material?.nome?? (item.descricaoItem?.trim() || '(material excluído)');
+    const nome    = sanitizarTextoPdf(item.material?.nome ?? (item.descricaoItem?.trim() || '(material excluído)'));
     const unidade = (item.material?.unidade ?? '—').toLowerCase();
-    const descricao = item.descricaoItem?.trim() || null;
+    const descricao = item.descricaoItem?.trim() ? sanitizarTextoPdf(item.descricaoItem.trim()) : null;
 
     const qtdUnidadeNum = item.qtdUnidade != null ? Number(item.qtdUnidade) : null;
     const temQtdUnidade  = !item.usarM2 && qtdUnidadeNum != null && qtdUnidadeNum > 0;
@@ -310,9 +375,13 @@ function drawItensTable(doc, itens, startY) {
       }
     }
 
+    const espessuraFmt = item.material?.espessura
+      ? `${String(item.material.espessura).replace(/\s*mm\s*$/i, '').trim()}mm`
+      : null;
+
     const especParts = [
       temMedida ? `${item.material.medida}` : dimensao,
-      item.material?.espessura     ? `${item.material.espessura}`      : null,
+      espessuraFmt,
       item.material?.identificador ? `${item.material.identificador}`  : null,
     ].filter(Boolean);
     const especLine = especParts.length > 0 ? especParts.join('  •  ') : null;
@@ -418,7 +487,7 @@ function drawObservacoes(doc, observacoes) {
 
   doc.font('Helvetica').fontSize(7);
 
-  const textoFormatado = observacoes
+  const textoFormatado = sanitizarTextoPdf(observacoes)
     .split('\n')
     .filter(Boolean)
     .map(linha => `• ${linha}`)
@@ -478,7 +547,7 @@ function drawInfoFixa(doc) {
   fillRect(doc, blockX, blockY, 3, blockH, C.accent);
 
   doc.font('Helvetica-Bold').fontSize(7).fillColor(C.accent)
-     .text('⚠  INDISPENSÁVEL', blockX + padH, blockY + padV, { width: blockW - padH * 2, lineBreak: false });
+     .text('INDISPENSÁVEL', blockX + padH, blockY + padV, { width: blockW - padH * 2, lineBreak: false });
 
   let ty = blockY + padV + 11;
   for (const linha of linhas) {
@@ -532,11 +601,14 @@ const ordemCompraPdfService = {
       drawSectionHeader(doc, y, 'Informações da Ordem de Compra');
       y += 26;
 
+      const nomeFornecedor = oc.fornecedor?.nomeFantasia ?? oc.fornecedor?.nome ?? '—';
+      y = drawFornecedorDestaque(doc, y, nomeFornecedor);
+      y += 10;
+
       const infoRows = [
         ['Nº da OC',            `#${oc.id}`],
         ['Status',              statusLabel(oc.status).text],
         ['Data',                formatDate(oc.data)],
-        ['Fornecedor',          oc.fornecedor?.nomeFantasia ?? oc.fornecedor?.nome ?? '—'],
         ['Requisitante',        oc.requisitante || '—'],
         ['Forma de Pagamento',  oc.formaPagamento || '—'],
         ['Prazo de Pagamento',  oc.prazoPagamento || '—'],

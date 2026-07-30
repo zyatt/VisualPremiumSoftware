@@ -47,12 +47,24 @@ import '../theme/app_theme.dart';
 String _dimensoesDoMaterial(String infoLine) {
   final s = infoLine.trim();
   if (s.isEmpty) return '';
+  final soNumero = RegExp(r'^\d+([.,]\d+)?$');
   final partes = s
       .split(RegExp(r'[·•∙⋅]|(?<=\s)-(?=\s)'))
       .map((p) => p.trim())
       .where((p) => p.isNotEmpty && RegExp(r'\d').hasMatch(p))
+      // Segmento composto só por um número (ex.: "14") representa a
+      // espessura em milímetros — acrescenta o sufixo "mm".
+      .map((p) => soNumero.hasMatch(p) ? '${p}mm' : p)
       .toList();
   return partes.join(' · ');
+}
+
+/// Nome do campo exibido na coluna "Campo" do histórico. Quando o campo
+/// alterado for "Espessura", acrescenta "(mm)" ao lado do texto.
+String _nomeCampoExibicao(String? campo) {
+  if (campo == null || campo.isEmpty) return '—';
+  if (campo.trim().toLowerCase() == 'espessura') return '$campo (mm)';
+  return campo;
 }
 
 /// Converte mensagens de erro técnicas em textos legíveis pelo usuário.
@@ -113,8 +125,6 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
     ('EXCLUSAO',           'Exclusão'),
     ('ESTOQUE_CONFIRMADO', 'Estoque confirmado'),
     ('CUSTO_MANUAL',       'Custo manual'),
-    ('FILHO_EDITADO',      'Variação editada'),
-    ('FILHO_EXCLUIDO',     'Variação excluída'),
   ];
 
   @override
@@ -268,7 +278,7 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                     child: TextField(
                       controller: _buscaCtrl,
                       decoration: InputDecoration(
-                        hintText:   'Buscar material...',
+                        hintText:   'Buscar material',
                         prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                         isDense:    true,
                         suffixIcon: _buscaCtrl.text.isNotEmpty
@@ -498,7 +508,6 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
@@ -511,33 +520,31 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
           borderRadius: BorderRadius.circular(10),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: _hovered
-                  ? _accent.withValues(alpha: 0.10)
-                  : Colors.transparent,
+                  ? _accent.withValues(alpha: 0.15)
+                  : _accent.withValues(alpha: 0.08),
               border: Border.all(
-                color: _hovered
-                    ? _accent.withValues(alpha: 0.6)
-                    : scheme.outlineVariant,
+                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
               ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
+                const Icon(
                   Icons.arrow_back,
                   size: 18,
-                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                  color: _accent,
                 ),
-                SizedBox(width: 6),
+                const SizedBox(width: 6),
                 Text(
                   widget.label,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 13,
-                    color: _hovered ? _accent : scheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
+                    color: _accent,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -623,7 +630,7 @@ class _CabecalhoTabela extends StatelessWidget {
         children: [
           // Ação
           SizedBox(
-            width: 120,
+            width: 96,
             child: Text('Ação',
                 style: _estiloHeader(context)),
           ),
@@ -696,62 +703,73 @@ class _LinhaLog extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Badge de ação ────────────────────────────────────────────────
-          SizedBox(
-            width: 120,
-            child: _BadgeAcao(label: log.acaoLabel, cor: cor),
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: SizedBox(
+              width: 96,
+              child: _BadgeAcao(label: log.acaoLabel, cor: cor),
+            ),
           ),
 
           // ── Nome do material ─────────────────────────────────────────────
           if (mostrarMaterial)
             Expanded(
               flex: 4,
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Flexible(
-                    child: Text(
-                      log.materialNome ?? '—',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                      overflow: TextOverflow.ellipsis,
+                  Text(
+                    log.materialNome ?? '—',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  if (_dimensoesDoMaterial(log.materialInfoLine).isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        _dimensoesDoMaterial(log.materialInfoLine),
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                  if (log.materialExcluido) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'excluído',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                      ),
+                  if (_dimensoesDoMaterial(log.materialInfoLine).isNotEmpty ||
+                      log.materialExcluido) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_dimensoesDoMaterial(log.materialInfoLine).isNotEmpty)
+                          Flexible(
+                            child: Text(
+                              _dimensoesDoMaterial(log.materialInfoLine),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        if (log.materialExcluido) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'excluído',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: Theme.of(context).colorScheme.outline,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ],
@@ -759,62 +777,77 @@ class _LinhaLog extends StatelessWidget {
             ),
 
           // ── Campo alterado ───────────────────────────────────────────────
-          SizedBox(
-            width: 140,
-            child: Text(
-              log.campo ?? '—',
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                fontStyle: FontStyle.italic,
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: SizedBox(
+              width: 140,
+              child: Text(
+                _nomeCampoExibicao(log.campo),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontStyle: FontStyle.italic,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
-              overflow: TextOverflow.ellipsis,
             ),
           ),
 
           // ── Valor antes ─────────────────────────────────────────────────
           Expanded(
             flex: 2,
-            child: log.valorAntes != null
-                ? _ValorChip(
-                    valor: log.valorAntes!,
-                    cor:   Color(0xFFDC2626),
-                    bg:    Color(0xFFDC2626),
-                  )
-                : Text('—',
-                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline)),
+            child: Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: log.valorAntes != null
+                  ? _ValorChip(
+                      valor: log.valorAntes!,
+                      cor:   Color(0xFFDC2626),
+                      bg:    Color(0xFFDC2626),
+                    )
+                  : Text('—',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline)),
+            ),
           ),
 
           // ── Valor depois ─────────────────────────────────────────────────
           Expanded(
             flex: 2,
-            child: log.valorDepois != null
-                ? _ValorChip(
-                    valor: log.valorDepois!,
-                    cor:   Color(0xFF15803D),
-                    bg:    Color(0xFF15803D),
-                  )
-                : Text('—',
-                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline)),
+            child: Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: log.valorDepois != null
+                  ? _ValorChip(
+                      valor: log.valorDepois!,
+                      cor:   Color(0xFF15803D),
+                      bg:    Color(0xFF15803D),
+                    )
+                  : Text('—',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline)),
+            ),
           ),
 
           // ── Usuário ──────────────────────────────────────────────────────
-          SizedBox(
-            width: 130,
-            child: Text(
-              log.usuarioNome ?? '—',
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              overflow: TextOverflow.ellipsis,
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: SizedBox(
+              width: 130,
+              child: Text(
+                log.usuarioNome ?? '—',
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ),
 
           // ── Data ─────────────────────────────────────────────────────────
-          SizedBox(
-            width: 130,
-            child: Text(
-              dataStr,
-              textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: SizedBox(
+              width: 130,
+              child: Text(
+                dataStr,
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
+              ),
             ),
           ),
         ],

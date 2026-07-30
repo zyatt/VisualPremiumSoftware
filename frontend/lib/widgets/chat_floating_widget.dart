@@ -214,10 +214,22 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
           // onPanUpdate já roda fora da fase de build, então setState
           // direto é seguro e responde no mesmo frame do gesto.
           setState(() {
+            // O clamp do centro precisa refletir a metade da largura/altura
+            // REAIS do que está sendo arrastado (bolha OU painel expandido).
+            // Usar sempre _bolhaTamanho/2 aqui — mesmo com o painel expandido
+            // (320x440) — fazia _cx/_cy se moverem livremente numa faixa
+            // maior do que aquela em que `left`/`top` (que usam `largura`/
+            // `altura` reais) já estavam saturados. Resultado: o painel
+            // ficava "preso" visualmente por um trecho do arrasto até o
+            // centro finalmente sair da zona clampada — exatamente o
+            // travamento reportado ao arrastar o chat expandido perto da
+            // borda inferior da tela.
+            final larguraAtual = _expandido ? _painelLargura : _bolhaTamanho;
+            final alturaAtual  = _expandido ? _painelAltura  : _bolhaTamanho;
             _cx = (_cxAoIniciar + delta.dx)
-                .clamp(_bolhaTamanho / 2, tela.width  - _bolhaTamanho / 2);
+                .clamp(larguraAtual / 2, tela.width  - larguraAtual / 2);
             _cy = (_cyAoIniciar + delta.dy)
-                .clamp(_bolhaTamanho / 2, tela.height - _bolhaTamanho / 2);
+                .clamp(alturaAtual  / 2, tela.height - alturaAtual  / 2);
           });
         },
         onPanEnd: (_) {

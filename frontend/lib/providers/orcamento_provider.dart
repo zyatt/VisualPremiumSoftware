@@ -190,6 +190,27 @@ class OrcamentoTab {
   /// Garante que o editor fique visível logo após clicar em "Novo Orçamento".
   bool modoEdicao;
 
+  /// Modo de precificação usado no comparativo de preços e ao gerar a OC:
+  /// 'UNIDADE' — o preço do fornecedor é por unidade/peça (padrão; total =
+  /// preço × quantidade), ou 'METRO_LINEAR' — o preço do fornecedor já é
+  /// por m/l (ou pela unidade de medida do material; total = preço ×
+  /// Quantidade por Unidade × quantidade). Só afeta a visualização/
+  /// conversão; os preços cadastrados não são alterados.
+  String modoPrecificacao;
+
+  /// true quando esta aba foi criada automaticamente pelo tour do robô
+  /// assistente "Como criar um orçamento" (via `adicionarAba(criadaPeloTour:
+  /// true)` em `_abrirEditorTour`), e não por um clique real do usuário em
+  /// "Novo Orçamento". Existe para impedir que essa aba de demonstração,
+  /// com o "MATERIAL EXEMPLO" fictício, seja PERSISTIDA em SharedPreferences
+  /// — sem isso, fechar o app (ou dar restart) no meio do tour, antes do
+  /// `aoEncerrar`/"Concluir" ter a chance de removê-la, deixava a aba
+  /// gravada em disco e ela reaparecia sozinha na próxima abertura do app,
+  /// como se fosse um orçamento real esquecido. Ver `_salvarAbas` (nunca
+  /// grava abas com esta flag) e `_carregar` (descarta qualquer uma que já
+  /// tenha sido salva por engano antes desta correção).
+  final bool criadaPeloTour;
+
   OrcamentoTab({
     required this.id,
     required this.titulo,
@@ -200,8 +221,12 @@ class OrcamentoTab {
     this.jaFinalizado = false,
     this.modoGerarOC = false,
     this.modoEdicao = false,
+    this.modoPrecificacao = 'UNIDADE',
+    this.criadaPeloTour = false,
   }) : itens = itens ?? [],
        fornecedoresOcultos = fornecedoresOcultos ?? [];
+
+  bool get orcarPorMetroLinear => modoPrecificacao == 'METRO_LINEAR';
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -213,6 +238,15 @@ class OrcamentoTab {
         'jaFinalizado': jaFinalizado,
         'modoGerarOC': modoGerarOC,
         'modoEdicao': modoEdicao,
+        'modoPrecificacao': modoPrecificacao,
+        // 'criadaPeloTour' NÃO é serializado de propósito: uma aba do tour
+        // nunca deveria chegar a ser persistida (ver _salvarAbas), então
+        // este campo nem precisa sobreviver a um round-trip JSON. Se um
+        // registro antigo (de antes desta correção) for lido de volta por
+        // `fromJson`, ele vem com `criadaPeloTour: false` (valor padrão) —
+        // o que é seguro, pois essas abas antigas já não têm mais tour
+        // algum rodando que dependa da flag; elas só precisam ser abas
+        // normais a partir de agora.
       };
 
   factory OrcamentoTab.fromJson(Map<String, dynamic> j) => OrcamentoTab(
@@ -226,6 +260,7 @@ class OrcamentoTab {
         jaFinalizado: j['jaFinalizado'] as bool? ?? false,
         modoGerarOC: j['modoGerarOC'] as bool? ?? false,
         modoEdicao: j['modoEdicao'] as bool? ?? false,
+        modoPrecificacao: j['modoPrecificacao'] as String? ?? 'UNIDADE',
         itens: (j['itens'] as List)
             .map((i) => ItemOrcamentoData.fromJson(i as Map<String, dynamic>))
             .toList(),
@@ -287,6 +322,24 @@ class OrcamentoProvider extends ChangeNotifier {
           lista.map((j) => OrcamentoTab.fromJson(j as Map<String, dynamic>)),
         );
       }
+      // Filtro defensivo: remove qualquer aba fictícia do tour do robô
+      // assistente que já tenha sido salva em disco ANTES desta correção
+      // (quando `_salvarAbas` ainda não excluía abas com `criadaPeloTour`).
+      // Como o campo `criadaPeloTour` nunca é serializado (ver toJson), não
+      // dá pra identificar essas abas antigas por ele — em vez disso,
+      // reconhecemos o padrão único da aba de demonstração do tour: sem
+      // servidorId (nunca foi salva de verdade de fato) e cujos itens são
+      // exatamente os nomes fixos usados só pelo tour — "MATERIAL EXEMPLO"
+      // (1º item) e, desde que o tour passou a mostrar dois materiais,
+      // opcionalmente "ADESIVO" (2º item, usado só para ilustrar o campo
+      // "Quantidade por Unidade") — ver orcamento_editor_page.dart. Um
+      // orçamento real do usuário nunca cai nesse padrão exato.
+      const nomesFicticiosDoTour = {'MATERIAL EXEMPLO', 'ADESIVO'};
+      _abas.removeWhere((a) =>
+          a.servidorId == null &&
+          a.itens.isNotEmpty &&
+          a.itens.length <= 2 &&
+          a.itens.every((i) => nomesFicticiosDoTour.contains(i.materialNome)));
       _abaAtiva = prefs.getInt(_kAbaAtiva(_userId!)) ?? 0;
       if (_abaAtiva >= _abas.length) _abaAtiva = 0;
     } catch (_) {}
@@ -300,20 +353,42 @@ class OrcamentoProvider extends ChangeNotifier {
     if (_userId == null) return; // sem usuário, não persiste
     try {
       final prefs = await SharedPreferences.getInstance();
+      // Filtra abas criadas pelo tour do robô assistente ANTES de
+      // persistir — essa aba de demonstração ("MATERIAL EXEMPLO") nunca
+      // deve ir para o disco. Sem este filtro, fechar o app (ou dar
+      // restart) no meio do tour salvava a aba fictícia junto com as
+      // reais, e ela reaparecia sozinha na próxima abertura do app,
+      // mesmo o tour nunca tendo sido concluído.
+      final abasPersistiveis = _abas.where((a) => !a.criadaPeloTour).toList();
       await prefs.setString(
         _kAbas(_userId!),
-        jsonEncode(_abas.map((a) => a.toJson()).toList()),
+        jsonEncode(abasPersistiveis.map((a) => a.toJson()).toList()),
       );
-      await prefs.setInt(_kAbaAtiva(_userId!), _abaAtiva);
+      // O índice salvo precisa se referir à lista JÁ FILTRADA (sem abas do
+      // tour), não à lista completa em memória — senão, se houver uma aba
+      // do tour antes da aba ativa real, o índice salvo ficaria deslocado
+      // e, ao restaurar, abriria a aba errada (ou nenhuma, se ficasse fora
+      // dos limites).
+      final abaAtivaObj = _abas.isNotEmpty && _abaAtiva < _abas.length
+          ? _abas[_abaAtiva]
+          : null;
+      final indicePersistivel = abaAtivaObj == null
+          ? 0
+          : abasPersistiveis.indexOf(abaAtivaObj);
+      await prefs.setInt(
+        _kAbaAtiva(_userId!),
+        indicePersistivel < 0 ? 0 : indicePersistivel,
+      );
     } catch (_) {}
   }
   // ── Abas ──────────────────────────────────────
 
-  void _novaAba({bool notificar = true}) {
+  void _novaAba({bool notificar = true, bool criadaPeloTour = false}) {
     final idx = _abas.length + 1;
     _abas.add(OrcamentoTab(
       id: _uuid.v4(),
       titulo: 'Orçamento $idx',
+      criadaPeloTour: criadaPeloTour,
     ));
     _abaAtiva = _abas.length - 1;
     if (notificar) {
@@ -322,7 +397,11 @@ class OrcamentoProvider extends ChangeNotifier {
     }
   }
 
-  void adicionarAba() => _novaAba();
+  /// [criadaPeloTour] deve ser `true` apenas quando chamado pelo tour do
+  /// robô assistente (`_abrirEditorTour` em orcamento_page.dart), para que
+  /// a aba de demonstração criada não seja persistida — ver `_salvarAbas`.
+  void adicionarAba({bool criadaPeloTour = false}) =>
+      _novaAba(criadaPeloTour: criadaPeloTour);
 
   void selecionarAba(int index) {
     if (index < 0 || index >= _abas.length) return;
@@ -483,6 +562,15 @@ class OrcamentoProvider extends ChangeNotifier {
 
   void removerItem(String itemId) {
     tabAtual?.itens.removeWhere((i) => i.itemId == itemId);
+    _salvarAbas();
+    notifyListeners();
+  }
+
+  /// Define o modo de precificação da aba atual ('UNIDADE' ou
+  /// 'METRO_LINEAR'). Usado pelo botão "Orçar por" no comparativo de preços.
+  void definirModoPrecificacao(String modo) {
+    if (tabAtual == null) return;
+    tabAtual!.modoPrecificacao = modo;
     _salvarAbas();
     notifyListeners();
   }

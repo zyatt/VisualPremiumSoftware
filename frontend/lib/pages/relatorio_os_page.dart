@@ -158,12 +158,41 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FORMATTER: MEDIDA — vírgula→ponto, sem pontos duplos, resultado em minúsculo
+// ─────────────────────────────────────────────────────────────────────────────
+class _MedidaFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue o, TextEditingValue n) {
+    var t = n.text.replaceAll(',', '.').replaceAll(RegExp(r'\.{2,}'), '.').toLowerCase();
+    final offset = n.selection.baseOffset.clamp(0, t.length);
+    return n.copyWith(text: t, selection: TextSelection.collapsed(offset: offset));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FORMATTER: ESPESSURA — só dígitos e ponto, vírgula→ponto, sem pontos duplos
+// ─────────────────────────────────────────────────────────────────────────────
+class _EspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue o, TextEditingValue n) {
+    // Remove tudo que não seja dígito ou ponto/vírgula, depois normaliza
+    var t = n.text.replaceAll(',', '.').replaceAll(RegExp(r'[^0-9.]'), '').replaceAll(RegExp(r'\.{2,}'), '.');
+    final offset = n.selection.baseOffset.clamp(0, t.length);
+    return n.copyWith(text: t, selection: TextSelection.collapsed(offset: offset));
+  }
+}
+
 class _RelatorioOSPageState extends State<RelatorioOSPage> {
   // ── Controllers ───────────────────────────────────────────────────────────
   final _buscaOSCtrl       = TextEditingController(); // busca por nº OS
   final _materialNomeCtrl  = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
+  final _comprimentoCtrl   = TextEditingController();
+  final _larguraCtrl       = TextEditingController();
   final _espessuraCtrl     = TextEditingController();
   Timer? _debounce;
 
@@ -186,6 +215,8 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
     _materialNomeCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
+    _comprimentoCtrl.dispose();
+    _larguraCtrl.dispose();
     _espessuraCtrl.dispose();
     super.dispose();
   }
@@ -204,6 +235,12 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
           materialMedida:        _medidaCtrl.text.trim().isEmpty
               ? null
               : _medidaCtrl.text.trim(),
+          materialComprimento:   _comprimentoCtrl.text.trim().isEmpty
+              ? null
+              : _comprimentoCtrl.text.trim(),
+          materialLargura:       _larguraCtrl.text.trim().isEmpty
+              ? null
+              : _larguraCtrl.text.trim(),
           materialEspessura:     _espessuraCtrl.text.trim().isEmpty
               ? null
               : _espessuraCtrl.text.trim(),
@@ -213,6 +250,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   }
 
   void _onChanged(String _) {
+    setState(() {}); // atualiza sufixo "mm" e outros elementos reativos
     _debounce?.cancel();
     _debounce = Timer(
       const Duration(milliseconds: 400),
@@ -224,6 +262,8 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
     _materialNomeCtrl.clear();
     _identificadorCtrl.clear();
     _medidaCtrl.clear();
+    _comprimentoCtrl.clear();
+    _larguraCtrl.clear();
     _espessuraCtrl.clear();
     setState(() {
       _dataInicio = null;
@@ -238,6 +278,8 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
       _materialNomeCtrl.text.isNotEmpty ||
       _identificadorCtrl.text.isNotEmpty ||
       _medidaCtrl.text.isNotEmpty ||
+      _comprimentoCtrl.text.isNotEmpty ||
+      _larguraCtrl.text.isNotEmpty ||
       _espessuraCtrl.text.isNotEmpty ||
       _temFiltroData;
 
@@ -304,12 +346,13 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
+                  flex: 2,
                   child: TextField(
                     controller: _buscaOSCtrl,
                     onChanged: _onChanged,
                     onSubmitted: (_) => _aplicarFiltros(),
                     decoration: InputDecoration(
-                      hintText: 'Buscar por número da OS...',
+                      hintText: 'Buscar por número da OS',
                       prefixIcon: Icon(Icons.search,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
@@ -318,12 +361,13 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
+                  flex: 3,
                   child: TextField(
                     controller: _materialNomeCtrl,
                     onChanged: _onChanged,
                     onSubmitted: (_) => _aplicarFiltros(),
                     decoration: InputDecoration(
-                      hintText: 'Nome do material...',
+                      hintText: 'Nome do material',
                       prefixIcon: Icon(Icons.filter_alt_outlined,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
@@ -351,10 +395,11 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
             ),
             const SizedBox(height: 10),
 
-            // ── Filtro linha 2: identificador + medida + espessura
+            // ── Filtro linha 2: identificador + medida + comprimento + largura + espessura
             Row(
               children: [
                 Expanded(
+                  flex: 3,
                   child: TextField(
                     controller: _identificadorCtrl,
                     onChanged: _onChanged,
@@ -362,7 +407,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
                     decoration: InputDecoration(
-                      hintText: 'Identificador...',
+                      hintText: 'Identificador',
                       prefixIcon: Icon(Icons.qr_code,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -371,14 +416,14 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
+                  flex: 3,
                   child: TextField(
                     controller: _medidaCtrl,
                     onChanged: _onChanged,
                     onSubmitted: (_) => _aplicarFiltros(),
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [_UpperCaseFormatter()],
+                    inputFormatters: [_MedidaFormatter()],
                     decoration: InputDecoration(
-                      hintText: 'Medida...',
+                      hintText: 'Medida',
                       prefixIcon: Icon(Icons.straighten,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -387,14 +432,52 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _comprimentoCtrl,
+                    onChanged: _onChanged,
+                    onSubmitted: (_) => _aplicarFiltros(),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
+                    decoration: InputDecoration(
+                      hintText: 'Comprimento',
+                      suffixText: 'm',
+                      prefixIcon: Icon(Icons.height,
+                          color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _larguraCtrl,
+                    onChanged: _onChanged,
+                    onSubmitted: (_) => _aplicarFiltros(),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
+                    decoration: InputDecoration(
+                      hintText: 'Largura',
+                      suffixText: 'm',
+                      prefixIcon: Icon(Icons.width_normal,
+                          color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
                   child: TextField(
                     controller: _espessuraCtrl,
                     onChanged: _onChanged,
                     onSubmitted: (_) => _aplicarFiltros(),
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [_UpperCaseFormatter()],
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
                     decoration: InputDecoration(
-                      hintText: 'Espessura...',
+                      hintText: 'Espessura',
+                      suffixText: 'mm',
                       prefixIcon: Icon(Icons.layers,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -1703,9 +1786,9 @@ class _MovimentacaoSection extends StatelessWidget {
                   final qtdTotal = grupo.fold(0.0, (acc, m) => acc + m.quantidade);
                   final total    = precoEfetivo * qtdTotal;
 
-                  final qtdStr = qtdTotal % 1 == 0
+                  final qtdStr = qtdTotal == qtdTotal.truncateToDouble()
                       ? qtdTotal.toStringAsFixed(0)
-                      : qtdTotal.toStringAsFixed(2);
+                      : qtdTotal.toString();
 
                   final dataRef = grupo.map((m) => m.criadoEm).reduce(
                     (a, b) => a.isAfter(b) ? a : b,
@@ -1738,7 +1821,8 @@ class _MovimentacaoSection extends StatelessWidget {
                                           );
                                     final detalhe = [
                                       if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
-                                      if ((ref.materialEspessura ?? '').isNotEmpty) ref.materialEspessura!,
+                                      if ((ref.materialEspessura ?? '').isNotEmpty)
+                                        '${ref.materialEspessura!.replaceAll(RegExp(r'\s*mm\s*$', caseSensitive: false), '')}mm',
                                       if ((ref.materialIdentificador ?? '').isNotEmpty) ref.materialIdentificador!,
                                     ].join(' · ');
                                     return Text.rich(
@@ -2032,7 +2116,6 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
@@ -2045,33 +2128,31 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
           borderRadius: BorderRadius.circular(10),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: _hovered
-                  ? _accent.withValues(alpha: 0.10)
-                  : Colors.transparent,
+                  ? _accent.withValues(alpha: 0.15)
+                  : _accent.withValues(alpha: 0.08),
               border: Border.all(
-                color: _hovered
-                    ? _accent.withValues(alpha: 0.6)
-                    : scheme.outlineVariant,
+                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
               ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
+                const Icon(
                   Icons.arrow_back,
                   size: 18,
-                  color: _hovered ? _accent : scheme.onSurfaceVariant,
+                  color: _accent,
                 ),
-                SizedBox(width: 6),
+                const SizedBox(width: 6),
                 Text(
                   widget.label,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 13,
-                    color: _hovered ? _accent : scheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
+                    color: _accent,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],

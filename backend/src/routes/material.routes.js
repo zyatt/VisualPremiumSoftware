@@ -9,6 +9,7 @@ const EXCLUSAO     = ['ADMIN', 'GERENTE'];
 const CUSTO        = ['ADMIN', 'GERENTE', 'COMPRAS'];
 
 router.get('/categorias',         authMiddleware, roleMiddleware(LEITURA),  ctrl.listarCategorias);
+router.get('/paginado',           authMiddleware, roleMiddleware(LEITURA),  ctrl.listarPaginado);
 router.get('/para-movimentacao',  authMiddleware, roleMiddleware(LEITURA),  ctrl.listarParaMovimentacao);
 router.get('/notificacoes',       authMiddleware, ctrl.notificacoes);
 router.get('/',                   authMiddleware, roleMiddleware(LEITURA),  ctrl.listar);

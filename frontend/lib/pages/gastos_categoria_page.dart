@@ -21,7 +21,7 @@ String _fmtData(DateTime? dt) {
 }
 
 String _fmtQtd(double q) =>
-    q % 1 == 0 ? q.toStringAsFixed(0) : q.toStringAsFixed(2);
+    q == q.truncateToDouble() ? q.toStringAsFixed(0) : q.toString();
 
 // Formata custo unitário com até 6 casas decimais, removendo zeros finais
 String _fmtCusto(double v) {
@@ -946,7 +946,7 @@ class _LinhaEstoque extends StatelessWidget {
       if (m.identificador != null && m.identificador!.isNotEmpty)
         m.identificador!,
       if (medidaOuDim != null && medidaOuDim.isNotEmpty) medidaOuDim,
-      if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
+      if (m.espessura != null && m.espessura!.isNotEmpty) '${m.espessura!}mm',
     ].join(' · ');
 
     final temCustoM2 =
@@ -1537,7 +1537,7 @@ class _LinhaGasto extends StatelessWidget {
       if (m.identificador != null && m.identificador!.isNotEmpty)
         m.identificador!,
       if (medidaOuDim != null && medidaOuDim.isNotEmpty) medidaOuDim,
-      if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
+      if (m.espessura != null && m.espessura!.isNotEmpty) '${m.espessura!}mm',
     ].join(' · ');
 
     return Column(

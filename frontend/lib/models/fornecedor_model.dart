@@ -29,8 +29,6 @@ class FornecedorMaterialVinculoModel {
     this.materialComprimento,
   });
 
-  /// Formata a dimensão (largura x comprimento) como "50x1.27m" — mesma
-  /// convenção usada nas demais telas (comprimento x largura, minúsculo).
   String? get _dimensaoFormatada {
     final l = materialLargura;
     final c = materialComprimento;
@@ -51,19 +49,22 @@ class FornecedorMaterialVinculoModel {
 
     if (materialEspessura != null &&
         materialEspessura!.isNotEmpty) {
-      partes.add(materialEspessura!);
+      final numero = materialEspessura!
+          .replaceAll(RegExp('mm\\s*\$', caseSensitive: false), '')
+          .trim();
+      partes.add('${numero}mm');
     }
 
-    if (materialIdentificador != null &&
-        materialIdentificador!.isNotEmpty) {
-      partes.add(materialIdentificador!);
-    }
+    final nomeBase = materialNome ?? 'Material #$materialId';
+    final nomeComIdentificador = (materialIdentificador != null && materialIdentificador!.isNotEmpty)
+        ? '$materialIdentificador · $nomeBase'
+        : nomeBase;
 
     if (partes.isEmpty) {
-      return materialNome ?? 'Material #$materialId';
+      return nomeComIdentificador;
     }
 
-    return '${materialNome ?? 'Material #$materialId'} · ${partes.join(' · ')}';
+    return '$nomeComIdentificador · ${partes.join(' · ')}';
   }
 
   static String formatarPreco(double valor) {

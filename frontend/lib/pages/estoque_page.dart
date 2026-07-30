@@ -18,6 +18,7 @@ import '../providers/usuario_provider.dart';
 import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/escolher_usuario_chat_dialog.dart';
+import '../providers/robo_helper_provider.dart';
 
 // ── Formatação de preço: até 6 casas decimais, sem zeros à direita ────────────
 
@@ -129,7 +130,37 @@ class _MedidaEspessuraFormatter extends TextInputFormatter {
   }
 }
 
+/// Formatter para o campo Espessura: aceita apenas dígitos, ponto e vírgula
+/// (vírgula é convertida em ponto), bloqueando letras e qualquer outro
+/// caractere. Também permite apenas 1 ponto no total (evita "2..5"/"2.5.5").
+class _EspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    // 1) Vírgula -> ponto
+    var texto = newValue.text.replaceAll(',', '.');
+
+    // 2) Remove tudo que não for dígito ou ponto (bloqueia letras, "mm", etc.)
+    texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
+
+    // 3) Permite apenas o primeiro ponto
+    final partes = texto.split('.');
+    if (partes.length > 2) {
+      texto = '${partes[0]}.${partes.sublist(1).join('')}';
+    }
+
+    final sel = newValue.selection.copyWith(
+      baseOffset:  newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
 class _DecimalInputFormatter extends TextInputFormatter {
+
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
@@ -192,6 +223,55 @@ class _EstoquePageState extends State<EstoquePage> {
   final _filtroCategoriaCtrl = TextEditingController();
   String _filtroCategoria    = '';
 
+  // ── Pontos de interesse para o tour guiado do robô assistente ───────────
+  // ("Como selecionar uma categoria?"): card "Geral" → card de categoria
+  // específica → campo de busca.
+  final _tourKeyCardGeral       = GlobalKey();
+  final _tourKeyCardEspecifica  = GlobalKey();
+  final _tourKeyCampoBusca      = GlobalKey();
+
+  /// Registra no RoboHelperProvider a(s) opção(ões) de ajuda contextual
+  /// desta página. Chamado sempre que o build ocorre com as categorias já
+  /// carregadas (as keys do tour só existem depois que os cards estão na
+  /// árvore). Repetir o registro em cada build é barato (é só uma
+  /// atribuição de lista) e garante que a opção sempre aponte para as
+  /// keys corretas mesmo se a página for reconstruída.
+  void _registrarAjudaRobo() {
+    // A página de categorias continua "montada" (só escondida) quando o
+    // usuário navega pra dentro de uma categoria, histórico, etc. (o
+    // Navigator.push é interno, não muda a rota do GoRouter). Se ela
+    // rebuildar em segundo plano nesse estado (por causa de outro
+    // provider notificando, por exemplo), NÃO deve re-registrar a dica —
+    // senão ela reaparece por cima da tela que empurramos, mesmo depois
+    // de já termos limpado antes do push.
+    final rota = ModalRoute.of(context);
+    if (rota != null && !rota.isCurrent) return;
+
+    final helper = context.read<RoboHelperProvider>();
+    helper.registrarOpcoes('/estoque', [
+      RoboHelpOption(
+        titulo: 'Como selecionar uma categoria?',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyCardGeral,
+            texto: 'Este é o card "Geral" — toque nele para ver materiais '
+                'de todas as categorias misturados.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeyCardEspecifica,
+            texto: 'Ou escolha um card de categoria específica para ver '
+                'somente os materiais daquele tipo.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeyCampoBusca,
+            texto: 'Prefere digitar? Use este campo para filtrar as '
+                'categorias pelo nome enquanto digita.',
+          ),
+        ],
+      ),
+    ]);
+  }
+
   // ── Ícones e cores ─────────────────────────────────────────────────────────
   static IconData _iconePara(String categoria) {
     return Icons.inventory_2;
@@ -209,12 +289,19 @@ class _EstoquePageState extends State<EstoquePage> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<MaterialProvider>().carregarCategorias();
+      context.read<RoboHelperProvider>().notificarRota('/estoque');
     });
   }
 
   @override
   void dispose() {
     _filtroCategoriaCtrl.dispose();
+    // Evita que o robô continue oferecendo "Como selecionar uma
+    // categoria?" em outra página depois que o usuário sai do Estoque.
+    try {
+      context.read<RoboHelperProvider>().encerrarTour();
+    context.read<RoboHelperProvider>().limparOpcoes('/estoque');
+    } catch (_) {}
     super.dispose();
   }
 
@@ -229,6 +316,15 @@ class _EstoquePageState extends State<EstoquePage> {
     final pularIdentificadores =
         categoriaId == _kCategoriaGeral ||
         categoriaId == _kCategoriaSemCategoria;
+
+    // A dica de "como selecionar uma categoria" só faz sentido na própria
+    // lista de categorias. Como esta navegação é um Navigator.push interno
+    // (a rota do GoRouter continua sendo '/estoque' o tempo todo), o
+    // provider nunca é avisado de que "saímos" da lista — por isso
+    // limpamos aqui manualmente. Ao voltar, carregarCategorias() (chamado
+    // no .then abaixo) reconstrói a lista e re-registra a dica sozinho.
+    context.read<RoboHelperProvider>().encerrarTour();
+    context.read<RoboHelperProvider>().limparOpcoes('/estoque');
 
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -264,6 +360,9 @@ class _EstoquePageState extends State<EstoquePage> {
     final categoriaLabel = temCategoria ? n.categoria! : 'Sem categoria';
     final temIdentificador =
         n.identificador != null && n.identificador!.trim().isNotEmpty;
+
+    context.read<RoboHelperProvider>().encerrarTour();
+    context.read<RoboHelperProvider>().limparOpcoes('/estoque');
 
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -321,6 +420,9 @@ class _EstoquePageState extends State<EstoquePage> {
 
     if (!mounted) return;
 
+    context.read<RoboHelperProvider>().encerrarTour();
+    context.read<RoboHelperProvider>().limparOpcoes('/estoque');
+
     // Sempre abre na aba "Geral" (todas as categorias misturadas) em vez de
     // tentar acertar a categoria específica do material: nem sempre bate
     // exatamente com o categoriaId esperado, e como os demais filtros
@@ -360,6 +462,8 @@ class _EstoquePageState extends State<EstoquePage> {
   /// usado quando a página é aberta a partir do diálogo de Alertas de
   /// Estoque, clicando em "Ir para Estoque".
   void _abrirGeralComStatus(String status) {
+    context.read<RoboHelperProvider>().encerrarTour();
+    context.read<RoboHelperProvider>().limparOpcoes('/estoque');
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => EstoqueCategoriaPage(
@@ -486,6 +590,7 @@ class _EstoquePageState extends State<EstoquePage> {
 
             // ── Campo de busca de categorias ───────────────────────────────
             SizedBox(
+              key: _tourKeyCampoBusca,
               width: 360,
               child: TextField(
                 controller: _filtroCategoriaCtrl,
@@ -601,34 +706,64 @@ class _EstoquePageState extends State<EstoquePage> {
                         _filtroCategoria.isEmpty ||
                         label.toLowerCase().contains(_filtroCategoria);
 
+                    // Índice do primeiro card a ser exibido (após filtro),
+                    // usado para saber qual é o "primeiro" (card Geral, se
+                    // visível) e o "segundo" (a próxima opção logo depois),
+                    // que são os dois pontos do tour de ajuda do robô.
+                    int indiceCardMontado = 0;
+
+                    Widget cardComTourKey(Widget card) {
+                      final indice = indiceCardMontado;
+                      indiceCardMontado++;
+                      if (indice == 0) {
+                        return KeyedSubtree(key: _tourKeyCardGeral, child: card);
+                      }
+                      if (indice == 2) {
+                        return KeyedSubtree(key: _tourKeyCardEspecifica, child: card);
+                      }
+                      return card;
+                    }
+
                     final todosCards = <Widget>[
                       for (final esp in especiais)
                         if (corresponde(esp.label))
-                          _CategoriaCardCompact(
-                            categoria: esp.label,
-                            cor:       esp.cor,
-                            icone:     esp.icone,
-                            onTap: () => _navegarParaCategoria(
-                              categoriaId:    esp.id,
-                              categoriaLabel: esp.label,
-                              cor:            esp.cor,
-                              icone:          esp.icone,
+                          cardComTourKey(
+                            _CategoriaCardCompact(
+                              categoria: esp.label,
+                              cor:       esp.cor,
+                              icone:     esp.icone,
+                              onTap: () => _navegarParaCategoria(
+                                categoriaId:    esp.id,
+                                categoriaLabel: esp.label,
+                                cor:            esp.cor,
+                                icone:          esp.icone,
+                              ),
                             ),
                           ),
                       for (int i = 0; i < provider.categorias.length; i++)
                         if (corresponde(provider.categorias[i]))
-                          _CategoriaCardCompact(
-                            categoria: provider.categorias[i],
-                            cor:       _cores[i % _cores.length],
-                            icone:     _iconePara(provider.categorias[i]),
-                            onTap: () => _navegarParaCategoria(
-                              categoriaId:    provider.categorias[i],
-                              categoriaLabel: provider.categorias[i],
-                              cor:            _cores[i % _cores.length],
-                              icone:          _iconePara(provider.categorias[i]),
+                          cardComTourKey(
+                            _CategoriaCardCompact(
+                              categoria: provider.categorias[i],
+                              cor:       _cores[i % _cores.length],
+                              icone:     _iconePara(provider.categorias[i]),
+                              onTap: () => _navegarParaCategoria(
+                                categoriaId:    provider.categorias[i],
+                                categoriaLabel: provider.categorias[i],
+                                cor:            _cores[i % _cores.length],
+                                icone:          _iconePara(provider.categorias[i]),
+                              ),
                             ),
                           ),
                     ];
+
+                    // Só depois que os cards e o campo de busca já foram
+                    // descritos é que registramos a opção de ajuda do robô
+                    // (as GlobalKeys precisam estar associadas a widgets
+                    // que serão de fato montados neste frame).
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) _registrarAjudaRobo();
+                    });
 
                     if (todosCards.isEmpty) {
                       return Center(
@@ -792,6 +927,8 @@ class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(null),
+          style: TextButton.styleFrom()
+              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
           child: const Text('Cancelar'),
         ),
         FilledButton.icon(
@@ -803,7 +940,7 @@ class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
           style: FilledButton.styleFrom(
             backgroundColor: AppTheme.primary,
             foregroundColor: Colors.white,
-          ),
+          ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
         ),
       ],
     );
@@ -1145,7 +1282,6 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
@@ -1158,15 +1294,13 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
           borderRadius: BorderRadius.circular(10),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: _hovered
-                  ? AppTheme.primary.withValues(alpha: 0.10)
-                  : Colors.transparent,
+                  ? AppTheme.primary.withValues(alpha: 0.15)
+                  : AppTheme.primary.withValues(alpha: 0.08),
               border: Border.all(
-                color: _hovered
-                    ? AppTheme.primary.withValues(alpha: 0.6)
-                    : scheme.outlineVariant,
+                color: AppTheme.primary.withValues(alpha: _hovered ? 0.9 : 0.5),
               ),
               borderRadius: BorderRadius.circular(10),
             ),
@@ -1176,15 +1310,15 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
                 Icon(
                   Icons.arrow_back,
                   size: 18,
-                  color: _hovered ? AppTheme.primary : scheme.onSurfaceVariant,
+                  color: AppTheme.primary,
                 ),
-                SizedBox(width: 6),
+                const SizedBox(width: 6),
                 Text(
                   widget.label,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 13,
-                    color: _hovered ? AppTheme.primary : scheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -1305,6 +1439,34 @@ class _IdentificadorCardState extends State<_IdentificadorCard> {
 // ─────────────────────────────────────────────────────────────────────────────
 // PÁGINA DE MATERIAIS POR CATEGORIA
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Chaves usadas pelo tour "Como cadastrar um material?" pra destacar cada
+/// campo do dialog de cadastro. Ficam guardadas na página (não no dialog em
+/// si), porque o dialog é recriado do zero toda vez que é aberto, mas o tour
+/// referencia essas chaves antes mesmo do dialog existir.
+class _MaterialFormTourKeys {
+  final nome           = GlobalKey();
+  final identificador  = GlobalKey();
+  final categoria      = GlobalKey();
+  final unidade        = GlobalKey();
+  final medida         = GlobalKey();
+  final comprimento    = GlobalKey();
+  final largura        = GlobalKey();
+  final espessura      = GlobalKey();
+  final quantidade     = GlobalKey();
+  final estoqueMinimo  = GlobalKey();
+  final estoqueConfirmado = GlobalKey();
+
+  /// True quando [key] é uma das keys deste formulário — usado pelo
+  /// PopScope do dialog para distinguir um Esc/fechamento manual real (a
+  /// parada do tour ainda está dentro deste formulário) de um pop
+  /// disparado pelo próprio tour navegando "Anterior" para um passo fora
+  /// dele (ex.: o botão "Novo Material" na página).
+  bool contemParada(GlobalKey key) => [
+        nome, identificador, categoria, unidade, medida, comprimento, largura,
+        espessura, quantidade, estoqueMinimo, estoqueConfirmado,
+      ].contains(key);
+}
 
 class EstoqueCategoriaPage extends StatefulWidget {
   final String   categoriaId;
@@ -1522,16 +1684,166 @@ class _CategoriaFiltroDropdownState extends State<_CategoriaFiltroDropdown> {
   }
 }
 
+// ── Dropdown de status (OK / LIMITE / CRITICO / INATIVO) ────────────────────
+// Lista curta e fixa, então sem campo de busca — apenas um MenuAnchor simples
+// com um indicador de cor por status, no mesmo padrão visual do
+// _CategoriaFiltroDropdown.
+class _StatusFiltroDropdown extends StatefulWidget {
+  final MenuController menuController;
+  final String valorSelecionado; // '' = TODOS
+  final ValueChanged<String> onSelecionar;
+  const _StatusFiltroDropdown({
+    required this.menuController,
+    required this.valorSelecionado,
+    required this.onSelecionar,
+  });
+
+  @override
+  State<_StatusFiltroDropdown> createState() => _StatusFiltroDropdownState();
+}
+
+class _StatusFiltroDropdownState extends State<_StatusFiltroDropdown> {
+  bool _hovered = false;
+
+  static const _opcoes = ['OK', 'LIMITE', 'CRITICO', 'INATIVO'];
+
+  Color _corStatus(String status, ColorScheme scheme) {
+    switch (status) {
+      case 'OK':
+        return AppTheme.statusOk;
+      case 'LIMITE':
+        return AppTheme.statusBaixo;
+      case 'CRITICO':
+        return AppTheme.statusCritico;
+      default:
+        return scheme.onSurfaceVariant;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return SizedBox(
+      width: 160,
+      child: MenuAnchor(
+        controller: widget.menuController,
+        style: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(scheme.surface),
+          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+          elevation: const WidgetStatePropertyAll(6),
+          padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(color: scheme.outlineVariant),
+            ),
+          ),
+        ),
+        menuChildren: [
+          SizedBox(
+            width: 160,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                MenuItemButton(
+                  onPressed: () {
+                    widget.onSelecionar('');
+                    widget.menuController.close();
+                  },
+                  trailingIcon: widget.valorSelecionado.isEmpty
+                      ? Icon(Icons.check, size: 16, color: AppTheme.primary)
+                      : null,
+                  child: const SizedBox(
+                    width: 128,
+                    child: Text('TODOS'),
+                  ),
+                ),
+                for (final s in _opcoes)
+                  MenuItemButton(
+                    onPressed: () {
+                      widget.onSelecionar(s);
+                      widget.menuController.close();
+                    },
+                    leadingIcon: Icon(Icons.circle, size: 8, color: _corStatus(s, scheme)),
+                    trailingIcon: widget.valorSelecionado == s
+                        ? Icon(Icons.check, size: 16, color: AppTheme.primary)
+                        : null,
+                    child: SizedBox(
+                      width: 108,
+                      child: Text(s, overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+        builder: (context, controller, child) {
+          return MouseRegion(
+            cursor: SystemMouseCursors.click,
+            onEnter: (_) => setState(() => _hovered = true),
+            onExit:  (_) => setState(() => _hovered = false),
+            child: GestureDetector(
+              onTap: () => controller.isOpen ? controller.close() : controller.open(),
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: 'Status',
+                  isDense:   true,
+                  suffixIcon: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: Icon(
+                      controller.isOpen ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+                      color: _hovered ? AppTheme.primary : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                child: Text(
+                  widget.valorSelecionado.isEmpty ? 'TODOS' : widget.valorSelecionado,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 14, color: scheme.onSurface),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   late final TextEditingController _buscaCtrl;
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
   final _espessuraCtrl     = TextEditingController();
+  final _larguraCtrl       = TextEditingController();
+  final _comprimentoCtrl   = TextEditingController();
   String _statusFiltro         = '';
   String _categoriaFiltro      = ''; // só usado quando widget.categoriaId == _kCategoriaGeral
   bool   _somenteFornecedor    = false;
-  bool   _statusHovered        = false;
   Timer? _debounceTimer;
+  final MenuController _statusMenuController = MenuController();
+
+  // ── Ajuda do robô ────────────────────────────────────────────────────────
+  final _tourKeyHistorico     = GlobalKey();
+  final _tourKeyOrcar         = GlobalKey();
+  final _tourKeyExportar      = GlobalKey();
+  final _tourKeyNovoMaterial  = GlobalKey();
+  // ── Ajuda do robô: busca/filtro de materiais ─────────────────────────────
+  final _tourKeyBusca            = GlobalKey();
+  final _tourKeyFiltroIdent      = GlobalKey();
+  final _tourKeyFiltroMedida     = GlobalKey();
+  final _tourKeyFiltroComp       = GlobalKey();
+  final _tourKeyFiltroLargura    = GlobalKey();
+  final _tourKeyFiltroEspessura  = GlobalKey();
+  final _tourKeyFiltroCategoria  = GlobalKey();
+  final _tourKeyFiltroStatus     = GlobalKey();
+  final _tourKeyFiltroFornecedor = GlobalKey();
+  final _materialTourKeys     = _MaterialFormTourKeys();
+  // true enquanto o dialog de "Novo Material" estiver aberto POR CAUSA do
+  // tour — usado pra fechá-lo de novo se o usuário clicar "Anterior" e
+  // voltar pro passo do botão (que fica escondido atrás do dialog).
+  bool _dialogTourAberto = false;
 
   static const int _itensPorPagina = 50;
   int     _paginaAtual  = 0;
@@ -1582,70 +1894,50 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
     _espessuraCtrl.dispose();
+    _larguraCtrl.dispose();
+    _comprimentoCtrl.dispose();
     super.dispose();
   }
 
   void _aplicarFiltros() {
-    setState(() => _paginaAtual = 0);
-    context.read<MaterialProvider>().carregar(
-          busca:         _buscaCtrl.text,
-          categoria:     _categoriaParaProvider(),
-          status:        _statusFiltro,
-          id:            '',
-          identificador: _identificadorCtrl.text.trim(),
-          medida:        _medidaCtrl.text.trim(),
-          espessura:     _espessuraCtrl.text.trim(),
-          // somenteFornecedor é filtrado localmente pelo _somenteFornecedor bool
-        );
+    _carregarPaginaAtual(irParaPagina: 0);
   }
 
-  /// Recarrega a lista mantendo a página e o scroll atuais.
-  /// Usar após editar/desativar/reativar um material.
+  /// Recarrega a página atual do servidor (mantém _paginaAtual, ordenação
+  /// e filtros). Usar após editar/desativar/reativar/excluir um material.
   void _recarregarSemResetarPagina() {
-    context.read<MaterialProvider>().carregar(
-          busca:         _buscaCtrl.text,
-          categoria:     _categoriaParaProvider(),
-          status:        _statusFiltro,
-          id:            '',
-          identificador: _identificadorCtrl.text.trim(),
-          medida:        _medidaCtrl.text.trim(),
-          espessura:     _espessuraCtrl.text.trim(),
-        );
+    _carregarPaginaAtual(irParaPagina: _paginaAtual);
   }
 
-  List<MaterialModel> _ordenarLista(List<MaterialModel> lista) {
-    if (_colunaOrdem == null) return lista;
-    final sorted = [...lista];
-    sorted.sort((a, b) {
-      dynamic va, vb;
-      switch (_colunaOrdem) {
-        case 'id':               va = a.id;               vb = b.id;               break;
-        case 'identificador':    va = a.identificador;    vb = b.identificador;    break;
-        case 'nome':             va = a.nome;             vb = b.nome;             break;
-        case 'categoria':        va = a.categoria;        vb = b.categoria;        break;
-        case 'medida':           va = a.medida;           vb = b.medida;           break;
-        case 'espessura':        va = a.espessura;        vb = b.espessura;        break;
-        case 'largura':          va = a.largura;          vb = b.largura;          break;
-        case 'comprimento':      va = a.comprimento;      vb = b.comprimento;      break;
-        case 'quantidade':       va = a.quantidade;       vb = b.quantidade;       break;
-        case 'estoqueMinimo':    va = a.estoqueMinimo;    vb = b.estoqueMinimo;    break;
-        case 'unidade':          va = a.unidade;          vb = b.unidade;          break;
-        case 'precoMediano':     va = a.precoMediano;     vb = b.precoMediano;     break;
-        case 'precoM2Mediano':   va = a.precoM2Mediano;   vb = b.precoM2Mediano;   break;
-        case 'ultimoValorPago':  va = a.ultimoValorPago;  vb = b.ultimoValorPago;  break;
-        case 'ultimoValorPagoM2':va = a.ultimoValorPagoM2;vb = b.ultimoValorPagoM2;break;
-        case 'status':           va = a.status;           vb = b.status;           break;
-        default:                 return 0;
-      }
-      if (va == null && vb == null) return 0;
-      if (va == null) return _crescente ? 1 : -1;
-      if (vb == null) return _crescente ? -1 : 1;
-      final cmp = va is num
-          ? (va).compareTo(vb as num)
-          : va.toString().toLowerCase().compareTo(vb.toString().toLowerCase());
-      return _crescente ? cmp : -cmp;
-    });
-    return sorted;
+  /// Busca a página [irParaPagina] do servidor já ordenada/filtrada.
+  /// Se a página vier vazia mas ainda existirem itens (ex.: acabou de
+  /// excluir o último item da última página), volta uma página.
+  Future<void> _carregarPaginaAtual({required int irParaPagina}) async {
+    final provider = context.read<MaterialProvider>();
+    await provider.carregarPaginado(
+      busca:         _buscaCtrl.text,
+      categoria:     _categoriaParaProvider(),
+      status:        _statusFiltro,
+      identificador: _identificadorCtrl.text.trim(),
+      medida:        _medidaCtrl.text.trim(),
+      espessura:     _espessuraCtrl.text.trim(),
+      largura:       _larguraCtrl.text.trim(),
+      comprimento:   _comprimentoCtrl.text.trim(),
+      comFornecedor: _somenteFornecedor,
+      pagina:        irParaPagina + 1, // backend é 1-indexado
+      porPagina:     _itensPorPagina,
+      ordenarPor:    _colunaOrdem,
+      direcao:       _crescente ? 'asc' : 'desc',
+    );
+    if (!mounted) return;
+    if (provider.materiaisPagina.isEmpty &&
+        provider.totalItensPagina > 0 &&
+        irParaPagina > 0) {
+      setState(() => _paginaAtual = irParaPagina - 1);
+      await _carregarPaginaAtual(irParaPagina: irParaPagina - 1);
+    } else {
+      setState(() => _paginaAtual = irParaPagina);
+    }
   }
 
   void _toggleOrdem(String sortKey) {
@@ -1656,9 +1948,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         _colunaOrdem = sortKey;
         _crescente   = true;
       }
-      // Volta para a primeira página ao mudar a ordenação
-      _paginaAtual = 0;
     });
+    // A ordenação agora acontece no servidor — volta pra primeira página.
+    _carregarPaginaAtual(irParaPagina: 0);
   }
 
   // ── Ações de material ──────────────────────────────────────────────────────
@@ -1672,6 +1964,187 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         child: _HistoricoPrecoDialog(material: material),
       ),
     );
+  }
+
+  /// Registra as dicas desta página (materiais de uma categoria) sob a
+  /// mesma rota '/estoque'. Só escreve de fato se esta página for a rota
+  /// visível no topo — evita que uma rebuild em segundo plano (ex.: esta
+  /// tela escondida atrás do dialog "Novo Material" ou de "Histórico")
+  /// sobrescreva as opções enquanto não é ela que está sendo mostrada.
+  void _registrarAjudaRoboCategoria() {
+    final rota = ModalRoute.of(context);
+    if (rota != null && !rota.isCurrent) return;
+
+    final bloqueiaQuantidade =
+        context.read<UsuarioProvider>().usuarioLogado?.role == 'COMPRAS';
+
+    final helper = context.read<RoboHelperProvider>();
+    helper.registrarOpcoes('/estoque', [
+      RoboHelpOption(
+        titulo: 'Como cadastrar um material',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyNovoMaterial,
+            texto: 'Toque aqui para abrir o formulário de cadastro de um '
+                'novo material.',
+            aoEntrar: () async {
+              // Se estivermos voltando pra este passo (botão "Anterior"
+              // vindo de dentro do dialog), fecha o dialog que o tour
+              // tinha aberto — senão o botão fica escondido atrás dele.
+              // IMPORTANTE: usa rootNavigator:true porque showDialog abre
+              // no Navigator raiz; sem isso maybePop() poppa a rota da
+              // página de estoque em vez do dialog.
+              if (_dialogTourAberto) {
+                _dialogTourAberto = false;
+                await Navigator.of(context, rootNavigator: true).maybePop();
+                await Future<void>.delayed(const Duration(milliseconds: 50));
+              }
+            },
+          ),
+          RoboTourStop(
+            key: () => _materialTourKeys.nome,
+            texto: 'Nome do material — obrigatório.',
+            aoEntrar: () async {
+              if (!_dialogTourAberto) {
+                _dialogTourAberto = true;
+                _abrirFormMaterial().then((_) {
+                  if (mounted) _dialogTourAberto = false;
+                });
+                // Aguarda um frame para que o dialog comece a montar antes
+                // de o provider tentar medir a key em destaque.
+                await Future<void>.delayed(const Duration(milliseconds: 80));
+              }
+            },
+          ),
+          RoboTourStop(
+            key: () =>_materialTourKeys.identificador,
+            texto: 'Identificador — Adicione um código, marca ou especificação.',
+          ),
+          RoboTourStop(
+            key: () => _materialTourKeys.categoria,
+            texto: 'Categoria do material — Digite uma categoria ou escolha '
+                'uma das categorias já existentes.',
+          ),
+          RoboTourStop(
+            key: () => _materialTourKeys.unidade,
+            texto: 'Unidade de medida do material (Unidade, m, m², m/l ou g).',
+          ),
+          RoboTourStop(
+            key: () => _materialTourKeys.medida,
+            texto: 'Medida do material — descrição livre (ex.: dimensões, '
+                'bitola, polegada).',
+          ),
+          RoboTourStop(
+            key: () => _materialTourKeys.comprimento,
+            texto: 'Comprimento da peça, em metros.',
+          ),
+          RoboTourStop(
+            key: () => _materialTourKeys.largura,
+            texto: 'Largura da peça, em metros.',
+          ),
+          RoboTourStop(
+            key: () => _materialTourKeys.espessura,
+            texto: 'Espessura da peça, em milímetros.',
+          ),
+          RoboTourStop(
+            key: () => _materialTourKeys.quantidade,
+            texto: bloqueiaQuantidade
+                ? 'A quantidade em estoque não é definida aqui — ela deve '
+                    'ser dada de entrada pela página de Controle de '
+                    'Estoque, vinculada a uma Ordem de Serviço.'
+                : 'Quantidade atual em estoque desse material.',
+          ),
+          RoboTourStop(
+            key: () => _materialTourKeys.estoqueMinimo,
+            texto: bloqueiaQuantidade
+                ? 'O estoque mínimo também é bloqueado aqui pelo mesmo '
+                    'motivo — é definido em Controle de Estoque.'
+                : 'Estoque mínimo — abaixo desse valor o material aparece '
+                    'como crítico/em limite.',
+          ),
+          RoboTourStop(
+            key: () => _materialTourKeys.estoqueConfirmado,
+            texto: 'Marque aqui quando a quantidade cadastrada já foi '
+                'conferida fisicamente no estoque.',
+          ),
+        ],
+      ),
+      RoboHelpOption(
+        titulo: 'Como buscar um material',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyBusca,
+            texto: 'Digite aqui o nome do material que você procura.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeyFiltroIdent,
+            texto: 'Filtre pelo identificador — código, marca ou '
+                'especificação cadastrada no material.',
+          ),
+          RoboTourStop(
+            key: () =>_tourKeyFiltroMedida,
+            texto: 'Filtre pela medida do material.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeyFiltroComp,
+            texto: 'Filtre pelo comprimento da peça, em metros.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeyFiltroLargura,
+            texto: 'Filtre pela largura da peça, em metros.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeyFiltroEspessura,
+            texto: 'Filtre pela espessura da peça, em milímetros.',
+          ),
+          if (widget.categoriaId == _kCategoriaGeral)
+            RoboTourStop(
+              key: () => _tourKeyFiltroCategoria,
+              texto: 'Filtre por uma categoria específica.',
+            ),
+          RoboTourStop(
+            key: () => _tourKeyFiltroStatus,
+            texto: 'Filtre pelo status do estoque: OK, Limite, Crítico '
+                'ou Inativo.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeyFiltroFornecedor,
+            texto: 'Marque aqui pra mostrar somente materiais que têm '
+                'um fornecedor vinculado.',
+          ),
+        ],
+      ),
+      RoboHelpOption(
+        titulo: 'Como ver o histórico de alterações',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyHistorico,
+            texto: 'Toque aqui para ver o histórico de cadastros, edições, '
+                'desativações e exclusões de materiais.',
+          ),
+        ],
+      ),
+      RoboHelpOption(
+        titulo: 'Como orçar os materiais filtrados na página',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyOrcar,
+            texto: 'Toque aqui para criar um orçamento com todos os '
+                'materiais que estão filtrados nesta página agora.',
+          ),
+        ],
+      ),
+      RoboHelpOption(
+        titulo: 'Como exportar o estoque para um PDF',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyExportar,
+            texto: 'Toque aqui para exportar a lista de materiais '
+                'filtrada em um arquivo PDF.',
+          ),
+        ],
+      ),
+    ]);
   }
 
   Future<void> _abrirFormMaterial([MaterialModel? material]) async {
@@ -1689,7 +2162,13 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
       // o PopScope dentro de _MaterialFormDialog intercepta (canPop: false)
       // para decidir se confirma alterações não salvas antes de fechar.
       // Se ficasse false, o Flutter nem chegaria a acionar o PopScope.
-      barrierDismissible: true,
+      //
+      // Exceção: enquanto o tour do robô estiver guiando este formulário,
+      // o balão de dica fica fora do dialog (numa camada abaixo dele), e
+      // qualquer clique do usuário tentando interagir com a dica cairia
+      // no barrier e fecharia o formulário sem querer. Por isso, nesse
+      // caso o barrier fica não-dismissible — só X/Cancelar/Esc fecham.
+      barrierDismissible: !_dialogTourAberto,
       builder: (_) => _MaterialFormDialog(
         material:    material,
         onDesativar: (!isCompras && material != null) ? _desativar : null,
@@ -1697,6 +2176,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         onExcluir:   (!isCompras && material != null) ? _excluir   : null,
         roleUsuario: roleAtual,
         somenteLeitura: isCompras && material != null,
+        tourKeys: _materialTourKeys,
       ),
     );
     if (!mounted) return;
@@ -1747,6 +2227,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     if (confirmar != true || !mounted) return;
     final ok = await context.read<MaterialProvider>().desativar(m.id);
     if (!mounted) return;
+    if (ok) _recarregarSemResetarPagina();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(ok ? '"${m.nome}" desativado.' : context.read<MaterialProvider>().erro ?? 'Erro'),
       backgroundColor: ok ? AppTheme.warning : AppTheme.error,
@@ -1778,6 +2259,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     if (confirmar != true || !mounted) return;
     final ok = await context.read<MaterialProvider>().reativar(m.id);
     if (!mounted) return;
+    if (ok) _recarregarSemResetarPagina();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(ok ? '"${m.nome}" reativado.' : context.read<MaterialProvider>().erro ?? 'Erro'),
       backgroundColor: ok ? AppTheme.success : AppTheme.error,
@@ -1816,6 +2298,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     if (confirmar != true || !mounted) return;
     final ok = await context.read<MaterialProvider>().excluir(m.id);
     if (!mounted) return;
+    if (ok) _recarregarSemResetarPagina();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(ok ? '"${m.nome}" excluído.' : context.read<MaterialProvider>().erro ?? 'Erro'),
       backgroundColor: AppTheme.error,
@@ -1908,7 +2391,58 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
 
   // ── Orçar materiais filtrados ──────────────────────────────────────────────
   Future<void> _orcarFiltrados() async {
-    final todos = context.read<MaterialProvider>().materiais;
+    final provider = context.read<MaterialProvider>();
+
+    // Confirmação antes de disparar a busca completa + navegação: usa a
+    // contagem já calculada pelo servidor para a página atual (mesma exibida
+    // no botão "Orçar filtrados (X)"), sem precisar buscar a lista inteira
+    // só pra mostrar o número no dialog.
+    final totalFiltrado = provider.totalItensPagina;
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Orçar materiais filtrados'),
+        content: Text(
+          'Deseja orçar os $totalFiltrado material${totalFiltrado == 1 ? '' : 'is'} filtrado${totalFiltrado == 1 ? '' : 's'}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            style: TextButton.styleFrom()
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: const Text('Orçar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+
+    // Esta função só roda sob demanda (clique em "Orçar filtrados"), então
+    // busca a lista completa que bate no filtro atual aqui — a tela em si
+    // usa carregarPaginado() e não mantém mais a tabela inteira em memória.
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Carregando materiais...'),
+      duration: Duration(seconds: 2),
+    ));
+    await provider.carregar(
+      busca:         _buscaCtrl.text,
+      categoria:     _categoriaParaProvider(),
+      status:        _statusFiltro,
+      identificador: _identificadorCtrl.text.trim(),
+      medida:        _medidaCtrl.text.trim(),
+      espessura:     _espessuraCtrl.text.trim(),
+      largura:       _larguraCtrl.text.trim(),
+      comprimento:   _comprimentoCtrl.text.trim(),
+      ativo:         null,
+    );
+    if (!mounted) return;
+    final todos = provider.materiais;
     final materiais = _somenteFornecedor
         ? todos.where((m) => m.fornecedorMateriais.isNotEmpty).toList()
         : todos;
@@ -1974,6 +2508,10 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final cor    = widget.cor;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _registrarAjudaRoboCategoria();
+    });
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -2064,14 +2602,22 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   runSpacing: 8,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Tooltip(
+                    Container(
+                      key: _tourKeyHistorico,
+                      child: Tooltip(
                       message: 'Ver histórico de movimentações do estoque',
                       child: OutlinedButton.icon(
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const HistoricoMaterialPage(),
-                          ),
-                        ),
+                        onPressed: () {
+                          context.read<RoboHelperProvider>().encerrarTour();
+                          context.read<RoboHelperProvider>().limparOpcoes('/estoque');
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const HistoricoMaterialPage(),
+                            ),
+                          ).then((_) {
+                            if (mounted) _registrarAjudaRoboCategoria();
+                          });
+                        },
                         icon: const Icon(Icons.history, size: 18),
                         label: const Text('Histórico'),
                         style: OutlinedButton.styleFrom(
@@ -2081,23 +2627,28 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                               horizontal: 16, vertical: 12),
                         ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                       ),
+                      ),
                     ),
-                    Consumer<MaterialProvider>(
+                    Container(
+                      key: _tourKeyOrcar,
+                      child: Consumer<MaterialProvider>(
                       builder: (_, mp, __) {
-                        final visiveis = _somenteFornecedor
-                            ? mp.materiais.where((m) => m.fornecedorMateriais.isNotEmpty).toList()
-                            : mp.materiais;
-                        final temMateriais = !mp.carregando && visiveis.isNotEmpty;
+                        // O contador usa o total já calculado no servidor pela
+                        // página atual (respeita busca/status/comFornecedor).
+                        // A lista completa só é buscada de fato ao clicar,
+                        // dentro de _orcarFiltrados — não fica pré-carregada.
+                        final total = mp.totalItensPagina;
+                        final temMateriais = !mp.carregandoPagina && total > 0;
                         return Tooltip(
                           message: temMateriais
-                              ? 'Criar orçamento com os ${visiveis.length} material(is) filtrado(s)'
+                              ? 'Criar orçamento com os $total material(is) filtrado(s)'
                               : 'Nenhum material filtrado',
                           child: OutlinedButton.icon(
                             onPressed: temMateriais ? _orcarFiltrados : null,
                             icon: const Icon(Icons.request_quote, size: 18),
                             label: Text(
                               temMateriais
-                                  ? 'Orçar filtrados (${visiveis.length})'
+                                  ? 'Orçar filtrados ($total)'
                                   : 'Orçar filtrados',
                             ),
                             style: OutlinedButton.styleFrom(
@@ -2119,8 +2670,11 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                           ),
                         );
                       },
+                      ),
                     ),
-                    Tooltip(
+                    Container(
+                      key: _tourKeyExportar,
+                      child: Tooltip(
                       message: 'Exportar lista de materiais em PDF',
                       child: OutlinedButton.icon(
                         onPressed: _exportarPdf,
@@ -2132,8 +2686,11 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                       ),
+                      ),
                     ),
-                    Tooltip(
+                    Container(
+                      key: _tourKeyNovoMaterial,
+                      child: Tooltip(
                       message: 'Cadastrar novo material no estoque',
                       child: FilledButton.icon(
                         onPressed: () => _abrirFormMaterial(),
@@ -2144,6 +2701,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                           foregroundColor: Colors.white,
                           padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                         ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                      ),
                       ),
                     ),
                     IconButton(
@@ -2167,11 +2725,13 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
               children: [
                 Expanded(
                   flex: 3,
+                  child: KeyedSubtree(
+                  key: _tourKeyBusca,
                   child: TextField(
                     controller: _buscaCtrl,
                     inputFormatters: [_UpperCaseFormatter()],
                     decoration: InputDecoration(
-                      hintText:   'Buscar material...',
+                      hintText:   'Nome do material',
                       prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense:    true,
                     ),
@@ -2183,11 +2743,14 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     },
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
+                  ),
                 ),
                 const SizedBox(width: 12),
                 if (widget.categoriaId == _kCategoriaGeral) ...[
                   SizedBox(
                     width: 160,
+                    child: KeyedSubtree(
+                    key: _tourKeyFiltroCategoria,
                     child: Consumer<MaterialProvider>(
                       builder: (_, provider, __) {
                         final categorias = provider.categorias;
@@ -2205,49 +2768,25 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                         );
                       },
                     ),
+                    ),
                   ),
                   const SizedBox(width: 12),
                 ],
-                MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  onEnter: (_) => setState(() => _statusHovered = true),
-                  onExit:  (_) => setState(() => _statusHovered = false),
-                  child: SizedBox(
-                  width: 160,
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: 'Status',
-                      isDense:   true,
-                    ),
-                    isEmpty: _statusFiltro.isEmpty,
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _statusFiltro.isEmpty ? null : _statusFiltro,
-                        isDense: true,
-                        isExpanded: true,
-                        mouseCursor: SystemMouseCursors.click,
-                        icon: Icon(
-                          Icons.arrow_drop_down,
-                          color: _statusHovered ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        items: const [
-                          DropdownMenuItem(value: '',        child: Text('TODOS')),
-                          DropdownMenuItem(value: 'OK',      child: Text('OK')),
-                          DropdownMenuItem(value: 'LIMITE',  child: Text('LIMITE')),
-                          DropdownMenuItem(value: 'CRITICO', child: Text('CRITICO')),
-                          DropdownMenuItem(value: 'INATIVO', child: Text('INATIVO')),
-                        ],
-                        onChanged: (v) {
-                          setState(() => _statusFiltro = v ?? '');
-                          _aplicarFiltros();
-                        },
-                      ),
-                    ),
-                  ),
+                KeyedSubtree(
+                  key: _tourKeyFiltroStatus,
+                  child: _StatusFiltroDropdown(
+                  menuController: _statusMenuController,
+                  valorSelecionado: _statusFiltro,
+                  onSelecionar: (v) {
+                    setState(() => _statusFiltro = v);
+                    _aplicarFiltros();
+                  },
                   ),
                 ),
                 SizedBox(width: 8),
-                MouseRegion(
+                KeyedSubtree(
+                key: _tourKeyFiltroFornecedor,
+                child: MouseRegion(
                   cursor: SystemMouseCursors.click,
                   child: Tooltip(
                     message: 'Mostrar somente materiais com fornecedor vinculado',
@@ -2279,6 +2818,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                   ),
                   ),
                 ),
+                ),
                 const SizedBox(width: 8),
                 Builder(
                   builder: (context) {
@@ -2286,6 +2826,8 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                         _identificadorCtrl.text.isNotEmpty ||
                         _medidaCtrl.text.isNotEmpty ||
                         _espessuraCtrl.text.isNotEmpty ||
+                        _larguraCtrl.text.isNotEmpty ||
+                        _comprimentoCtrl.text.isNotEmpty ||
                         _statusFiltro.isNotEmpty ||
                         _categoriaFiltro.isNotEmpty ||
                         _somenteFornecedor;
@@ -2298,14 +2840,14 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                               _identificadorCtrl.clear();
                               _medidaCtrl.clear();
                               _espessuraCtrl.clear();
+                              _larguraCtrl.clear();
+                              _comprimentoCtrl.clear();
                               setState(() {
                                 _statusFiltro      = '';
                                 _categoriaFiltro   = '';
                                 _somenteFornecedor = false;
                               });
-                              context.read<MaterialProvider>().carregar(
-                                    categoria: _categoriaParaProvider(),
-                                  );
+                              _aplicarFiltros();
                             }
                           : null,
                       style: IconButton.styleFrom(
@@ -2329,10 +2871,12 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
             Row(
               children: [
                 Expanded(
+                  child: KeyedSubtree(
+                  key: _tourKeyFiltroIdent,
                   child: TextField(
                     controller: _identificadorCtrl,
                     decoration: InputDecoration(
-                      hintText:   'Identificador...',
+                      hintText:   'Identificador',
                       prefixIcon: Icon(Icons.qr_code, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
@@ -2346,13 +2890,16 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     },
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
+                  ),
                 ),
                 SizedBox(width: 12),
                 Expanded(
+                  child: KeyedSubtree(
+                  key: _tourKeyFiltroMedida,
                   child: TextField(
                     controller: _medidaCtrl,
                     decoration: InputDecoration(
-                      hintText:   'Medida...',
+                      hintText:   'Medida',
                       prefixIcon: Icon(Icons.straighten, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
@@ -2365,17 +2912,22 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     },
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
+                  ),
                 ),
                 SizedBox(width: 12),
                 Expanded(
+                  child: KeyedSubtree(
+                  key: _tourKeyFiltroComp,
                   child: TextField(
-                    controller: _espessuraCtrl,
+                    controller: _comprimentoCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: InputDecoration(
-                      hintText:   'Espessura...',
-                      prefixIcon: Icon(Icons.layers, color: Theme.of(context).colorScheme.outline, size: 18),
+                      hintText:   'Comprimento',
+                      suffixText: 'm',
+                      prefixIcon: Icon(Icons.height, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
-                    inputFormatters: [_MedidaEspessuraFormatter()],
+                    inputFormatters: [_EspessuraFormatter()],
                     onChanged: (_) {
                       setState(() {});
                       _debounceTimer?.cancel();
@@ -2383,6 +2935,55 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                           const Duration(milliseconds: 400), _aplicarFiltros);
                     },
                     onSubmitted: (_) => _aplicarFiltros(),
+                  ),
+                  ),
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: KeyedSubtree(
+                  key: _tourKeyFiltroLargura,
+                  child: TextField(
+                    controller: _larguraCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      hintText:   'Largura',
+                      suffixText: 'm',
+                      prefixIcon: Icon(Icons.width_normal, color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense:    true,
+                    ),
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: (_) {
+                      setState(() {});
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                          const Duration(milliseconds: 400), _aplicarFiltros);
+                    },
+                    onSubmitted: (_) => _aplicarFiltros(),
+                  ),
+                  ),
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: KeyedSubtree(
+                  key: _tourKeyFiltroEspessura,
+                  child: TextField(
+                    controller: _espessuraCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      hintText:   'Espessura',
+                      suffixText: 'mm',
+                      prefixIcon: Icon(Icons.layers, color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense:    true,
+                    ),
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: (_) {
+                      setState(() {});
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                          const Duration(milliseconds: 400), _aplicarFiltros);
+                    },
+                    onSubmitted: (_) => _aplicarFiltros(),
+                  ),
                   ),
                 ),
               ],
@@ -2393,7 +2994,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
             Expanded(
               child: Consumer<MaterialProvider>(
                 builder: (_, provider, __) {
-                  if (provider.carregando) {
+                  if (provider.carregandoPagina) {
                     return const Center(
                       child: CircularProgressIndicator(color: AppTheme.primary),
                     );
@@ -2436,13 +3037,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                       ),
                     );
                   }
-                  final todos = _somenteFornecedor
-                      ? provider.materiais
-                          .where((m) => m.fornecedorMateriais.isNotEmpty)
-                          .toList()
-                      : provider.materiais;
+                  final paginados = provider.materiaisPagina;
 
-                  if (todos.isEmpty) {
+                  if (paginados.isEmpty) {
                     return Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -2473,12 +3070,8 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                       ),
                     );
                   }
-                  final ordenados    = _ordenarLista(todos);
-                  final totalPaginas = (ordenados.length / _itensPorPagina).ceil();
-                  final paginaSegura = _paginaAtual.clamp(0, (totalPaginas - 1).clamp(0, 999));
-                  final inicio       = paginaSegura * _itensPorPagina;
-                  final fim          = (inicio + _itensPorPagina).clamp(0, ordenados.length);
-                  final paginados    = ordenados.sublist(inicio, fim);
+                  final totalItens  = provider.totalItensPagina;
+                  final totalPaginas = (totalItens / _itensPorPagina).ceil().clamp(1, 999999999);
 
                   final mostrarCat = widget.categoriaId != _kCategoriaGeral;
                   return Column(
@@ -2501,11 +3094,11 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                       if (totalPaginas > 1) ...[
                         const SizedBox(height: 12),
                         _BarraPaginacao(
-                          paginaAtual:     paginaSegura,
+                          paginaAtual:     _paginaAtual,
                           totalPaginas:    totalPaginas,
-                          totalItens:      ordenados.length,
+                          totalItens:      totalItens,
                           itensPorPagina:  _itensPorPagina,
-                          onPaginaChanged: (p) => setState(() => _paginaAtual = p),
+                          onPaginaChanged: (p) => _carregarPaginaAtual(irParaPagina: p),
                         ),
                       ],
                     ],
@@ -2911,8 +3504,8 @@ class _TabelaMateriais extends StatefulWidget {
     _ColDef(label: 'Estoque atual',               flex: 0.6,  minWidth: 120, sortKey: 'quantidade'),
     _ColDef(label: 'Estoque mínimo',              flex: 0.6,  minWidth: 130, sortKey: 'estoqueMinimo'),
     _ColDef(label: 'Unidade',                     flex: 0.9,  minWidth: 100, sortKey: 'unidade'),
-    _ColDef(label: 'Custo (Últimas compras)',     flex: 0.9,  minWidth: 170, sortKey: 'ultimoValorPago'),
-    _ColDef(label: 'Custo m² (Últimas compras)',  flex: 0.9,  minWidth: 180, sortKey: 'ultimoValorPagoM2'),
+    _ColDef(label: 'Preço',                       flex: 0.9,  minWidth: 170, sortKey: 'ultimoValorPago'),
+    _ColDef(label: 'Preço m²',                    flex: 0.9,  minWidth: 180, sortKey: 'ultimoValorPagoM2'),
     _ColDef(label: 'Status',                      flex: 0.6,  minWidth: 120, sortKey: 'status'),
     _ColDef(label: '',                             fixed: 40),
   ];
@@ -3204,7 +3797,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
  
     Widget estoqueAtualCell() {
       return maybeOpacity(_cell(
-        m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2),
+        formatarQuantidade(m.quantidade),
         context,
         inativo: inativo,
       ));
@@ -3278,15 +3871,15 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                 _vDivider(context),
  
                 // Espessura
-                _colWrap(cols[widget.mostrarCategoria ? 5 : 4], maybeOpacity(_cell(m.espessura ?? '—', context, inativo: inativo))),
+                _colWrap(cols[widget.mostrarCategoria ? 5 : 4], maybeOpacity(_cell(m.espessura != null && m.espessura!.trim().isNotEmpty ? '${m.espessura!.trim().replaceAll(RegExp("mm\\s*\$", caseSensitive: false), '').trim()}mm' : '—', context, inativo: inativo))),
                 _vDivider(context),
  
                 // Comprimento
-                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], maybeOpacity(_cell(m.comprimento != null ? m.comprimento!.toStringAsFixed((m.comprimento! % 1 == 0 ? 0 : 2).toInt()) : '—', context, inativo: inativo))),
+                _colWrap(cols[widget.mostrarCategoria ? 6 : 5], maybeOpacity(_cell(m.comprimento != null ? formatarQuantidade(m.comprimento!) : '—', context, inativo: inativo))),
                 _vDivider(context),
  
                 // Largura
-                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], maybeOpacity(_cell(m.largura != null ? m.largura!.toStringAsFixed((m.largura! % 1 == 0 ? 0 : 2).toInt()) : '—', context, inativo: inativo))),
+                _colWrap(cols[widget.mostrarCategoria ? 7 : 6], maybeOpacity(_cell(m.largura != null ? formatarQuantidade(m.largura!) : '—', context, inativo: inativo))),
                 _vDivider(context),
  
                 // Estoque atual (com lógica especial para específico)
@@ -3295,7 +3888,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
  
                 // Estoque mínimo
                 _colWrap(cols[widget.mostrarCategoria ? 9 : 8], maybeOpacity(_cell(
-                  m.estoqueMinimo.toStringAsFixed(m.estoqueMinimo % 1 == 0 ? 0 : 2),
+                  formatarQuantidade(m.estoqueMinimo),
                   context,
                   inativo: inativo,
                 ))),
@@ -3388,7 +3981,12 @@ class _MaterialFormDialog extends StatefulWidget {
   /// ficam ocultas. Usado para permitir que o usuário COMPRAS visualize os
   /// dados de um material já cadastrado sem poder alterá-los.
   final bool somenteLeitura;
-  const _MaterialFormDialog({this.material, this.onDesativar, this.onReativar, this.onExcluir, this.roleUsuario, this.somenteLeitura = false});
+  /// Chaves opcionais usadas pelo tour de ajuda do robô, pra destacar cada
+  /// campo deste formulário passo a passo. Null quando o dialog é aberto
+  /// normalmente (fora do tour) — nesse caso as chaves simplesmente não
+  /// fazem nada.
+  final _MaterialFormTourKeys? tourKeys;
+  const _MaterialFormDialog({this.material, this.onDesativar, this.onReativar, this.onExcluir, this.roleUsuario, this.somenteLeitura = false, this.tourKeys});
 
   @override
   State<_MaterialFormDialog> createState() => _MaterialFormDialogState();
@@ -3398,6 +3996,27 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   final _formKey = GlobalKey<FormState>();
   bool _salvando = false;
   String? _erroDialog;
+
+  // ── Fechamento automático quando o tour do robô termina ────────────────
+  // Só relevante quando widget.tourKeys != null, ou seja, quando ESTE
+  // dialog foi aberto pelo próprio tour (via aoEntrar do passo "Nome").
+  // Nesse caso, quando o usuário concluir o tour (botão "Concluir" na
+  // última parada) ou encerrá-lo de outra forma (Esc, X do robô), o
+  // dialog deve fechar junto — sem isso ele ficaria aberto sozinho depois
+  // do tour acabar. Guardamos a referência ao provider (não ao context)
+  // pra poder remover o listener no dispose com segurança.
+  RoboHelperProvider? _roboHelper;
+
+  void _aoMudarRoboHelper() {
+    // dispara só na transição tourAtivo:true → false, evitando fechar o
+    // dialog no frame em que ele mesmo acabou de ser aberto pelo tour
+    // (nesse momento tourAtivo já é true).
+    if (widget.tourKeys != null &&
+        !(_roboHelper?.tourAtivo ?? false) &&
+        mounted) {
+      Navigator.of(context).maybePop();
+    }
+  }
 
   // ── Detecção de possível material duplicado ───────────────────────────
   // Compara nome/identificador/medida/espessura digitados contra os
@@ -3471,9 +4090,70 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     return _aliasUnidade[norm] ?? norm; // preserva desconhecidos sem crash
   }
 
+  /// Detecta se o texto contém a palavra "RETALHO" (ou variações próximas
+  /// como "RETALHOS", "RETALH", "RETALHOO", "RETALHP" etc.) em qualquer
+  /// palavra do texto. Usado para impedir que o usuário digite isso no campo
+  /// Nome — retalhos devem ser identificados pelo campo Identificador, não
+  /// pelo nome do material.
+  ///
+  /// A detecção usa distância de edição (Levenshtein) em vez de apenas uma
+  /// regex exata, para pegar erros de digitação comuns (letra faltando,
+  /// duplicada ou trocada), sem disparar em palavras muito diferentes.
+  static const _palavraRetalho = 'RETALHO';
+
+  static int _distanciaEdicao(String a, String b) {
+    final la = a.length, lb = b.length;
+    final d = List.generate(la + 1, (_) => List<int>.filled(lb + 1, 0));
+    for (var i = 0; i <= la; i++) {
+      d[i][0] = i;
+    }
+    for (var j = 0; j <= lb; j++) {
+      d[0][j] = j;
+    }
+    for (var i = 1; i <= la; i++) {
+      for (var j = 1; j <= lb; j++) {
+        final custo = a[i - 1] == b[j - 1] ? 0 : 1;
+        d[i][j] = [
+          d[i - 1][j] + 1,
+          d[i][j - 1] + 1,
+          d[i - 1][j - 1] + custo,
+        ].reduce((x, y) => x < y ? x : y);
+      }
+    }
+    return d[la][lb];
+  }
+
+  static bool _pareceRetalho(String palavra) {
+    final p = palavra.toUpperCase();
+    if (p.length < 5) return false; // evita falso-positivo em palavras curtas
+    // Compara contra a raiz "RETALHO" e também contra "RETALHOS" (plural),
+    // tolerando até 2 edições de diferença (insere/remove/troca letra).
+    final distBase   = _distanciaEdicao(p, _palavraRetalho);
+    final distPlural = _distanciaEdicao(p, '${_palavraRetalho}S');
+    final tolerancia = p.length <= 7 ? 2 : 3;
+    return distBase <= tolerancia || distPlural <= tolerancia;
+  }
+
+  static bool _contemRetalho(String texto) {
+    final palavras = texto.split(RegExp(r'[^A-Za-zÀ-ÿ]+'));
+    return palavras.any((p) => p.isNotEmpty && _pareceRetalho(p));
+  }
+
   @override
   void initState() {
     super.initState();
+    if (widget.tourKeys != null) {
+      // addPostFrameCallback: evita ler o provider antes do primeiro frame
+      // deste dialog terminar de montar (context ainda instável no meio
+      // do initState), e garante que _roboHelper já reflita tourAtivo:true
+      // (o passo "Nome" que abriu este dialog) antes de começarmos a
+      // ouvir mudanças — senão o listener poderia disparar cedo demais.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _roboHelper = context.read<RoboHelperProvider>();
+        _roboHelper!.addListener(_aoMudarRoboHelper);
+      });
+    }
     final m        = widget.material;
     _estoqueConfirmado = m?.estoqueConfirmado ?? false;
     _nome          = TextEditingController(text: m?.nome ?? '');
@@ -3492,8 +4172,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     });
     _medida        = TextEditingController(text: m?.medida ?? '');
     _espessura     = TextEditingController(text: m?.espessura ?? '');
-    _largura       = TextEditingController(text: m?.largura != null ? m!.largura!.toStringAsFixed((m.largura! % 1 == 0 ? 0 : 4).toInt()) : '');
-    _comprimento   = TextEditingController(text: m?.comprimento != null ? m!.comprimento!.toStringAsFixed((m.comprimento! % 1 == 0 ? 0 : 4).toInt()) : '');
+    _largura       = TextEditingController(text: m?.largura != null ? formatarQuantidade(m!.largura!) : '');
+    _comprimento   = TextEditingController(text: m?.comprimento != null ? formatarQuantidade(m!.comprimento!) : '');
     _quantidade    = TextEditingController(
         text: m != null ? m.quantidade.toString() : '0');
     _estoqueMinimo = TextEditingController(
@@ -3501,7 +4181,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
     // Campos que entram na comparação de duplicidade: qualquer alteração
     // reagenda a verificação (debounced).
-    for (final c in [_nome, _identificador, _medida, _espessura]) {
+    for (final c in [_nome, _identificador, _medida, _espessura, _largura, _comprimento]) {
       c.addListener(_agendarVerificacaoDuplicata);
     }
     // Roda uma verificação inicial (ex.: ao editar um material que já
@@ -3612,6 +4292,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
   @override
   void dispose() {
+    _roboHelper?.removeListener(_aoMudarRoboHelper);
     _debounceDuplicata?.cancel();
     for (final c in [
       _nome, _identificador, _categoria, _medida, _espessura,
@@ -3693,6 +4374,24 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     final medidaNorm        = _normalizarTextoComparacao(_medida.text);
     final espessuraNorm     = _normalizarTextoComparacao(_espessura.text);
 
+    // Dimensões digitadas: usa os campos numéricos Comprimento/Largura/
+    // Espessura como fonte principal e, quando algum deles estiver vazio,
+    // cai para o que der pra extrair do texto livre "medida" (que pode
+    // trazer tudo junto, em qualquer grafia: com ou sem "m"/"mm", com ou
+    // sem casas decimais, com ou sem um terceiro "x" pra espessura).
+    final medidaDigitadaExtraida = _extrairDimensoesMedida(_medida.text);
+    final comprimentoDigitado = double.tryParse(_comprimento.text.trim().replaceAll(',', '.'))
+        ?? medidaDigitadaExtraida.comprimento;
+    final larguraDigitada = double.tryParse(_largura.text.trim().replaceAll(',', '.'))
+        ?? medidaDigitadaExtraida.largura;
+    final espessuraDigitadaNum = _extrairNumeroDeTexto(_espessura.text)
+        ?? medidaDigitadaExtraida.espessura;
+
+    bool dimensaoBate(double? a, double? b) {
+      if (a == null || b == null) return false;
+      return (a - b).abs() < 0.001;
+    }
+
     final encontrados = <_PossivelDuplicata>[];
     for (final m in candidatos) {
       // Ignora o próprio material ao editar.
@@ -3703,13 +4402,37 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       final mMedidaNorm        = _normalizarTextoComparacao(m.medida);
       final mEspessuraNorm     = _normalizarTextoComparacao(m.espessura);
 
+      // Mesma lógica de fallback do lado do material cadastrado: prioriza os
+      // campos numéricos e, na falta deles, extrai do texto "medida" salvo.
+      final mMedidaExtraida = _extrairDimensoesMedida(m.medida);
+      final mComprimentoFinal = m.comprimento ?? mMedidaExtraida.comprimento;
+      final mLarguraFinal     = m.largura ?? mMedidaExtraida.largura;
+      final mEspessuraFinal   = _extrairNumeroDeTexto(m.espessura) ?? mMedidaExtraida.espessura;
+
+      // Comprimento/largura batem se os valores numéricos coincidirem,
+      // não importa como cada lado escreveu a medida (com/sem "m", com/sem
+      // decimais, com/sem espessura embutida no texto).
+      final dimensoesBatem = dimensaoBate(comprimentoDigitado, mComprimentoFinal) &&
+          dimensaoBate(larguraDigitada, mLarguraFinal);
+      final medidaOuDimensaoBate = mMedidaNorm == medidaNorm || dimensoesBatem;
+
+      // Espessura: compara numericamente (ignorando "mm" e formatação) e só
+      // cai para comparação de texto puro quando nenhum lado tem número
+      // reconhecível (ex.: valor não numérico digitado por engano). Quando
+      // ambos os lados estão vazios, conta como igual.
+      final espessuraBate = (espessuraNorm.isEmpty && mEspessuraNorm.isEmpty)
+          ? true
+          : (espessuraDigitadaNum != null && mEspessuraFinal != null)
+              ? dimensaoBate(espessuraDigitadaNum, mEspessuraFinal)
+              : mEspessuraNorm == espessuraNorm;
+
       // Mesma regra de unicidade usada no backend (nome + identificador +
       // medida + espessura, normalizados): se bater, o cadastro será
       // rejeitado com 409 ao salvar.
       final exata = mNomeNorm == nomeNorm &&
           mIdentificadorNorm == identificadorNorm &&
-          mMedidaNorm == medidaNorm &&
-          mEspessuraNorm == espessuraNorm;
+          medidaOuDimensaoBate &&
+          espessuraBate;
 
       final similaridadeNome = _similaridadeTexto(nomeNorm, mNomeNorm);
       final mesmoIdentificador =
@@ -3784,6 +4507,20 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     if (!_formKey.currentState!.validate()) return;
     if (!_modoRetalho && (_unidade == null || _unidade!.isEmpty)) {
       setState(() => _erroDialog = 'Selecione uma unidade antes de salvar.');
+      return;
+    }
+    // Garante que a verificação de duplicidade mais recente já foi
+    // concluída antes de decidir se pode salvar (evita salvar durante o
+    // debounce, quando _possiveisDuplicatas ainda reflete o texto anterior
+    // digitado, permitindo escapar da validação por timing).
+    _debounceDuplicata?.cancel();
+    await _verificarDuplicatas();
+    if (!mounted) return;
+    if (_possiveisDuplicatas.any((d) => d.exata)) {
+      setState(() {
+        _erroDialog = 'Já existe um material idêntico cadastrado. '
+            'Ajuste a medida/espessura ou edite o material existente.';
+      });
       return;
     }
     setState(() { _salvando = true; _erroDialog = null; });
@@ -3869,21 +4606,40 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
               const SizedBox(height: 12),
             ],
-            TextFormField(
+            KeyedSubtree(
+              key: widget.tourKeys?.nome,
+              child: TextFormField(
               controller: _nome,
               autofocus: !_editando,
               readOnly: widget.somenteLeitura,
               decoration: const InputDecoration(labelText: 'Nome *'),
               textCapitalization: TextCapitalization.characters,
               inputFormatters: [_UpperCaseFormatter()],
+              autovalidateMode: AutovalidateMode.onUserInteraction,
               onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
-              validator: (v) =>
-                  v == null || v.trim().isEmpty ? 'Nome é obrigatório' : null,
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) return 'Nome é obrigatório';
+                if (_contemRetalho(v)) {
+                  return 'Não digite "RETALHO" no nome — digite no campo Identificador';
+                }
+                return null;
+              },
+              ),
             ),
             const SizedBox(height: 10),
-            TextFormField(
+            KeyedSubtree(
+              key: widget.tourKeys?.identificador,
+              child: TextFormField(
               controller: _identificador,
               readOnly: _modoRetalho || widget.somenteLeitura,
+              onChanged: (v) {
+                // Ativa o modo Retalho automaticamente ao digitar essa
+                // palavra no Identificador, travando os campos como se o
+                // usuário tivesse clicado no botão "Modo Retalho".
+                if (!_modoRetalho && _contemRetalho(v)) {
+                  _ativarModoRetalho();
+                }
+              },
               decoration: InputDecoration(
                 labelText: 'Identificador',
                 suffixIcon: _modoRetalho
@@ -3895,11 +4651,14 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
               textCapitalization: TextCapitalization.characters,
               inputFormatters: [_UpperCaseFormatter()],
+              ),
             ),
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
-                child: widget.somenteLeitura
+                child: KeyedSubtree(
+                  key: widget.tourKeys?.categoria,
+                  child: widget.somenteLeitura
                     ? TextFormField(
                         controller: _categoria,
                         readOnly: true,
@@ -3982,9 +4741,12 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                         },
                       ),
               ),
+              ),
               const SizedBox(width: 12),
               Expanded(
-                child: _modoRetalho
+                child: KeyedSubtree(
+                  key: widget.tourKeys?.unidade,
+                  child: _modoRetalho
                     ? InputDecorator(
                         decoration: InputDecoration(
                           labelText: 'Unidade',
@@ -4035,24 +4797,28 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                         ),
                       ),
               ),
+              ),
             ]),
             const SizedBox(height: 10),
             if (_unidade != 'ML' && _unidade != 'G') ...[
-            TextFormField(
-              controller: _medida,
-              readOnly: _modoRetalho || widget.somenteLeitura,
-              decoration: InputDecoration(
-                labelText: 'Medida',
-                suffixIcon: _modoRetalho
-                    ? const Tooltip(
-                        message: 'Bloqueado no modo Retalho',
-                        child: Icon(Icons.lock_outline, size: 16),
-                      )
-                    : null,
+            KeyedSubtree(
+              key: widget.tourKeys?.medida,
+              child: TextFormField(
+                controller: _medida,
+                readOnly: _modoRetalho || widget.somenteLeitura,
+                decoration: InputDecoration(
+                  labelText: 'Medida',
+                  suffixIcon: _modoRetalho
+                      ? const Tooltip(
+                          message: 'Bloqueado no modo Retalho',
+                          child: Icon(Icons.lock_outline, size: 16),
+                        )
+                      : null,
+                ),
+                textCapitalization: TextCapitalization.none,
+                inputFormatters: [_MedidaEspessuraFormatter()],
+                onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
               ),
-              textCapitalization: TextCapitalization.none,
-              inputFormatters: [_MedidaEspessuraFormatter()],
-              onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
             ),
             ], // end if not ML/G (medida)
             if (_verificandoDuplicata || _possiveisDuplicatas.isNotEmpty) ...[
@@ -4066,7 +4832,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
-                child: TextFormField(
+                child: KeyedSubtree(
+                  key: widget.tourKeys?.comprimento,
+                  child: TextFormField(
                   controller: _comprimento,
                   readOnly: _modoRetalho || widget.somenteLeitura,
                   decoration: InputDecoration(
@@ -4083,11 +4851,14 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [_DecimalInputFormatter()],
                   onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: TextFormField(
+                child: KeyedSubtree(
+                  key: widget.tourKeys?.largura,
+                  child: TextFormField(
                   controller: _largura,
                   readOnly: _modoRetalho || widget.somenteLeitura,
                   decoration: InputDecoration(
@@ -4104,17 +4875,26 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [_DecimalInputFormatter()],
                   onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: TextFormField(
+                child: KeyedSubtree(
+                  key: widget.tourKeys?.espessura,
+                  child: TextFormField(
                   controller: _espessura,
                   readOnly: widget.somenteLeitura,
-                  decoration: const InputDecoration(labelText: 'Espessura'),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Espessura',
+                    suffixText: 'mm',
+                    floatingLabelBehavior: FloatingLabelBehavior.always,
+                  ),
                   textCapitalization: TextCapitalization.none,
-                  inputFormatters: [_MedidaEspessuraFormatter()],
+                  inputFormatters: [_EspessuraFormatter()],
                   onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
+                  ),
                 ),
               ),
             ]),
@@ -4122,7 +4902,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
-                child: _bloquearQuantidade
+                child: KeyedSubtree(
+                  key: widget.tourKeys?.quantidade,
+                  child: _bloquearQuantidade
                     ? _QuantidadeBloqueadaInfo()
                     : TextFormField(
                   controller: _quantidade,
@@ -4135,10 +4917,13 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                           ? 'Número inválido'
                           : null,
                 ),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _bloquearEstoqueMinimo
+                child: KeyedSubtree(
+                  key: widget.tourKeys?.estoqueMinimo,
+                  child: _bloquearEstoqueMinimo
                     ? _EstoqueMinimoBloqueadoInfo()
                     : TextFormField(
                   controller: _estoqueMinimo,
@@ -4159,11 +4944,14 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                           ? 'Número inválido'
                           : null,
                 ),
+                ),
               ),
             ]),
             SizedBox(height: 10),
             const SizedBox(height: 10),
-            InkWell(
+            KeyedSubtree(
+              key: widget.tourKeys?.estoqueConfirmado,
+              child: InkWell(
               borderRadius: BorderRadius.circular(8),
               mouseCursor: widget.somenteLeitura ? SystemMouseCursors.basic : SystemMouseCursors.click,
               onTap: widget.somenteLeitura ? null : () => setState(() => _estoqueConfirmado = !_estoqueConfirmado),
@@ -4204,6 +4992,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   ],
                 ),
               ),
+            ),
             ),
 
           ],
@@ -4372,6 +5161,49 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
+        // Quando este dialog foi aberto pelo tour do robô (tourKeys não
+        // nulo) e o tour ainda está no ar, o Esc chega até aqui ANTES do
+        // KeyboardListener do robô conseguir tratá-lo (o foco está dentro
+        // do dialog). Se deixássemos cair em _confirmarFechamento, o
+        // dialog fecharia mas o tour continuaria "ativo" apontando pra um
+        // campo que não existe mais — daí a dica sumir e o dialog ficar
+        // aberto, ou vice-versa, dependendo da corrida entre os dois
+        // listeners. Em vez disso, tratamos Esc aqui como "sair do tour":
+        // encerra o tour e fecha o dialog junto, de forma consistente.
+        // (O listener _aoMudarRoboHelper cobre os demais jeitos de encerrar
+        // o tour — ex.: "Concluir" na última parada — fechando o dialog
+        // quando tourAtivo virar false por qualquer motivo.)
+        //
+        // IMPORTANTE: este handler também é acionado programaticamente
+        // pelo próprio tour quando o usuário clica "Anterior" saindo de um
+        // passo dentro deste dialog de volta pro passo do botão "Novo
+        // Material" (fora dele) — nesse caso tourAtivo continua true, só
+        // muda a parada. Tratar isso como a condição acima faria o
+        // "Anterior" encerrar o tour inteiro em vez de só voltar um passo.
+        // Distinguimos checando se a parada atual do tour ainda aponta pra
+        // uma key deste dialog: se sim, é um Esc/fechamento manual de
+        // verdade; se não (a parada já é a do botão "Novo Material", fora
+        // do dialog), é o próprio tour navegando pra trás — só deixamos o
+        // pop acontecer, sem encerrar o tour.
+        final roboHelper =
+            context.mounted ? context.read<RoboHelperProvider>() : null;
+        final tourNavegandoParaFora = widget.tourKeys != null &&
+            roboHelper != null &&
+            roboHelper.tourAtivo &&
+            roboHelper.paradaAtual != null &&
+            !widget.tourKeys!.contemParada(roboHelper.paradaAtual!.key);
+        if (tourNavegandoParaFora) {
+          Navigator.pop(context);
+          return;
+        }
+        if (widget.tourKeys != null &&
+            context.mounted &&
+            roboHelper != null &&
+            roboHelper.tourAtivo) {
+          roboHelper.encerrarTour();
+          Navigator.pop(context);
+          return;
+        }
         final podeFechar = await _confirmarFechamento();
         if (!context.mounted) return;
         if (podeFechar) {
@@ -4643,6 +5475,42 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   }
 }
 
+/// Extrai o primeiro número de um texto, aceitando vírgula ou ponto como
+/// separador decimal e ignorando qualquer sufixo de unidade colado nele
+/// (ex.: "1.22m" -> 1.22, "3mm" -> 3, "2,00" -> 2.0). Retorna null se não
+/// houver número reconhecível.
+double? _extrairNumeroDeTexto(String? s) {
+  if (s == null) return null;
+  final match = RegExp(r'[-+]?\d+(?:[.,]\d+)?').firstMatch(s.trim());
+  if (match == null) return null;
+  return double.tryParse(match.group(0)!.replaceAll(',', '.'));
+}
+
+/// Dimensões numéricas extraídas do texto livre "medida".
+class _DimensoesMedida {
+  final double? comprimento;
+  final double? largura;
+  final double? espessura;
+  const _DimensoesMedida({this.comprimento, this.largura, this.espessura});
+}
+
+/// Faz o parse do campo "medida" (texto livre) em até 3 números separados
+/// por "x"/"X"/"×", tolerando qualquer combinação de: presença ou não do
+/// sufixo de unidade ("m", "mm"), formatação decimal (2 vs 2.00 vs 2,00), e
+/// um terceiro segmento opcional com a espessura embutida (ex.: "5x1.22x3mm",
+/// "2x1x2mm", "2.00x1.00m", "2x1"). Todas essas grafias devem ser
+/// reconhecidas como a mesma medida física.
+_DimensoesMedida _extrairDimensoesMedida(String? medida) {
+  if (medida == null || medida.trim().isEmpty) return const _DimensoesMedida();
+  final partes = medida.trim().split(RegExp(r'[xX×]'));
+  final numeros = partes.map(_extrairNumeroDeTexto).toList();
+  return _DimensoesMedida(
+    comprimento: numeros.isNotEmpty ? numeros[0] : null,
+    largura:     numeros.length > 1 ? numeros[1] : null,
+    espessura:   numeros.length > 2 ? numeros[2] : null,
+  );
+}
+
 /// Normaliza texto para comparação de duplicidade: maiúsculas, sem acentos,
 /// espaços colapsados. Espelha a normalização usada no backend (nome,
 /// identificador, medida, espessura comparados case-insensitive).
@@ -4772,15 +5640,30 @@ class _AvisoPossivelDuplicata extends StatelessWidget {
           const SizedBox(height: 8),
           ...duplicatas.map((d) {
             final m = d.material;
+
+            // Formata comprimento x largura (ex.: "2x1m") quando ambos os
+            // valores numéricos estiverem disponíveis. Nesse caso, o texto
+            // livre "medida" é omitido (evita repetir a mesma informação em
+            // formatos diferentes, ex.: "2x1m" e "2.00x1.00x2").
+            String? dimensaoFormatada;
+            if (m.comprimento != null && m.largura != null &&
+                m.comprimento! > 0 && m.largura! > 0) {
+              String fmt(double v) =>
+                  v % 1 == 0 ? v.toStringAsFixed(0) : v.toString();
+              dimensaoFormatada = '${fmt(m.comprimento!)}x${fmt(m.largura!)}m';
+            }
+
             final detalhes = [
               if (m.identificador != null && m.identificador!.trim().isNotEmpty) m.identificador!.trim(),
-              if (m.medida != null && m.medida!.trim().isNotEmpty) m.medida!.trim(),
-              if (m.espessura != null && m.espessura!.trim().isNotEmpty) m.espessura!.trim(),
+              if (dimensaoFormatada != null)
+                dimensaoFormatada
+              else if (m.medida != null && m.medida!.trim().isNotEmpty)
+                m.medida!.trim(),
+              if (m.espessura != null && m.espessura!.trim().isNotEmpty)
+                '${m.espessura!.trim().replaceAll(RegExp(r"mm\s*$", caseSensitive: false), '').trim()}mm',
             ].join(' • ');
 
-            final qtdTxt = m.quantidade % 1 == 0
-                ? m.quantidade.toStringAsFixed(0)
-                : m.quantidade.toStringAsFixed(2);
+            final qtdTxt = formatarQuantidade(m.quantidade);
 
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 3),
@@ -4914,6 +5797,20 @@ String _formatarCusto(double valor) {
     if (!str.endsWith('0')) return str;
   }
   return valor.toStringAsFixed(2);
+}
+
+/// Formata uma quantidade de material SEM arredondar/truncar o valor real.
+/// Diferente de `qtd.toStringAsFixed(2)` (que corta a precisão real do
+/// estoque, ex.: 3.696 exibido como "3.70"), esta função mostra o número
+/// exatamente como ele é: inteiro sem casas decimais, ou com o número de
+/// casas necessário para representá-lo por completo (sem zeros à direita).
+/// Ex.: 3.696 → "3.696" | 3.70 → "3.7" | 4 → "4"
+String formatarQuantidade(double valor) {
+  if (valor == valor.truncateToDouble()) return valor.toStringAsFixed(0);
+  // toString() do Dart já imprime a representação decimal completa e mínima
+  // de um double (sem zeros à direita além do necessário), preservando a
+  // precisão real do valor armazenado.
+  return valor.toString();
 }
 
 class _CustoCell extends StatefulWidget {
@@ -5466,8 +6363,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                 SizedBox(
                                   width: 70,
                                   child: Text(
-                                    h.quantidade.toStringAsFixed(
-                                        h.quantidade % 1 == 0 ? 0 : 2),
+                                    formatarQuantidade(h.quantidade),
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
                                       fontSize: 13,
@@ -5854,9 +6750,7 @@ class _BannerSecao extends StatelessWidget {
               final unidade = formatarUnidadeExibicao(a.unidade as String?);
               final unidadeExibir = unidade == '—' ? '' : unidade;
               final qtd     = a.quantidade as double;
-              final qtdStr  = qtd % 1 == 0
-                  ? qtd.toStringAsFixed(0)
-                  : qtd.toStringAsFixed(2);
+              final qtdStr  = formatarQuantidade(qtd);
               final selecionado = selecionados.contains(a);
               return InkWell(
                 onTap: () => onToggle(a),

@@ -32,8 +32,26 @@ class SolicitacaoAlteradaBanner extends StatelessWidget {
     // no exato momento da troca de rota/usuário (ver AppShell). maybeOf
     // evita lançar exceção e derrubar o app se, por algum motivo, nenhum
     // Overlay estiver mais disponível nesse instante.
+    //
+    // ATENÇÃO: [context] precisa ser um contexto de DENTRO da árvore do
+    // Navigator (ex: o context de build() do AppShell), nunca
+    // `navigatorKey.currentContext` — esse é o contexto do próprio widget
+    // Navigator, e o Overlay dele é filho na árvore, não ancestral, então
+    // Overlay.maybeOf (que só busca pra cima) sempre retornaria null. Se
+    // precisar de um contexto "estável" que sobreviva a uma desmontagem,
+    // use [showOnOverlay] com `navigatorKey.currentState?.overlay`.
     final overlay = Overlay.maybeOf(context, rootOverlay: true);
     if (overlay == null) return;
+    showOnOverlay(overlay, notificacao, onTap: onTap);
+  }
+
+  /// Mesmo comportamento de [show], mas recebendo o [OverlayState]
+  /// diretamente — sem passar por busca de ancestral via BuildContext.
+  static void showOnOverlay(
+    OverlayState overlay,
+    SolicitacaoAlteradaNotificacao notificacao, {
+    VoidCallback? onTap,
+  }) {
     late OverlayEntry entry;
     entry = OverlayEntry(
       builder: (_) => _BannerOverlay(

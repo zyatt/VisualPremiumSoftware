@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import '../models/fornecedor_model.dart';
 import '../providers/fornecedor_provider.dart';
 import '../providers/orcamento_provider.dart';
+import '../providers/robo_helper_provider.dart';
 import '../repositories/orcamento_repository.dart';
 import '../theme/app_theme.dart';
 import 'orcamento_historico_page.dart';
@@ -140,6 +141,17 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
   // _abaVisivel controla a visibilidade do editor inline (quando usado)
 
+  // ── Robô assistente: tour "Como criar um orçamento" ───────────────────────
+  // Este tour é especial: começa aqui (destaque no botão "Novo Orçamento")
+  // mas continua dentro do OrcamentoEditorPage, aberto via Navigator.push
+  // por CIMA desta página (não troca de rota do RoboHelperProvider — ver
+  // comentário em _registrarAjudaRobo). Por isso a tela do editor registra
+  // as próprias paradas na MESMA rota '/orcamento' desta página, e o botão
+  // "Novo Orçamento" abaixo apenas garante que uma aba/editor esteja aberto
+  // quando o tour chega nessa parada.
+  final _tourKeyNovoOrcamento = GlobalKey();
+  RoboHelperProvider? _roboHelperPagina;
+
   @override
   void initState() {
     super.initState();
@@ -152,6 +164,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FornecedorProvider>().carregar();
       _carregarOrcamentosServidor(origem: 'initState');
+      final helper = context.read<RoboHelperProvider>();
+      helper.notificarRota('/orcamento');
+      _roboHelperPagina = helper;
     });
   }
 
@@ -159,7 +174,173 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   void dispose() {
     _logOrc('dispose');
     _mainTabController.dispose();
+    try {
+      context.read<RoboHelperProvider>().encerrarTour();
+      context.read<RoboHelperProvider>().limparOpcoes('/orcamento');
+    } catch (_) {}
     super.dispose();
+  }
+
+  // Evita empurrar o OrcamentoEditorPage mais de uma vez enquanto o tour
+  // navega rapidamente entre a 1ª e a 2ª parada (ex.: clique duplo em
+  // "Próximo"). Mesmo padrão de guarda usado em fornecedores_page.dart e
+  // solicitacoes_material_page.dart para os dialogs abertos pelo tour.
+  bool _editorTourAberto = false;
+
+  /// Abre (ou reaproveita) o OrcamentoEditorPage para o tour continuar lá
+  /// dentro — chamado pelo `aoEntrar` da 2ª parada do tour "Como criar um
+  /// orçamento". Equivalente a tocar no botão "Novo Orçamento", mas
+  /// disparado programaticamente pelo tour (o highlight nunca clica no
+  /// widget de baixo — ver _HighlightOverlay em robo_helper_widget.dart).
+  ///
+  /// IMPORTANTE: este Future NÃO pode esperar o Navigator.push inteiro
+  /// (ou seja, até o editor ser fechado/popado). O RoboHelperProvider
+  /// (proximaParada/paradaAnterior) faz `await parada.aoEntrar?.call()`
+  /// e, enquanto esse await não resolve, mantém `_navegando = true` —
+  /// bloqueando Próximo/Anterior. Como antes aguardávamos o
+  /// Navigator.push inteiro, o tour ficava travado na parada do campo
+  /// Nome pelo tempo inteiro que o editor estivesse aberto — só "Fechar"
+  /// funcionava, porque encerrarTour() não passa por esse guard. Agora
+  /// só aguardamos o suficiente para o editor montar (garantindo que a
+  /// próxima key já exista na árvore) e tratamos o retorno do editor
+  /// (_aoVoltarDoEditor) de forma desacoplada, via .then(), sem bloquear
+  /// o tour.
+  Future<void> _abrirEditorTour() async {
+    if (_editorTourAberto) return;
+    _editorTourAberto = true;
+    final p = context.read<OrcamentoProvider>();
+    p.adicionarAba(criadaPeloTour: true);
+    final pushFuture = Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+    );
+    // Quando o editor for eventualmente fechado (usuário concluindo o
+    // tour, cancelando, ou saindo antes), trata o retorno normalmente —
+    // mas sem travar o aoEntrar/tour enquanto isso não acontece.
+    pushFuture.then((resultado) async {
+      if (mounted) _editorTourAberto = false;
+      if (mounted) await _aoVoltarDoEditor(resultado);
+    });
+    // Em vez de um delay fixo (que falhava sempre que a transição de rota
+    // demorasse mais que o esperado — animação de push do MaterialPageRoute
+    // é ~300ms — deixando o overlay escurecer a tela sem achar
+    // criarOrcamentoTourKeyCampoNome, porque tentou medir a key antes do
+    // editor terminar de montar), aguardamos ativamente a key do campo
+    // Nome passar a existir na árvore, checando a cada frame. Isso cobre
+    // tanto o caso rápido (poucos frames) quanto o mais lento (device/
+    // build mais pesado) sem nunca esperar mais que o necessário.
+    const tentativasMax = 30; // ~30 frames (até a transição normal terminar)
+    for (var i = 0; i < tentativasMax; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+      if (criarOrcamentoTourKeyBlocoFiltros.currentContext != null) break;
+    }
+  }
+
+  Future<void> _fecharEditorTourSeAberto() async {
+    if (!_editorTourAberto) return;
+    _editorTourAberto = false;
+    // Fecha a aba criada pelo tour antes de fechar o editor — mesma
+    // lógica de _onRoboHelperPaginaChanged no editor, mas disparada aqui
+    // quando o Anterior é clicado na 2ª parada (blocoFiltros), que ainda
+    // está nesta página (rota '/orcamento'). Sem isso, o editor fecha mas
+    // a aba criada automaticamente pelo tour fica aberta, vazia.
+    try {
+      context.read<OrcamentoProvider>().fecharAbaAposOperacao();
+    } catch (_) {}
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+
+  /// Registra no RoboHelperProvider a opção de ajuda contextual desta
+  /// página. Chamado a cada build (barato) para garantir que a primeira
+  /// parada sempre aponte para a key correta. As demais paradas (dentro do
+  /// OrcamentoEditorPage) são ANEXADAS a esta mesma opção pelo próprio
+  /// editor, assim que ele é montado — ver `_anexarParadasDoEditorAoTour`
+  /// em orcamento_editor_page.dart. Isso funciona porque o editor é aberto
+  /// via Navigator.push (não troca a rota do RoboHelperProvider, que
+  /// continua '/orcamento' o tempo todo) e o overlay do tour usa
+  /// `isActive` (não `isCurrent`) para decidir se o alvo ainda é válido —
+  /// então o tour sobrevive à navegação para a tela de cima.
+  void _registrarAjudaRobo() {
+    final rota = ModalRoute.of(context);
+    if (rota != null && !rota.isCurrent) return;
+
+    final helper = context.read<RoboHelperProvider>();
+
+    // Preserva paradas extras já anexadas por OrcamentoEditorPage
+    // (_anexarParadasDoEditorAoTour). Como o editor é empurrado por CIMA
+    // desta página via Navigator.push, esta página continua montada e seu
+    // build (logo, este postFrameCallback) continua rodando em segundo
+    // plano. Se sempre reescrevêssemos a opção só com as 2 paradas base,
+    // toda vez que esta página rebuildasse depois do editor já ter
+    // anexado o restante, a lista voltaria a ter só 2 paradas — e o tour
+    // ficaria preso na 2ª (campo Nome), sempre mostrando "Concluir" ali,
+    // porque _anexarParadasDoEditorAoTour desiste de reanexar quando
+    // encontra MAIS que as 2 paradas base (evita duplicar/perder o
+    // RoboTourStop em que o usuário estiver no meio do tour) — só que
+    // aqui o problema é o oposto: menos que o esperado, nunca mais.
+    final opcoesAtuais = helper.opcoesAtuais;
+    final opcaoExistente =
+        opcoesAtuais.where((o) => o.titulo == 'Como criar um orçamento').firstOrNull;
+
+    // CRÍTICO: se o editor já anexou as paradas extras (opção com mais de
+    // 2 paradas), esta página NÃO deve reescrever a opção enquanto o tour
+    // estiver ativo E o passo atual já estiver dentro do território do
+    // editor (índice >= 2). Antes desta guarda, este método rodava a cada
+    // build desta página (que continua rebuildando em segundo plano
+    // mesmo com o editor empurrado por cima, ex.: por notificações do
+    // OrcamentoProvider) e SEMPRE chamava helper.registrarOpcoes(...) de
+    // novo, mesmo already-correto. Isso por si não apagava as paradas
+    // extras (paradasExtras as preservava), mas cada chamada é uma
+    // reescrita completa da lista + um notifyListeners() — e se essa
+    // reescrita corresse EXATAMENTE durante a janela em que
+    // RoboHelperProvider.paradaAnterior() está no meio de um `await
+    // aoSair(...)` (lendo `helper.opcoesAtuais` OUTRA vez logo depois,
+    // em `_paradaEm`), a alternância entre "lista antiga" e "lista recém
+    // reconstruída" podia fazer `_paradaEm(novoIndice)` observar um
+    // estado intermediário mais curto que o esperado, levando o provider
+    // a concluir (erroneamente) que a lista "encolheu" e encerrar o tour
+    // (`_encerrarTourInterno()`) — fechando o editor e a aba, exatamente
+    // o bug relatado ao clicar "Anterior" na parada "primeiroFornecedorDialog".
+    // Pular a reescrita aqui enquanto o editor already possui e está
+    // gerenciando as paradas extras elimina essa fonte de corrida: quem
+    // manda na opção nesse momento é só o editor
+    // (_anexarParadasDoEditorAoTour), nunca esta página.
+    final editorJaAnexouExtras =
+        opcaoExistente != null && opcaoExistente.paradas.length > 2;
+    final tourDentroDoEditor = helper.tourAtivo && helper.passoAtual >= 2;
+    if (editorJaAnexouExtras && tourDentroDoEditor) return;
+
+    final paradasExtras = editorJaAnexouExtras
+        ? opcaoExistente.paradas.sublist(2)
+        : const <RoboTourStop>[];
+
+    helper.registrarOpcoes('/orcamento', [
+      RoboHelpOption(
+        titulo: 'Como criar um orçamento',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyNovoOrcamento,
+            texto: 'Toque aqui para começar um novo orçamento de compras.',
+          ),
+          RoboTourStop(
+            key: () => criarOrcamentoTourKeyBlocoFiltros,
+            texto: 'Use estes campos para filtrar o material desejado: '
+                'nome, identificador, medida, comprimento, largura ou '
+                'espessura.',
+            aoEntrar: _abrirEditorTour,
+            aoSair: _fecharEditorTourSeAberto,
+          ),
+          ...paradasExtras,
+        ],
+        // Garante que encerrar o tour (ESC, "Fechar" ou "Concluir") a
+        // partir de QUALQUER parada dentro do editor (3ª em diante — ver
+        // orcamento_editor_page.dart) também feche o editor e devolva o
+        // usuário para esta página. Sem isto, o aoSair de cada parada só
+        // fechava o dialog daquela parada específica (fornecedor ou
+        // preço), deixando o editor inteiro aberto na tela.
+        aoEncerrar: _fecharEditorTourSeAberto,
+      ),
+    ]);
   }
 
   // ── Retorno do editor de orçamento ───────────────────────────────────────────
@@ -460,6 +641,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       provider.setFornecedoresOcultosTab(
         (orcamentoCompleto['fornecedoresOcultos'] as List? ?? []).map((e) => e as int).toList(),
       );
+      provider.definirModoPrecificacao(orcamentoCompleto['modoPrecificacao'] as String? ?? 'UNIDADE');
       // jaFinalizado=true mantém o orçamento somente-leitura, modoGerarOC=true
       // exibe o botão "Gerar OC" no editor.
       provider.atualizarFlagsTab(jaFinalizado: true, modoGerarOC: true);
@@ -567,6 +749,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       provider.setFornecedoresOcultosTab(
         (orcamentoCompleto['fornecedoresOcultos'] as List? ?? []).map((e) => e as int).toList(),
       );
+      provider.definirModoPrecificacao(orcamentoCompleto['modoPrecificacao'] as String? ?? 'UNIDADE');
 
       final statusReaberto = orc['status'] as String? ?? '';
       provider.atualizarFlagsTab(
@@ -681,6 +864,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         'titulo': orcamentoCompleto['titulo'] as String? ?? 'Orçamento #$orcId',
         'itens': itensParaPdf,
         'fornecedoresOcultos': fornecedoresOcultos,
+        'modoPrecificacao': orcamentoCompleto['modoPrecificacao'] as String? ?? 'UNIDADE',
       });
 
       final hoje = DateTime.now();
@@ -710,6 +894,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
   @override
   Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _registrarAjudaRobo();
+    });
     return Consumer<OrcamentoProvider>(
       builder: (context, provider, _) {
         if (!provider.carregado) {
@@ -939,6 +1126,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         const SizedBox(width: 12),
 
         Tooltip(
+          key: _tourKeyNovoOrcamento,
           message: 'Criar um novo orçamento de compra',
           child: FilledButton.icon(
             onPressed: () async {
@@ -1184,24 +1372,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
     return Column(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Tooltip(
-              message: 'Atualizar lista de orçamentos',
-              child: TextButton.icon(
-                onPressed: () => _carregarOrcamentosServidor(origem: 'botaoAtualizarManual'),
-                icon: Icon(Icons.refresh, size: 15),
-                label: Text('Atualizar', style: TextStyle(fontSize: 12)),
-                style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant)
-                    .copyWith(
-                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
         Expanded(
           child: ListView.separated(
             itemCount: lista.length,
@@ -1360,13 +1530,20 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
               _parseDoubleOrNull(materialData?['largura']),
               _parseDoubleOrNull(materialData?['comprimento']),
             );
+      final espessura = materialData?['espessura'] as String?;
+      final espessuraFormatada = (espessura != null && espessura.isNotEmpty)
+          ? (espessura.toLowerCase().endsWith('mm') ? espessura : '${espessura}mm')
+          : null;
+      final identificador = materialData?['identificador'] as String?;
       final partes = <String>[
         if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
-        if ((materialData?['espessura'] as String? ?? '').isNotEmpty) materialData!['espessura'] as String,
-        if ((materialData?['identificador'] as String? ?? '').isNotEmpty) materialData!['identificador'] as String,
+        if (espessuraFormatada != null) espessuraFormatada,
       ];
-      materiaisUnicos[materialId] =
+      final nomeComPartes =
           partes.isEmpty ? nomeBase : '$nomeBase · ${partes.join(' · ')}';
+      materiaisUnicos[materialId] = (identificador != null && identificador.isNotEmpty)
+          ? '$identificador · $nomeComPartes'
+          : nomeComPartes;
     }
     
     final criadoEm = orcamento['criadoEm'] != null
@@ -1432,9 +1609,9 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
                   ),
                 if (aprovadoEm != null)
                   _chip(
-                    Icons.check_circle_outline,
+                    motivoRejeicao != null ? Icons.cancel_outlined : Icons.check_circle_outline,
                     [
-                      'Aprovado em ${_formatDataCard(aprovadoEm)}',
+                      '${motivoRejeicao != null ? 'Não aprovado' : 'Aprovado'} em ${_formatDataCard(aprovadoEm)}',
                       if (aprovadorNome != null) 'por $aprovadorNome',
                     ].join(' '),
                     Theme.of(context).colorScheme.onSurfaceVariant,

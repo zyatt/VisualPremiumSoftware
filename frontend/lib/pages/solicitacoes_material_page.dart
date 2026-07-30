@@ -12,8 +12,9 @@ import '../providers/material_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_client.dart';
-import '../pages/controle_estoque_page.dart' show MaterialFormDialog, formatarUnidadeExibicao, formatarMedidaOuDimensoes;
+import '../pages/controle_estoque_page.dart' show MaterialFormDialog, formatarUnidadeExibicao, formatarMedidaOuDimensoes, formatarQuantidade;
 import '../widgets/escolher_usuario_chat_dialog.dart';
+import '../providers/robo_helper_provider.dart';
 
 class _UpperCaseFormatter extends TextInputFormatter {
   static final _acentos = {
@@ -87,6 +88,40 @@ class _MedidaEspessuraFormatter extends TextInputFormatter {
   }
 }
 
+/// Formata um valor de espessura garantindo o sufixo "mm" sem duplicar.
+/// Dados antigos podem já ter sido salvos com "mm"/"MM" digitado manualmente
+/// (ex.: "2MM", "2 mm"); removemos esse sufixo antes de reanexar o nosso.
+String? formatarEspessuraComSufixo(String? valor) {
+  final v = valor?.trim();
+  if (v == null || v.isEmpty) return null;
+  final numero = v.replaceAll(RegExp(r'\s*mm\s*$', caseSensitive: false), '').trim();
+  if (numero.isEmpty) return null;
+  return '${numero}mm';
+}
+
+/// Formatter para o campo Espessura: aceita apenas dígitos, ponto e vírgula
+/// (vírgula é convertida em ponto), bloqueando letras e qualquer outro
+/// caractere.
+class _EspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text.replaceAll(',', '.');
+    texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
+    final partes = texto.split('.');
+    if (partes.length > 2) {
+      texto = '${partes[0]}.${partes.sublist(1).join('')}';
+    }
+    final sel = newValue.selection.copyWith(
+      baseOffset: newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
 class SolicitacoesMaterialPage extends StatefulWidget {
   const SolicitacoesMaterialPage({super.key});
 
@@ -101,6 +136,56 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
   String _andamentoFiltro = '';
   Timer? _debounceTimer;
   late TabController _tabController;
+
+  // ── Robô assistente: tour "Como fazer uma solicitação?" ──────────────────
+  final _tourKeyNovaSolicitacao = GlobalKey();
+  final _criarSolicitacaoTourKeys = _CriarSolicitacaoTourKeys();
+  RoboHelperProvider? _roboHelperPagina;
+  // Evita reabrir/refechar o dialog "Nova Solicitação" (ou o seletor de
+  // material dentro dele) mais de uma vez enquanto o tour navega entre
+  // paradas rapidamente — mesmo padrão usado em fornecedores_page.dart.
+  bool _dialogTourAberto = false;
+  bool _seletorTourAberto = false;
+  // Flags de transição SEPARADAS por camada de dialog — usar uma única
+  // flag compartilhada fazia o _abrirSeletorTour() ser bloqueado pelo
+  // _dialogTourEmTransicao ainda ligado pelo _abrirDialogTour() anterior
+  // (o addPostFrameCallback que o desliga só roda no frame seguinte, e o
+  // tour já tinha avançado pro próximo passo antes disso), fazendo o
+  // dialog "Selecionar Material" simplesmente não abrir durante o tour.
+  bool _dialogTourEmTransicao = false;
+  bool _seletorTourEmTransicao = false;
+
+  // ── Robô assistente: tour "Como adicionar materiais a uma solicitação
+  // existente" ──────────────────────────────────────────────────────────
+  // Keys do card em destaque na listagem do tour "Como adicionar materiais a
+  // uma solicitação existente". IMPORTANTE: usamos DUAS GlobalKeys distintas
+  // (fictício vs. linha real) em vez de reutilizar a mesma — o Flutter proíbe
+  // que a mesma GlobalKey seja usada por dois elementos montados ao mesmo
+  // tempo, e como `_tourExibirCardFicticio` é setado de forma assíncrona
+  // (dentro de `aoEntrar`), havia uma janela de frames em que o card
+  // fictício E a primeira linha real da lista (recém-chegada do provider)
+  // tentavam existir simultaneamente com a mesma key. Isso corrompia o
+  // Element daquela posição, deixando o GestureDetector/MouseRegion "preso"
+  // até um rebuild completo — exatamente o sintoma relatado de linhas que
+  // param de responder a clique/hover depois de exclusões rápidas.
+  final _tourKeyCardSolicitacaoFicticio = GlobalKey();
+  final _tourKeyCardSolicitacaoReal = GlobalKey();
+  // Key que o RoboTourStop efetivamente usa: aponta pra uma das duas acima,
+  // trocada apenas depois que uma delas garantidamente saiu da árvore.
+  GlobalKey get _tourKeyCardSolicitacao =>
+      _tourExibirCardFicticio ? _tourKeyCardSolicitacaoFicticio : _tourKeyCardSolicitacaoReal;
+  final _tourKeyAdicionarMateriaisExistente = GlobalKey();
+  bool _tourExibirCardFicticio = false;
+  // Solicitação simulada em memória (nunca enviada ao backend) usada como
+  // substituta de uma solicitação real quando a lista "Em Andamento" está
+  // vazia — apenas para o tour "Como adicionar materiais a uma solicitação
+  // existente" poder dar highlight e abrir o dialog de verdade.
+  SolicitacaoMaterialModel? _solicitacaoTourFake;
+  bool _dialogVisualizarTourAberto = false;
+  bool _dialogVisualizarTourEmTransicao = false;
+  // Controla o scroll da aba "Em Andamento" — usado pelo tour pra sempre
+  // voltar ao topo da lista antes de dar highlight na primeira linha.
+  final _scrollEmAndamento = ScrollController();
 
   // ── Paginação (independente por aba) ─────────────────────────────────────
   static const int _itensPorPagina = 50;
@@ -143,11 +228,15 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
         await context.read<SolicitacaoMaterialProvider>().carregar();
         _atualizarTotaisGlobais();
+        final helper = context.read<RoboHelperProvider>();
+        helper.notificarRota('/solicitacoes-material');
+        _roboHelperPagina = helper;
+        _roboHelperPagina!.addListener(_onRoboHelperPaginaChanged);
       }
     });
 
@@ -181,6 +270,52 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     _tentarAbrirSolicitacaoPendente();
   }
 
+  // Rede de segurança: se o tour terminar (ESC, "Fechar", ou trocou de
+  // dica) enquanto um dialog aberto pelo próprio tour ainda está na tela,
+  // garante que ele seja fechado e que as flags voltem a false — senão a
+  // próxima tentativa de abrir o mesmo dialog fica bloqueada pelo guard.
+  void _onRoboHelperPaginaChanged() {
+    if (!mounted) return;
+    if (_roboHelperPagina!.tourAtivo) return;
+
+    // Quantos dialogs o tour pode ter empilhado simultaneamente (ex.:
+    // "Nova Solicitação" com o "Selecionar Material" aberto por cima).
+    // Contamos as flags ativas ANTES de zerá-las para saber quantos
+    // maybePop() precisamos disparar.
+    final dialogsAbertosPeloTour = [
+      _seletorTourAberto,
+      _dialogTourAberto,
+      _dialogVisualizarTourAberto,
+    ].where((aberto) => aberto).length;
+
+    _seletorTourAberto = false;
+    _dialogTourAberto = false;
+    _dialogVisualizarTourAberto = false;
+
+    if (dialogsAbertosPeloTour > 0) {
+      // IMPORTANTE: maybePop() é assíncrono — disparar as N chamadas em
+      // sequência sem aguardar cada uma resolver faz com que a pilha do
+      // Navigator ainda não tenha sido atualizada entre uma chamada e
+      // outra (ou faz pops concorrentes se atropelarem), deixando
+      // dialogs empilhados (ex.: "Selecionar Material" sobre "Nova
+      // Solicitação") sem fechar todos ao apertar ESC. Por isso
+      // aguardamos cada pop terminar antes de disparar o próximo.
+      () async {
+        final navigator = Navigator.of(context, rootNavigator: true);
+        for (var i = 0; i < dialogsAbertosPeloTour; i++) {
+          if (!mounted) return;
+          final fechou = await navigator.maybePop();
+          // Se não havia mais nada pra fechar, para de tentar.
+          if (!fechou) break;
+        }
+      }();
+    }
+
+    if (_tourExibirCardFicticio) {
+      setState(() => _tourExibirCardFicticio = false);
+    }
+  }
+
   @override
   void dispose() {
     // Usa a referência guardada em didChangeDependencies() em vez de
@@ -192,6 +327,12 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     _debounceTimer?.cancel();
     _buscaCtrl.dispose();
     _tabController.dispose();
+    _scrollEmAndamento.dispose();
+    _roboHelperPagina?.removeListener(_onRoboHelperPaginaChanged);
+    try {
+      context.read<RoboHelperProvider>().encerrarTour();
+      context.read<RoboHelperProvider>().limparOpcoes('/solicitacoes-material');
+    } catch (_) {}
     super.dispose();
   }
 
@@ -279,6 +420,393 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     }
   }
 
+  /// Abre o dialog "Nova Solicitação" já com um item de material inicial
+  /// (simulando o clique em "Adicionar Material") e com as GlobalKeys do
+  /// tour vinculadas — usado apenas pelo tour do robô assistente.
+  Future<void> _abrirDialogTour() async {
+    if (_dialogTourAberto || _dialogTourEmTransicao) return;
+    _dialogTourAberto = true;
+    _dialogTourEmTransicao = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _dialogTourEmTransicao = false;
+    });
+    showDialog<bool>(
+      context: context,
+      // Enquanto o tour do robô guia este formulário, o balão de dica fica
+      // fora do dialog (numa camada acima dele, no Overlay raiz), e o
+      // GestureDetector de tela cheia do robô (que avança o tour a cada
+      // toque) fica por baixo do balão mas por CIMA do barrier do dialog.
+      // Se o barrier continuar dismissible, qualquer clique do usuário
+      // tentando interagir com a dica (ex.: os botões Anterior/Próximo)
+      // vaza pro barrier e fecha o formulário sem querer — foi isso que
+      // fazia o tour "pular" direto da parada do botão "Nova Solicitação"
+      // pro campo Observação: o dialog fechava e reabria no meio do tour,
+      // perdendo os passos intermediários. Mesmo padrão usado em estoque.
+      barrierDismissible: !_dialogTourAberto,
+      builder: (_) => _CriarSolicitacaoDialog(
+        tourKeys: _criarSolicitacaoTourKeys,
+        abrirComItemInicial: true,
+      ),
+    ).then((salvou) {
+      if (mounted) _dialogTourAberto = false;
+      if (salvou == true && mounted) {
+        context.read<SolicitacaoMaterialProvider>().carregar();
+      }
+    });
+    // Aguarda um frame para o dialog começar a montar antes de o provider
+    // tentar medir a key em destaque.
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+  }
+
+  /// Fecha o dialog "Nova Solicitação" aberto pelo tour, aguardando a
+  /// animação de saída terminar antes de retornar — evita que a parada
+  /// seguinte/anterior tente medir keys enquanto ele ainda está visível.
+  /// IMPORTANTE: rootNavigator:true porque showDialog abre no Navigator
+  /// raiz; sem isso maybePop() poparia a rota da página em vez do dialog.
+  Future<void> _fecharDialogTourSeAberto() async {
+    if (!_dialogTourAberto || _dialogTourEmTransicao) return;
+    _dialogTourAberto = false;
+    _dialogTourEmTransicao = true;
+    await Navigator.of(context, rootNavigator: true).maybePop();
+    _dialogTourEmTransicao = false;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+
+  /// Abre o dialog "Selecionar Material" por cima do "Nova Solicitação",
+  /// já indo direto para a categoria "TODOS", com as keys do tour.
+  Future<void> _abrirSeletorTour() async {
+    if (_seletorTourAberto || _seletorTourEmTransicao) return;
+    _seletorTourAberto = true;
+    _seletorTourEmTransicao = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _seletorTourEmTransicao = false;
+    });
+    showDialog<MaterialModel>(
+      context: context,
+      // Mesmo motivo do dialog "Nova Solicitação" em _abrirDialogTour: o
+      // GestureDetector de tela cheia do robô fica acima do barrier deste
+      // dialog enquanto o tour está ativo, e um barrier dismissible deixa
+      // cliques nos botões da dica vazarem e fecharem o seletor sem querer.
+      barrierDismissible: !_seletorTourAberto,
+      builder: (_) => _SeletorMaterialDialog(
+        tourKeys: _criarSolicitacaoTourKeys.seletorMaterial,
+        abrirTodosAutomaticamente: true,
+      ),
+    ).then((_) {
+      if (mounted) _seletorTourAberto = false;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+  }
+
+  /// Fecha o "Selecionar Material" aberto pelo tour, para voltar ao
+  /// "Nova Solicitação" por baixo dele (ex.: botão "Anterior").
+  Future<void> _fecharSeletorTourSeAberto() async {
+    if (!_seletorTourAberto || _seletorTourEmTransicao) return;
+    _seletorTourAberto = false;
+    _seletorTourEmTransicao = true;
+    await Navigator.of(context, rootNavigator: true).maybePop();
+    _seletorTourEmTransicao = false;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+
+  /// Monta (apenas em memória, sem tocar o backend) uma solicitação
+  /// fictícia "em andamento" para o tour "Como adicionar materiais a uma
+  /// solicitação existente" poder dar highlight e abrir o dialog de
+  /// verdade. Antes, quando a lista estava vazia, essa etapa criava uma
+  /// solicitação real no servidor só pra servir de demonstração — o que
+  /// não faz sentido, já que a intenção é apenas simular a existência de
+  /// uma solicitação para a dica funcionar, não gerar dado real. Agora,
+  /// se não houver nenhuma solicitação em andamento, geramos um
+  /// [SolicitacaoMaterialModel] fake (guardado em [_solicitacaoTourFake])
+  /// usando um material real já carregado (só para exibição/nome), e o
+  /// dialog de visualização do tour passa a aceitar esse fake como
+  /// alternativa a uma solicitação vinda do provider.
+  Future<void> _garantirSolicitacaoTourExistente() async {
+    final provider = context.read<SolicitacaoMaterialProvider>();
+    final temEmAndamento =
+        provider.solicitacoes.any((s) => s.andamento != 'FINALIZADO');
+    if (temEmAndamento) {
+      _solicitacaoTourFake = null;
+      return;
+    }
+
+    try {
+      // Precisa de um material real para o item de demonstração — usa o
+      // primeiro disponível já carregado no MaterialProvider (carregando
+      // a primeira página, sem filtros, se ainda não houver nada em
+      // memória).
+      final materialProvider = context.read<MaterialProvider>();
+      var materiais = materialProvider.materiais;
+      if (materiais.isEmpty) {
+        await materialProvider.carregar();
+        if (!mounted) return;
+        materiais = materialProvider.materiais;
+      }
+      if (materiais.isEmpty) {
+        // Sem nenhum material cadastrado no sistema não há como montar uma
+        // solicitação de demonstração — mantém o fallback do card fictício.
+        _solicitacaoTourFake = null;
+        return;
+      }
+      final materialDemo = materiais.first;
+      final agora = DateTime.now();
+
+      final itemFake = ItemSolicitacaoModel(
+        id: -1,
+        solicitacaoId: -1,
+        materialId: materialDemo.id,
+        materialNome: materialDemo.nome,
+        materialUnidade: materialDemo.unidade,
+        materialIdentificador: materialDemo.identificador,
+        materialMedida: materialDemo.medida,
+        materialEspessura: materialDemo.espessura,
+        materialLargura: materialDemo.largura,
+        materialComprimento: materialDemo.comprimento,
+        materialCategoria: materialDemo.categoria,
+        materialQuantidadeEstoque: materialDemo.quantidade,
+        quantidade: 1,
+        observacao: null,
+        imagemUrl: null,
+        comprado: false,
+        estoque: false,
+        criadoEm: agora,
+      );
+
+      if (mounted) {
+        setState(() {
+          _solicitacaoTourFake = SolicitacaoMaterialModel(
+            id: -1,
+            numeroOS: 'DEMONSTRACAO',
+            nomeCliente: 'Cliente',
+            dataNecessidade: agora.add(const Duration(days: 7)),
+            andamento: 'EM_ANDAMENTO',
+            observacao: 'Solicitação de exemplo usada apenas nesta dica — '
+                'nada é salvo.',
+            // Não usamos o usuário logado aqui de propósito: esse campo é
+            // só exibido no dialog de visualização e o valor real não
+            // importa nesta simulação (é descartado ao sair do tour).
+            usuarioId: 0,
+            usuarioNome: 'Visual Premium',
+            criadoEm: agora,
+            atualizadoEm: agora,
+            itens: [itemFake],
+            adicionais: const [],
+          );
+        });
+      }
+    } catch (_) {
+      // Falhou silenciosamente (ex.: material indisponível) — o chamador
+      // cai de volta pro card fictício.
+      _solicitacaoTourFake = null;
+    }
+  }
+
+  /// Abre o dialog "Solicitação OS ..." (visualização) por cima da listagem
+  /// e dá highlight no botão "Adicionar Materiais" — usado apenas pelo tour
+  /// do robô assistente. Se existir alguma solicitação em andamento, abre a
+  /// primeira delas (a mesma que está com o card em destaque); senão abre o
+  /// card fictício com uma solicitação de demonstração.
+  Future<void> _abrirDialogVisualizarTour() async {
+    if (_dialogVisualizarTourAberto || _dialogVisualizarTourEmTransicao) return;
+    _dialogVisualizarTourAberto = true;
+    _dialogVisualizarTourEmTransicao = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _dialogVisualizarTourEmTransicao = false;
+    });
+
+    final emAndamento = context
+        .read<SolicitacaoMaterialProvider>()
+        .solicitacoes
+        .where((s) => s.andamento != 'FINALIZADO')
+        .toList()
+      ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
+
+    // Usa a primeira solicitação real "em andamento" se houver; senão cai
+    // para a solicitação simulada (montada em _garantirSolicitacaoTourExistente,
+    // nunca enviada ao backend) para que o tour continue funcionando mesmo
+    // sem nenhuma solicitação de verdade.
+    final solicitacaoParaAbrir =
+        emAndamento.isNotEmpty ? emAndamento.first : _solicitacaoTourFake;
+
+    if (solicitacaoParaAbrir == null) {
+      // Nem solicitação real nem simulada disponível (ex.: nenhum material
+      // cadastrado no sistema) — mantém o card fictício em destaque com o
+      // texto orientando o usuário.
+      _dialogVisualizarTourAberto = false;
+      _dialogVisualizarTourEmTransicao = false;
+      return;
+    }
+
+    showDialog<bool>(
+      context: context,
+      barrierDismissible: !_dialogVisualizarTourAberto,
+      builder: (_) => _VisualizarSolicitacaoDialog(
+        solicitacao: solicitacaoParaAbrir,
+        tourKeyAdicionarMateriais: _tourKeyAdicionarMateriaisExistente,
+      ),
+    ).then((salvou) {
+      if (mounted) _dialogVisualizarTourAberto = false;
+      if (salvou == true && mounted) {
+        context.read<SolicitacaoMaterialProvider>().carregar();
+      }
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+  }
+
+  /// Fecha o dialog de visualização aberto pelo tour, aguardando a animação
+  /// de saída terminar antes de retornar.
+  Future<void> _fecharDialogVisualizarTourSeAberto() async {
+    if (!_dialogVisualizarTourAberto || _dialogVisualizarTourEmTransicao) return;
+    _dialogVisualizarTourAberto = false;
+    _dialogVisualizarTourEmTransicao = true;
+    await Navigator.of(context, rootNavigator: true).maybePop();
+    _dialogVisualizarTourEmTransicao = false;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+
+  /// Registra no RoboHelperProvider as opções de ajuda contextual desta
+  /// página. Chamado a cada build (barato — é só uma atribuição de lista)
+  /// pra garantir que as opções sempre apontem para as keys corretas.
+  void _registrarAjudaRobo() {
+    final rota = ModalRoute.of(context);
+    if (rota != null && !rota.isCurrent) return;
+
+    final helper = context.read<RoboHelperProvider>();
+    final k = _criarSolicitacaoTourKeys;
+    helper.registrarOpcoes('/solicitacoes-material', [
+      RoboHelpOption(
+        titulo: 'Como fazer uma solicitação',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyNovaSolicitacao,
+            texto: 'Toque aqui para abrir o formulário de uma nova '
+                'solicitação de material.',
+            aoEntrar: () async {
+              // Voltando pra este passo (botão "Anterior" vindo de dentro
+              // do dialog), fecha tudo que o tour tiver aberto — senão o
+              // botão fica escondido atrás do(s) dialog(s).
+              await _fecharSeletorTourSeAberto();
+              await _fecharDialogTourSeAberto();
+            },
+          ),
+          RoboTourStop(
+            key: () => k.numeroOS,
+            texto: 'Número da OS (Ordem de Serviço) vinculada a essa '
+                'solicitação — obrigatório.',
+            aoEntrar: _abrirDialogTour,
+          ),
+          RoboTourStop(
+            key: () => k.cliente,
+            texto: 'Nome do cliente dessa OS — obrigatório.',
+          ),
+          RoboTourStop(
+            key: () => k.dataNecessidade,
+            texto: 'Data em que o material precisa estar disponível.',
+          ),
+          RoboTourStop(
+            key: () => k.observacao,
+            texto: 'Observação geral da solicitação (opcional).',
+          ),
+          RoboTourStop(
+            key: () => k.adicionarMaterial,
+            texto: 'Toque aqui para adicionar um material à solicitação — '
+                'você pode adicionar quantos precisar.',
+          ),
+          RoboTourStop(
+            key: () => k.material,
+            texto: 'Toque para escolher o material desejado.',
+            aoEntrar: _fecharSeletorTourSeAberto,
+          ),
+          RoboTourStop(
+            key: () => k.seletorMaterial.filtros,
+            texto: 'Use a busca por nome ou os filtros de identificador, '
+                'medida, comprimento, largura e espessura para encontrar '
+                'o material mais rápido.',
+            aoEntrar: _abrirSeletorTour,
+          ),
+          RoboTourStop(
+            key: () => k.quantidade,
+            texto: 'Depois de escolher o material, informe a quantidade '
+                'necessária.',
+            aoEntrar: () async {
+              // Volta pro "Nova Solicitação" com o material já selecionado
+              // (o seletor fecha sozinho ao tocar num material — aqui só
+              // garantimos que a flag/estado fiquem consistentes caso o
+              // usuário tenha voltado de um passo anterior).
+              await _fecharSeletorTourSeAberto();
+              await _abrirDialogTour();
+            },
+          ),
+          RoboTourStop(
+            key: () => k.observacaoMaterial,
+            texto: 'Observação específica desse material (opcional).',
+          ),
+          RoboTourStop(
+            key: () => k.anexarImagem,
+            texto: 'Toque aqui para anexar uma imagem de referência desse '
+                'material.',
+          ),
+        ],
+      ),
+      RoboHelpOption(
+        titulo: 'Como adicionar materiais a uma solicitação existente',
+        paradas: [
+          RoboTourStop(
+            // IMPORTANTE: passar o GETTER (função), não o valor já resolvido.
+            // _tourKeyCardSolicitacao decide entre a key real e a fictícia
+            // com base em _tourExibirCardFicticio — e esse flag só é ligado
+            // DENTRO do aoEntrar abaixo, de forma assíncrona (depois que
+            // _garantirSolicitacaoTourExistente() roda). Se a key fosse
+            // resolvida aqui (no momento em que esta lista de paradas é
+            // construída em _registrarAjudaRobo(), com o flag ainda false),
+            // o RoboTourStop ficaria preso apontando pra
+            // _tourKeyCardSolicitacaoReal — que nunca chega a existir na
+            // árvore quando cai no card fictício — e o highlight/dica nunca
+            // apareceriam, mesmo com o card "DEMONSTRAÇÃO" visível na tela.
+            key: () => _tourKeyCardSolicitacao,
+            texto: 'Selecione uma solicitação para abrir e adicionar mais '
+                'materiais a ela.',
+            aoEntrar: () async {
+              await _fecharDialogVisualizarTourSeAberto();
+              // Esse tour só faz sentido na aba "Em Andamento" — se o
+              // usuário estiver em "Finalizadas", troca automaticamente.
+              if (_tabController.index != 0) {
+                _tabController.animateTo(0);
+              }
+              // Sempre volta pra primeira página e pro topo da lista, pra
+              // garantir que a primeira solicitação (a que vai receber o
+              // highlight) esteja visível.
+              setState(() => _paginaEmAndamento = 0);
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (_scrollEmAndamento.hasClients) {
+                  _scrollEmAndamento.jumpTo(0);
+                }
+              });
+              // Se não existir nenhuma solicitação em andamento, cria uma
+              // de verdade pra o tour poder abrir o dialog real no passo
+              // seguinte (em vez de só escurecer a tela e não fazer nada).
+              await _garantirSolicitacaoTourExistente();
+              final temSolicitacaoEmAndamento = mounted &&
+                  context
+                      .read<SolicitacaoMaterialProvider>()
+                      .solicitacoes
+                      .any((s) => s.andamento != 'FINALIZADO');
+              if (!temSolicitacaoEmAndamento && mounted) {
+                setState(() => _tourExibirCardFicticio = true);
+              }
+            },
+          ),
+          RoboTourStop(
+            key: () => _tourKeyAdicionarMateriaisExistente,
+            texto: 'Toque aqui para adicionar mais materiais a esta '
+                'solicitação.',
+            aoEntrar: _abrirDialogVisualizarTour,
+          ),
+        ],
+      ),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     // ── Abertura pendente vinda de um encaminhamento no chat ────────────────
@@ -290,6 +818,9 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     // há um id pendente não consumido.
     context.watch<SolicitacaoMaterialProvider>().solicitacaoParaAbrirPendente;
     WidgetsBinding.instance.addPostFrameCallback((_) => _tentarAbrirSolicitacaoPendente());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _registrarAjudaRobo();
+    });
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -319,16 +850,19 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                 const Spacer(),
                 Tooltip(
                   message: 'Criar uma nova solicitação de material',
-                  child: FilledButton.icon(
-                    onPressed: () => _abrirFormSolicitacao(),
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Nova Solicitação'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    ).copyWith(
-                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                  child: KeyedSubtree(
+                    key: _tourKeyNovaSolicitacao,
+                    child: FilledButton.icon(
+                      onPressed: () => _abrirFormSolicitacao(),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Nova Solicitação'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      ).copyWith(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
                     ),
                   ),
                 ),
@@ -364,7 +898,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                   child: TextField(
                     controller: _buscaCtrl,
                     decoration: InputDecoration(
-                      hintText: 'Buscar por material, OS ou cliente...',
+                      hintText: 'Buscar por material, OS ou cliente',
                       prefixIcon: Icon(Icons.search,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
@@ -444,6 +978,11 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                             ? 'Finalizadas'
                             : 'Finalizadas (${finalizadas.length})',
                       ),
+                      Tab(
+                        text: provider.carregando
+                            ? 'Materiais Solicitados'
+                            : 'Materiais Solicitados (${emAndamento.fold<int>(0, (soma, s) => soma + s.totalMateriais)})',
+                      ),
                     ],
                   ),
                 );
@@ -513,6 +1052,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                     children: [
                       _buildLista(emAndamento, 'Nenhuma solicitação em andamento', _Aba.emAndamento),
                       _buildLista(finalizadas, 'Nenhuma solicitação finalizada', _Aba.finalizadas),
+                      MateriaisSolicitadosView(solicitacoes: emAndamento),
                     ],
                   );
                 },
@@ -526,19 +1066,50 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
 
   Widget _buildLista(
       List<SolicitacaoMaterialModel> lista, String mensagemVazia, _Aba aba) {
+    // Card fictício do tour "Como adicionar materiais a uma solicitação
+    // existente": só aparece na aba Em Andamento, e apenas quando não há
+    // nenhuma solicitação real disponível para dar highlight.
+    final mostrarCardFicticio =
+        _tourExibirCardFicticio && aba == _Aba.emAndamento && lista.isEmpty;
+
+    // Quando existe uma solicitação fake montada (_solicitacaoTourFake, veja
+    // _garantirSolicitacaoTourExistente), mostramos ela na própria tabela —
+    // igual a uma linha real — em vez do card genérico "Selecione uma
+    // solicitação". Isso evita a solicitação "DEMONSTRAÇÃO" aparecer do nada
+    // só no dialog do passo seguinte do tour: agora o passo 1 (lista) e o
+    // passo 2 (dialog) mostram consistentemente a mesma solicitação fake.
+    // O card genérico continua existindo como fallback para o caso raro em
+    // que não há nenhum material cadastrado no sistema para montar o fake.
+    if (mostrarCardFicticio && _solicitacaoTourFake != null) {
+      return SingleChildScrollView(
+        controller: _scrollEmAndamento,
+        padding: const EdgeInsets.only(top: 16),
+        child: Card(
+          clipBehavior: Clip.antiAlias,
+          child: _TabelaSolicitacoes(
+            solicitacoes: [_solicitacaoTourFake!],
+            onAbrir: (_) => _abrirDialogVisualizarTour(),
+            tourKeyPrimeiraLinha: _tourKeyCardSolicitacaoFicticio,
+          ),
+        ),
+      );
+    }
+
     if (lista.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.inventory_2_outlined, size: 64,
-                color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: 16),
-            Text(mensagemVazia,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          ],
-        ),
+        child: mostrarCardFicticio
+            ? _CardSolicitacaoFicticio(tourKey: _tourKeyCardSolicitacaoFicticio)
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.inventory_2_outlined, size: 64,
+                      color: Theme.of(context).colorScheme.outline),
+                  const SizedBox(height: 16),
+                  Text(mensagemVazia,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                ],
+              ),
       );
     }
 
@@ -553,12 +1124,15 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
       children: [
         Expanded(
           child: SingleChildScrollView(
+            controller: aba == _Aba.emAndamento ? _scrollEmAndamento : null,
             padding: const EdgeInsets.only(top: 16),
             child: Card(
               clipBehavior: Clip.antiAlias,
               child: _TabelaSolicitacoes(
                 solicitacoes: paginados,
                 onAbrir: _abrirFormSolicitacao,
+                tourKeyPrimeiraLinha:
+                    aba == _Aba.emAndamento ? _tourKeyCardSolicitacaoReal : null,
               ),
             ),
           ),
@@ -862,8 +1436,15 @@ class _BannerTotaisGlobais extends StatelessWidget {
 class _TabelaSolicitacoes extends StatelessWidget {
   final List<SolicitacaoMaterialModel> solicitacoes;
   final void Function(SolicitacaoMaterialModel) onAbrir;
+  /// Usado apenas pelo tour do robô assistente: dá highlight na primeira
+  /// linha da tabela (a solicitação que o tour vai abrir em seguida).
+  final GlobalKey? tourKeyPrimeiraLinha;
 
-  const _TabelaSolicitacoes({required this.solicitacoes, required this.onAbrir});
+  const _TabelaSolicitacoes({
+    required this.solicitacoes,
+    required this.onAbrir,
+    this.tourKeyPrimeiraLinha,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -891,7 +1472,11 @@ class _TabelaSolicitacoes extends StatelessWidget {
           if (i > 0)
             Divider(height: 0, thickness: 0.8,
                 color: Theme.of(context).colorScheme.outlineVariant),
-          _LinhaSolicitacao(solicitacao: solicitacoes[i], onAbrir: onAbrir),
+          _LinhaSolicitacao(
+            solicitacao: solicitacoes[i],
+            onAbrir: onAbrir,
+            tourKey: i == 0 ? tourKeyPrimeiraLinha : null,
+          ),
         ],
       ],
     );
@@ -914,8 +1499,13 @@ class _CabecalhoColuna extends StatelessWidget {
 class _LinhaSolicitacao extends StatefulWidget {
   final SolicitacaoMaterialModel solicitacao;
   final void Function(SolicitacaoMaterialModel) onAbrir;
+  final GlobalKey? tourKey;
 
-  const _LinhaSolicitacao({required this.solicitacao, required this.onAbrir});
+  const _LinhaSolicitacao({
+    required this.solicitacao,
+    required this.onAbrir,
+    this.tourKey,
+  });
 
   @override
   State<_LinhaSolicitacao> createState() => _LinhaSolicitacaoState();
@@ -933,7 +1523,16 @@ class _LinhaSolicitacaoState extends State<_LinhaSolicitacao> {
         ? const Color(0x00ff9800).withValues(alpha: 0.10)
         : Theme.of(context).colorScheme.surface;
 
-    return MouseRegion(
+    return KeyedSubtree(
+      // IMPORTANTE: nunca usar UniqueKey() aqui — isso gera uma key NOVA a
+      // cada build(), fazendo o Flutter descartar e remontar o State desta
+      // linha (perdendo _hovered e, em rebuilds concorrentes, o hit-test do
+      // GestureDetector) toda vez que o provider notifica a lista. Usamos
+      // ValueKey(sol.numeroOS + data) como identificador estável da linha
+      // entre rebuilds (mesma solicitação = mesma key = mesmo Element).
+      key: widget.tourKey ??
+          ValueKey('${sol.numeroOS}_${sol.dataSolicitacao.millisecondsSinceEpoch}'),
+      child: MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -1007,6 +1606,57 @@ class _LinhaSolicitacaoState extends State<_LinhaSolicitacao> {
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+      ),
+    );
+  }
+}
+
+/// Card de demonstração exibido apenas durante o tour do robô assistente
+/// "Como adicionar materiais a uma solicitação existente", quando não há
+/// nenhuma solicitação real em andamento pra dar highlight. Não abre nada
+/// ao tocar — apenas ilustra onde um card real apareceria.
+class _CardSolicitacaoFicticio extends StatelessWidget {
+  final GlobalKey tourKey;
+  const _CardSolicitacaoFicticio({required this.tourKey});
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyedSubtree(
+      key: tourKey,
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: Container(
+          width: 420,
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: AppTheme.primary.withValues(alpha: 0.4),
+              width: 1.5,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.touch_app_outlined, size: 40, color: AppTheme.primary),
+              const SizedBox(height: 12),
+              Text(
+                'Selecione uma solicitação',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: Theme.of(context).colorScheme.onSurface),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Toque em qualquer solicitação da lista para abri-la e '
+                'adicionar mais materiais.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+            ],
           ),
         ),
       ),
@@ -1181,6 +1831,9 @@ class _ItemMaterialCriacao {
   final TextEditingController observacaoCtrl = TextEditingController();
   final FocusNode quantidadeFocus = FocusNode();
   File? imagem;
+  /// Usada para localizar e scrollar até este item quando ele falha na
+  /// validação ao clicar em "Criar".
+  final GlobalKey cardKey = GlobalKey();
 
   void dispose() {
     quantidadeCtrl.dispose();
@@ -1189,8 +1842,32 @@ class _ItemMaterialCriacao {
   }
 }
 
+/// GlobalKeys usadas pelo tour do robô assistente dentro do dialog
+/// "Nova Solicitação".
+class _CriarSolicitacaoTourKeys {
+  final numeroOS          = GlobalKey();
+  final cliente           = GlobalKey();
+  final dataNecessidade   = GlobalKey();
+  final observacao        = GlobalKey();
+  final adicionarMaterial = GlobalKey();
+  final material          = GlobalKey();
+  final quantidade        = GlobalKey();
+  final observacaoMaterial = GlobalKey();
+  final anexarImagem      = GlobalKey();
+  final seletorMaterial   = _SeletorMaterialTourKeys();
+}
+
 class _CriarSolicitacaoDialog extends StatefulWidget {
-  const _CriarSolicitacaoDialog();
+  final _CriarSolicitacaoTourKeys? tourKeys;
+  /// Usado pelo tour do robô assistente: já nasce com um item de material
+  /// adicionado, simulando o clique em "Adicionar Material", para poder
+  /// destacar os campos do card sem esperar uma interação real do usuário.
+  final bool abrirComItemInicial;
+
+  const _CriarSolicitacaoDialog({
+    this.tourKeys,
+    this.abrirComItemInicial = false,
+  });
 
   @override
   State<_CriarSolicitacaoDialog> createState() => _CriarSolicitacaoDialogState();
@@ -1219,6 +1896,14 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
   void initState() {
     super.initState();
     _numeroOSCtrl.addListener(_onNumeroOSChanged);
+    if (widget.abrirComItemInicial) {
+      // Simula o clique em "Adicionar Material" pro tour do robô assistente
+      // já poder destacar os campos do card sem depender de uma interação
+      // real do usuário.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _itens.isEmpty) _adicionarItem();
+      });
+    }
   }
 
   void _onNumeroOSChanged() {
@@ -1296,6 +1981,32 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
     });
   }
 
+  Future<void> _cadastrarMaterialGlobal(BuildContext context) async {
+    final criou = await showDialog<bool>(
+      context: context,
+      builder: (_) => const MaterialFormDialog(),
+    );
+    if (criou == true && context.mounted) {
+      await context.read<MaterialProvider>().carregarCategorias();
+    }
+  }
+
+  /// Scrolla a lista de materiais até o card do [item] informado, usado
+  /// para levar o usuário direto até o item que falhou na validação.
+  void _scrollAteItem(_ItemMaterialCriacao item) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = item.cardKey.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          alignment: 0.5,
+        );
+      }
+    });
+  }
+
   Future<void> _salvar() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
@@ -1312,13 +2023,21 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
     // Valida se todos os itens têm material e quantidade
     for (int i = 0; i < _itens.length; i++) {
       final item = _itens[i];
+      item.quantidadeCtrl.text = item.quantidadeCtrl.text.trim();
+      item.observacaoCtrl.text = item.observacaoCtrl.text.trim();
+
       if (item.material == null) {
         setState(() => _erroDialog = 'Selecione o material do item ${i + 1}');
+        _scrollAteItem(item);
         return;
       }
-      if (item.quantidadeCtrl.text.trim().isEmpty ||
+      if (item.quantidadeCtrl.text.isEmpty ||
           double.tryParse(item.quantidadeCtrl.text) == null) {
         setState(() => _erroDialog = 'Informe a quantidade do item ${i + 1}');
+        _scrollAteItem(item);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          item.quantidadeFocus.requestFocus();
+        });
         return;
       }
     }
@@ -1386,7 +2105,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: 700,
+          maxWidth: 1040,
           maxHeight: MediaQuery.of(context).size.height * 0.92,
         ),
         child: Column(
@@ -1411,126 +2130,247 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
               ),
             ),
             const Divider(height: 0),
+            if (_erroDialog != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+                child: _ErroBanner(
+                  mensagem: _erroDialog!,
+                  onDismiss: () => setState(() => _erroDialog = null),
+                ),
+              ),
+            // Corpo em 2 seções: dados da solicitação (esquerda, largura
+            // fixa) e materiais (direita, ocupa o espaço restante e rola
+            // de forma independente) — evita o dialog crescer verticalmente
+            // sem controle a cada material adicionado.
             Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (_erroDialog != null) ...[
-                        _ErroBanner(
-                          mensagem: _erroDialog!,
-                          onDismiss: () => setState(() => _erroDialog = null),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SizedBox(
+                    height: constraints.maxHeight,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // ── Seção esquerda: dados da solicitação ──────────
+                        SizedBox(
+                          width: 320,
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(24),
+                            child: Form(
+                              key: _formKey,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  KeyedSubtree(
+                                    key: widget.tourKeys?.numeroOS,
+                                    child: TextFormField(
+                                      controller: _numeroOSCtrl,
+                                      autofocus: widget.tourKeys == null,
+                                      decoration: InputDecoration(
+                                        labelText: 'Número OS *',
+                                        errorText: _erroOS,
+                                        errorMaxLines: 3,
+                                        suffixIcon: _verificandoOS
+                                            ? const Padding(
+                                                padding: EdgeInsets.all(12),
+                                                child: SizedBox(
+                                                  width: 16,
+                                                  height: 16,
+                                                  child: CircularProgressIndicator(
+                                                      strokeWidth: 2),
+                                                ),
+                                              )
+                                            : (_erroOS == null &&
+                                                    _ultimaOSVerificada != null &&
+                                                    _ultimaOSVerificada ==
+                                                        _numeroOSCtrl.text.trim())
+                                                ? const Icon(Icons.check_circle,
+                                                    color: AppTheme.success, size: 20)
+                                                : null,
+                                      ),
+                                      textCapitalization: TextCapitalization.characters,
+                                      inputFormatters: [_UpperCaseFormatter()],
+                                      validator: (v) => v == null || v.trim().isEmpty
+                                          ? 'Número OS é obrigatório'
+                                          : null,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  KeyedSubtree(
+                                    key: widget.tourKeys?.cliente,
+                                    child: TextFormField(
+                                      controller: _clienteCtrl,
+                                      decoration: const InputDecoration(labelText: 'Nome Cliente *'),
+                                      textCapitalization: TextCapitalization.words,
+                                      validator: (v) => v == null || v.trim().isEmpty
+                                          ? 'Nome do cliente é obrigatório'
+                                          : null,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  KeyedSubtree(
+                                    key: widget.tourKeys?.dataNecessidade,
+                                    child: _DatePickerField(
+                                      label: 'Data Necessidade *',
+                                      value: _dataNecessidade,
+                                      firstDate: DateTime.now(),
+                                      lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+                                      onChanged: (d) => setState(() => _dataNecessidade = d),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  KeyedSubtree(
+                                    key: widget.tourKeys?.observacao,
+                                    child: TextFormField(
+                                      controller: _observacaoCtrl,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Observação',
+                                        alignLabelWithHint: true,
+                                      ),
+                                      maxLines: 4,
+                                      textCapitalization: TextCapitalization.sentences,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
-                        const SizedBox(height: 12),
-                      ],
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: _numeroOSCtrl,
-                              autofocus: true,
-                              decoration: InputDecoration(
-                                labelText: 'Número OS *',
-                                errorText: _erroOS,
-                                errorMaxLines: 2,
-                                suffixIcon: _verificandoOS
-                                    ? const Padding(
-                                        padding: EdgeInsets.all(12),
-                                        child: SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(
-                                              strokeWidth: 2),
+                        const VerticalDivider(width: 1),
+                        // ── Seção direita: materiais ───────────────────────
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                                child: Row(
+                                  children: [
+                                    Text('Materiais',
+                                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                            fontWeight: FontWeight.w700)),
+                                    const SizedBox(width: 8),
+                                    if (_itens.isNotEmpty)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.primary.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: Text('${_itens.length}',
+                                            style: const TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                                color: AppTheme.primary)),
+                                      ),
+                                    const Spacer(),
+                                    TextButton.icon(
+                                      onPressed: () => _cadastrarMaterialGlobal(context),
+                                      icon: const Icon(Icons.add, size: 16),
+                                      label: const Text('Cadastrar material'),
+                                      style: TextButton.styleFrom(
+                                              foregroundColor: AppTheme.primary)
+                                          .copyWith(
+                                        mouseCursor: WidgetStateProperty.all(
+                                            SystemMouseCursors.click),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Tooltip(
+                                      message: 'Adicionar um novo material à solicitação',
+                                      child: KeyedSubtree(
+                                        key: widget.tourKeys?.adicionarMaterial,
+                                        child: FilledButton.tonalIcon(
+                                          onPressed: _adicionarItem,
+                                          icon: const Icon(Icons.add, size: 18),
+                                          label: const Text('Adicionar Material'),
+                                          style: FilledButton.styleFrom().copyWith(
+                                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Divider(height: 1),
+                              Expanded(
+                                child: _itens.isEmpty
+                                    ? Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.inventory_2_outlined,
+                                                size: 40,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .outline),
+                                            const SizedBox(height: 12),
+                                            Text(
+                                              'Nenhum material adicionado ainda',
+                                              style: TextStyle(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 12),
+                                            TextButton.icon(
+                                              onPressed: _adicionarItem,
+                                              icon: const Icon(Icons.add, size: 18),
+                                              label: const Text('Adicionar Material'),
+                                              style: TextButton.styleFrom(
+                                                      foregroundColor: AppTheme.primary)
+                                                  .copyWith(
+                                                mouseCursor: WidgetStateProperty.all(
+                                                    SystemMouseCursors.click),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       )
-                                    : (_erroOS == null &&
-                                            _ultimaOSVerificada != null &&
-                                            _ultimaOSVerificada ==
-                                                _numeroOSCtrl.text.trim())
-                                        ? const Icon(Icons.check_circle,
-                                            color: AppTheme.success, size: 20)
-                                        : null,
+                                    : ListView.separated(
+                                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                                        itemCount: _itens.length,
+                                        separatorBuilder: (_, __) => const SizedBox(height: 12),
+                                        itemBuilder: (context, index) {
+                                          final item = _itens[index];
+                                          // O tour só destaca os campos do
+                                          // PRIMEIRO item — os demais (se o
+                                          // usuário já tiver adicionado mais)
+                                          // não recebem keys, evitando
+                                          // GlobalKeys duplicadas na árvore.
+                                          final ehPrimeiro = index == 0;
+                                          return _ItemMaterialCard(
+                                            key: item.cardKey,
+                                            index: index,
+                                            item: item,
+                                            onRemover: _itens.length > 1
+                                                ? () => _removerItem(index)
+                                                : null,
+                                            tourKeyMaterial:
+                                                ehPrimeiro ? widget.tourKeys?.material : null,
+                                            tourKeyQuantidade:
+                                                ehPrimeiro ? widget.tourKeys?.quantidade : null,
+                                            tourKeyObservacao: ehPrimeiro
+                                                ? widget.tourKeys?.observacaoMaterial
+                                                : null,
+                                            tourKeyAnexarImagem: ehPrimeiro
+                                                ? widget.tourKeys?.anexarImagem
+                                                : null,
+                                            seletorTourKeys:
+                                                ehPrimeiro ? widget.tourKeys?.seletorMaterial : null,
+                                            abrirSeletorAutomaticamente: false,
+                                          );
+                                        },
+                                      ),
                               ),
-                              textCapitalization: TextCapitalization.characters,
-                              inputFormatters: [_UpperCaseFormatter()],
-                              validator: (v) => v == null || v.trim().isEmpty
-                                  ? 'Número OS é obrigatório'
-                                  : null,
-                            ),
+                            ],
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _clienteCtrl,
-                              decoration: const InputDecoration(labelText: 'Nome Cliente *'),
-                              textCapitalization: TextCapitalization.words,
-                              validator: (v) => v == null || v.trim().isEmpty
-                                  ? 'Nome do cliente é obrigatório'
-                                  : null,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _DatePickerField(
-                        label: 'Data Necessidade *',
-                        value: _dataNecessidade,
-                        firstDate: DateTime.now(),
-                        lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
-                        onChanged: (d) => setState(() => _dataNecessidade = d),
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _observacaoCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Observação',
-                          alignLabelWithHint: true,
                         ),
-                        maxLines: 3,
-                        textCapitalization: TextCapitalization.sentences,
-                      ),
-                      const SizedBox(height: 24),
-                      const Divider(),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Text('Materiais',
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w700)),
-                          const Spacer(),
-                          Tooltip(
-                            message: 'Adicionar um novo material à solicitação',
-                            child: TextButton.icon(
-                              onPressed: _adicionarItem,
-                              icon: const Icon(Icons.add, size: 18),
-                              label: const Text('Adicionar Material'),
-                              style: TextButton.styleFrom(foregroundColor: AppTheme.primary)
-                                  .copyWith(
-                                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      ..._itens.asMap().entries.map((entry) {
-                        final index = entry.key;
-                        final item = entry.value;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _ItemMaterialCard(
-                            index: index,
-                            item: item,
-                            onRemover: _itens.length > 1 ? () => _removerItem(index) : null,
-                          ),
-                        );
-                      }),
-                    ],
-                  ),
-                ),
+                      ],
+                    ),
+                  );
+                },
               ),
             ),
             const Divider(height: 0),
@@ -1579,17 +2419,35 @@ class _ItemMaterialCard extends StatelessWidget {
   final int index;
   final _ItemMaterialCriacao item;
   final VoidCallback? onRemover;
+  /// Preenchidas só pelo tour do robô assistente, para destacar o campo
+  /// "Material" do item e as keys usadas dentro do dialog de seleção.
+  final GlobalKey? tourKeyMaterial;
+  final GlobalKey? tourKeyQuantidade;
+  final GlobalKey? tourKeyObservacao;
+  final GlobalKey? tourKeyAnexarImagem;
+  final _SeletorMaterialTourKeys? seletorTourKeys;
+  final bool abrirSeletorAutomaticamente;
 
   const _ItemMaterialCard({
+    super.key,
     required this.index,
     required this.item,
     this.onRemover,
+    this.tourKeyMaterial,
+    this.tourKeyQuantidade,
+    this.tourKeyObservacao,
+    this.tourKeyAnexarImagem,
+    this.seletorTourKeys,
+    this.abrirSeletorAutomaticamente = false,
   });
 
   Future<void> _selecionarMaterial(BuildContext context) async {
     final material = await showDialog<MaterialModel>(
       context: context,
-      builder: (_) => const _SeletorMaterialDialog(),
+      builder: (_) => _SeletorMaterialDialog(
+        tourKeys: seletorTourKeys,
+        abrirTodosAutomaticamente: abrirSeletorAutomaticamente,
+      ),
     );
     if (material != null) {
       item.material = material;
@@ -1619,16 +2477,6 @@ class _ItemMaterialCard extends StatelessWidget {
     }
   }
 
-  Future<void> _cadastrarMaterial(BuildContext context) async {
-    final criou = await showDialog<bool>(
-      context: context,
-      builder: (_) => const MaterialFormDialog(),
-    );
-    if (criou == true && context.mounted) {
-      await context.read<MaterialProvider>().carregarCategorias();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -1650,40 +2498,12 @@ class _ItemMaterialCard extends StatelessWidget {
                           fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.primary)),
                 ),
                 const Spacer(),
-                MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: InkWell(
-                    onTap: () => _cadastrarMaterial(context),
-                    mouseCursor: SystemMouseCursors.click,
-                    borderRadius: BorderRadius.circular(6),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.add, size: 14, color: AppTheme.primary),
-                          SizedBox(width: 4),
-                          Text(
-                            'Cadastrar material',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
                 if (onRemover != null)
                   IconButton(
                     onPressed: onRemover,
-                    icon: const Icon(Icons.delete_outline, size: 18),
+                    icon: const Icon(Icons.close, size: 18),
                     tooltip: 'Remover item',
-                    color: AppTheme.error,
                     style: IconButton.styleFrom(
-                      backgroundColor: AppTheme.error.withValues(alpha: 0.08),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ).copyWith(
                       mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
@@ -1696,7 +2516,9 @@ class _ItemMaterialCard extends StatelessWidget {
               children: [
                 Expanded(
                   flex: 3,
-                  child: MouseRegion(
+                  child: KeyedSubtree(
+                    key: tourKeyMaterial,
+                    child: MouseRegion(
                     cursor: SystemMouseCursors.click,
                     child: InkWell(
                     onTap: () => _selecionarMaterial(context),
@@ -1718,7 +2540,7 @@ class _ItemMaterialCard extends StatelessWidget {
                                 : Theme.of(context).colorScheme.onSurfaceVariant;
                             if (m == null) {
                               return Text(
-                                'Toque para selecionar...',
+                                'Selecionar material',
                                 style: TextStyle(fontSize: 14, color: corTexto),
                                 overflow: TextOverflow.ellipsis,
                               );
@@ -1730,9 +2552,9 @@ class _ItemMaterialCard extends StatelessWidget {
                             );
                             final infoAoLado = [
                               if (m.identificador != null && m.identificador!.isNotEmpty) m.identificador!,
-                              if (medidaFmt != null) medidaFmt,
-                              if (m.espessura != null && m.espessura!.isNotEmpty) m.espessura!,
-                            ].join(' · ');
+                              medidaFmt,
+                              formatarEspessuraComSufixo(m.espessura),
+                            ].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
                             return Text.rich(
                               TextSpan(
                                 style: TextStyle(fontSize: 14, color: corTexto),
@@ -1749,7 +2571,7 @@ class _ItemMaterialCard extends StatelessWidget {
                             Padding(
                               padding: const EdgeInsets.only(top: 2),
                               child: Text(
-                                'Estoque: ${item.material!.quantidade % 1 == 0 ? item.material!.quantidade.toStringAsFixed(0) : item.material!.quantidade.toStringAsFixed(2)} ${formatarUnidadeExibicao(item.material!.unidade)}',
+                                'Estoque: ${formatarQuantidade(item.material!.quantidade)} ${formatarUnidadeExibicao(item.material!.unidade)}',
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: Theme.of(context).colorScheme.outline,
@@ -1762,27 +2584,34 @@ class _ItemMaterialCard extends StatelessWidget {
                     ),
                     ),
                   ),
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: TextFormField(
-                    controller: item.quantidadeCtrl,
-                    focusNode: item.quantidadeFocus,
-                    decoration: const InputDecoration(labelText: 'Quantidade *'),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,3}')),
-                    ],
+                  child: KeyedSubtree(
+                    key: tourKeyQuantidade,
+                    child: TextFormField(
+                      controller: item.quantidadeCtrl,
+                      focusNode: item.quantidadeFocus,
+                      decoration: const InputDecoration(labelText: 'Quantidade *'),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,3}')),
+                      ],
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: item.observacaoCtrl,
-              decoration: const InputDecoration(labelText: 'Observação'),
-              maxLines: 2,
-              textCapitalization: TextCapitalization.sentences,
+            KeyedSubtree(
+              key: tourKeyObservacao,
+              child: TextFormField(
+                controller: item.observacaoCtrl,
+                decoration: const InputDecoration(labelText: 'Observação'),
+                maxLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+              ),
             ),
             const SizedBox(height: 12),
             Row(
@@ -1811,12 +2640,15 @@ class _ItemMaterialCard extends StatelessWidget {
                   ),
                 ] else
                   Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _selecionarImagem(context),
-                      icon: const Icon(Icons.add_photo_alternate_outlined, size: 16),
-                      label: const Text('Anexar imagem'),
-                      style: OutlinedButton.styleFrom().copyWith(
-                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    child: KeyedSubtree(
+                      key: tourKeyAnexarImagem,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _selecionarImagem(context),
+                        icon: const Icon(Icons.add_photo_alternate_outlined, size: 16),
+                        label: const Text('Anexar imagem'),
+                        style: OutlinedButton.styleFrom().copyWith(
+                          mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
                       ),
                     ),
                   ),
@@ -1835,8 +2667,14 @@ class _ItemMaterialCard extends StatelessWidget {
 
 class _VisualizarSolicitacaoDialog extends StatefulWidget {
   final SolicitacaoMaterialModel solicitacao;
+  /// Usado apenas pelo tour do robô assistente para dar highlight no botão
+  /// "Adicionar Materiais" depois que este dialog abre.
+  final GlobalKey? tourKeyAdicionarMateriais;
 
-  const _VisualizarSolicitacaoDialog({required this.solicitacao});
+  const _VisualizarSolicitacaoDialog({
+    required this.solicitacao,
+    this.tourKeyAdicionarMateriais,
+  });
 
   @override
   State<_VisualizarSolicitacaoDialog> createState() =>
@@ -1878,7 +2716,11 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     _andamento = _solicitacaoAtual.andamento;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<SolicitacaoMaterialProvider>().carregarLogs(_solicitacaoAtual.id);
+      // Solicitação simulada do tour (id negativo) não existe no backend —
+      // não faz sentido buscar logs dela.
+      if (_solicitacaoAtual.id >= 0) {
+        context.read<SolicitacaoMaterialProvider>().carregarLogs(_solicitacaoAtual.id);
+      }
     });
   }
 
@@ -1906,6 +2748,10 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
   }
 
   bool get _podeAdicionarMateriais {
+    // Solicitação simulada pelo tour (nunca existe no backend) — sempre
+    // permite mostrar/destacar o botão, já que nenhuma ação real de
+    // "adicionar materiais" chegará a ser persistida a partir dela.
+    if (_solicitacaoAtual.id < 0) return true;
     final usuario = context.read<UsuarioProvider>().usuarioLogado;
     if (usuario == null) return false;
     final ehAdmin = usuario.role.trim().toUpperCase() == 'ADMIN' || usuario.role.trim().toUpperCase() == 'GERENTE';
@@ -2508,15 +3354,18 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
                   if (_podeAdicionarMateriais)
                   Tooltip(
                     message: 'Adicionar mais materiais a esta solicitação',
-                    child: FilledButton.icon(
-                      onPressed: _adicionarMateriais,
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Adicionar Materiais'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                      ).copyWith(
-                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    child: KeyedSubtree(
+                      key: widget.tourKeyAdicionarMateriais ?? UniqueKey(),
+                      child: FilledButton.icon(
+                        onPressed: _adicionarMateriais,
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('Adicionar Materiais'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                        ).copyWith(
+                          mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
                       ),
                     ),
                   ),
@@ -2931,7 +3780,9 @@ class _MaterialCard extends StatelessWidget {
                         children: [
                           Expanded(
                             child: Text(
-                              materialNome,
+                              (materialIdentificador != null && materialIdentificador!.isNotEmpty)
+                                  ? '$materialIdentificador · $materialNome'
+                                  : materialNome,
                               style: const TextStyle(
                                   fontWeight: FontWeight.w600, fontSize: 14),
                               softWrap: true,
@@ -2999,7 +3850,7 @@ class _MaterialCard extends StatelessWidget {
                               if (materialEspessura != null &&
                                   materialEspessura!.trim().isNotEmpty)
                                 Text(
-                                  materialEspessura!.trim(),
+                                  formatarEspessuraComSufixo(materialEspessura)!,
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
@@ -3007,17 +3858,6 @@ class _MaterialCard extends StatelessWidget {
                                   ),
                                 ),
                             ],
-                          ),
-                        ),
-                      if (materialIdentificador != null && materialIdentificador!.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            materialIdentificador!,
-                            style: TextStyle(
-                                fontSize: 11,
-                                color: Theme.of(context).colorScheme.outline),
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                     ],
@@ -3041,7 +3881,7 @@ class _MaterialCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${quantidade % 1 == 0 ? quantidade.toStringAsFixed(0) : quantidade.toStringAsFixed(2)}${materialUnidade != null ? ' ${formatarUnidadeExibicao(materialUnidade)}' : ''}',
+                        '${formatarQuantidade(quantidade)}${materialUnidade != null ? ' ${formatarUnidadeExibicao(materialUnidade)}' : ''}',
                         style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -3068,7 +3908,7 @@ class _MaterialCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${materialEstoque % 1 == 0 ? materialEstoque.toStringAsFixed(0) : materialEstoque.toStringAsFixed(2)}${materialUnidade != null ? ' ${formatarUnidadeExibicao(materialUnidade)}' : ''}',
+                        '${formatarQuantidade(materialEstoque)}${materialUnidade != null ? ' ${formatarUnidadeExibicao(materialUnidade)}' : ''}',
                         style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -3398,7 +4238,7 @@ class _EditarMaterialDialogState extends State<_EditarMaterialDialog> {
     super.initState();
     final qtd = widget.quantidadeAtual;
     _quantidadeCtrl = TextEditingController(
-      text: qtd % 1 == 0 ? qtd.toStringAsFixed(0) : qtd.toStringAsFixed(2),
+      text: formatarQuantidade(qtd),
     );
     _observacaoCtrl = TextEditingController(text: widget.observacaoAtual ?? '');
   }
@@ -3665,6 +4505,76 @@ class _AbaDadosSolicitacao extends StatelessWidget {
 
 // ─── Aba Histórico ────────────────────────────────────────────────────────
 
+/// Formata número sem arredondar/cortar a precisão real do valor.
+/// Ex: 5 -> "5", 3.696 -> "3.696" (não "3.70").
+String _fmtNumeroLog(num v) {
+  final d = v.toDouble();
+  return formatarQuantidade(d);
+}
+
+/// Quantidade + unidade a partir do snapshot de material salvo no log
+/// (ex: "25 m/l", "1 unidade"). Retorna null se não houver quantidade.
+String? _qtdComUnidadeLog(Map<String, dynamic> depois) {
+  final qtd = depois['quantidade'];
+  if (qtd == null) return null;
+  final qtdNum = qtd is num ? qtd : num.tryParse(qtd.toString());
+  if (qtdNum == null) return null;
+  final unidade = depois['materialUnidade']?.toString().trim();
+  final qtdFmt = _fmtNumeroLog(qtdNum);
+  return unidade != null && unidade.isNotEmpty ? '$qtdFmt $unidade' : qtdFmt;
+}
+
+/// Nome + detalhes (medida/espessura) de um material do log, sem a
+/// quantidade — ex: "ACRILICO TESTE2 (2MM)".
+String _formatarMaterialLogNome(Map material) {
+  final nome = material['materialNome']?.toString().trim();
+  if (nome == null || nome.isEmpty) return '';
+
+  final detalhesPartes = <String>[];
+  final medida = material['materialMedida']?.toString().trim();
+  if (medida != null && medida.isNotEmpty) detalhesPartes.add(medida);
+  final espessura = formatarEspessuraComSufixo(material['materialEspessura']?.toString());
+  if (espessura != null) detalhesPartes.add(espessura);
+
+  if (detalhesPartes.isEmpty) return nome;
+  return '$nome (${detalhesPartes.join(' · ')})';
+}
+
+/// Quantidade/unidade de um material do log, já formatada — ex: "2 UNIDADE".
+String? _formatarMaterialLogQtd(Map material) {
+  return _qtdComUnidadeLog(material.cast<String, dynamic>());
+}
+
+/// Linha de material do histórico: nome+detalhes em destaque e a
+/// quantidade em cinza, separados por espaço.
+Widget _linhaMaterialLog(Map material, {Color corNome = AppTheme.success}) {
+  final nome = _formatarMaterialLogNome(material);
+  final qtd = _formatarMaterialLogQtd(material);
+  return RichText(
+    text: TextSpan(
+      children: [
+        TextSpan(
+          text: nome,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: corNome,
+          ),
+        ),
+        if (qtd != null && qtd.isNotEmpty)
+          TextSpan(
+            text: '  $qtd',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w400,
+              color: Colors.grey,
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 class _AbaHistorico extends StatelessWidget {
   final int solicitacaoId;
   const _AbaHistorico({required this.solicitacaoId});
@@ -3714,15 +4624,43 @@ class _AbaHistorico extends StatelessWidget {
           separatorBuilder: (_, __) => const SizedBox(height: 8),
           itemBuilder: (_, i) {
             final log = prov.logs[i];
-            final excluido = log.depois['excluido'] == true;
+            final excluido  = log.depois['excluido'] == true;
+            final criada    = log.depois['criada'] == true;
+            final adicionado = log.depois['adicionado'] == true;
+            final eventoEspecial = excluido || criada || adicionado;
+
             final campos = <String>[];
-            if (!excluido) {
+            if (!eventoEspecial) {
               for (final key in log.depois.keys) {
                 final antes = log.antes[key]?.toString();
                 final depois = log.depois[key]?.toString();
                 if (antes != depois) campos.add(key);
               }
             }
+
+            // Lista de materiais no evento de criação — um item por linha
+            // (nome + detalhes + quantidade/unidade), sem vírgulas.
+            final materiaisCriacaoLista = criada && log.depois['materiais'] is List
+                ? (log.depois['materiais'] as List)
+                    .whereType<Map>()
+                    .where((m) => _formatarMaterialLogNome(m).isNotEmpty)
+                    .toList()
+                : const <Map>[];
+
+            // Material único do evento de adição extra — mesmo formato usado
+            // na lista de criação (nome + detalhes em destaque, quantidade em cinza).
+            final materialAdicionadoNome =
+                adicionado ? _formatarMaterialLogNome(log.depois) : null;
+
+            // Título da entrada: identifica a ação além de quem a realizou —
+            // não basta mostrar só o nome do usuário.
+            final tituloEntrada = criada
+                ? 'Solicitação criada por ${log.editorNome}'
+                : adicionado
+                    ? 'Material extra adicionado por ${log.editorNome}'
+                    : excluido
+                        ? 'Material removido por ${log.editorNome}'
+                        : log.editorNome;
 
             return Card(
               margin: EdgeInsets.zero,
@@ -3734,13 +4672,19 @@ class _AbaHistorico extends StatelessWidget {
                     Row(
                       children: [
                         Icon(
-                          excluido ? Icons.delete_outline : Icons.edit_note,
+                          excluido
+                              ? Icons.delete_outline
+                              : criada
+                                  ? Icons.add_circle_outline
+                                  : adicionado
+                                      ? Icons.playlist_add
+                                      : Icons.edit_note,
                           size: 16,
                           color: excluido ? AppTheme.error : AppTheme.primary,
                         ),
                         const SizedBox(width: 6),
                         Expanded(
-                          child: Text(log.editorNome,
+                          child: Text(tituloEntrada,
                               style: const TextStyle(
                                   fontWeight: FontWeight.w700, fontSize: 13)),
                         ),
@@ -3750,7 +4694,10 @@ class _AbaHistorico extends StatelessWidget {
                                 color: Theme.of(context).colorScheme.onSurfaceVariant)),
                       ],
                     ),
-                    if (log.item != null && log.item!.isNotEmpty) ...[
+                    // Para o evento de material extra adicionado, o nome do
+                    // material já aparece na linha de detalhe logo abaixo —
+                    // repeti-lo aqui em itálico só duplicaria a informação.
+                    if (!adicionado && log.item != null && log.item!.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(
                         log.item!,
@@ -3773,6 +4720,46 @@ class _AbaHistorico extends StatelessWidget {
                           color: AppTheme.error,
                         ),
                       ),
+                    ],
+                    if (criada) ...[
+                      const SizedBox(height: 8),
+                      const Divider(height: 0),
+                      const SizedBox(height: 8),
+                      if (materiaisCriacaoLista.isNotEmpty)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (final material in materiaisCriacaoLista)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 3),
+                                child: _linhaMaterialLog(material),
+                              ),
+                          ],
+                        )
+                      else
+                        const Text(
+                          'Solicitação criada',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.success,
+                          ),
+                        ),
+                    ],
+                    if (adicionado) ...[
+                      const SizedBox(height: 8),
+                      const Divider(height: 0),
+                      const SizedBox(height: 8),
+                      materialAdicionadoNome != null && materialAdicionadoNome.isNotEmpty
+                          ? _linhaMaterialLog(log.depois)
+                          : const Text(
+                              'Material adicionado à solicitação',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.success,
+                              ),
+                            ),
                     ],
                     if (campos.isNotEmpty) ...[
                       const SizedBox(height: 10),
@@ -3897,16 +4884,49 @@ class _AdicionarMateriaisDialogState extends State<_AdicionarMateriaisDialog> {
     });
   }
 
+  Future<void> _cadastrarMaterialGlobal(BuildContext context) async {
+    final criou = await showDialog<bool>(
+      context: context,
+      builder: (_) => const MaterialFormDialog(),
+    );
+    if (criou == true && context.mounted) {
+      await context.read<MaterialProvider>().carregarCategorias();
+    }
+  }
+
+  /// Scrolla a lista de materiais até o card do [item] informado.
+  void _scrollAteItem(_ItemMaterialCriacao item) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = item.cardKey.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          alignment: 0.5,
+        );
+      }
+    });
+  }
+
   Future<void> _salvar() async {
     for (int i = 0; i < _itens.length; i++) {
       final item = _itens[i];
+      item.quantidadeCtrl.text = item.quantidadeCtrl.text.trim();
+      item.observacaoCtrl.text = item.observacaoCtrl.text.trim();
+
       if (item.material == null) {
         setState(() => _erroDialog = 'Selecione o material do item ${i + 1}');
+        _scrollAteItem(item);
         return;
       }
-      if (item.quantidadeCtrl.text.trim().isEmpty ||
+      if (item.quantidadeCtrl.text.isEmpty ||
           double.tryParse(item.quantidadeCtrl.text) == null) {
         setState(() => _erroDialog = 'Informe a quantidade do item ${i + 1}');
+        _scrollAteItem(item);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          item.quantidadeFocus.requestFocus();
+        });
         return;
       }
     }
@@ -4017,6 +5037,16 @@ class _AdicionarMateriaisDialogState extends State<_AdicionarMateriaisDialog> {
                             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.w700)),
                         const Spacer(),
+                        TextButton.icon(
+                          onPressed: () => _cadastrarMaterialGlobal(context),
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Cadastrar material'),
+                          style: TextButton.styleFrom(foregroundColor: AppTheme.primary)
+                              .copyWith(
+                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Tooltip(
                           message: 'Adicionar um novo material à solicitação',
                           child: TextButton.icon(
@@ -4038,6 +5068,7 @@ class _AdicionarMateriaisDialogState extends State<_AdicionarMateriaisDialog> {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: _ItemMaterialCard(
+                          key: item.cardKey,
                           index: index,
                           item: item,
                           onRemover: _itens.length > 1 ? () => _removerItem(index) : null,
@@ -4147,6 +5178,9 @@ class _DatePickerField extends StatelessWidget {
     return InputDecorator(
       decoration: InputDecoration(labelText: label, isDense: true),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
+        hoverColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(4),
         onTap: () async {
           final picked = await showDatePicker(
             context: context,
@@ -4176,8 +5210,32 @@ class _DatePickerField extends StatelessWidget {
 const _kSelCategoriaGeral = '__GERAL__';
 const _kSelCategoriaSemCategoria = '__SEM_CATEGORIA__';
 
+/// GlobalKeys usadas pelo tour do robô assistente dentro do dialog
+/// "Selecionar Material" (aberto a partir de um item da Nova Solicitação).
+class _SeletorMaterialTourKeys {
+  final filtrarCategorias = GlobalKey();
+  final cardTodos         = GlobalKey();
+  final buscaNome         = GlobalKey();
+  final identificador     = GlobalKey();
+  final medida            = GlobalKey();
+  final comprimento       = GlobalKey();
+  final largura           = GlobalKey();
+  final espessura         = GlobalKey();
+  final primeiroMaterial  = GlobalKey();
+  /// Envolve busca por nome + todos os campos de filtro (identificador,
+  /// medida, comprimento, largura, espessura) — usado pra destacar tudo
+  /// de uma vez com uma única dica, em vez de campo a campo.
+  final filtros           = GlobalKey();
+}
+
 class _SeletorMaterialDialog extends StatefulWidget {
-  const _SeletorMaterialDialog();
+  final _SeletorMaterialTourKeys? tourKeys;
+  final bool abrirTodosAutomaticamente;
+
+  const _SeletorMaterialDialog({
+    this.tourKeys,
+    this.abrirTodosAutomaticamente = false,
+  });
 
   @override
   State<_SeletorMaterialDialog> createState() => _SeletorMaterialDialogState();
@@ -4199,6 +5257,8 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
   final _buscaCtrl = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl = TextEditingController();
+  final _comprimentoCtrl = TextEditingController();
+  final _larguraCtrl = TextEditingController();
   final _espessuraCtrl = TextEditingController();
   String _statusFiltro = '';
   Timer? _debounceTimer;
@@ -4209,8 +5269,13 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<MaterialProvider>().carregarCategorias();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await context.read<MaterialProvider>().carregarCategorias();
+      // Durante o tour do robô assistente, abre direto a categoria "TODOS"
+      // pra já cair na lista de materiais e destacar os campos de filtro.
+      if (widget.abrirTodosAutomaticamente && mounted) {
+        await _abrirCategoria(_kSelCategoriaGeral, 'TODOS', AppTheme.primary);
+      }
     });
   }
 
@@ -4221,6 +5286,8 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
     _buscaCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
+    _comprimentoCtrl.dispose();
+    _larguraCtrl.dispose();
     _espessuraCtrl.dispose();
     super.dispose();
   }
@@ -4242,6 +5309,8 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
       _buscaCtrl.clear();
       _identificadorCtrl.clear();
       _medidaCtrl.clear();
+      _comprimentoCtrl.clear();
+      _larguraCtrl.clear();
       _espessuraCtrl.clear();
       _statusFiltro = '';
       _carregandoMateriais = true;
@@ -4256,6 +5325,8 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
       busca: _buscaCtrl.text.trim(),
       identificador: _identificadorCtrl.text.trim(),
       medida: _medidaCtrl.text.trim(),
+      comprimento: _comprimentoCtrl.text.trim(),
+      largura: _larguraCtrl.text.trim(),
       espessura: _espessuraCtrl.text.trim(),
       status: _statusFiltro,
       categoria: _categoriaParaProvider(_categoriaSelecionada!),
@@ -4303,7 +5374,7 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: 700,
+          maxWidth: 820,
           maxHeight: MediaQuery.of(context).size.height * 0.85,
         ),
         child: Column(
@@ -4322,6 +5393,8 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                             _identificadorCtrl.clear();
                             _buscaCtrl.clear();
                             _medidaCtrl.clear();
+                            _comprimentoCtrl.clear();
+                            _larguraCtrl.clear();
                             _espessuraCtrl.clear();
                             _filtroCategoria = '';
                             _filtroCategoriaCtrl.clear();
@@ -4413,16 +5486,19 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: TextField(
-                controller: _filtroCategoriaCtrl,
-                inputFormatters: [_UpperCaseFormatter()],
-                decoration: InputDecoration(
-                  hintText: 'Filtrar categorias...',
-                  prefixIcon: Icon(Icons.search, size: 18,
-                      color: Theme.of(context).colorScheme.outline),
-                  isDense: true,
+              child: KeyedSubtree(
+                key: widget.tourKeys?.filtrarCategorias,
+                child: TextField(
+                  controller: _filtroCategoriaCtrl,
+                  inputFormatters: [_UpperCaseFormatter()],
+                  decoration: InputDecoration(
+                    hintText: 'Filtrar categorias...',
+                    prefixIcon: Icon(Icons.search, size: 18,
+                        color: Theme.of(context).colorScheme.outline),
+                    isDense: true,
+                  ),
+                  onChanged: (v) => setState(() => _filtroCategoria = v),
                 ),
-                onChanged: (v) => setState(() => _filtroCategoria = v),
               ),
             ),
             Expanded(
@@ -4438,7 +5514,9 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                 itemBuilder: (_, i) {
                   final cat = categorias[i];
                   final cor = _cores[i % _cores.length];
+                  final ehTodos = cat['id'] == _kSelCategoriaGeral;
                   return _CategoriaCardSeletor(
+                    key: ehTodos ? widget.tourKeys?.cardTodos : null,
                     label: cat['label'] as String,
                     cor: cor,
                     icone: cat['icon'] as IconData,
@@ -4466,7 +5544,9 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
 
     return Column(
       children: [
-        Padding(
+        KeyedSubtree(
+          key: widget.tourKeys?.filtros,
+          child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Column(
             children: [
@@ -4474,21 +5554,24 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                 children: [
                   Expanded(
                     flex: 4,
-                    child: TextField(
-                      controller: _buscaCtrl,
-                      inputFormatters: [_UpperCaseFormatter()],
-                      decoration: InputDecoration(
-                        hintText: 'Buscar por nome...',
-                        prefixIcon: Icon(Icons.search, size: 18,
-                            color: Theme.of(context).colorScheme.outline),
-                        isDense: true,
+                    child: KeyedSubtree(
+                      key: widget.tourKeys?.buscaNome,
+                      child: TextField(
+                        controller: _buscaCtrl,
+                        inputFormatters: [_UpperCaseFormatter()],
+                        decoration: InputDecoration(
+                          hintText: 'Nome do material',
+                          prefixIcon: Icon(Icons.search, size: 18,
+                              color: Theme.of(context).colorScheme.outline),
+                          isDense: true,
+                        ),
+                        onChanged: (_) {
+                          _debounceTimer?.cancel();
+                          _debounceTimer = Timer(
+                              const Duration(milliseconds: 350),
+                              _aplicarFiltrosMateriais);
+                        },
                       ),
-                      onChanged: (_) {
-                        _debounceTimer?.cancel();
-                        _debounceTimer = Timer(
-                            const Duration(milliseconds: 350),
-                            _aplicarFiltrosMateriais);
-                      },
                     ),
                   ),
                 ],
@@ -4497,53 +5580,46 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
               Row(
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _identificadorCtrl,
-                      inputFormatters: [_UpperCaseFormatter()],
-                      decoration: InputDecoration(
-                        hintText: 'Identificador',
-                        isDense: true,
+                    child: KeyedSubtree(
+                      key: widget.tourKeys?.identificador,
+                      child: TextField(
+                        controller: _identificadorCtrl,
+                        inputFormatters: [_UpperCaseFormatter()],
+                        decoration: InputDecoration(
+                          hintText: 'Identificador',
+                          prefixIcon: Icon(Icons.qr_code, size: 18,
+                              color: Theme.of(context).colorScheme.outline),
+                          isDense: true,
+                        ),
+                        onChanged: (_) {
+                          _debounceTimer?.cancel();
+                          _debounceTimer = Timer(
+                              const Duration(milliseconds: 350),
+                              _aplicarFiltrosMateriais);
+                        },
                       ),
-                      onChanged: (_) {
-                        _debounceTimer?.cancel();
-                        _debounceTimer = Timer(
-                            const Duration(milliseconds: 350),
-                            _aplicarFiltrosMateriais);
-                      },
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: TextField(
-                      controller: _medidaCtrl,
-                      inputFormatters: [_MedidaEspessuraFormatter()],
-                      decoration: InputDecoration(
-                        hintText: 'Medida',
-                        isDense: true,
+                    child: KeyedSubtree(
+                      key: widget.tourKeys?.medida,
+                      child: TextField(
+                        controller: _medidaCtrl,
+                        inputFormatters: [_MedidaEspessuraFormatter()],
+                        decoration: InputDecoration(
+                          hintText: 'Medida',
+                          prefixIcon: Icon(Icons.straighten, size: 18,
+                              color: Theme.of(context).colorScheme.outline),
+                          isDense: true,
+                        ),
+                        onChanged: (_) {
+                          _debounceTimer?.cancel();
+                          _debounceTimer = Timer(
+                              const Duration(milliseconds: 350),
+                              _aplicarFiltrosMateriais);
+                        },
                       ),
-                      onChanged: (_) {
-                        _debounceTimer?.cancel();
-                        _debounceTimer = Timer(
-                            const Duration(milliseconds: 350),
-                            _aplicarFiltrosMateriais);
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: _espessuraCtrl,
-                      inputFormatters: [_MedidaEspessuraFormatter()],
-                      decoration: InputDecoration(
-                        hintText: 'Espessura',
-                        isDense: true,
-                      ),
-                      onChanged: (_) {
-                        _debounceTimer?.cancel();
-                        _debounceTimer = Timer(
-                            const Duration(milliseconds: 350),
-                            _aplicarFiltrosMateriais);
-                      },
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -4554,11 +5630,15 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                     onPressed: (_buscaCtrl.text.isNotEmpty ||
                             _identificadorCtrl.text.isNotEmpty ||
                             _medidaCtrl.text.isNotEmpty ||
+                            _comprimentoCtrl.text.isNotEmpty ||
+                            _larguraCtrl.text.isNotEmpty ||
                             _espessuraCtrl.text.isNotEmpty)
                         ? () {
                             _buscaCtrl.clear();
                             _identificadorCtrl.clear();
                             _medidaCtrl.clear();
+                            _comprimentoCtrl.clear();
+                            _larguraCtrl.clear();
                             _espessuraCtrl.clear();
                             setState(() {
                               _statusFiltro = '';
@@ -4580,7 +5660,83 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: KeyedSubtree(
+                      key: widget.tourKeys?.comprimento,
+                      child: TextField(
+                        controller: _comprimentoCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [_EspessuraFormatter()],
+                        decoration: InputDecoration(
+                          hintText: 'Comprimento',
+                          suffixText: 'm',
+                          prefixIcon: Icon(Icons.height, size: 18,
+                              color: Theme.of(context).colorScheme.outline),
+                          isDense: true,
+                        ),
+                        onChanged: (_) {
+                          _debounceTimer?.cancel();
+                          _debounceTimer = Timer(
+                              const Duration(milliseconds: 350),
+                              _aplicarFiltrosMateriais);
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: KeyedSubtree(
+                      key: widget.tourKeys?.largura,
+                      child: TextField(
+                        controller: _larguraCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [_EspessuraFormatter()],
+                        decoration: InputDecoration(
+                          hintText: 'Largura',
+                          suffixText: 'm',
+                          prefixIcon: Icon(Icons.width_normal, size: 18,
+                              color: Theme.of(context).colorScheme.outline),
+                          isDense: true,
+                        ),
+                        onChanged: (_) {
+                          _debounceTimer?.cancel();
+                          _debounceTimer = Timer(
+                              const Duration(milliseconds: 350),
+                              _aplicarFiltrosMateriais);
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: KeyedSubtree(
+                      key: widget.tourKeys?.espessura,
+                      child: TextField(
+                        controller: _espessuraCtrl,
+                        inputFormatters: [_EspessuraFormatter()],
+                        decoration: InputDecoration(
+                          hintText: 'Espessura',
+                          suffixText: 'mm',
+                          prefixIcon: Icon(Icons.layers, size: 18,
+                              color: Theme.of(context).colorScheme.outline),
+                          isDense: true,
+                        ),
+                        onChanged: (_) {
+                          _debounceTimer?.cancel();
+                          _debounceTimer = Timer(
+                              const Duration(milliseconds: 350),
+                              _aplicarFiltrosMateriais);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
+          ),
           ),
         ),
         const Divider(height: 0),
@@ -4635,6 +5791,7 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                       itemCount: _materiais.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (_, i) => _MaterialItemSeletor(
+                        key: i == 0 ? widget.tourKeys?.primeiroMaterial : null,
                         material: _materiais[i],
                         cor: _categoriaCor,
                         onTap: () => Navigator.of(context, rootNavigator: true)
@@ -4757,6 +5914,7 @@ class _CategoriaCardSeletor extends StatefulWidget {
   final VoidCallback onTap;
 
   const _CategoriaCardSeletor({
+    super.key,
     required this.label,
     required this.cor,
     required this.icone,
@@ -4833,6 +5991,7 @@ class _MaterialItemSeletor extends StatefulWidget {
   final VoidCallback onTap;
 
   const _MaterialItemSeletor({
+    super.key,
     required this.material,
     required this.cor,
     required this.onTap,
@@ -4853,7 +6012,11 @@ class _MaterialItemSeletorState extends State<_MaterialItemSeletor> {
       largura:     m.largura,
       comprimento: m.comprimento,
     );
-    final detalhes = [m.identificador, medidaFmt, m.espessura]
+    final espessuraFmt = formatarEspessuraComSufixo(m.espessura);
+    final identificador = (m.identificador != null && m.identificador!.trim().isNotEmpty)
+        ? m.identificador!.trim()
+        : null;
+    final detalhes = [medidaFmt, espessuraFmt]
         .whereType<String>()
         .where((s) => s.trim().isNotEmpty)
         .join(' · ');
@@ -4896,6 +6059,8 @@ class _MaterialItemSeletorState extends State<_MaterialItemSeletor> {
                   TextSpan(
                     style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                     children: [
+                      if (identificador != null)
+                        TextSpan(text: '$identificador · '),
                       TextSpan(text: m.nome),
                       if (detalhes.isNotEmpty)
                         TextSpan(text: ' · $detalhes'),
@@ -4906,7 +6071,7 @@ class _MaterialItemSeletorState extends State<_MaterialItemSeletor> {
               ),
               const SizedBox(width: 12),
               Text(
-                '${m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2)} ${formatarUnidadeExibicao(m.unidade)}',
+                '${formatarQuantidade(m.quantidade)} ${formatarUnidadeExibicao(m.unidade)}',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -4920,6 +6085,951 @@ class _MaterialItemSeletorState extends State<_MaterialItemSeletor> {
           ),
         ),
       ),
+    );
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────
+// ABA "MATERIAIS SOLICITADOS": agrupamento por categoria + por nome parecido
+// (ex.: "METALON 1234 bla blabla" sem categoria e "METALON bla bla bla"
+// com categoria caem no mesmo grupo, e o grupo herda a categoria correta)
+// ─────────────────────────────────────────────────────────────────────────
+/// Um material "achatado", vindo de um item original OU de um adicional,
+/// junto com o contexto da OS de onde ele veio.
+class MaterialAchatadoSolicitado {
+  final String nome;
+  final String? categoria;
+  final String? identificador;
+  final String? medidaOuDimensao;
+  final String? unidade;
+  final double quantidade;
+  final bool resolvido; // comprado || estoque
+  final String status; // 'PENDENTE' | 'COMPRADO' | 'ESTOQUE'
+  final int solicitacaoId;
+  final String numeroOS;
+  final String nomeCliente;
+  final DateTime dataSolicitacao;
+  final DateTime dataNecessidade;
+
+  MaterialAchatadoSolicitado({
+    required this.nome,
+    required this.categoria,
+    required this.identificador,
+    required this.medidaOuDimensao,
+    required this.unidade,
+    required this.quantidade,
+    required this.resolvido,
+    required this.status,
+    required this.solicitacaoId,
+    required this.numeroOS,
+    required this.nomeCliente,
+    required this.dataSolicitacao,
+    required this.dataNecessidade,
+  });
+}
+
+/// Um grupo de materiais "equivalentes" (mesmo material na prática, com
+/// possíveis diferenças de nome/categoria) dentro de uma categoria.
+class GrupoMaterialSolicitado {
+  /// Nome de exibição do grupo — o nome mais "completo/frequente" entre os
+  /// materiais agrupados.
+  final String nomeExibicao;
+  final String? categoria;
+  final List<MaterialAchatadoSolicitado> materiais;
+
+  GrupoMaterialSolicitado({
+    required this.nomeExibicao,
+    required this.categoria,
+    required this.materiais,
+  });
+
+  int get totalOcorrencias => materiais.length;
+  int get totalPendentes => materiais.where((m) => !m.resolvido).length;
+  int get totalResolvidos => materiais.where((m) => m.resolvido).length;
+
+  /// Nomes/variações distintas que caíram nesse grupo (pra deixar visível
+  /// pro usuário que, por ex., "METALON 1234" e "METALON bla" foram
+  /// unificados).
+  List<String> get variacoesDeNome =>
+      materiais.map((m) => m.nome.trim()).toSet().toList()..sort();
+}
+
+/// Uma categoria com seus grupos de materiais.
+class CategoriaAgrupada {
+  final String categoria; // 'SEM CATEGORIA' quando nenhum item tem categoria
+  final List<GrupoMaterialSolicitado> grupos;
+
+  CategoriaAgrupada({required this.categoria, required this.grupos});
+
+  int get totalMateriais =>
+      grupos.fold(0, (soma, g) => soma + g.totalOcorrencias);
+  int get totalPendentes =>
+      grupos.fold(0, (soma, g) => soma + g.totalPendentes);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ALGORITMO DE AGRUPAMENTO
+// ─────────────────────────────────────────────────────────────────────────
+
+const Map<String, String> _acentosMap = {
+  'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A',
+  'È': 'E', 'É': 'E', 'Ê': 'E', 'Ë': 'E',
+  'Ì': 'I', 'Í': 'I', 'Î': 'I', 'Ï': 'I',
+  'Ò': 'O', 'Ó': 'O', 'Ô': 'O', 'Õ': 'O', 'Ö': 'O',
+  'Ù': 'U', 'Ú': 'U', 'Û': 'U', 'Ü': 'U',
+  'Ç': 'C', 'Ñ': 'N',
+};
+
+String _semAcentos(String s) {
+  final buffer = StringBuffer();
+  for (final ch in s.split('')) {
+    buffer.write(_acentosMap[ch] ?? ch);
+  }
+  return buffer.toString();
+}
+
+/// Palavras genéricas demais para servirem de "assinatura" do material
+/// (não ajudam a diferenciar nem a agrupar).
+const Set<String> _stopwords = {
+  'DE', 'DA', 'DO', 'E', 'PARA', 'COM', 'SEM', 'A', 'O', 'MM', 'CM', 'M',
+};
+
+/// Verifica se um token é "numérico/medida" (ex.: "1234", "20X20", "3/4",
+/// "2.44X1.22M") — esses tokens ajudam a diferenciar variantes (medida
+/// diferente), mas NÃO devem contar pra decidir se dois materiais são
+/// diferentes o suficiente pra não agrupar; na prática servem só de
+/// informação extra a mostrar.
+bool _pareceMedidaOuCodigo(String token) {
+  if (token.isEmpty) return false;
+  final temDigito = RegExp(r'\d').hasMatch(token);
+  if (!temDigito) return false;
+  // Ex.: "1234", "20X20", "3/4", "2.44X1.22M", "M8"
+  return RegExp(r'^[0-9]+([.,/X][0-9]+)*[A-Z]{0,3}$').hasMatch(token) ||
+      RegExp(r'^[A-Z]{1,2}[0-9]+$').hasMatch(token);
+}
+
+/// Normaliza um nome de material para comparação: sem acento, maiúsculo,
+/// espaços colapsados.
+String _normalizar(String nome) {
+  var s = _semAcentos(nome.toUpperCase());
+  s = s.replaceAll(RegExp(r'[^A-Z0-9 ]'), ' ');
+  s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+  return s;
+}
+
+/// Extrai a "assinatura" de um nome: o conjunto de palavras significativas
+/// (ignorando stopwords e tokens de medida/código), na ORDEM em que
+/// aparecem, mas usado como conjunto para comparação de similaridade.
+/// Isso é o que permite que "METALON 1234 BLA BLABLA" e
+/// "METALON BLA BLA BLA" sejam vistos como o mesmo material-base: os dois
+/// têm a mesma palavra "forte" no começo (METALON) e conjuntos de palavras
+/// com grande sobreposição, mesmo com medidas/códigos diferentes no meio.
+List<String> _palavrasChave(String nomeNormalizado) {
+  return nomeNormalizado
+      .split(' ')
+      .where((w) => w.isNotEmpty)
+      .where((w) => !_stopwords.contains(w))
+      .where((w) => !_pareceMedidaOuCodigo(w))
+      .toList();
+}
+
+/// Similaridade de Jaccard entre dois conjuntos de palavras-chave.
+double _similaridadeJaccard(List<String> a, List<String> b) {
+  if (a.isEmpty || b.isEmpty) return 0;
+  final setA = a.toSet();
+  final setB = b.toSet();
+  final inter = setA.intersection(setB).length;
+  final uniao = setA.union(setB).length;
+  if (uniao == 0) return 0;
+  return inter / uniao;
+}
+
+/// Dois materiais são considerados "o mesmo, na prática" quando:
+///  - a primeira palavra-chave (geralmente o "tipo" do material, ex.:
+///    METALON, CHAPA, PARAFUSO) é igual — isso evita agrupar coisas
+///    totalmente diferentes só por causa de palavras soltas em comum; E
+///  - a similaridade de Jaccard entre as palavras-chave é >= o limiar.
+bool _mesmoMaterial(List<String> chaveA, List<String> chaveB,
+    {double limiar = 0.5}) {
+  if (chaveA.isEmpty || chaveB.isEmpty) return false;
+  if (chaveA.first != chaveB.first) return false;
+  return _similaridadeJaccard(chaveA, chaveB) >= limiar;
+}
+
+/// Achata itens + adicionais de uma lista de solicitações em uma lista
+/// única de materiais.
+List<MaterialAchatadoSolicitado> _achatarMateriais(
+    List<SolicitacaoMaterialModel> solicitacoes) {
+  final resultado = <MaterialAchatadoSolicitado>[];
+  for (final s in solicitacoes) {
+    for (final item in s.itens) {
+      resultado.add(MaterialAchatadoSolicitado(
+        nome: item.materialNome,
+        categoria: (item.materialCategoria?.trim().isEmpty ?? true)
+            ? null
+            : item.materialCategoria!.trim(),
+        identificador: item.materialIdentificador,
+        medidaOuDimensao: item.medidaOuDimensao,
+        unidade: item.materialUnidade,
+        quantidade: item.quantidade,
+        resolvido: item.resolvido,
+        status: item.statusCompra,
+        solicitacaoId: s.id,
+        numeroOS: s.numeroOS,
+        nomeCliente: s.nomeCliente,
+        dataSolicitacao: item.criadoEm,
+        dataNecessidade: s.dataNecessidade,
+      ));
+    }
+    for (final ad in s.adicionais) {
+      resultado.add(MaterialAchatadoSolicitado(
+        nome: ad.materialNome,
+        categoria: (ad.materialCategoria?.trim().isEmpty ?? true)
+            ? null
+            : ad.materialCategoria!.trim(),
+        identificador: ad.materialIdentificador,
+        medidaOuDimensao: ad.medidaOuDimensao,
+        unidade: ad.materialUnidade,
+        quantidade: ad.quantidade,
+        resolvido: ad.resolvido,
+        status: ad.statusCompra,
+        solicitacaoId: s.id,
+        numeroOS: s.numeroOS,
+        nomeCliente: s.nomeCliente,
+        dataSolicitacao: ad.adicionadoEm,
+        dataNecessidade: s.dataNecessidade,
+      ));
+    }
+  }
+  return resultado;
+}
+
+/// Ponto de entrada principal: recebe as solicitações em andamento e
+/// devolve a lista de categorias já agrupadas e ordenadas (mais materiais
+/// pendentes primeiro).
+///
+/// Regra de agrupamento (resolve o problema descrito):
+///  1. Materiais são comparados pelo NOME (ignorando categoria) usando a
+///     assinatura de palavras-chave.
+///  2. Se dois (ou mais) materiais são considerados "o mesmo", eles formam
+///     um único grupo — mesmo que estejam com categorias diferentes ou um
+///     deles sem categoria.
+///  3. A categoria final do grupo é a categoria mais frequente entre os
+///     materiais do grupo (ou 'SEM CATEGORIA' se nenhum tiver).
+///     Ou seja: um material sem categoria "herda" a categoria do grupo ao
+///     qual foi associado por similaridade de nome.
+List<CategoriaAgrupada> agruparMateriaisSolicitados(
+    List<SolicitacaoMaterialModel> solicitacoesEmAndamento) {
+  final materiais = _achatarMateriais(solicitacoesEmAndamento);
+
+  // 1) Agrupa por similaridade de nome (independente de categoria).
+  final grupos = <List<MaterialAchatadoSolicitado>>[];
+  final chavesPorGrupo = <List<String>>[];
+
+  for (final m in materiais) {
+    final chave = _palavrasChave(_normalizar(m.nome));
+    int? indiceEncontrado;
+    for (var i = 0; i < grupos.length; i++) {
+      if (_mesmoMaterial(chave, chavesPorGrupo[i])) {
+        indiceEncontrado = i;
+        break;
+      }
+    }
+    if (indiceEncontrado != null) {
+      grupos[indiceEncontrado].add(m);
+      // Amplia a assinatura do grupo com a união das palavras-chave, para
+      // que o grupo continue "pegando" variações levemente diferentes
+      // conforme mais materiais entram (ex.: um 3º nome que é parecido com
+      // o 2º mas não tanto com o 1º).
+      chavesPorGrupo[indiceEncontrado] = {
+        ...chavesPorGrupo[indiceEncontrado],
+        ...chave,
+      }.toList();
+    } else {
+      grupos.add([m]);
+      chavesPorGrupo.add(chave);
+    }
+  }
+
+  // 2) Para cada grupo, decide a categoria "vencedora" e o nome de
+  // exibição (nome mais longo/completo, que tende a ser o mais descritivo).
+  final gruposMontados = grupos.map((materiaisDoGrupo) {
+    final contagemCategorias = <String, int>{};
+    for (final m in materiaisDoGrupo) {
+      if (m.categoria != null) {
+        contagemCategorias[m.categoria!] =
+            (contagemCategorias[m.categoria!] ?? 0) + 1;
+      }
+    }
+    String? categoriaVencedora;
+    var maiorContagem = 0;
+    contagemCategorias.forEach((cat, qtd) {
+      if (qtd > maiorContagem) {
+        maiorContagem = qtd;
+        categoriaVencedora = cat;
+      }
+    });
+
+    final nomeExibicao = materiaisDoGrupo
+        .map((m) => m.nome.trim())
+        .reduce((a, b) => b.length > a.length ? b : a);
+
+    return GrupoMaterialSolicitado(
+      nomeExibicao: nomeExibicao,
+      categoria: categoriaVencedora,
+      materiais: materiaisDoGrupo,
+    );
+  }).toList();
+
+  // 3) Organiza os grupos dentro de suas categorias.
+  final porCategoria = <String, List<GrupoMaterialSolicitado>>{};
+  for (final g in gruposMontados) {
+    final chave = g.categoria ?? 'SEM CATEGORIA';
+    porCategoria.putIfAbsent(chave, () => []).add(g);
+  }
+
+  final categorias = porCategoria.entries
+      .map((e) => CategoriaAgrupada(categoria: e.key, grupos: e.value))
+      .toList();
+
+  // Ordena: categorias com mais pendências primeiro; 'SEM CATEGORIA' vai
+  // sempre por último, já que é a "gaveta" que precisa de atenção do
+  // cadastro, não uma categoria real.
+  categorias.sort((a, b) {
+    if (a.categoria == 'SEM CATEGORIA') return 1;
+    if (b.categoria == 'SEM CATEGORIA') return -1;
+    return b.totalPendentes.compareTo(a.totalPendentes);
+  });
+
+  for (final cat in categorias) {
+    cat.grupos.sort((a, b) => b.totalPendentes.compareTo(a.totalPendentes));
+  }
+
+  return categorias;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// WIDGET
+// ─────────────────────────────────────────────────────────────────────────
+
+enum _ColunaOrdenavel { os, adicionado, necessidade, status }
+
+const List<String> _ordemStatus = ['PENDENTE', 'COMPRADO', 'ESTOQUE'];
+
+/// Como a listagem "Materiais Solicitados" está agrupada no momento.
+/// O usuário escolhe pelos botões no topo da view.
+enum _ModoAgrupamento { categoria, os, necessidade, status }
+
+extension on _ModoAgrupamento {
+  String get rotulo {
+    switch (this) {
+      case _ModoAgrupamento.categoria:
+        return 'CATEGORIA';
+      case _ModoAgrupamento.os:
+        return 'OS';
+      case _ModoAgrupamento.necessidade:
+        return 'NECESSIDADE';
+      case _ModoAgrupamento.status:
+        return 'STATUS';
+    }
+  }
+
+  IconData get icone {
+    switch (this) {
+      case _ModoAgrupamento.categoria:
+        return Icons.label_outline;
+      case _ModoAgrupamento.os:
+        return Icons.assignment_outlined;
+      case _ModoAgrupamento.necessidade:
+        return Icons.event_outlined;
+      case _ModoAgrupamento.status:
+        return Icons.flag_outlined;
+    }
+  }
+}
+
+/// Um grupo genérico de materiais (usado por qualquer modo de agrupamento,
+/// não só por categoria).
+class _GrupoGenerico {
+  final String titulo;
+  final List<MaterialAchatadoSolicitado> materiais;
+  const _GrupoGenerico({required this.titulo, required this.materiais});
+
+  int get totalMateriais => materiais.length;
+  int get totalPendentes => materiais.where((m) => !m.resolvido).length;
+}
+
+/// Data "de necessidade" truncada pro início do dia, usada como chave de
+/// agrupamento (2 horários no mesmo dia caem no mesmo grupo).
+DateTime _diaSemHora(DateTime d) => DateTime(d.year, d.month, d.day);
+
+/// Reagrupa a lista já achatada de materiais de acordo com o modo escolhido
+/// pelo usuário. Quando o modo é "categoria", delega pro agrupamento por
+/// similaridade de nome já existente (agruparMateriaisSolicitados); nos
+/// demais modos, agrupa de forma simples pela chave correspondente.
+List<_GrupoGenerico> _agruparPorModo(
+  List<SolicitacaoMaterialModel> solicitacoes,
+  _ModoAgrupamento modo,
+) {
+  if (modo == _ModoAgrupamento.categoria) {
+    final categorias = agruparMateriaisSolicitados(solicitacoes);
+    return categorias
+        .map((cat) => _GrupoGenerico(
+              titulo: cat.categoria,
+              materiais: cat.grupos.expand((g) => g.materiais).toList(),
+            ))
+        .toList();
+  }
+
+  final materiais = _achatarMateriais(solicitacoes);
+  final formatoData = DateFormat('dd/MM/yyyy');
+  final porChave = <String, List<MaterialAchatadoSolicitado>>{};
+  final tituloPorChave = <String, String>{};
+
+  for (final m in materiais) {
+    String chave;
+    String titulo;
+    switch (modo) {
+      case _ModoAgrupamento.os:
+        chave = m.numeroOS;
+        titulo = 'OS ${m.numeroOS} · ${m.nomeCliente}';
+        break;
+      case _ModoAgrupamento.necessidade:
+        final dia = _diaSemHora(m.dataNecessidade);
+        chave = dia.toIso8601String();
+        titulo = formatoData.format(dia);
+        break;
+      case _ModoAgrupamento.status:
+        chave = m.status;
+        titulo = _statusVisual(m.status).label;
+        break;
+      case _ModoAgrupamento.categoria:
+        chave = '';
+        titulo = '';
+        break;
+    }
+    porChave.putIfAbsent(chave, () => []).add(m);
+    tituloPorChave[chave] = titulo;
+  }
+
+  final grupos = porChave.entries
+      .map((e) => _GrupoGenerico(titulo: tituloPorChave[e.key]!, materiais: e.value))
+      .toList();
+
+  switch (modo) {
+    case _ModoAgrupamento.os:
+      grupos.sort((a, b) {
+        if (a.totalPendentes != b.totalPendentes) {
+          return b.totalPendentes.compareTo(a.totalPendentes);
+        }
+        return a.titulo.compareTo(b.titulo);
+      });
+      break;
+    case _ModoAgrupamento.necessidade:
+      grupos.sort((a, b) => a.materiais.first.dataNecessidade
+          .compareTo(b.materiais.first.dataNecessidade));
+      break;
+    case _ModoAgrupamento.status:
+      grupos.sort((a, b) => _ordemStatus
+          .indexOf(a.materiais.first.status)
+          .compareTo(_ordemStatus.indexOf(b.materiais.first.status)));
+      break;
+    case _ModoAgrupamento.categoria:
+      break;
+  }
+
+  return grupos;
+}
+
+class MateriaisSolicitadosView extends StatefulWidget {
+  final List<SolicitacaoMaterialModel> solicitacoes;
+
+  const MateriaisSolicitadosView({super.key, required this.solicitacoes});
+
+  @override
+  State<MateriaisSolicitadosView> createState() => _MateriaisSolicitadosViewState();
+}
+
+class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
+  _ColunaOrdenavel? _coluna;
+  bool _crescente = true;
+  _ModoAgrupamento _modoAgrupamento = _ModoAgrupamento.categoria;
+
+  void _alternarOrdenacao(_ColunaOrdenavel coluna) {
+    setState(() {
+      if (_coluna == coluna) {
+        _crescente = !_crescente;
+      } else {
+        _coluna = coluna;
+        _crescente = true;
+      }
+    });
+  }
+
+  int _comparar(MaterialAchatadoSolicitado a, MaterialAchatadoSolicitado b) {
+    int resultado;
+    switch (_coluna) {
+      case _ColunaOrdenavel.os:
+        final numA = int.tryParse(a.numeroOS);
+        final numB = int.tryParse(b.numeroOS);
+        resultado = (numA != null && numB != null)
+            ? numA.compareTo(numB)
+            : a.numeroOS.compareTo(b.numeroOS);
+        break;
+      case _ColunaOrdenavel.adicionado:
+        resultado = a.dataSolicitacao.compareTo(b.dataSolicitacao);
+        break;
+      case _ColunaOrdenavel.necessidade:
+        resultado = a.dataNecessidade.compareTo(b.dataNecessidade);
+        break;
+      case _ColunaOrdenavel.status:
+        resultado = _ordemStatus.indexOf(a.status).compareTo(_ordemStatus.indexOf(b.status));
+        break;
+      case null:
+        // Ordenação padrão: pendentes primeiro, depois por necessidade mais próxima.
+        if (a.resolvido != b.resolvido) return a.resolvido ? 1 : -1;
+        return a.dataNecessidade.compareTo(b.dataNecessidade);
+    }
+    return _crescente ? resultado : -resultado;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final grupos = _agruparPorModo(widget.solicitacoes, _modoAgrupamento);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: _SeletorAgrupamento(
+            modoAtivo: _modoAgrupamento,
+            onSelecionar: (modo) => setState(() => _modoAgrupamento = modo),
+          ),
+        ),
+        Expanded(
+          child: grupos.isEmpty
+              ? Center(
+                  child: Text(
+                    'Nenhum material pendente nas solicitações em andamento',
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: grupos.length,
+                  itemBuilder: (context, index) {
+                    final grupo = grupos[index];
+                    final semCategoria = _modoAgrupamento == _ModoAgrupamento.categoria &&
+                        grupo.titulo == 'SEM CATEGORIA';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                semCategoria
+                                    ? Icons.label_off_outlined
+                                    : _modoAgrupamento.icone,
+                                size: 18,
+                                color: semCategoria ? AppTheme.error : AppTheme.primary,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                grupo.titulo,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                  color: semCategoria
+                                      ? AppTheme.error
+                                      : Theme.of(context).colorScheme.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _TabelaMateriaisCategoria(
+                            materiais: [...grupo.materiais]..sort(_comparar),
+                            colunaAtiva: _coluna,
+                            crescente: _crescente,
+                            onOrdenar: _alternarOrdenacao,
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Botões de segmento no topo da view, pra escolher por qual critério os
+/// materiais devem ser agrupados (categoria, OS, necessidade ou status).
+class _SeletorAgrupamento extends StatelessWidget {
+  final _ModoAgrupamento modoAtivo;
+  final void Function(_ModoAgrupamento) onSelecionar;
+
+  const _SeletorAgrupamento({
+    required this.modoAtivo,
+    required this.onSelecionar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final corBorda = Theme.of(context).colorScheme.outlineVariant;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Text(
+              'Agrupar por:',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              border: Border.all(color: corBorda),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: _ModoAgrupamento.values.map((modo) {
+                final ativo = modo == modoAtivo;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Material(
+                    color: ativo
+                        ? AppTheme.primary.withValues(alpha: 0.14)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      mouseCursor: SystemMouseCursors.click,
+                      onTap: () => onSelecionar(modo),
+                      child: Padding(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              modo.icone,
+                              size: 14,
+                              color: ativo
+                                  ? AppTheme.primary
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              modo.rotulo,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.3,
+                                color: ativo
+                                    ? AppTheme.primary
+                                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Cor/ícone/rótulo de cada status de compra, reaproveitado na tabela.
+class _StatusVisual {
+  final Color cor;
+  final IconData icone;
+  final String label;
+  const _StatusVisual(this.cor, this.icone, this.label);
+}
+
+_StatusVisual _statusVisual(String status) {
+  switch (status) {
+    case 'COMPRADO':
+      return const _StatusVisual(AppTheme.success, Icons.shopping_cart, 'COMPRADO');
+    case 'ESTOQUE':
+      return const _StatusVisual(Colors.blue, Icons.inventory_2, 'ESTOQUE');
+    default:
+      return const _StatusVisual(AppTheme.primary, Icons.schedule, 'PENDENTE');
+  }
+}
+
+/// Formata "quantidade + unidade" com espaço e unidade no padrão de
+/// exibição correto (ex.: "2 unidade"), em vez de grudado e em maiúsculas.
+String _formatarQuantidadeUnidade(double quantidade, String? unidade) {
+  final qtd = formatarQuantidade(quantidade);
+  if (unidade == null || unidade.trim().isEmpty) return qtd;
+  return '$qtd ${formatarUnidadeExibicao(unidade)}';
+}
+
+class _TabelaMateriaisCategoria extends StatelessWidget {
+  final List<MaterialAchatadoSolicitado> materiais;
+  final _ColunaOrdenavel? colunaAtiva;
+  final bool crescente;
+  final void Function(_ColunaOrdenavel) onOrdenar;
+
+  const _TabelaMateriaisCategoria({
+    required this.materiais,
+    required this.colunaAtiva,
+    required this.crescente,
+    required this.onOrdenar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final corBorda = Theme.of(context).colorScheme.outlineVariant;
+    final formatoData = DateFormat('dd/MM/yyyy');
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: corBorda),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Cabeçalho da tabela ──────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
+              border: Border(bottom: BorderSide(color: corBorda)),
+            ),
+            child: Row(
+              children: [
+                const Expanded(flex: 4, child: _CelulaCabecalho('MATERIAL')),
+                Expanded(
+                  flex: 3,
+                  child: _CelulaCabecalho(
+                    'OS',
+                    coluna: _ColunaOrdenavel.os,
+                    colunaAtiva: colunaAtiva,
+                    crescente: crescente,
+                    onTap: onOrdenar,
+                  ),
+                ),
+                const Expanded(flex: 2, child: _CelulaCabecalho('QTD. SOLICITADA')),
+                Expanded(
+                  flex: 2,
+                  child: _CelulaCabecalho(
+                    'ADICIONADO',
+                    coluna: _ColunaOrdenavel.adicionado,
+                    colunaAtiva: colunaAtiva,
+                    crescente: crescente,
+                    onTap: onOrdenar,
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: _CelulaCabecalho(
+                    'NECESSIDADE',
+                    coluna: _ColunaOrdenavel.necessidade,
+                    colunaAtiva: colunaAtiva,
+                    crescente: crescente,
+                    onTap: onOrdenar,
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: _CelulaCabecalho(
+                    'STATUS',
+                    coluna: _ColunaOrdenavel.status,
+                    colunaAtiva: colunaAtiva,
+                    crescente: crescente,
+                    onTap: onOrdenar,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // ── Linhas ────────────────────────────────────────────────────────
+          ...materiais.asMap().entries.map((entry) {
+            final ultima = entry.key == materiais.length - 1;
+            final m = entry.value;
+            final visual = _statusVisual(m.status);
+            final detalhes = [
+              if (m.identificador != null && m.identificador!.trim().isNotEmpty)
+                m.identificador!.trim(),
+              if (m.medidaOuDimensao != null) m.medidaOuDimensao!,
+            ].join(' · ');
+
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                border: ultima ? null : Border(bottom: BorderSide(color: corBorda)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 4,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(m.nome,
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
+                        if (detalhes.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(detalhes,
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('OS ${m.numeroOS}',
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
+                        Text(m.nomeCliente,
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      _formatarQuantidadeUnidade(m.quantidade, m.unidade),
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      formatoData.format(m.dataSolicitacao),
+                      style: TextStyle(
+                          fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      formatoData.format(m.dataNecessidade),
+                      style: TextStyle(
+                          fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: visual.cor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(visual.icone, size: 13, color: visual.cor),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              visual.label,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 11, fontWeight: FontWeight.w700, color: visual.cor),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+class _CelulaCabecalho extends StatelessWidget {
+  final String texto;
+  final _ColunaOrdenavel? coluna;
+  final _ColunaOrdenavel? colunaAtiva;
+  final bool crescente;
+  final void Function(_ColunaOrdenavel)? onTap;
+
+  const _CelulaCabecalho(
+    this.texto, {
+    this.coluna,
+    this.colunaAtiva,
+    this.crescente = true,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final corPadrao = Theme.of(context).colorScheme.onSurfaceVariant;
+    final ativa = coluna != null && coluna == colunaAtiva;
+    final cor = ativa ? AppTheme.primary : corPadrao;
+
+    final conteudo = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            texto,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+              color: cor,
+            ),
+          ),
+        ),
+        if (coluna != null) ...[
+          const SizedBox(width: 2),
+          Icon(
+            ativa
+                ? (crescente ? Icons.arrow_upward : Icons.arrow_downward)
+                : Icons.unfold_more,
+            size: 12,
+            color: ativa ? AppTheme.primary : corPadrao.withValues(alpha: 0.5),
+          ),
+        ],
+      ],
+    );
+
+    if (coluna == null || onTap == null) return conteudo;
+
+    return InkWell(
+      mouseCursor: SystemMouseCursors.click,
+      onTap: () => onTap!(coluna!),
+      child: conteudo,
     );
   }
 }

@@ -83,8 +83,9 @@ model Material {
   orcamentoVendaItemMateriais OrcamentoVendaItemMaterial[]
   itensSolicitacao            ItemSolicitacaoMaterial[]
   adicionaisSolicitacao       AdicionalSolicitacaoMaterial[]
-  estoqueProducao             EstoqueProducao?
+  estoqueProducao             EstoqueProducao[]
   movimentacoesProducao       MovimentacaoProducao[]
+  entradasPendentes           EntradaPendente[]
 
   @@unique([nome, identificador, medida, espessura])
   @@map("materiais")
@@ -154,6 +155,11 @@ model Orcamento {
   criadoEm            DateTime        @default(now())
   atualizadoEm        DateTime        @updatedAt
   fornecedoresOcultos Int[]           @default([])
+  /// Modo de precificação usado no comparativo de preços e ao gerar a OC:
+  /// 'UNIDADE' (preço do fornecedor é por unidade/peça) ou 'METRO_LINEAR'
+  /// (preço já é por m/l — multiplica também pela Quantidade por Unidade de
+  /// cada item). Definido pelo botão "Orçar por" no editor.
+  modoPrecificacao    String          @default("UNIDADE")
   itens               OrcamentoItem[]
   aprovador           Usuario?        @relation("AprovadorOrcamento", fields: [aprovadorId], references: [id])
   criador             Usuario?        @relation("OrcamentoCriador", fields: [criadorId], references: [id])
@@ -265,6 +271,20 @@ model MovimentacaoEstoque {
   larguraUsada     Decimal?     @db.Decimal(15, 6)
   comprimentoUsado Decimal?     @db.Decimal(15, 6)
   materialOrigemId Int?
+  // Fonte da verdade para distinguir a origem de uma SAIDA relacionada ao
+  // fluxo de produção: 'TRANSFERENCIA' (saída via transferirParaProducao,
+  // estoque normal -> produção) ou 'BAIXA' (saída de registro gerada por
+  // darBaixa, quando o material já havia saído do estoque normal antes).
+  // null para qualquer movimentação normal, alheia ao fluxo de produção.
+  // Gravado no momento da criação — ver estoqueProducao.service.js.
+  // Registros criados antes desta coluna existir ficam com null; nesses
+  // casos estoque.service.js cai no fallback por texto/numeroOS.
+  origemProducao   String?
+  /// '1' ou '2' — preenchido apenas quando [origemProducao] não é nulo,
+  /// identifica a qual linha de produção a transferência/baixa pertence.
+  /// Registros antigos (pré-migração) ficam com null; nesses casos
+  /// estoque.service.js cai no fallback por texto/numeroOS.
+  producao         String?
   criadoEm         DateTime     @default(now())
   material         Material     @relation("MovimentacaoMaterial", fields: [materialId], references: [id])
   materialOrigem   Material?    @relation("MovimentacaoMaterialOrigem", fields: [materialOrigemId], references: [id])
@@ -275,24 +295,74 @@ model MovimentacaoEstoque {
   @@map("movimentacoes_estoque")
 }
 
-/// Saldo de material fisicamente transferido do estoque normal para a
-/// produção. Um registro por material (1:1). Não interfere no cálculo de
-/// status (OK/LIMITE/CRITICO) do estoque normal — é um saldo à parte, sem
-/// estoque mínimo próprio.
+/// Saldo de material transferido do estoque normal para uma linha de
+/// produção específica. Existem 2 linhas de produção independentes
+/// ('1' e '2') — cada uma com seu próprio saldo por material, visível
+/// apenas para usuários com o cargo PRODUCAO correspondente (PRODUCAO1/
+/// PRODUCAO2). Não interfere no cálculo de status (OK/LIMITE/CRITICO) do
+/// estoque normal — é um saldo à parte, sem estoque mínimo próprio.
 model EstoqueProducao {
   id           Int      @id @default(autoincrement())
-  materialId   Int      @unique
+  materialId   Int
+  /// '1' ou '2' — identifica a qual linha de produção este saldo pertence.
+  producao     String
   quantidade   Decimal  @default(0) @db.Decimal(10, 3)
+  /// Quantidade devolvida ao estoque padrão mas ainda pendente de
+  /// confirmação em Controle de Estoque. Fica "no limbo": já saiu de
+  /// [quantidade] (disponível na produção) mas ainda não voltou pro
+  /// Material do estoque padrão. Ver EntradaPendente (tipo DEVOLUCAO).
+  quantidadePendente Decimal @default(0) @db.Decimal(10, 3)
   criadoEm     DateTime @default(now())
   atualizadoEm DateTime @updatedAt
   material     Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
+  @@unique([materialId, producao])
+  @@index([producao])
   @@map("estoque_producao")
+}
+
+/// Fila de entradas do fluxo de produção que aguardam confirmação manual em
+/// Controle de Estoque antes de impactar o estoque padrão. Cobre dois
+/// casos, distinguidos por [tipo]:
+/// - RETALHO: sobra gerada por uma baixa de produção (darBaixa). Antes da
+///   confirmação, nenhum Material de retalho é criado/incrementado.
+/// - DEVOLUCAO: devolução da produção para o estoque padrão. A quantidade
+///   já sai de EstoqueProducao.quantidade na hora, mas fica marcada em
+///   EstoqueProducao.quantidadePendente até ser confirmada ou recusada.
+model EntradaPendente {
+  id                 Int       @id @default(autoincrement())
+  tipo               String    // 'RETALHO' | 'DEVOLUCAO'
+  status             String    @default("PENDENTE") // 'PENDENTE' | 'CONFIRMADA' | 'RECUSADA'
+  materialId         Int
+  quantidade         Decimal   @db.Decimal(10, 3)
+  /// Linha de produção de origem ('1' ou '2').
+  producao           String
+  numeroOS           String?
+  relacaoOSId        Int?
+  /// Dados extras necessários para recriar/incrementar o retalho ao
+  /// confirmar (RETALHO): dimensões usadas na baixa e preços apurados no
+  /// momento em que a pendência foi criada.
+  larguraUsada       Decimal?  @db.Decimal(15, 6)
+  comprimentoUsado   Decimal?  @db.Decimal(15, 6)
+  precoM2Final       Decimal?  @db.Decimal(15, 6)
+  precoUnitarioFinal Decimal?  @db.Decimal(15, 6)
+  observacao         String?
+  usuarioNome        String?
+  criadoEm           DateTime  @default(now())
+  resolvidoEm        DateTime?
+  material           Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([tipo])
+  @@index([materialId])
+  @@map("entradas_pendentes")
 }
 
 /// Histórico de movimentações do estoque de produção:
 /// - TRANSFERENCIA: entrada vinda do estoque normal (Controle de Estoque).
 /// - BAIXA: saída para uma OS específica (registrada pela página de Produção).
+/// Histórico compartilhado entre as duas linhas de produção — o campo
+/// [producao] indica de qual linha ('1' ou '2') veio cada movimentação.
 model MovimentacaoProducao {
   id          Int      @id @default(autoincrement())
   materialId  Int
@@ -301,11 +371,14 @@ model MovimentacaoProducao {
   numeroOS    String?  // preenchido apenas em BAIXA
   observacao  String?
   usuarioNome String?
+  /// '1' ou '2' — linha de produção de origem/destino desta movimentação.
+  producao    String
   criadoEm    DateTime @default(now())
   material    Material @relation(fields: [materialId], references: [id])
 
   @@index([materialId])
   @@index([numeroOS])
+  @@index([producao])
   @@map("movimentacoes_producao")
 }
 
@@ -631,7 +704,8 @@ enum Role {
   ADMIN
   GERENTE
   COMPRAS
-  PRODUCAO
+  PRODUCAO1
+  PRODUCAO2
   ORCAMENTISTA
 }
 

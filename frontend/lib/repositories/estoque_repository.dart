@@ -26,6 +26,8 @@ class EstoqueRepository {
     String? materialNome,
     String? materialIdentificador,
     String? materialMedida,
+    String? materialComprimento,
+    String? materialLargura,
     String? materialEspessura,
     DateTime? dataInicio,
     DateTime? dataFim,
@@ -43,8 +45,18 @@ class EstoqueRepository {
     if (materialIdentificador != null && materialIdentificador.isNotEmpty) {
       params.add('materialIdentificador=${Uri.encodeComponent(materialIdentificador)}');
     }
-    if (materialMedida != null && materialMedida.isNotEmpty) {
-      params.add('materialMedida=${Uri.encodeComponent(materialMedida)}');
+    if (materialComprimento != null &&
+      materialComprimento.isNotEmpty) {
+      params.add(
+        'materialComprimento=${Uri.encodeComponent(materialComprimento)}',
+      );
+    }
+
+    if (materialLargura != null &&
+        materialLargura.isNotEmpty) {
+      params.add(
+        'materialLargura=${Uri.encodeComponent(materialLargura)}',
+      );
     }
     if (materialEspessura != null && materialEspessura.isNotEmpty) {
       params.add('materialEspessura=${Uri.encodeComponent(materialEspessura)}');

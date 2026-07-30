@@ -700,7 +700,8 @@ class _RoleLabel extends StatelessWidget {
       'GERENTE'                 => ('Gerente'),
       'COMPRAS'                 => ('Compras'),
       'ORCAMENTISTA'            => ('Orçamentista'),
-      'PRODUCAO' || 'PRODUÇÃO'  => ('Produção'),
+      'PRODUCAO1'               => ('Produção 1'),
+      'PRODUCAO2'               => ('Produção 2'),
       _                         => (role),
     };
 
@@ -756,7 +757,8 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
     'GERENTE',
     'COMPRAS',
     'ORCAMENTISTA',
-    'PRODUCAO',
+    'PRODUCAO1',
+    'PRODUCAO2',
   ];
 
   @override
@@ -841,7 +843,8 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
     'GERENTE'      => 'Gerente',
     'COMPRAS'      => 'Compras',
     'ORCAMENTISTA' => 'Orçamentista',
-    'PRODUCAO'     => 'Produção',
+    'PRODUCAO1'    => 'Produção 1',
+    'PRODUCAO2'    => 'Produção 2',
     _              => role,
   };
 

@@ -315,6 +315,16 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
       precoM2:       precoM2Final       ?? undefined,
       larguraUsada: (larguraUsada != null ? Number(larguraUsada) : null),
       comprimentoUsado: (comprimentoUsado != null ? Number(comprimentoUsado) : null),
+      // Esta saída decrementou o ESTOQUE NORMAL (ver criarSolicitacao, que
+      // reserva de prisma.material, não de EstoqueProducao). É diferente da
+      // baixa feita a partir do saldo do EstoqueProducao (ver
+      // estoqueProducao.service.js#darBaixa, que grava 'BAIXA' aqui).
+      // Precisa de um valor próprio para não cair no fallback por regex de
+      // observacao em estoque.service.js#removerMovimentacao, que hoje
+      // trata qualquer observação "Saída via produção..." como se tivesse
+      // vindo do EstoqueProducao — o que faz a devolução ir para o lugar
+      // errado ao excluir a movimentação.
+      origemProducao: 'SOLICITACAO_ESTOQUE_NORMAL',
     },
   });
 
