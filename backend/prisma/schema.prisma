@@ -87,7 +87,21 @@ model Material {
   movimentacoesProducao       MovimentacaoProducao[]
   entradasPendentes           EntradaPendente[]
 
-  @@unique([nome, identificador, medida, espessura])
+  // A unicidade lógica (nome + identificador + medida + espessura) NÃO é mais
+  // garantida pelo @@unique padrão abaixo, porque o Postgres trata NULL como
+  // sempre diferente de NULL — então dois materiais com identificador/medida/
+  // espessura em branco não eram bloqueados por essa constraint, permitindo
+  // duplicatas quando o formulário era enviado duas vezes rapidamente.
+  //
+  // A proteção real agora vem de um ÍNDICE ÚNICO DE EXPRESSÃO, criado na
+  // migração `migration.sql`, que trata NULL como '' (string vazia) só para
+  // fins de comparação de unicidade — sem alterar o tipo das colunas nem o
+  // comportamento do resto da aplicação. Ver:
+  //   materiais_nome_identificador_medida_espessura_null_safe_key
+  //
+  // Este @@unique é mantido comentado apenas como referência histórica —
+  // NÃO reative sem entender a limitação acima.
+  // @@unique([nome, identificador, medida, espessura])
   @@map("materiais")
 }
 

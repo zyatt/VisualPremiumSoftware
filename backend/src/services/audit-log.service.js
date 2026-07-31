@@ -7,6 +7,8 @@ const _LABELS = {
   medida:            'Medida',
   espessura:         'Espessura',
   identificador:     'Identificador',
+  largura:           'Largura (m)',
+  comprimento:       'Comprimento (m)',
   valor:             'Valor',
   valorMetroQuadrado:'Valor m²',
   quantidade:        'Quantidade',
@@ -23,7 +25,14 @@ const _IGNORAR = new Set([
 
 function _str(v) {
   if (v === null || v === undefined) return null;
-  if (typeof v === 'object' && !Array.isArray(v)) return null;
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    const isDecimal =
+      v.constructor?.name === 'Decimal' ||
+      (typeof v.toFixed === 'function' && typeof v.isNaN === 'function') ||
+      (Array.isArray(v.d) && typeof v.e === 'number');
+    if (isDecimal) return v.toString();
+    return null;
+  }
   return String(v);
 }
 
@@ -31,12 +40,6 @@ function _label(campo) {
   return _LABELS[campo] ?? campo;
 }
 
-// Monta o snapshot dos dados descritivos do material a partir do próprio
-// objeto `material` (antes ou depois da operação). Esse snapshot é gravado
-// junto do log para que o histórico continue exibindo nome/unidade/medida/
-// etc. mesmo depois que o material for excluído do banco (hard delete) —
-// nesse caso o JOIN com a tabela material passa a retornar null, então o
-// log não pode depender apenas do relacionamento.
 function _snapshot(material) {
   if (!material) return {};
   return {
@@ -54,10 +57,6 @@ function _snapshot(material) {
 async function registrar(materialId, acao, opts = {}) {
   const { campo, valorAntes, valorDepois, usuarioId, usuarioNome, material } = opts;
 
-  // Quando o material já foi excluído (ex.: log de EXCLUSAO gravado após o
-  // delete), a FK materialId aponta para uma linha que não existe mais.
-  // Com onDelete: SetNull no schema, o banco aceita NULL nesse campo, então
-  // passamos null explicitamente — o snapshot (*Snap) preserva os dados.
   const materialExiste = materialId != null
     ? await prisma.material.findUnique({ where: { id: materialId }, select: { id: true } })
     : null;
@@ -79,8 +78,6 @@ async function registrar(materialId, acao, opts = {}) {
 async function registrarEdicao(materialId, antes, depois, usuarioId, usuarioNome) {
   const campos = new Set([...Object.keys(antes), ...Object.keys(depois)]);
   const promessas = [];
-  // Snapshot tirado do estado "depois" (dados atuais do material no momento
-  // da edição), usado igualmente em todas as entradas geradas por esta edição.
   const snap = _snapshot(depois);
 
   for (const campo of campos) {
@@ -108,20 +105,12 @@ async function registrarEdicao(materialId, antes, depois, usuarioId, usuarioNome
   if (promessas.length > 0) await Promise.all(promessas);
 }
 
-// Seleção completa dos campos do material usados na exibição do histórico
-// (nome, unidade, medida, espessura, identificador, largura, comprimento).
 const _MATERIAL_SELECT = {
   id: true, nome: true, categoria: true, unidade: true,
   medida: true, espessura: true, identificador: true,
   largura: true, comprimento: true,
 };
 
-// Achata o snapshot gravado no log (colunas *Snap) num objeto `material`
-// no mesmo formato do include do Prisma, para os consumidores (controller/
-// frontend) não precisarem tratar dois formatos diferentes. Se o material
-// ainda existe (JOIN não-nulo), os dados atuais têm prioridade; senão,
-// cai no snapshot gravado no momento da ação — é o que garante que
-// exclusões continuem aparecendo no histórico com os dados corretos.
 function _comMaterialResolvido(log) {
   const { materialNomeSnap, materialCategoriaSnap, materialUnidadeSnap,
           materialMedidaSnap, materialEspessuraSnap, materialIdentificadorSnap,
@@ -176,9 +165,6 @@ async function listar(filtros = {}) {
   }
 
   if (busca) {
-    // Busca tanto pelo nome atual do material (JOIN) quanto pelo nome
-    // salvo no snapshot — necessário porque materiais excluídos não têm
-    // mais linha na tabela material, então o JOIN sozinho não os encontraria.
     where.OR = [
       { material:        { nome: { contains: busca, mode: 'insensitive' } } },
       { materialNomeSnap: { contains: busca, mode: 'insensitive' } },

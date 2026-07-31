@@ -13,6 +13,10 @@ const _includeSolicitacao = {
   baixas: { orderBy: { criadoEm: 'asc' } },
 };
 
+function _formatarMedidaRetalho(areaM2) {
+  return `${Number(areaM2).toFixed(2)}m²`;
+}
+
 function _calcularStatus(quantidade, estoqueMinimo, ativo) {
   if (!ativo) return 'INATIVO';
   const q   = Number(quantidade);
@@ -315,15 +319,6 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
       precoM2:       precoM2Final       ?? undefined,
       larguraUsada: (larguraUsada != null ? Number(larguraUsada) : null),
       comprimentoUsado: (comprimentoUsado != null ? Number(comprimentoUsado) : null),
-      // Esta saída decrementou o ESTOQUE NORMAL (ver criarSolicitacao, que
-      // reserva de prisma.material, não de EstoqueProducao). É diferente da
-      // baixa feita a partir do saldo do EstoqueProducao (ver
-      // estoqueProducao.service.js#darBaixa, que grava 'BAIXA' aqui).
-      // Precisa de um valor próprio para não cair no fallback por regex de
-      // observacao em estoque.service.js#removerMovimentacao, que hoje
-      // trata qualquer observação "Saída via produção..." como se tivesse
-      // vindo do EstoqueProducao — o que faz a devolução ir para o lugar
-      // errado ao excluir a movimentação.
       origemProducao: 'SOLICITACAO_ESTOQUE_NORMAL',
     },
   });
@@ -349,10 +344,13 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
           select: { nome: true, espessura: true, categoria: true, medida: true },
         });
 
+        const medidaRetalho = _formatarMedidaRetalho(areaRetalho);
+
         let retalhoMat = await prisma.material.findFirst({
           where: {
             nome:          { equals: materialData.nome, mode: 'insensitive' },
             identificador: { equals: 'RETALHO',    mode: 'insensitive' },
+            medida:        { equals: medidaRetalho, mode: 'insensitive' },
             espessura:     materialData.espessura
               ? { equals: materialData.espessura, mode: 'insensitive' }
               : null,
@@ -377,7 +375,7 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
                 nome:              materialData.nome,
                 unidade:           'M2',
                 categoria:         materialData.categoria   ?? null,
-                medida:            materialData.medida      ?? null,
+                medida:            medidaRetalho,
                 espessura:         materialData.espessura   ?? null,
                 identificador:     'RETALHO',
                 quantidade:        areaRetalho,
@@ -394,9 +392,7 @@ async function _registrarSaidaControleEstoque(sol, { larguraUsada, comprimentoUs
               retalhoMat = await prisma.material.findFirst({
                 where: {
                   nome:      { equals: materialData.nome, mode: 'insensitive' },
-                  medida:    materialData.medida
-                    ? { equals: materialData.medida,    mode: 'insensitive' }
-                    : null,
+                  medida:    { equals: medidaRetalho, mode: 'insensitive' },
                   espessura: materialData.espessura
                     ? { equals: materialData.espessura, mode: 'insensitive' }
                     : null,

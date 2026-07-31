@@ -1,9 +1,6 @@
 const prisma = require('../utils/prisma');
 const { resolverRelacaoOSDescritiva } = require('./estoque.service');
 
-// Mesma lógica de status usada em material.service / producao.service, mas
-// aplicada apenas ao ESTOQUE NORMAL — o estoque de produção nunca fica
-// CRÍTICO nem tem estoque mínimo próprio.
 function _calcularStatus(quantidade, estoqueMinimo, ativo) {
   if (!ativo) return 'INATIVO';
   const q   = Number(quantidade);
@@ -13,10 +10,10 @@ function _calcularStatus(quantidade, estoqueMinimo, ativo) {
   return 'CRITICO';
 }
 
-/**
- * Valida e normaliza o identificador de linha de produção ('1' ou '2').
- * Aceita string ou número (1, 2, '1', '2', 'PRODUCAO1', 'PRODUCAO2').
- */
+function _formatarMedidaRetalho(areaM2) {
+  return `${Number(areaM2).toFixed(2)}m²`;
+}
+
 function _normalizarProducao(producao) {
   const raw = String(producao ?? '').trim().toUpperCase();
   const match = raw.match(/^(?:PRODUCAO)?([12])$/);
@@ -26,18 +23,6 @@ function _normalizarProducao(producao) {
   return match[1];
 }
 
-
-/**
- * Transfere material do estoque normal para o estoque de produção.
- * - Decrementa Material.quantidade (recalcula status do estoque normal).
- * - Incrementa (ou cria) o saldo em EstoqueProducao.
- * - Registra uma MovimentacaoEstoque do tipo SAIDA (para manter o histórico
- *   do estoque normal consistente com qualquer outra saída), vinculada a uma
- *   RelacaoOS "interna" de transferências (numeroOS fixo), e uma
- *   MovimentacaoProducao do tipo TRANSFERENCIA (entrada no estoque de produção).
- *
- * Não gera OS de destino — é apenas uma movimentação interna entre estoques.
- */
 async function transferirParaProducao({
   materialId,
   quantidade,
@@ -66,22 +51,10 @@ async function transferirParaProducao({
     };
   }
 
-  // Resolve a RelacaoOS com data automática ANTES da transaction, pois
-  // resolverRelacaoOSDescritiva usa o cliente prisma global (não o tx) e
-  // pode fazer múltiplas queries internas. O resultado (id + numeroOS) é
-  // passado para dentro da transaction via closure.
-  //
-  // Nome base por linha de produção: 'TRANSFERENCIA-PRODUCAO1' ou
-  // 'TRANSFERENCIA-PRODUCAO2' → cria/reutiliza
-  // 'TRANSFERENCIA-PRODUCAO<N>-DD-MM-YYYY', fechando no fim do dia como
-  // qualquer outra OS descritiva. Mantém as duas linhas em relações
-  // separadas para que o Controle de Estoque possa distinguir para onde
-  // cada transferência foi.
   const NOME_BASE_TRANSFERENCIA = `TRANSFERENCIA-PRODUCAO${prod}`;
   const relacao = await resolverRelacaoOSDescritiva(NOME_BASE_TRANSFERENCIA);
 
   const resultado = await prisma.$transaction(async (tx) => {
-    // 1) Decrementa estoque normal e recalcula status
     const matAtualizado = await tx.material.update({
       where: { id: materialId },
       data:  { quantidade: { decrement: qtd } },
@@ -93,14 +66,6 @@ async function transferirParaProducao({
     );
     await tx.material.update({ where: { id: materialId }, data: { status: novoStatus } });
 
-    // 2) Registra saída no histórico do estoque normal vinculada à RelacaoOS
-    //    do dia (ex: TRANSFERENCIA-PRODUCAO1-13-07-2026). Mantém rastreabilidade
-    //    e o comportamento de fechamento automático ao virar o dia.
-    //    A observação identifica a origem e o destino ("transferência do
-    //    estoque padrão para produção <N>") para que o Histórico de
-    //    Movimentações e o Controle de Estoque exibam a linha de produção
-    //    correta, mesmo quando o usuário digita uma observação própria no
-    //    diálogo, que é preservada como linha extra.
     const obsBaseTransferencia =
       `Transferência do estoque padrão para produção ${prod} – ${usuarioNome ?? 'Usuário'}`;
     const obsTransferencia = observacao?.trim()
@@ -121,20 +86,17 @@ async function transferirParaProducao({
       },
     });
 
-    // Atualiza atualizadoEm da RelacaoOS para refletir a última transferência
     await tx.relacaoOS.update({
       where: { id: relacao.id },
       data:  { atualizadoEm: new Date() },
     });
 
-    // 3) Incrementa (ou cria) saldo no estoque de produção DA LINHA informada
     const estoqueProd = await tx.estoqueProducao.upsert({
       where:  { materialId_producao: { materialId, producao: prod } },
       create: { materialId, producao: prod, quantidade: qtd },
       update: { quantidade: { increment: qtd } },
     });
 
-    // 4) Histórico do estoque de produção (compartilhado, com a linha marcada)
     await tx.movimentacaoProducao.create({
       data: {
         materialId,
@@ -155,20 +117,12 @@ async function transferirParaProducao({
 }
 
 /**
- * Devolve material do estoque de produção (linha '1' ou '2') de volta para
- * o ESTOQUE PADRÃO (Material.quantidade) — operação inversa de
- * [transferirParaProducao]. Usado quando sobrou material na produção e ele
- * precisa voltar a ficar disponível para qualquer uso normal.
- *
- * - Decrementa o saldo em EstoqueProducao da linha informada.
- * - Incrementa Material.quantidade (recalcula status do estoque normal).
- * - Registra uma MovimentacaoEstoque do tipo ENTRADA (histórico do estoque
- *   normal), vinculada à mesma RelacaoOS "interna" usada nas transferências
- *   dessa linha, e uma MovimentacaoProducao do tipo DEVOLUCAO (saída do
- *   estoque de produção) para o histórico compartilhado de produção.
- *
- * Segue o mesmo padrão de observação/rastreabilidade de
- * [transferirParaProducao], só que na direção contrária.
+ * Devolve material do estoque de produção de volta para o estoque padrão.
+ * NÃO incrementa mais o Material diretamente: a quantidade sai do saldo
+ * disponível da produção na hora (decrement em `quantidade`) mas fica
+ * "no limbo" em `quantidadePendente`, e uma EntradaPendente (tipo
+ * DEVOLUCAO) é criada. Só ao ser confirmada em Controle de Estoque é que
+ * o Material do estoque padrão é de fato incrementado.
  */
 async function devolverAoEstoquePadrao({
   materialId,
@@ -199,93 +153,52 @@ async function devolverAoEstoquePadrao({
     };
   }
 
-  // Mesmo agrupamento por dia usado em transferirParaProducao, mas com nome
-  // base próprio ('DEVOLUCAO-PRODUCAO<N>'), para não misturar no Controle de
-  // Estoque as transferências de SAÍDA (para produção) com as de ENTRADA
-  // (devolução) na mesma RelacaoOS.
-  const NOME_BASE_DEVOLUCAO = `DEVOLUCAO-PRODUCAO${prod}`;
-  const relacao = await resolverRelacaoOSDescritiva(NOME_BASE_DEVOLUCAO);
-
   const obsBaseDevolucao =
-    `Devolução da produção ${prod} para o estoque padrão – ${usuarioNome ?? 'Usuário'}`;
+    `Devolução da produção ${prod} para o estoque padrão – ${usuarioNome ?? 'Usuário'} (aguardando confirmação)`;
   const obsDevolucao = observacao?.trim()
     ? `${obsBaseDevolucao}\n${observacao.trim()}`
     : obsBaseDevolucao;
 
   const resultado = await prisma.$transaction(async (tx) => {
-    // 1) Decrementa o saldo da linha de produção
     await tx.estoqueProducao.update({
       where: { materialId_producao: { materialId, producao: prod } },
-      data:  { quantidade: { decrement: qtd } },
-    });
-
-    // 2) Incrementa estoque normal e recalcula status
-    const matAtualizado = await tx.material.update({
-      where: { id: materialId },
-      data:  { quantidade: { increment: qtd } },
-    });
-    const novoStatus = _calcularStatus(
-      matAtualizado.quantidade,
-      matAtualizado.estoqueMinimo,
-      matAtualizado.ativo,
-    );
-    await tx.material.update({ where: { id: materialId }, data: { status: novoStatus } });
-
-    // 3) Registra entrada no histórico do estoque normal, vinculada à
-    //    RelacaoOS do dia (ex: DEVOLUCAO-PRODUCAO1-23-07-2026).
-    await tx.movimentacaoEstoque.create({
       data: {
-        materialId,
-        tipo:        'ENTRADA',
-        quantidade:  qtd,
-        numeroOS:    relacao.numeroOS,
-        relacaoOSId: relacao.id,
-        observacao:  obsDevolucao,
-        origemProducao: 'DEVOLUCAO',
-        producao:       prod,
+        quantidade:        { decrement: qtd },
+        quantidadePendente: { increment: qtd },
       },
     });
 
-    await tx.relacaoOS.update({
-      where: { id: relacao.id },
-      data:  { atualizadoEm: new Date() },
-    });
-
-    // 4) Histórico do estoque de produção (compartilhado, com a linha marcada)
-    await tx.movimentacaoProducao.create({
+    const movProducao = await tx.movimentacaoProducao.create({
       data: {
         materialId,
         tipo:       'DEVOLUCAO',
         quantidade: qtd,
         producao:   prod,
         observacao: observacao?.trim()
-          ? `Devolução da produção ${prod} para o estoque padrão\n${observacao.trim()}`
-          : `Devolução da produção ${prod} para o estoque padrão`,
+          ? `Devolução da produção ${prod} para o estoque padrão (aguardando confirmação)\n${observacao.trim()}`
+          : `Devolução da produção ${prod} para o estoque padrão (aguardando confirmação)`,
         usuarioNome: usuarioNome ?? null,
       },
     });
 
-    return matAtualizado;
+    const pendencia = await tx.entradaPendente.create({
+      data: {
+        tipo:        'DEVOLUCAO',
+        status:      'PENDENTE',
+        materialId,
+        quantidade:  qtd,
+        producao:    prod,
+        observacao:  obsDevolucao,
+        usuarioNome: usuarioNome ?? null,
+      },
+    });
+
+    return { movimentacaoProducao: movProducao, pendencia };
   });
 
   return resultado;
 }
 
-/**
- * Transfere material de UMA linha de produção para A OUTRA (ex.: sobrou
- * material na produção 1 e a produção 2 precisa dele). Restrito a
- * ADMIN/GERENTE (ver roleMiddleware na rota) — diferente da transferência
- * do estoque padrão, aqui NÃO mexe em Material.quantidade nem gera
- * MovimentacaoEstoque: é uma movimentação interna, só entre as duas linhas
- * do estoque de produção.
- *
- * Gera UM único registro de histórico (MovimentacaoProducao, tipo
- * TRANSFERENCIA_LINHA) com `producao` = linha de DESTINO (a que recebeu o
- * saldo). Não é preciso guardar a origem em coluna própria: como só existem
- * duas linhas, o frontend deriva a origem como "a outra linha" a partir do
- * destino (ver `producaoOrigemDerivada` no model Dart) — evita precisar de
- * migração de schema para este recurso.
- */
 async function transferirEntreLinhas({
   materialId,
   quantidade,
@@ -319,21 +232,17 @@ async function transferirEntreLinhas({
   const obsFinal = observacao?.trim() ? `${obsBase}\n${observacao.trim()}` : obsBase;
 
   const resultado = await prisma.$transaction(async (tx) => {
-    // 1) Decrementa a linha de origem
     await tx.estoqueProducao.update({
       where: { materialId_producao: { materialId, producao: origem } },
       data:  { quantidade: { decrement: qtd } },
     });
 
-    // 2) Incrementa (ou cria) a linha de destino
     const estoqueDestino = await tx.estoqueProducao.upsert({
       where:  { materialId_producao: { materialId, producao: destino } },
       create: { materialId, producao: destino, quantidade: qtd },
       update: { quantidade: { increment: qtd } },
     });
 
-    // 3) Histórico do estoque de produção — um único registro, com
-    //    `producao` apontando para a linha de destino.
     await tx.movimentacaoProducao.create({
       data: {
         materialId,
@@ -351,11 +260,6 @@ async function transferirEntreLinhas({
   return resultado;
 }
 
-/**
- * Lista os materiais atualmente disponíveis no estoque de produção.
- * [producao] ('1' ou '2') é OBRIGATÓRIO — cada linha de produção só pode
- * ver o próprio saldo, nunca o da outra nem o estoque normal.
- */
 async function listarEstoque({ producao, busca, categoria, identificador, medida, espessura } = {}) {
   const prod = _normalizarProducao(producao);
   const where = { quantidade: { gt: 0 }, producao: prod };
@@ -394,30 +298,19 @@ async function listarEstoque({ producao, busca, categoria, identificador, medida
     comprimento:   r.material.comprimento,
     ultimoValorPago:   r.material.ultimoValorPago,
     ultimoValorPagoM2: r.material.ultimoValorPagoM2,
-    quantidade:    r.quantidade,
-    producao:      r.producao,
+    quantidade:        r.quantidade,
+    quantidadePendente: r.quantidadePendente,
+    producao:          r.producao,
   }));
 }
 
 /**
- * Gera (ou incrementa) o retalho M² correspondente à área não utilizada de
- * uma baixa dimensional feita a partir do estoque de produção. Segue a
- * mesma regra de identificação/criação do material RETALHO usada em
- * estoque.service.js#registrarMovimentacao, e o saldo resultante entra no
- * ESTOQUE PADRÃO (Material.quantidade) — não fica preso à linha de produção
- * que fez a baixa. Quem quiser usar o retalho em produção precisa
- * transferi-lo normalmente (tela de Controle de Estoque), do mesmo jeito
- * que qualquer outro material.
- *
- * Deve ser chamada dentro da mesma transaction de darBaixa.
- *
- * Também registra uma MovimentacaoEstoque do tipo ENTRADA (vinculada à
- * mesma RelacaoOS da saída/baixa que gerou o retalho), para que o Histórico
- * de Movimentações do Controle de Estoque mostre explicitamente que aquele
- * m² foi criado/incrementado no estoque padrão a partir da baixa da
- * produção — sem essa entrada, o acréscimo ficava "invisível" no
- * histórico, aparecendo só como um incremento silencioso em
- * Material.quantidade.
+ * Em vez de criar/incrementar o Material de retalho diretamente, registra
+ * uma EntradaPendente (tipo RETALHO). O retalho só é de fato criado ou
+ * incrementado no estoque padrão quando essa pendência for confirmada em
+ * Controle de Estoque (ver confirmarEntradaPendente). Nenhum Material é
+ * tocado aqui — o material original que gerou o retalho já teve sua baixa
+ * registrada antes desta função ser chamada.
  */
 async function _gerarOuIncrementarRetalhoEstoquePadrao(tx, {
   material, larguraUsada, comprimentoUsado, precoM2Final, precoUnitarioFinal,
@@ -437,17 +330,46 @@ async function _gerarOuIncrementarRetalhoEstoquePadrao(tx, {
   const areaRetalho = Math.round((areaTotal - areaUsada) * 10000) / 10000;
   if (areaRetalho <= 0.0001) return;
 
-  // Observação da entrada de retalho no histórico do estoque padrão,
-  // seguindo o mesmo padrão "<descrição> – <usuário>" usado nas demais
-  // movimentações de produção, para exibição consistente na tela de
-  // Histórico de Movimentações.
   const obsRetalho =
-    `Retalho de ${areaRetalho} m² gerado pela baixa da produção ${producao} (OS ${numeroOS}) – ${usuarioNome ?? 'Usuário'}`;
+    `Retalho de ${areaRetalho} m² gerado pela baixa da produção ${producao} (OS ${numeroOS}) – ${usuarioNome ?? 'Usuário'} (aguardando confirmação)`;
+
+  await tx.entradaPendente.create({
+    data: {
+      tipo:               'RETALHO',
+      status:             'PENDENTE',
+      materialId:         material.id,
+      quantidade:         areaRetalho,
+      producao,
+      numeroOS,
+      relacaoOSId,
+      larguraUsada:       larg,
+      comprimentoUsado:   comp,
+      precoM2Final:       precoM2Final != null ? Number(precoM2Final) : null,
+      precoUnitarioFinal: precoUnitarioFinal != null ? Number(precoUnitarioFinal) : null,
+      observacao:         obsRetalho,
+      usuarioNome:        usuarioNome ?? null,
+    },
+  });
+}
+
+/**
+ * Executa de fato a criação/incremento do Material de retalho no estoque
+ * padrão, a partir dos dados de uma EntradaPendente do tipo RETALHO já
+ * confirmada. Espelha a lógica que antes rodava direto em
+ * _gerarOuIncrementarRetalhoEstoquePadrao.
+ */
+async function _efetivarRetalho(tx, pendencia) {
+  const material = await tx.material.findUnique({ where: { id: pendencia.materialId } });
+  if (!material) throw { status: 404, message: 'Material de origem do retalho não encontrado' };
+
+  const areaRetalho = Number(pendencia.quantidade);
+  const medidaRetalho = _formatarMedidaRetalho(areaRetalho);
 
   let retalhoMat = await tx.material.findFirst({
     where: {
       nome:          { equals: material.nome, mode: 'insensitive' },
       identificador: { equals: 'RETALHO',    mode: 'insensitive' },
+      medida:        { equals: medidaRetalho, mode: 'insensitive' },
       espessura:     material.espessura
         ? { equals: material.espessura, mode: 'insensitive' }
         : null,
@@ -455,13 +377,14 @@ async function _gerarOuIncrementarRetalhoEstoquePadrao(tx, {
   });
 
   const custoM2Retalho = (() => {
+    const precoM2Final = pendencia.precoM2Final != null ? Number(pendencia.precoM2Final) : null;
+    const precoUnitarioFinal = pendencia.precoUnitarioFinal != null ? Number(pendencia.precoUnitarioFinal) : null;
     if (precoM2Final != null && precoM2Final > 0) {
-      const area = Number(larguraUsada) * Number(comprimentoUsado);
+      const area = Number(pendencia.larguraUsada) * Number(pendencia.comprimentoUsado);
       if (area > 0) return precoM2Final / area;
     }
-    const pu    = precoUnitarioFinal != null ? Number(precoUnitarioFinal) : null;
     const areaT = Number(material.largura) * Number(material.comprimento);
-    if (pu != null && pu > 0 && areaT > 0) return pu / areaT;
+    if (precoUnitarioFinal != null && precoUnitarioFinal > 0 && areaT > 0) return precoUnitarioFinal / areaT;
     return material.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null;
   })();
 
@@ -472,13 +395,13 @@ async function _gerarOuIncrementarRetalhoEstoquePadrao(tx, {
           nome:              material.nome,
           unidade:           'M²',
           categoria:         material.categoria ?? null,
-          medida:            null,
+          medida:            medidaRetalho,
           espessura:         material.espessura ?? null,
           identificador:     'RETALHO',
           quantidade:        areaRetalho,
           estoqueMinimo:     0,
           status:            _calcularStatus(areaRetalho, 0, true),
-          estoqueConfirmado: false,
+          estoqueConfirmado: true,
           ativo:             true,
           ultimoValorPago:   null,
           ultimoValorPagoM2: custoM2Retalho,
@@ -489,7 +412,7 @@ async function _gerarOuIncrementarRetalhoEstoquePadrao(tx, {
         retalhoMat = await tx.material.findFirst({
           where: {
             nome:      { equals: material.nome, mode: 'insensitive' },
-            medida:    null,
+            medida:    { equals: medidaRetalho, mode: 'insensitive' },
             espessura: material.espessura
               ? { equals: material.espessura, mode: 'insensitive' }
               : null,
@@ -509,9 +432,6 @@ async function _gerarOuIncrementarRetalhoEstoquePadrao(tx, {
       }
     }
   } else {
-    // O retalho já existia (item "modelo" do estoque padrão) — incrementa o
-    // saldo direto em Material.quantidade, igual a uma saída dimensional
-    // feita direto no Controle de Estoque.
     const novaQtd = Number(retalhoMat.quantidade) + areaRetalho;
     await tx.material.update({
       where: { id: retalhoMat.id },
@@ -524,46 +444,32 @@ async function _gerarOuIncrementarRetalhoEstoquePadrao(tx, {
     });
   }
 
-  // Registra a entrada do retalho no Histórico de Movimentações do estoque
-  // padrão, vinculada à MESMA RelacaoOS da baixa de produção que o
-  // originou, para deixar claro de onde veio esse m². origemProducao +
-  // producao são o que alimenta o badge de origem ("Produção 1"/"Produção
-  // 2") na tela de Histórico — sem eles a coluna Origem fica vazia, como
-  // a saída/baixa que gerou este retalho.
   await tx.movimentacaoEstoque.create({
     data: {
       materialId:  retalhoMat.id,
       tipo:        'ENTRADA',
       quantidade:  areaRetalho,
-      numeroOS,
-      relacaoOSId,
+      numeroOS:    pendencia.numeroOS,
+      relacaoOSId: pendencia.relacaoOSId,
       precoM2:     custoM2Retalho ?? undefined,
-      observacao:  obsRetalho,
+      observacao:  `Retalho confirmado de ${areaRetalho} m² gerado pela baixa da produção ${pendencia.producao}` +
+        (pendencia.numeroOS ? ` (OS ${pendencia.numeroOS})` : '') +
+        ` – ${pendencia.usuarioNome ?? 'Usuário'}`,
       origemProducao: 'BAIXA',
-      producao,
+      producao:       pendencia.producao,
     },
   });
-  await tx.relacaoOS.update({
-    where: { id: relacaoOSId },
-    data:  { atualizadoEm: new Date() },
-  });
+
+  if (pendencia.relacaoOSId) {
+    await tx.relacaoOS.update({
+      where: { id: pendencia.relacaoOSId },
+      data:  { atualizadoEm: new Date() },
+    });
+  }
+
+  return retalhoMat;
 }
 
-/**
- * Dá baixa (saída) no estoque de produção para uma OS específica.
- * Não mexe em Material.quantidade (o material já saiu do estoque normal no
- * momento da transferência), mas registra uma MovimentacaoEstoque do tipo
- * SAIDA vinculada à RelacaoOS informada — para que a baixa apareça no
- * Controle de Estoque daquela OS, do mesmo jeito que uma saída direta do
- * estoque normal ou uma solicitação de produção (ver
- * producao.service.js#_registrarSaidaControleEstoque). Sem essa ligação a
- * baixa ficava visível apenas no histórico do estoque de produção.
- *
- * Aceita larguraUsada/comprimentoUsado para materiais UNIDADE com dimensão
- * cadastrada, no mesmo padrão da tela de Controle de Estoque: quando
- * informados, quantidade é sempre 1 e o custo (precoM2) é calculado
- * proporcionalmente à área usada.
- */
 async function darBaixa({
   materialId,
   quantidade,
@@ -574,10 +480,24 @@ async function darBaixa({
   larguraUsada,
   comprimentoUsado,
 }) {
-  const qtd = Number(quantidade);
-  if (!qtd || qtd <= 0) {
+  const temQuantidadeInformada = quantidade != null && quantidade !== '';
+  const qtdInteira = temQuantidadeInformada ? Number(quantidade) : 0;
+  if (temQuantidadeInformada && (!Number.isFinite(qtdInteira) || qtdInteira <= 0)) {
     throw { status: 400, message: 'Informe uma quantidade válida' };
   }
+
+  const temDimensao = larguraUsada != null && larguraUsada !== '' &&
+    comprimentoUsado != null && comprimentoUsado !== '';
+
+  if (qtdInteira <= 0 && !temDimensao) {
+    throw {
+      status: 400,
+      message: 'Informe a quantidade e/ou a dimensão usada',
+    };
+  }
+
+  const qtd = qtdInteira + (temDimensao ? 1 : 0);
+
   const prod = _normalizarProducao(producao);
   const numeroOSNorm = (numeroOS ?? '').trim().toUpperCase();
   if (!numeroOSNorm) {
@@ -597,9 +517,6 @@ async function darBaixa({
 
   const material = await prisma.material.findUnique({ where: { id: materialId } });
 
-  // Mesma regra de resolução de RelacaoOS usada em estoque.service.js
-  // #registrarMovimentacao: OS numérica ou com sufixo (#OC/#S/#E) usa upsert
-  // direto; OS descritiva usa o agrupamento por dia (resolverRelacaoOSDescritiva).
   const osEhNumerica = /^\d+$/.test(numeroOSNorm);
   const osTemSufixo  = /#(OC|S|E)/.test(numeroOSNorm);
 
@@ -627,17 +544,15 @@ async function darBaixa({
     relacao = await resolverRelacaoOSDescritiva(numeroOSNorm);
   }
 
-  // Calcula precoUnitario/precoM2 (proporcional à área usada, se dimensional)
-  // seguindo o mesmo cálculo de producao.service.js#_registrarSaidaControleEstoque.
   const precoUnitarioFinal = material?.ultimoValorPago != null ? Number(material.ultimoValorPago) : null;
-  let precoM2Final = material?.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null;
+  let precoM2Dimensional = material?.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null;
 
   const _unidadeMat = (material?.unidade ?? '').toLowerCase().trim();
   const _eMetroLinear = ['m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'].includes(_unidadeMat);
-  if (_eMetroLinear) precoM2Final = null;
+  if (_eMetroLinear) precoM2Dimensional = null;
 
   if (
-    larguraUsada != null && comprimentoUsado != null &&
+    temDimensao &&
     !_eMetroLinear &&
     material?.largura != null && material?.comprimento != null
   ) {
@@ -649,24 +564,16 @@ async function darBaixa({
     if (larg > 0 && comp > 0 && largTotal > 0 && compTotal > 0) {
       const areaUsada = larg * comp;
       const areaTotal = largTotal * compTotal;
-      const custoM2 = precoM2Final != null
-        ? precoM2Final
+      const custoM2 = precoM2Dimensional != null
+        ? precoM2Dimensional
         : (precoUnitarioFinal != null && areaTotal > 0 ? precoUnitarioFinal / areaTotal : null);
       if (custoM2 != null) {
-        precoM2Final = Math.round(custoM2 * areaUsada * 1000000) / 1000000;
+        precoM2Dimensional = Math.round(custoM2 * areaUsada * 1000000) / 1000000;
       }
     }
   }
 
-  // A observação identifica de qual linha de produção é a baixa (ex.:
-  // "Baixa da produção 1 – <usuário>") para que o Histórico de
-  // Movimentações e o Controle de Estoque exibam a origem corretamente —
-  // mesmo quando o usuário digita uma observação própria no diálogo, que é
-  // preservada como linha extra.
-  const obsBaseBaixa = `Baixa da produção ${prod} – ${usuarioNome ?? 'Usuário'}`;
-  const obsFinal = observacao?.trim()
-    ? `${obsBaseBaixa}\n${observacao.trim()}`
-    : obsBaseBaixa;
+  const usuarioLabel = usuarioNome ?? 'Usuário';
 
   const movimentacao = await prisma.$transaction(async (tx) => {
     await tx.estoqueProducao.update({
@@ -674,51 +581,94 @@ async function darBaixa({
       data:  { quantidade: { decrement: qtd } },
     });
 
-    const mov = await tx.movimentacaoProducao.create({
-      data: {
-        materialId,
-        tipo:       'BAIXA',
-        quantidade: qtd,
-        numeroOS:   numeroOSNorm,
-        producao:   prod,
-        observacao: observacao?.trim()
-          ? `Baixa da produção ${prod}\n${observacao.trim()}`
-          : `Baixa da produção ${prod}`,
-        usuarioNome: usuarioNome ?? null,
-      },
-    });
+    let primeiraMov = null;
 
-    await tx.movimentacaoEstoque.create({
-      data: {
-        materialId,
-        tipo:        'SAIDA',
-        quantidade:  qtd,
-        numeroOS:    numeroOSNorm,
-        relacaoOSId: relacao.id,
-        observacao:  obsFinal,
-        origemProducao: 'BAIXA',
-        producao:       prod,
-        precoUnitario: precoUnitarioFinal ?? undefined,
-        precoM2:       precoM2Final       ?? undefined,
-        larguraUsada:     larguraUsada     != null ? Number(larguraUsada)     : null,
-        comprimentoUsado: comprimentoUsado != null ? Number(comprimentoUsado) : null,
-      },
-    });
+    if (qtdInteira > 0) {
+      const obsBaseInteira = `Baixa da produção ${prod} – ${usuarioLabel}`;
+      const obsInteiraFinal = observacao?.trim()
+        ? `${obsBaseInteira}\n${observacao.trim()}`
+        : obsBaseInteira;
+
+      const movInteira = await tx.movimentacaoProducao.create({
+        data: {
+          materialId,
+          tipo:       'BAIXA',
+          quantidade: qtdInteira,
+          numeroOS:   numeroOSNorm,
+          producao:   prod,
+          observacao: observacao?.trim()
+            ? `Baixa da produção ${prod}\n${observacao.trim()}`
+            : `Baixa da produção ${prod}`,
+          usuarioNome: usuarioNome ?? null,
+        },
+      });
+      primeiraMov = primeiraMov ?? movInteira;
+
+      await tx.movimentacaoEstoque.create({
+        data: {
+          materialId,
+          tipo:        'SAIDA',
+          quantidade:  qtdInteira,
+          numeroOS:    numeroOSNorm,
+          relacaoOSId: relacao.id,
+          observacao:  obsInteiraFinal,
+          origemProducao: 'BAIXA',
+          producao:       prod,
+          precoUnitario: precoUnitarioFinal ?? undefined,
+          larguraUsada:     null,
+          comprimentoUsado: null,
+        },
+      });
+    }
+
+    if (temDimensao) {
+      const obsBaseDimensional = `Baixa da produção ${prod} – ${usuarioLabel}`;
+      const obsDimensionalFinal = observacao?.trim()
+        ? `${obsBaseDimensional}\n${observacao.trim()}`
+        : obsBaseDimensional;
+
+      const movDimensional = await tx.movimentacaoProducao.create({
+        data: {
+          materialId,
+          tipo:       'BAIXA',
+          quantidade: 1,
+          numeroOS:   numeroOSNorm,
+          producao:   prod,
+          observacao: observacao?.trim()
+            ? `Baixa da produção ${prod}\n${observacao.trim()}`
+            : `Baixa da produção ${prod}`,
+          usuarioNome: usuarioNome ?? null,
+        },
+      });
+      primeiraMov = primeiraMov ?? movDimensional;
+
+      await tx.movimentacaoEstoque.create({
+        data: {
+          materialId,
+          tipo:        'SAIDA',
+          quantidade:  1,
+          numeroOS:    numeroOSNorm,
+          relacaoOSId: relacao.id,
+          observacao:  obsDimensionalFinal,
+          origemProducao: 'BAIXA',
+          producao:       prod,
+          precoM2: precoM2Dimensional ?? undefined,
+          larguraUsada:     Number(larguraUsada),
+          comprimentoUsado: Number(comprimentoUsado),
+        },
+      });
+    }
 
     await tx.relacaoOS.update({
       where: { id: relacao.id },
       data:  { atualizadoEm: new Date() },
     });
 
-    // Gera/incrementa o retalho M² (sobra da área não utilizada) no ESTOQUE
-    // PADRÃO — mesmo comportamento da saída dimensional feita pelo estoque
-    // normal (ver estoque.service.js#registrarMovimentacao). O retalho não
-    // fica mais preso à linha de produção que fez a baixa.
     await _gerarOuIncrementarRetalhoEstoquePadrao(tx, {
       material,
-      larguraUsada,
-      comprimentoUsado,
-      precoM2Final,
+      larguraUsada:     temDimensao ? Number(larguraUsada)     : null,
+      comprimentoUsado: temDimensao ? Number(comprimentoUsado) : null,
+      precoM2Final: precoM2Dimensional,
       precoUnitarioFinal,
       producao: prod,
       numeroOS: numeroOSNorm,
@@ -726,7 +676,7 @@ async function darBaixa({
       usuarioNome,
     });
 
-    return mov;
+    return primeiraMov;
   });
 
   return movimentacao;
@@ -781,6 +731,183 @@ async function excluirHistorico(movimentacaoId) {
   await prisma.movimentacaoProducao.delete({ where: { id: movimentacaoId } });
 }
 
+/**
+ * Lista as pendências (RETALHO e/ou DEVOLUCAO) aguardando confirmação no
+ * Controle de Estoque. Por padrão traz todas as linhas de produção e
+ * apenas status PENDENTE — o card de "Pendentes" do dialog de Saída p/
+ * Produção mostra todas, independente da linha.
+ */
+async function listarPendentes({ producao, tipo, status } = {}) {
+  const where = { status: status ?? 'PENDENTE' };
+  if (producao) where.producao = _normalizarProducao(producao);
+  if (tipo)     where.tipo = tipo;
+
+  const registros = await prisma.entradaPendente.findMany({
+    where,
+    include: {
+      material: {
+        select: {
+          id: true, nome: true, unidade: true, categoria: true,
+          identificador: true, medida: true, espessura: true,
+          largura: true, comprimento: true,
+        },
+      },
+    },
+    orderBy: { criadoEm: 'desc' },
+  });
+
+  // Para RETALHO, o `material` incluído é o material de ORIGEM (que gerou
+  // a sobra) — sua unidade/medida/dimensões não são as do retalho em si.
+  // O retalho é sempre M², com medida calculada a partir da área sobrante,
+  // sem largura/comprimento próprios (é uma peça irregular). Sobrescreve
+  // esses campos para refletir o retalho, mantendo nome/categoria/
+  // espessura do material de origem (o retalho herda esses atributos).
+  return registros.map((r) => {
+    if (r.tipo !== 'RETALHO') return r;
+    const areaRetalho = Number(r.quantidade);
+    return {
+      ...r,
+      material: {
+        ...r.material,
+        unidade:       'M²',
+        identificador: 'RETALHO',
+        medida:        _formatarMedidaRetalho(areaRetalho),
+        largura:       null,
+        comprimento:   null,
+      },
+    };
+  });
+}
+
+/** Conta quantas pendências existem, para o badge do botão. */
+async function contarPendentes() {
+  return prisma.entradaPendente.count({ where: { status: 'PENDENTE' } });
+}
+
+/**
+ * Confirma uma EntradaPendente: efetiva o impacto real no estoque padrão.
+ * - RETALHO: cria/incrementa o Material de retalho (lógica que antes
+ *   rodava direto em darBaixa).
+ * - DEVOLUCAO: incrementa o Material do estoque padrão e zera a
+ *   quantidadePendente correspondente em EstoqueProducao.
+ */
+async function confirmarEntradaPendente({ id, usuarioNome }) {
+  const pendencia = await prisma.entradaPendente.findUnique({ where: { id: Number(id) } });
+  if (!pendencia) throw { status: 404, message: 'Pendência não encontrada' };
+  if (pendencia.status !== 'PENDENTE') {
+    throw { status: 400, message: 'Esta pendência já foi resolvida' };
+  }
+
+  const resultado = await prisma.$transaction(async (tx) => {
+    if (pendencia.tipo === 'RETALHO') {
+      const retalhoMat = await _efetivarRetalho(tx, pendencia);
+      await tx.entradaPendente.update({
+        where: { id: pendencia.id },
+        data:  { status: 'CONFIRMADA', resolvidoEm: new Date() },
+      });
+      return retalhoMat;
+    }
+
+    if (pendencia.tipo === 'DEVOLUCAO') {
+      const qtd = Number(pendencia.quantidade);
+
+      await tx.estoqueProducao.update({
+        where: { materialId_producao: { materialId: pendencia.materialId, producao: pendencia.producao } },
+        data:  { quantidadePendente: { decrement: qtd } },
+      });
+
+      const matAtualizado = await tx.material.update({
+        where: { id: pendencia.materialId },
+        data:  { quantidade: { increment: qtd } },
+      });
+      const novoStatus = _calcularStatus(
+        matAtualizado.quantidade,
+        matAtualizado.estoqueMinimo,
+        matAtualizado.ativo,
+      );
+      await tx.material.update({ where: { id: pendencia.materialId }, data: { status: novoStatus } });
+
+      const NOME_BASE_DEVOLUCAO = `DEVOLUCAO-PRODUCAO${pendencia.producao}`;
+      const relacao = await resolverRelacaoOSDescritiva(NOME_BASE_DEVOLUCAO);
+
+      await tx.movimentacaoEstoque.create({
+        data: {
+          materialId: pendencia.materialId,
+          tipo:        'ENTRADA',
+          quantidade:  qtd,
+          numeroOS:    relacao.numeroOS,
+          relacaoOSId: relacao.id,
+          observacao:  `Devolução confirmada da produção ${pendencia.producao} para o estoque padrão – ${usuarioNome ?? pendencia.usuarioNome ?? 'Usuário'}`,
+          origemProducao: 'DEVOLUCAO',
+          producao:       pendencia.producao,
+        },
+      });
+      await tx.relacaoOS.update({
+        where: { id: relacao.id },
+        data:  { atualizadoEm: new Date() },
+      });
+
+      await tx.entradaPendente.update({
+        where: { id: pendencia.id },
+        data:  { status: 'CONFIRMADA', resolvidoEm: new Date() },
+      });
+
+      return matAtualizado;
+    }
+
+    throw { status: 400, message: `Tipo de pendência desconhecido: ${pendencia.tipo}` };
+  });
+
+  return resultado;
+}
+
+/**
+ * Recusa uma EntradaPendente, estornando o que for necessário:
+ * - RETALHO: apenas cancela o registro — o retalho nunca saiu de lugar
+ *   nenhum, então não há nada a estornar no estoque.
+ * - DEVOLUCAO: devolve a quantidade para EstoqueProducao.quantidade
+ *   (volta pra produção de origem), tirando de quantidadePendente.
+ */
+async function recusarEntradaPendente({ id, usuarioNome }) {
+  const pendencia = await prisma.entradaPendente.findUnique({ where: { id: Number(id) } });
+  if (!pendencia) throw { status: 404, message: 'Pendência não encontrada' };
+  if (pendencia.status !== 'PENDENTE') {
+    throw { status: 400, message: 'Esta pendência já foi resolvida' };
+  }
+
+  const resultado = await prisma.$transaction(async (tx) => {
+    if (pendencia.tipo === 'DEVOLUCAO') {
+      const qtd = Number(pendencia.quantidade);
+      await tx.estoqueProducao.update({
+        where: { materialId_producao: { materialId: pendencia.materialId, producao: pendencia.producao } },
+        data: {
+          quantidade:         { increment: qtd },
+          quantidadePendente: { decrement: qtd },
+        },
+      });
+
+      await tx.movimentacaoProducao.create({
+        data: {
+          materialId: pendencia.materialId,
+          tipo:       'DEVOLUCAO',
+          quantidade: qtd,
+          producao:   pendencia.producao,
+          observacao: `Estorno: devolução recusada, material retorna à produção ${pendencia.producao} – ${usuarioNome ?? 'Usuário'}`,
+          usuarioNome: usuarioNome ?? null,
+        },
+      });
+    }
+    // RETALHO: nada a estornar no estoque — só cancela o registro abaixo.
+
+    return tx.entradaPendente.update({
+      where: { id: pendencia.id },
+      data:  { status: 'RECUSADA', resolvidoEm: new Date() },
+    });
+  });
+
+  return resultado;
+}
+
 module.exports = {
   transferirParaProducao,
   devolverAoEstoquePadrao,
@@ -789,4 +916,8 @@ module.exports = {
   darBaixa,
   listarHistorico,
   excluirHistorico,
+  listarPendentes,
+  contarPendentes,
+  confirmarEntradaPendente,
+  recusarEntradaPendente,
 };

@@ -5469,9 +5469,23 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
   }
 
   Future<void> _salvar() async {
-    if (!_formKey.currentState!.validate()) return;
+    // Trava o botão IMEDIATAMENTE, antes de qualquer "await" — inclusive
+    // antes da validação e da verificação de duplicidade. Isso fecha a
+    // janela em que um duplo clique (ou duplo toque no mobile) disparava
+    // _salvar() duas vezes antes que _salvando virasse true, resultando
+    // em dois materiais idênticos cadastrados a partir de um único clique.
+    if (_salvando) return;
+    setState(() { _salvando = true; });
+
+    if (!_formKey.currentState!.validate()) {
+      setState(() => _salvando = false);
+      return;
+    }
     if (!_modoRetalho && (_unidade == null || _unidade!.isEmpty)) {
-      setState(() => _erroDialog = 'Selecione uma unidade antes de salvar.');
+      setState(() {
+        _salvando = false;
+        _erroDialog = 'Selecione uma unidade antes de salvar.';
+      });
       return;
     }
     // Garante que a verificação de duplicidade mais recente já foi
@@ -5482,12 +5496,13 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     if (!mounted) return;
     if (_possiveisDuplicatas.any((d) => d.exata)) {
       setState(() {
+        _salvando = false;
         _erroDialog = 'Já existe um material idêntico cadastrado. '
             'Ajuste a medida/espessura ou edite o material existente.';
       });
       return;
     }
-    setState(() { _salvando = true; _erroDialog = null; });
+    setState(() { _erroDialog = null; });
 
     final custoValor = _custoCtrl.text.trim().isEmpty
         ? null
@@ -6737,98 +6752,116 @@ class _TransferenciaProducaoDialogState
 
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: SizedBox(
-        width: 880,
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Cabeçalho ─────────────────────────────────────────────
-              Row(
-                children: [
-                  const Icon(Icons.factory_outlined, color: AppTheme.warning),
-                  const SizedBox(width: 8),
-                  Text('Saída para Produção', style: Theme.of(context).textTheme.headlineSmall),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TabBar(
-                controller: _tabController,
-                isScrollable: false,
-                labelColor: AppTheme.warning,
-                indicatorColor: AppTheme.warning,
-                tabs: [
-                  const Tab(text: 'Saída'),
-                  Tab(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text('Pendentes de confirmação'),
-                        if (totalPendentes > 0) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: AppTheme.error,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              '$totalPendentes',
-                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(
-                height: 560,
-                child: TabBarView(
-                  controller: _tabController,
+      child: ConstrainedBox(
+        // Limita a altura do diálogo ao espaço disponível na tela (descontando
+        // o insetPadding acima). Antes, a área das abas tinha altura FIXA
+        // (SizedBox(height: 560)), que não se adaptava a telas/janelas menores.
+        // Em resoluções baixas, cabeçalho + 560 + rodapé ultrapassava a altura
+        // da janela e o rodapé com "Confirmar Transferência" era empurrado
+        // para fora (overflow), ficando inacessível.
+        constraints: BoxConstraints(
+          maxWidth: 880,
+          maxHeight: MediaQuery.of(context).size.height - 48,
+        ),
+        child: SizedBox(
+          width: 880,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Cabeçalho ─────────────────────────────────────────────
+                Row(
                   children: [
-                    SingleChildScrollView(child: _buildAbaSaida(context)),
-                    SingleChildScrollView(child: _buildAbaPendentes(context)),
+                    const Icon(Icons.factory_outlined, color: AppTheme.warning),
+                    const SizedBox(width: 8),
+                    Text('Saída para Produção', style: Theme.of(context).textTheme.headlineSmall),
                   ],
                 ),
-              ),
-              AnimatedBuilder(
-                animation: _tabController,
-                builder: (context, _) {
-                  if (_tabController.index != 0) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          style: TextButton.styleFrom().copyWith(
-                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                          ),
-                          child: const Text('Cancelar'),
-                        ),
-                        const SizedBox(width: 8),
-                        FilledButton(
-                          onPressed: (_selecionado == null || _producaoSelecionada == null || _enviando) ? null : _confirmar,
-                          style: FilledButton.styleFrom(backgroundColor: AppTheme.warning).copyWith(
-                            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                          ),
-                          child: _enviando
-                              ? const SizedBox(
-                                  width: 18, height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                              : const Text('Confirmar Transferência'),
-                        ),
-                      ],
+                const SizedBox(height: 12),
+                TabBar(
+                  controller: _tabController,
+                  isScrollable: false,
+                  labelColor: AppTheme.warning,
+                  indicatorColor: AppTheme.warning,
+                  tabs: [
+                    const Tab(text: 'Saída'),
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('Pendentes de confirmação'),
+                          if (totalPendentes > 0) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: AppTheme.error,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '$totalPendentes',
+                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
-                  );
-                },
-              ),
-            ],
+                  ],
+                ),
+                // Antes: SizedBox(height: 560, ...) — altura fixa que causava o
+                // overflow em telas menores. Agora: Flexible dentro da Column
+                // (mainAxisSize.min), então essa área ocupa o espaço restante
+                // até o limite do ConstrainedBox acima, sem nunca empurrar o
+                // rodapé (Cancelar / Confirmar Transferência) para fora da
+                // área visível. Se o conteúdo interno não couber, ele rola
+                // (SingleChildScrollView já usado em cada aba).
+                Flexible(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      SingleChildScrollView(child: _buildAbaSaida(context)),
+                      SingleChildScrollView(child: _buildAbaPendentes(context)),
+                    ],
+                  ),
+                ),
+                AnimatedBuilder(
+                  animation: _tabController,
+                  builder: (context, _) {
+                    if (_tabController.index != 0) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            style: TextButton.styleFrom().copyWith(
+                              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                            ),
+                            child: const Text('Cancelar'),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton(
+                            onPressed: (_selecionado == null || _producaoSelecionada == null || _enviando) ? null : _confirmar,
+                            style: FilledButton.styleFrom(backgroundColor: AppTheme.warning).copyWith(
+                              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                            ),
+                            child: _enviando
+                                ? const SizedBox(
+                                    width: 18, height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                : const Text('Confirmar Transferência'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
         ),
       ),

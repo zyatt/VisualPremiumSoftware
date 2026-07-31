@@ -1,7 +1,5 @@
 const prisma = require('../utils/prisma');
 
-// ─── Veículos ────────────────────────────────────────────────────────────────
-
 async function listarVeiculos() {
   return prisma.veiculo.findMany({
     where: { ativo: true },
@@ -77,8 +75,6 @@ async function excluirVeiculoDefinitivo(id) {
   });
 }
 
-// ─── Manutenções ─────────────────────────────────────────────────────────────
-
 async function listarManutencoes(veiculoId) {
   return prisma.manutencaoVeiculo.findMany({
     where: { veiculoId },
@@ -119,11 +115,6 @@ async function deletarManutencao(id) {
   return prisma.manutencaoVeiculo.delete({ where: { id } });
 }
 
-/**
- * Marca (ou desmarca) o serviço como finalizado manualmente, sem depender
- * da dataRetirada. Ao finalizar, some do "Em andamento" e da notificação
- * de retirada imediatamente, sem esperar a virada do dia.
- */
 async function finalizarManutencao(id, { finalizada = true } = {}) {
   return prisma.manutencaoVeiculo.update({
     where: { id },
@@ -134,12 +125,6 @@ async function finalizarManutencao(id, { finalizada = true } = {}) {
   });
 }
 
-// ─── Gastos (para a página de gastos) ────────────────────────────────────────
-
-/**
- * Retorna gastos de veículos agrupados por veículo.
- * Filtros opcionais: dataInicio / dataFim (sobre dataEnvio).
- */
 async function gastosPorVeiculo({ dataInicio, dataFim } = {}) {
   const where = {};
 
@@ -207,7 +192,6 @@ async function resumoGastosVeiculo({ ano } = {}) {
     select: { valor: true, dataEnvio: true },
   });
 
-  // Agrupa por mês (1–12)
   const porMes = Array.from({ length: 12 }, (_, i) => ({
     mes:        i + 1,
     totalGasto: 0,
@@ -215,7 +199,7 @@ async function resumoGastosVeiculo({ ano } = {}) {
 
   let totalAnual = 0;
   for (const m of manutencoes) {
-    const mes = new Date(m.dataEnvio).getMonth(); // 0-indexed
+    const mes = new Date(m.dataEnvio).getMonth();
     const v   = Number(m.valor);
     porMes[mes].totalGasto += v;
     totalAnual              += v;

@@ -427,10 +427,6 @@ async function gerarPdfDeItens(dados) {
   const { titulo = 'Orçamento', fornecedoresOcultos = [], modoPrecificacao = 'UNIDADE' } = dados;
   const itens = aplicarFornecedoresOcultos(dados.itens ?? [], fornecedoresOcultos);
 
-  // No modo METRO_LINEAR (botão "Orçar por" do comparativo), o total de
-  // cada item multiplica também pela Quantidade por Unidade (mesma lógica
-  // usada no editor e na geração da OC). Itens sem qtdUnidade preenchida
-  // usam fator 1 (comportam-se como no modo Unidade).
   const orcarPorMetroLinear = modoPrecificacao === 'METRO_LINEAR';
   const fatorItem = (item) => {
     if (!orcarPorMetroLinear) return 1;

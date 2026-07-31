@@ -17,8 +17,6 @@ const listarSolicitacoes = async (req, res, next) => {
   try {
     const { status, busca } = req.query;
     const statusArr = status ? status.split(',').map((s) => s.trim()) : undefined;
-    // Rota legada — não é mais acessível pelos cargos PRODUCAO1/PRODUCAO2
-    // (ver producao.routes.js), então não há mais filtro por usuarioId aqui.
     res.json(await svc.listarSolicitacoes({ status: statusArr, busca }));
   } catch (e) { next(e); }
 };

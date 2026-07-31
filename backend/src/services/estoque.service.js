@@ -1,8 +1,5 @@
 const prisma = require('../utils/prisma');
 
-// Formata a unidade para exibição em mensagens ao usuário (o valor salvo no
-// banco permanece em maiúsculo). Ex.: 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²'/'M2'
-// → 'm²'; 'KG' → 'Kg'; 'G' → 'g'. Espelha `formatarUnidadeExibicao` do app.
 function formatUnidade(unidade) {
   if (!unidade || !unidade.trim()) return '';
   const u = unidade.trim().toUpperCase();
@@ -256,10 +253,6 @@ async function registrarMovimentacao({
           return material.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null;
         })();
 
-        // Observação padrão da entrada de retalho no Histórico de
-        // Movimentações — deixa explícito que este m² foi gerado pela saída
-        // dimensional acima (mesma OS/relacaoOSId), evitando que o
-        // incremento em Material.quantidade fique "invisível" no histórico.
         const obsRetalho =
           `Retalho de ${areaRetalho} m² gerado pela saída de ${material.nome} (OS ${numeroOS}) – ${usuarioNome ?? 'Usuário'}`;
 
@@ -319,9 +312,6 @@ async function registrarMovimentacao({
           });
         }
 
-        // Registra a entrada do retalho no Histórico de Movimentações,
-        // vinculada à MESMA RelacaoOS da saída que o originou (relacao.id),
-        // para que fique claro de onde veio esse m² de retalho.
         await prisma.movimentacaoEstoque.create({
           data: {
             materialId:  retalhoMat.id,
@@ -357,11 +347,6 @@ async function removerMovimentacao(movimentacaoId) {
 
   const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
 
-  // Se esta SAÍDA usou o modo dimensional (larguraUsada/comprimentoUsado),
-  // ela pode ter gerado/incrementado um material RETALHO com a área
-  // sobrante (ver registrarMovimentacao). Ao excluir a movimentação,
-  // essa área precisa ser revertida do retalho também — senão o retalho
-  // fica com uma quantidade "fantasma" que nunca existiu.
   let retalhoParaReverter = null;
   if (
     mov.tipo === 'SAIDA' &&
@@ -395,53 +380,11 @@ async function removerMovimentacao(movimentacaoId) {
     }
   }
 
-  // Se a movimentação removida é uma SAÍDA vinculada a uma OS de
-  // transferência para produção (numeroOS começa com 'TRANSFERENCIA-PRODUCAO'),
-  // precisa também decrementar o EstoqueProducao — a quantidade que havia
-  // entrado lá ao fazer a transferência deixa de existir.
-  // Fonte da verdade: o campo origemProducao, gravado no momento da criação
-  // (ver estoqueProducao.service.js#transferirParaProducao/darBaixa). Cai no
-  // fallback por texto/numeroOS apenas para registros criados antes deste
-  // campo existir (origemProducao === null).
-  // Fonte da verdade principal: o campo origemProducao, gravado no momento
-  // da criação (ver estoqueProducao.service.js#transferirParaProducao/
-  // darBaixa). Combinado com OR ao fallback por texto/numeroOS (não troca
-  // condicional) para não depender de um único sinal: se o Prisma Client
-  // ainda não tiver sido regenerado após a migration (`npx prisma generate`),
-  // o create() grava origemProducao como null silenciosamente, e sem o OR a
-  // detecção quebraria mesmo a movimentação tendo o numeroOS/observação
-  // corretos. Com o OR, qualquer um dos dois sinais sendo verdadeiro basta.
   const ehTransferenciaProducao =
     mov.tipo === 'SAIDA' &&
     (mov.origemProducao === 'TRANSFERENCIA' ||
       (mov.numeroOS ?? '').startsWith('TRANSFERENCIA-PRODUCAO'));
 
-  // Se a movimentação removida é a SAÍDA de registro/relatório gerada
-  // automaticamente quando uma solicitação de Produção é finalizada
-  // (ver _registrarSaidaControleEstoque em producao.service.js), essa
-  // saída NUNCA decrementou o estoque normal — o material já havia saído
-  // do estoque normal antes, na transferência para o EstoqueProducao, e
-  // foi consumido de lá. Deletar essa movimentação, portanto, não deve
-  // devolver quantidade ao estoque normal; deve devolver ao EstoqueProducao,
-  // de onde ela realmente foi baixada.
-  // ATENÇÃO: existem DUAS origens distintas de saída "relacionada à
-  // produção", e não podem ser tratadas da mesma forma ao excluir:
-  //   1) Solicitação de Produção que reserva do ESTOQUE NORMAL
-  //      (producao.service.js#criarSolicitacao decrementa prisma.material
-  //      diretamente). A saída de controle de estoque gerada para ela
-  //      (producao.service.js#_registrarSaidaControleEstoque) grava
-  //      origemProducao: 'SOLICITACAO_ESTOQUE_NORMAL' e DEVE devolver ao
-  //      estoque normal quando removida.
-  //   2) Baixa feita a partir do saldo do EstoqueProducao
-  //      (estoqueProducao.service.js#darBaixa), que grava
-  //      origemProducao: 'BAIXA' e DEVE devolver ao EstoqueProducao.
-  // O fallback textual antigo (regex em cima de "Saída via produção...")
-  // não distinguia os dois casos — ambas as observações começam com esse
-  // texto — e por isso QUALQUER saída da Produção era devolvida ao
-  // EstoqueProducao ao ser excluída, mesmo quando havia saído do estoque
-  // normal. O fallback agora exige o texto específico das baixas de
-  // EstoqueProducao e nunca casa com "Saída via produção –", que é
-  // exclusiva do fluxo de solicitação/estoque normal.
   const ehSaidaDeProducao =
     mov.tipo === 'SAIDA' &&
     !ehTransferenciaProducao &&
@@ -449,10 +392,6 @@ async function removerMovimentacao(movimentacaoId) {
       (mov.origemProducao == null &&
         /^(Baixa via produção|Baixa do estoque de produção|Baixa da produção)/i.test((mov.observacao ?? '').trim())));
 
-  // Fallback para registros antigos sem o campo `producao` preenchido:
-  // extrai a linha ('1' ou '2') do numeroOS (TRANSFERENCIA-PRODUCAO<N>...)
-  // ou da observação ("...produção <N>..."). Assume '1' como último
-  // recurso para não quebrar o estorno de dados pré-migração.
   if (mov.producao == null && (ehTransferenciaProducao || ehSaidaDeProducao)) {
     const fonte = `${mov.numeroOS ?? ''} ${mov.observacao ?? ''}`;
     const match = fonte.match(/PRODUCAO ?([12])|produção ([12])/i);
@@ -461,8 +400,6 @@ async function removerMovimentacao(movimentacaoId) {
 
   await prisma.$transaction([
     prisma.movimentacaoEstoque.delete({ where: { id: movimentacaoId } }),
-    // Para saídas originadas da Produção, NÃO mexe em material.quantidade
-    // (estoque normal) — o saldo correto a reverter é o do EstoqueProducao.
     ...(ehSaidaDeProducao
       ? []
       : [prisma.material.update({
@@ -475,10 +412,7 @@ async function removerMovimentacao(movimentacaoId) {
           data:  { quantidade: { decrement: retalhoParaReverter.areaRetalho } },
         })]
       : []),
-    // Reverte o saldo no EstoqueProducao da linha correspondente (mov.producao)
-    // se for uma transferência desfeita. Usa updateMany (chave composta
-    // materialId+producao) e protege contra negativo fazendo um segundo
-    // update logo após a transaction.
+
     ...(ehTransferenciaProducao
       ? [prisma.estoqueProducao.updateMany({
           where: { materialId: mov.materialId, producao: mov.producao },
@@ -495,9 +429,7 @@ async function removerMovimentacao(movimentacaoId) {
           },
         })]
       : []),
-    // Devolve a quantidade ao EstoqueProducao (não ao estoque normal) quando
-    // a saída removida é a de registro de uma baixa de produção — na MESMA
-    // linha de produção (mov.producao) de onde ela foi baixada.
+
     ...(ehSaidaDeProducao
       ? [prisma.estoqueProducao.upsert({
           where:  { materialId_producao: { materialId: mov.materialId, producao: mov.producao } },
@@ -518,9 +450,6 @@ async function removerMovimentacao(movimentacaoId) {
       : []),
   ]);
 
-  // Protege EstoqueProducao contra quantidade negativa (caso o material já
-  // tenha sido parcialmente ou totalmente consumido por baixas antes da
-  // remoção da transferência).
   if (ehTransferenciaProducao) {
     const ep = await prisma.estoqueProducao.findUnique({
       where: { materialId_producao: { materialId: mov.materialId, producao: mov.producao } },
@@ -540,8 +469,6 @@ async function removerMovimentacao(movimentacaoId) {
 
   if (retalhoParaReverter) {
     const retalhoMatAntes = await prisma.material.findUnique({ where: { id: retalhoParaReverter.id } });
-    // Protege contra quantidade negativa caso o retalho já tenha sido
-    // parcialmente consumido por outras movimentações antes da exclusão.
     const qtdFinal = Math.max(0, Number(retalhoMatAntes.quantidade));
     const statusRetalho = _calcularStatus(qtdFinal, Number(retalhoMatAntes.estoqueMinimo), retalhoMatAntes.ativo);
     await prisma.material.update({
@@ -575,41 +502,17 @@ async function excluirRelacaoOS(relacaoOSId) {
     throw { status: 400, message: 'Não é possível excluir uma OS fechada' };
   }
 
-  // Acumula quanto precisa ser revertido do EstoqueProducao por material +
-  // linha de produção (pode haver múltiplas transferências/baixas do mesmo
-  // material, para linhas diferentes, na mesma OS).
-  // - TRANSFERENCIA-PRODUCAO desfeita: registra como BAIXA no histórico de produção
-  //   (a transferência que teria entrado lá é estornada).
-  // - Saída de produção desfeita: registra como TRANSFERENCIA no histórico de produção
-  //   (a quantidade volta a ficar disponível no estoque de produção, de onde saiu).
-  // Chave: `${materialId}:${producao}`.
-  const estornoProducaoTransferencia = new Map(); // chave → qtd a decrementar (BAIXA)
-  const estornoProducaoBaixa         = new Map(); // chave → qtd a incrementar (TRANSFERENCIA)
+  const estornoProducaoTransferencia = new Map();
+  const estornoProducaoBaixa         = new Map();
 
   for (const mov of relacao.movimentacoes) {
     const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
 
-    // Fonte principal: origemProducao. Combinado com OR ao fallback por
-    // numeroOS/texto (não troca condicional) para não depender de um único
-    // sinal — ver nota equivalente em removerMovimentacao.
     const ehTransferenciaProducao =
       mov.tipo === 'SAIDA' &&
       (mov.origemProducao === 'TRANSFERENCIA' ||
         (mov.numeroOS ?? '').startsWith('TRANSFERENCIA-PRODUCAO'));
 
-    // Se esta SAÍDA é o registro/relatório automático de uma baixa feita a
-    // partir do Estoque de Produção (ver _registrarSaidaControleEstoque em
-    // producao.service.js), ela NUNCA decrementou o estoque normal — o
-    // material já havia saído dele na transferência anterior. Excluir a OS,
-    // portanto, não deve devolver quantidade ao estoque normal; deve
-    // devolver ao EstoqueProducao, de onde ela realmente foi baixada.
-    // Mesma correção aplicada em removerMovimentacao: o fallback textual não
-    // pode casar com "Saída via produção –", pois esse texto é usado tanto
-    // pela saída de solicitação do ESTOQUE NORMAL (origemProducao:
-    // 'SOLICITACAO_ESTOQUE_NORMAL', deve voltar ao estoque normal) quanto,
-    // antigamente, por baixas do EstoqueProducao — sem o origemProducao
-    // como sinal principal, as duas eram confundidas e tudo voltava para o
-    // EstoqueProducao.
     const ehSaidaDeProducao =
       mov.tipo === 'SAIDA' &&
       !ehTransferenciaProducao &&
@@ -617,8 +520,6 @@ async function excluirRelacaoOS(relacaoOSId) {
         (mov.origemProducao == null &&
           /^(Baixa via produção|Baixa do estoque de produção|Baixa da produção)/i.test((mov.observacao ?? '').trim())));
 
-    // Fallback para registros antigos sem `producao` preenchido — ver nota
-    // equivalente em removerMovimentacao.
     let producaoMov = mov.producao;
     if (producaoMov == null && (ehTransferenciaProducao || ehSaidaDeProducao)) {
       const fonte = `${mov.numeroOS ?? ''} ${mov.observacao ?? ''}`;
@@ -640,7 +541,6 @@ async function excluirRelacaoOS(relacaoOSId) {
       materialSvc.notificarSeCritico(statusAntes, { ...mat, status: novoStatus });
     }
 
-    // Marca para reverter no EstoqueProducao se for uma transferência desfeita.
     if (ehTransferenciaProducao) {
       const chave = `${mov.materialId}:${producaoMov}`;
       const acumulado = estornoProducaoTransferencia.get(chave) ?? { materialId: mov.materialId, producao: producaoMov, qtd: 0 };
@@ -648,7 +548,6 @@ async function excluirRelacaoOS(relacaoOSId) {
       estornoProducaoTransferencia.set(chave, acumulado);
     }
 
-    // Marca para devolver ao EstoqueProducao se for uma saída de produção desfeita.
     if (ehSaidaDeProducao) {
       const chave = `${mov.materialId}:${producaoMov}`;
       const acumulado = estornoProducaoBaixa.get(chave) ?? { materialId: mov.materialId, producao: producaoMov, qtd: 0 };
@@ -660,10 +559,6 @@ async function excluirRelacaoOS(relacaoOSId) {
   await prisma.movimentacaoEstoque.deleteMany({ where: { relacaoOSId: relacao.id } });
   await prisma.relacaoOS.delete({ where: { id: relacao.id } });
 
-  // Reverte EstoqueProducao para cada (material, linha de produção) afetado
-  // por transferências desfeitas e registra estorno no histórico de
-  // produção. Protege contra negativo caso já tenha sido parcialmente
-  // consumido por baixas.
   for (const { materialId, producao, qtd: qtdEstorno } of estornoProducaoTransferencia.values()) {
     await prisma.estoqueProducao.updateMany({
       where: { materialId, producao },
@@ -679,7 +574,6 @@ async function excluirRelacaoOS(relacaoOSId) {
         usuarioNome: null,
       },
     });
-    // Protege contra negativo
     const ep = await prisma.estoqueProducao.findUnique({ where: { materialId_producao: { materialId, producao } } });
     if (ep && Number(ep.quantidade) < 0) {
       await prisma.estoqueProducao.update({
@@ -689,9 +583,6 @@ async function excluirRelacaoOS(relacaoOSId) {
     }
   }
 
-  // Devolve ao EstoqueProducao a quantidade das saídas de produção desfeitas
-  // (baixas feitas a partir do estoque de produção que estavam registradas
-  // nesta OS excluída), na MESMA linha de produção de origem.
   for (const { materialId, producao, qtd: qtdDevolver } of estornoProducaoBaixa.values()) {
     await prisma.estoqueProducao.upsert({
       where:  { materialId_producao: { materialId, producao } },

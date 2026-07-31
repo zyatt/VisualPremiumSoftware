@@ -127,9 +127,6 @@ function _montarWhere(filtros = {}) {
   if (identificador) where.identificador = { contains: identificador, mode: 'insensitive' };
   if (medida)        where.medida        = { contains: medida,        mode: 'insensitive' };
   if (espessura) {
-    // Extrai só a parte numérica digitada (ex.: "2mm", "2 mm", "2" -> "2")
-    // e busca por essa substring, para que qualquer uma dessas formas
-    // encontre um material cadastrado como "2", "2mm" ou "2 mm".
     const espessuraNum = espessura.replace(',', '.').match(/[\d.]+/)?.[0];
     where.espessura = { contains: espessuraNum ?? espessura, mode: 'insensitive' };
   }
@@ -148,11 +145,6 @@ function _montarWhere(filtros = {}) {
   return where;
 }
 
-// Colunas reais da tabela `materiais` que podem ser usadas em orderBy do
-// Prisma diretamente. `precoMediano` e `precoM2Mediano` ficam de fora
-// porque são médias calculadas em cima de fornecedorMateriais — não
-// existem como coluna, então precisam de uma query separada (ver
-// `_listarPaginadoPorMedia` abaixo).
 const _colunasOrdenaveis = new Set([
   'id', 'identificador', 'nome', 'categoria', 'medida', 'espessura',
   'largura', 'comprimento', 'quantidade', 'estoqueMinimo', 'unidade',
@@ -164,7 +156,6 @@ function _resolverOrderBy(ordenarPor, direcao) {
   if (ordenarPor && _colunasOrdenaveis.has(ordenarPor)) {
     return [{ [ordenarPor]: dir }, { id: 'asc' }];
   }
-  // padrão atual da tela: ativos primeiro, por nome
   return [{ ativo: 'desc' }, { nome: 'asc' }];
 }
 
@@ -172,12 +163,6 @@ async function listar(filtros = {}) {
   const { limite, pagina, porPagina } = filtros;
   const where = _montarWhere(filtros);
 
-  // Paginação/limite opcionais:
-  //  - `limite` (ex.: autocomplete) → aplica só `take`, direto no banco,
-  //    em vez de trazer a tabela inteira e cortar no client.
-  //  - `pagina` + `porPagina` → paginação completa para telas de listagem.
-  // Quando nenhum dos dois é informado, mantém o comportamento atual
-  // (retorna tudo) para não quebrar telas que ainda não migraram.
   const take = limite != null && limite !== ''
     ? Number(limite)
     : (porPagina != null && porPagina !== '' ? Number(porPagina) : undefined);
@@ -196,12 +181,7 @@ async function listar(filtros = {}) {
   return materiais.map(_mapearMaterial);
 }
 
-/// Ordena/pagina por `precoMediano` ou `precoM2Mediano` — colunas que só
-/// existem calculadas (média dos preços dos fornecedores ativos), então
-/// não dá pra usar orderBy direto do Prisma. Busca os ids já ordenados via
-/// SQL com AVG(), pagina esses ids, e só então busca os materiais completos.
 async function _listarPaginadoPorMedia(where, { campoMedia, direcao, take, skip, total }) {
-  // Ids que batem no filtro (query leve — só a coluna id).
   const filtrados = await prisma.material.findMany({ where, select: { id: true } });
   const ids = filtrados.map((m) => m.id);
 
@@ -210,8 +190,6 @@ async function _listarPaginadoPorMedia(where, { campoMedia, direcao, take, skip,
   const colunaPreco = campoMedia === 'precoM2Mediano' ? 'precoMetroQuadrado' : 'preco';
   const dir = direcao === 'desc' ? 'DESC' : 'ASC';
 
-  // Query construída com o nome da coluna fixo (não vem do usuário — só
-  // 2 valores possíveis acima), e ids/limit/offset como parâmetros.
   const idsPagina = await prisma.$queryRawUnsafe(
     `
       SELECT m.id
@@ -241,10 +219,6 @@ async function _listarPaginadoPorMedia(where, { campoMedia, direcao, take, skip,
   return { data: emOrdem.map(_mapearMaterial), total };
 }
 
-/// Versão paginada de `listar`, para telas de listagem: retorna
-/// `{ data, total }` em vez da tabela inteira. `ordenarPor`/`direcao`
-/// controlam a ordenação no banco (exceto para as 2 colunas calculadas,
-/// tratadas à parte em `_listarPaginadoPorMedia`).
 async function listarPaginado(filtros = {}) {
   const { pagina = 1, porPagina = 50, ordenarPor, direcao } = filtros;
   const where = _montarWhere(filtros);
@@ -455,7 +429,6 @@ async function excluir(id, usuarioId, usuarioNome) {
   if (!material) throw { status: 404, message: 'Material não encontrado' };
   if (material.ativo) throw { status: 400, message: 'Desative o material antes de excluí-lo' };
 
-  // Orphaning de ordemItens antes do delete para evitar violação de FK.
   await prisma.ordemCompraItem.updateMany({
     where: { materialId: id },
     data: {
@@ -464,12 +437,6 @@ async function excluir(id, usuarioId, usuarioNome) {
     },
   });
 
-  // Deleta PRIMEIRO. Com onDelete: SetNull no schema, o banco seta
-  // materialId = NULL em todos os AuditLogMaterial existentes para este
-  // material — preservando o histórico completo via snapshot (*Snap).
-  // Se ainda houver FK com RESTRICT em outra tabela (ex.: movimentações),
-  // o delete falha aqui antes de qualquer log ser gravado, mantendo
-  // o estado do banco consistente.
   let deletado;
   try {
     deletado = await prisma.material.delete({ where: { id } });
@@ -483,10 +450,6 @@ async function excluir(id, usuarioId, usuarioNome) {
     throw e;
   }
 
-  // Grava o log de EXCLUSAO depois do delete. O materialId passado (id)
-  // já não existe mais na tabela materiais, então o banco grava NULL
-  // nesse campo (onDelete: SetNull), mas o snapshot capturado em `material`
-  // acima preserva todos os dados descritivos para exibição no histórico.
   await auditSvc.registrar(id, 'EXCLUSAO', {
     valorAntes: material.nome,
     usuarioId,

@@ -12,7 +12,6 @@ async function login(username, senha) {
   const token = jwt.sign(
     { id: usuario.id, username: usuario.username, role: usuario.role },
     process.env.JWT_SECRET
-    // sem expiresIn — token não expira
   );
 
   return {
@@ -25,7 +24,6 @@ async function refresh(payload) {
   const token = jwt.sign(
     { id: payload.id, username: payload.username, role: payload.role },
     process.env.JWT_SECRET
-    // sem expiresIn
   );
   return { token };
 }

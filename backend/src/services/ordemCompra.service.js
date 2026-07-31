@@ -86,14 +86,6 @@ const _selectMaterial = {
 async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
   if (!fornecedorId || !Array.isArray(itens) || itens.length === 0) return;
 
-  // O preço vinculado ao fornecedor (fornecedorMaterial.preco) representa o
-  // valor por "pacote/embalagem" comprado (mesmo conceito do Preço Unitário
-  // no orçamento: valorTotal do item / quantidade de embalagens). Para
-  // materiais com qtdUnidade (ML, grama etc.), item.precoUnitario é o valor
-  // por unidade de medida (ex: Valor/ML), NÃO o valor por embalagem — por
-  // isso precisa ser multiplicado por qtdUnidade aqui. O "último custo de
-  // compra" (ultimoValorPago, no material) continua usando o precoUnitario
-  // bruto em outro ponto do fluxo, então não é afetado por este cálculo.
   const porMaterial = new Map();
   for (const item of itens) {
     const mid = Number(item.materialId);

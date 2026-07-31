@@ -552,7 +552,15 @@ class MaterialProvider extends ChangeNotifier {
     }
   }
 
+  // Trava reentrância no próprio provider — mesmo que alguma tela (atual ou
+  // futura) chame criar() sem controlar seu próprio estado de "salvando",
+  // um segundo clique/chamada concorrente é ignorado aqui em vez de gerar
+  // um material duplicado no backend.
+  bool _criando = false;
+
   Future<bool> criar(Map<String, dynamic> dados) async {
+    if (_criando) return false;
+    _criando = true;
     try {
       await _repo.criar(dados);
       await recarregar();
@@ -561,6 +569,8 @@ class MaterialProvider extends ChangeNotifier {
       _erro = _mensagemErro(e, acao: 'cadastrar material');
       notifyListeners();
       return false;
+    } finally {
+      _criando = false;
     }
   }
 

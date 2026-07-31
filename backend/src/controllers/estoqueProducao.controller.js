@@ -88,10 +88,6 @@ const darBaixa = async (req, res, next) => {
 
 const listarHistorico = async (req, res, next) => {
   try {
-    // Histórico é compartilhado: usuários PRODUCAO1/PRODUCAO2 veem tudo
-    // (transferências e baixas das duas linhas), só não podem operar fora
-    // da própria. Por isso NÃO restringe automaticamente por role aqui —
-    // apenas repassa um filtro opcional se o usuário pedir explicitamente.
     res.json(await svc.listarHistorico(req.query));
   } catch (e) { next(e); }
 };
@@ -103,4 +99,51 @@ const excluirHistorico = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-module.exports = { transferir, devolver, transferirEntreLinhas, listarEstoque, darBaixa, listarHistorico, excluirHistorico };
+/**
+ * Lista as entradas pendentes de confirmação (RETALHO + DEVOLUCAO). Sem
+ * filtro de linha por padrão — o card "Pendentes" mostra todas.
+ */
+const listarPendentes = async (req, res, next) => {
+  try {
+    const { producao, tipo, status } = req.query;
+    res.json(await svc.listarPendentes({ producao, tipo, status }));
+  } catch (e) { next(e); }
+};
+
+/** Contador simples para o badge do botão "Saída p/ Produção". */
+const contarPendentes = async (req, res, next) => {
+  try {
+    const total = await svc.contarPendentes();
+    res.json({ total });
+  } catch (e) { next(e); }
+};
+
+const confirmarPendente = async (req, res, next) => {
+  try {
+    const usuarioNome = await _nomeUsuario(req);
+    const resultado = await svc.confirmarEntradaPendente({ id: Number(req.params.id), usuarioNome });
+    res.json(resultado);
+  } catch (e) { next(e); }
+};
+
+const recusarPendente = async (req, res, next) => {
+  try {
+    const usuarioNome = await _nomeUsuario(req);
+    const resultado = await svc.recusarEntradaPendente({ id: Number(req.params.id), usuarioNome });
+    res.json(resultado);
+  } catch (e) { next(e); }
+};
+
+module.exports = {
+  transferir,
+  devolver,
+  transferirEntreLinhas,
+  listarEstoque,
+  darBaixa,
+  listarHistorico,
+  excluirHistorico,
+  listarPendentes,
+  contarPendentes,
+  confirmarPendente,
+  recusarPendente,
+};

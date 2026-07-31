@@ -27,11 +27,6 @@ function formatNumber(value) {
   }).format(value ?? 0);
 }
 
-// Mapa de caracteres Unicode comuns (fora do WinAnsi/CP1252 usado pela fonte
-// base Helvetica do PDFKit) para seus equivalentes ASCII mais próximos.
-// Sem isso, qualquer caractere fora do WinAnsi é renderizado como um glifo
-// de outra posição da tabela (lixo visual), em vez de aparecer como espaço
-// ou ser omitido — foi o que causou o texto ilegível nas Observações.
 const MAPA_CARACTERES_ESPECIAIS = {
   '\u2018': "'", '\u2019': "'", '\u201A': "'",
   '\u201C': '"', '\u201D': '"', '\u201E': '"',
@@ -43,20 +38,9 @@ const MAPA_CARACTERES_ESPECIAIS = {
   '\u2705': '', '\u274C': '', '\u26A0': '',
 };
 
-/// Remove/substitui caracteres que a fonte Helvetica (WinAnsi/CP1252) do
-/// PDFKit não sabe desenhar. Caracteres não mapeados e fora do intervalo
-/// Latin-1 (0x00–0xFF) são descartados, para nunca imprimir um glifo
-/// incorreto no lugar (ex.: emojis, símbolos tipográficos "inteligentes"
-/// colados de Word/WhatsApp, etc.).
 function sanitizarTextoPdf(texto) {
   if (!texto) return texto;
-  // Normaliza quebras de linha estilo Windows/Excel (\r\n) e Mac clássico (\r)
-  // para \n ANTES de tudo. Sem isso, um \r "solto" (de texto colado de
-  // planilha/editor que mistura \r\n com \n) sobrevive como caractere
-  // separado — como o resto do código só faz split('\n'), esse \r órfão
-  // fica grudado no fim da linha anterior e é desenhado como texto de
-  // verdade. A fonte Helvetica/WinAnsi não tem glifo pra 0x0D, e o PDFKit
-  // desenha o glifo de outra posição da tabela no lugar (efeito "Ð" lixo).
+
   const textoNormalizado = texto.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   let resultado = '';
   for (const char of textoNormalizado) {
@@ -64,15 +48,10 @@ function sanitizarTextoPdf(texto) {
     if (MAPA_CARACTERES_ESPECIAIS[char] !== undefined) {
       resultado += MAPA_CARACTERES_ESPECIAIS[char];
     } else if (code === 0x09) {
-      // TAB (0x09): a fonte base Helvetica/WinAnsi do PDFKit não tem glifo
-      // definido pra esse código — desenhá-lo cru produz um glifo lixo
-      // (ex.: texto colado de planilha/Excel, gerando o efeito "'ÒVçF–FFR").
-      // Substitui por espaço para preservar o espaçamento sem quebrar o glifo.
       resultado += ' ';
     } else if (code === 0x0A || (code >= 0x20 && code <= 0xFF)) {
       resultado += char;
     }
-    // demais caracteres (emojis, símbolos fora do Latin-1, etc.) são omitidos
   }
   return resultado;
 }
@@ -215,7 +194,6 @@ function drawAvisoNotaFiscal(doc, y) {
   const padH   = 16;
   const padV   = 12;
 
-  // Fundo e borda arredondada-like (retângulo com cantos levemente destacados via linha)
   fillRect(doc, MARGIN, y, CONTENT_W, blockH, '#FFF4EC');
   doc.rect(MARGIN, y, CONTENT_W, blockH).strokeColor(C.accent).lineWidth(1).stroke();
   fillRect(doc, MARGIN, y, 4, blockH, C.accent);
@@ -223,7 +201,6 @@ function drawAvisoNotaFiscal(doc, y) {
   const textX = MARGIN + padH;
   const textW = CONTENT_W - padH * 2;
 
-  // Título com pequeno marcador circular antes do texto
   const titleY = y + padV;
   doc.fillColor(C.accent).circle(textX + 2.5, titleY + 5, 2.5).fill();
   doc.font('Helvetica-Bold').fontSize(9).fillColor(C.accent)
@@ -234,7 +211,6 @@ function drawAvisoNotaFiscal(doc, y) {
   const colW   = (textW - colGap) / 2;
   const col2X  = textX + colW + colGap;
 
-  // Divisor vertical sutil entre as duas colunas
   doc.strokeColor('#F0C9A8').lineWidth(0.8)
      .moveTo(textX + colW + colGap / 2, rowY - 2)
      .lineTo(textX + colW + colGap / 2, rowY + 24)
@@ -357,20 +333,16 @@ function drawItensTable(doc, itens, startY) {
 
     const temMedida = item.material?.medida && item.material.medida.trim().length > 0;
 
-    // Construir dimensão no formato "2X1M"
     let dimensao = null;
     if (!temMedida) {
       const comp = item.material?.comprimento;
       const larg = item.material?.largura;
       
       if (comp && larg) {
-        // Ambos preenchidos: "2X1M"
         dimensao = `${comp}X${larg}M`;
       } else if (comp) {
-        // Só comprimento: "2M (C)"
         dimensao = `${comp}M`;
       } else if (larg) {
-        // Só largura: "1M (L)"
         dimensao = `${larg}M`;
       }
     }

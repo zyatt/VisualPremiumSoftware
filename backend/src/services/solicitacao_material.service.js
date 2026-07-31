@@ -23,11 +23,7 @@ function registrarSseCliente(res, usuarioId) {
 function _broadcast(tipo, dados, excludeUsuarioId) {
   const payload = `data: ${JSON.stringify({ tipo, ...dados })}\n\n`;
   let enviados  = 0;
-  // Compara como string: o id do usuário conectado via SSE e o id do autor
-  // da ação podem chegar com tipos diferentes (number vs string, dependendo
-  // de como cada rota/middleware os produz) — comparar com === direto faz
-  // a exclusão falhar silenciosamente e o próprio autor acaba recebendo
-  // (e vendo) o banner da sua própria ação.
+
   const excludeStr = excludeUsuarioId !== undefined && excludeUsuarioId !== null
     ? String(excludeUsuarioId)
     : undefined;
@@ -45,8 +41,6 @@ const _materialSelect = {
   largura: true, comprimento: true,
 };
 
-// Formata um número Decimal/number: sem casas decimais se for inteiro, senão
-// até 2 casas (sem zeros à direita) — mesma regra usada no app Flutter.
 function _formatarNumero(valor) {
   const n = Number(valor);
   if (!Number.isFinite(n)) return String(valor);
@@ -57,10 +51,6 @@ function _formatarNumero(valor) {
   return s;
 }
 
-// Monta o snapshot de um material (item ou adicional) para ser gravado no
-// campo `depois` de um log — inclui unidade e medida/dimensões formatadas,
-// para a aba Histórico exibir "25 m/l", "1.4X2M", etc. sem precisar buscar
-// o material de novo depois (que pode ter mudado ou sido excluído).
 function _snapshotMaterial(registro) {
   const mat = registro.material || {};
   const largura     = mat.largura     != null ? Number(mat.largura)     : null;
@@ -154,9 +144,15 @@ async function _validarMaterial(materialId) {
   return mat;
 }
 
+function _ehNumeroOSPuro(numeroOS) {
+  return /^\d+$/.test(String(numeroOS ?? '').trim());
+}
+
 async function verificarOSExiste(numeroOS, ignorarId) {
-  const sol = await prisma.solicitacaoMaterial.findUnique({
-    where: { numeroOS },
+  if (!_ehNumeroOSPuro(numeroOS)) return { existe: false };
+
+  const sol = await prisma.solicitacaoMaterial.findFirst({
+    where: { numeroOS: String(numeroOS).trim() },
     select: { id: true, numeroOS: true, nomeCliente: true, andamento: true },
   });
   if (!sol) return { existe: false };
@@ -171,14 +167,16 @@ async function verificarOSExiste(numeroOS, ignorarId) {
 }
 
 async function criar(data, usuarioId, usuarioNome) {
-  const existe = await prisma.solicitacaoMaterial.findUnique({
-    where: { numeroOS: data.numeroOS },
-  });
-  if (existe) {
-    throw {
-      status: 409,
-      message: `Já existe uma solicitação para a OS "${data.numeroOS}". Abra a solicitação existente e adicione novos materiais.`,
-    };
+  if (_ehNumeroOSPuro(data.numeroOS)) {
+    const existe = await prisma.solicitacaoMaterial.findFirst({
+      where: { numeroOS: String(data.numeroOS).trim() },
+    });
+    if (existe) {
+      throw {
+        status: 409,
+        message: `Já existe uma solicitação para a OS "${data.numeroOS}". Abra a solicitação existente e adicione novos materiais.`,
+      };
+    }
   }
 
   const itensRaw = Array.isArray(data.itens) ? data.itens : [];
@@ -210,9 +208,6 @@ async function criar(data, usuarioId, usuarioNome) {
 
   console.log(`[Solicitações] Nova solicitação criada: OS=${nova.numeroOS} por usuário ${usuarioId}`);
 
-  // Log de criação — primeira entrada do histórico, registra quem abriu a
-  // solicitação e com quais materiais, servindo de "marco zero" antes de
-  // qualquer edição/adição futura.
   if (usuarioId) {
     await prisma.logEdicaoSolicitacao.create({
       data: {
@@ -255,9 +250,9 @@ async function atualizar(id, data, editorId, editorNome, editorRole) {
     throw { status: 403, message: 'Apenas o criador da solicitação, um gerente ou um administrador pode editar os dados.' };
   }
 
-  if (data.numeroOS && data.numeroOS !== sol.numeroOS) {
-    const conflito = await prisma.solicitacaoMaterial.findUnique({
-      where: { numeroOS: data.numeroOS },
+  if (data.numeroOS && data.numeroOS !== sol.numeroOS && _ehNumeroOSPuro(data.numeroOS)) {
+    const conflito = await prisma.solicitacaoMaterial.findFirst({
+      where: { numeroOS: String(data.numeroOS).trim() },
     });
     if (conflito) throw { status: 409, message: `OS "${data.numeroOS}" já pertence a outra solicitação.` };
   }
@@ -309,9 +304,6 @@ async function adicionarMateriais(solicitacaoId, itens, usuarioId, usuarioNome, 
   const sol = await prisma.solicitacaoMaterial.findUnique({ where: { id: solicitacaoId } });
   if (!sol) throw { status: 404, message: 'Solicitação não encontrada' };
 
-  // Mesma regra usada para editar/excluir o cabeçalho e os materiais
-  // (ver _autorizarEdicaoMaterial acima): ADMIN, GERENTE ou o próprio
-  // criador da solicitação.
   const ehAdmin = usuarioRole === 'ADMIN' || usuarioRole === 'GERENTE';
   if (sol.usuarioId !== usuarioId && !ehAdmin) {
     throw { status: 403, message: 'Apenas o criador da solicitação, um gerente ou um administrador pode adicionar materiais.' };
@@ -344,15 +336,11 @@ async function adicionarMateriais(solicitacaoId, itens, usuarioId, usuarioNome, 
     )
   );
 
-  // Retorna a solicitação atualizada
   const atualizado = await prisma.solicitacaoMaterial.findUnique({
     where: { id: solicitacaoId },
     include: _includeBase,
   });
 
-  // Log de histórico — um registro por material adicionado, para que a aba
-  // Histórico mostre exatamente quais itens entraram e quando, igual ao que
-  // já é feito para edição/exclusão de materiais.
   if (usuarioId) {
     await prisma.$transaction(
       criados.map((c) =>
@@ -384,7 +372,6 @@ async function adicionarMateriais(solicitacaoId, itens, usuarioId, usuarioNome, 
   return atualizado;
 }
 
-// ─── Rótulo amigável de um status de compra, usado no histórico ──────────────
 function _labelStatus(status) {
   switch (status) {
     case 'COMPRADO': return 'Comprado';
@@ -393,19 +380,12 @@ function _labelStatus(status) {
   }
 }
 
-// Deriva o status ('PENDENTE' | 'COMPRADO' | 'ESTOQUE') a partir dos campos
-// booleanos comprado/estoque de um registro (item ou adicional).
 function _statusDe(registro) {
   if (registro.estoque)  return 'ESTOQUE';
   if (registro.comprado) return 'COMPRADO';
   return 'PENDENTE';
 }
 
-// ─── Marcar item/adicional como comprado ou retirado do estoque ──────────────
-// Qualquer usuário com role ACESSO pode marcar. Só ADMIN pode desmarcar (voltar
-// para PENDENTE) ou trocar um status já salvo por outro.
-// tipo   = 'item' | 'adicional'
-// status = 'PENDENTE' | 'COMPRADO' | 'ESTOQUE'
 async function marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioRole, status) {
   if (!['PENDENTE', 'COMPRADO', 'ESTOQUE'].includes(status)) {
     throw { status: 400, message: 'Status inválido. Valores permitidos: PENDENTE, COMPRADO, ESTOQUE.' };
@@ -420,9 +400,6 @@ async function marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioR
 
   const statusAnterior = _statusDe(registro);
 
-  // Voltar para PENDENTE (desmarcar) ou trocar um status já salvo por outro
-  // são ações restritas a ADMIN/GERENTE. Sair de PENDENTE para COMPRADO ou
-  // ESTOQUE é permitido a qualquer usuário com acesso à tela.
   const ehAdmin = usuarioRole === 'ADMIN' || usuarioRole === 'GERENTE';
   if (statusAnterior !== 'PENDENTE' && statusAnterior !== status && !ehAdmin) {
     throw {
@@ -434,7 +411,6 @@ async function marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioR
   }
 
   if (statusAnterior === status) {
-    // Nada muda — evita gravar log/broadcast à toa.
     return model.findUnique({ where: { id: itemId }, include: { material: { select: _materialSelect } } });
   }
 
@@ -456,7 +432,6 @@ async function marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioR
     include: { material: { select: _materialSelect } },
   });
 
-  // Log de histórico da transição de status (comprado <-> pendente <-> estoque).
   if (usuarioId) {
     await prisma.logEdicaoSolicitacao.create({
       data: {
@@ -475,15 +450,12 @@ async function marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioR
     tipo,
     itemId,
     status,
-    comprado: status === 'COMPRADO', // mantido por compatibilidade com clientes antigos
+    comprado: status === 'COMPRADO',
   }, usuarioId);
 
-  // Se o item passou a estar resolvido (comprado ou estoque), verifica se
-  // todos os materiais da solicitação estão resolvidos e auto-finaliza.
   if (status === 'COMPRADO' || status === 'ESTOQUE') {
     try {
       await _verificarTodosResolvidos(registro.solicitacaoId);
-      // _verificarTodosResolvidos não lançou: tudo resolvido — finaliza automaticamente
       const sol = await prisma.solicitacaoMaterial.findUnique({
         where: { id: registro.solicitacaoId },
       });
@@ -493,7 +465,6 @@ async function marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioR
           data: { andamento: 'FINALIZADO' },
         });
 
-        // Registra no histórico a transição de andamento, igual ao fluxo manual em `atualizar`.
         await prisma.logEdicaoSolicitacao.create({
           data: {
             solicitacaoId: registro.solicitacaoId,
@@ -517,15 +488,12 @@ async function marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioR
         _broadcast('solicitacao_finalizada', { solicitacaoId: registro.solicitacaoId }, usuarioId);
       }
     } catch {
-      // Ainda há itens pendentes — não finaliza
     }
   }
 
   return atualizado;
 }
 
-// Mantido por compatibilidade: usado internamente e por chamadores antigos
-// que ainda pensam em termos de um booleano "comprado".
 async function marcarComprado(tipo, itemId, usuarioId, usuarioNome, usuarioRole, comprado) {
   return marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioRole, comprado ? 'COMPRADO' : 'PENDENTE');
 }
@@ -534,7 +502,6 @@ async function marcarEstoque(tipo, itemId, usuarioId, usuarioNome, usuarioRole, 
   return marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioRole, estoque ? 'ESTOQUE' : 'PENDENTE');
 }
 
-// ─── Verificar se todos os materiais estão comprados ou retirados do estoque ──
 async function _verificarTodosResolvidos(solicitacaoId) {
   const [itens, adicionais] = await Promise.all([
     prisma.itemSolicitacaoMaterial.findMany({ where: { solicitacaoId }, select: { comprado: true, estoque: true } }),
@@ -542,7 +509,7 @@ async function _verificarTodosResolvidos(solicitacaoId) {
   ]);
 
   const todos = [...itens, ...adicionais];
-  if (todos.length === 0) return; // sem materiais, pode finalizar
+  if (todos.length === 0) return;
 
   const pendentes = todos.filter((i) => !i.comprado && !i.estoque);
   if (pendentes.length > 0) {
@@ -553,10 +520,8 @@ async function _verificarTodosResolvidos(solicitacaoId) {
   }
 }
 
-// Alias mantido por compatibilidade com o nome anterior da função.
 const _verificarTodosComprados = _verificarTodosResolvidos;
 
-// ─── Excluir ──────────────────────────────────
 async function excluir(id, usuarioId, usuarioRole) {
   const sol = await prisma.solicitacaoMaterial.findUnique({
     where: { id },
@@ -567,14 +532,12 @@ async function excluir(id, usuarioId, usuarioRole) {
   });
   if (!sol) throw { status: 404, message: 'Solicitação não encontrada' };
 
-  // Permite ADMIN, GERENTE ou o próprio criador da solicitação excluir
   const ehAdmin   = usuarioRole === 'ADMIN' || usuarioRole === 'GERENTE';
   const ehCriador = sol.usuarioId === usuarioId;
   if (!ehAdmin && !ehCriador) {
     throw { status: 403, message: 'Apenas o criador da solicitação, um gerente ou um administrador pode excluir.' };
   }
 
-  // Remove arquivos de imagem do disco
   const _rmImagem = (url) => {
     if (!url) return;
     const disco = path.join(__dirname, '..', 'uploads', 'solicitacoes', path.basename(url));
@@ -586,9 +549,6 @@ async function excluir(id, usuarioId, usuarioRole) {
   return prisma.solicitacaoMaterial.delete({ where: { id } });
 }
 
-// ─── Autorização para editar/excluir um material de uma solicitação ─────────
-// Regra igual à edição do cabeçalho: ADMIN/GERENTE ou o próprio criador da
-// solicitação, e apenas enquanto ela não estiver FINALIZADA.
 async function _autorizarEdicaoMaterial(solicitacaoId, usuarioId, usuarioRole) {
   const sol = await prisma.solicitacaoMaterial.findUnique({ where: { id: solicitacaoId } });
   if (!sol) throw { status: 404, message: 'Solicitação não encontrada' };
@@ -604,7 +564,6 @@ async function _autorizarEdicaoMaterial(solicitacaoId, usuarioId, usuarioRole) {
   return sol;
 }
 
-// ─── Editar quantidade/observação de um item ou adicional ───────────────────
 async function atualizarItem(tipo, itemId, data, usuarioId, usuarioNome, usuarioRole) {
   const model = tipo === 'item'
     ? prisma.itemSolicitacaoMaterial
@@ -657,9 +616,6 @@ async function atualizarItem(tipo, itemId, data, usuarioId, usuarioNome, usuario
         editorNome:    usuarioNome ?? 'Desconhecido',
         antes,
         depois,
-        // Contexto (não é um campo alterado em si, mas identifica qual
-        // material foi editado — usado pela aba Histórico para exibir
-        // uma legenda antes do diff de campos).
         item: `${registro.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
       },
     });
@@ -679,7 +635,6 @@ async function atualizarItem(tipo, itemId, data, usuarioId, usuarioNome, usuario
   return atualizado;
 }
 
-// ─── Remover um item ou adicional de uma solicitação ─────────────────────────
 async function excluirItem(tipo, itemId, usuarioId, usuarioNome, usuarioRole) {
   const model = tipo === 'item'
     ? prisma.itemSolicitacaoMaterial
@@ -719,8 +674,6 @@ async function excluirItem(tipo, itemId, usuarioId, usuarioNome, usuarioRole) {
         editorNome:    usuarioNome ?? 'Desconhecido',
         antes: { quantidade: registro.quantidade, observacao: registro.observacao },
         depois: { excluido: true },
-        // Contexto: nome do material removido — consumido pela aba Histórico
-        // para exibir "Material removido: <nome>" em vez de um diff de campos.
         item: `${registro.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
       },
     });
@@ -740,7 +693,6 @@ async function excluirItem(tipo, itemId, usuarioId, usuarioNome, usuarioRole) {
   return { solicitacaoId: registro.solicitacaoId };
 }
 
-// ─── Contar novas ─────────────────────────────────────────────────────────────
 async function contarNovas(usuarioId) {
   const dataCorte = new Date();
   dataCorte.setDate(dataCorte.getDate() - 7);
@@ -754,7 +706,6 @@ async function contarNovas(usuarioId) {
   });
 }
 
-// ─── Marcar todas como visualizadas ──────────────────────────────────────────
 async function marcarTodasComoVisualizadas(usuarioId) {
   const dataCorte = new Date();
   dataCorte.setDate(dataCorte.getDate() - 7);

@@ -1,6 +1,5 @@
 const prisma = require('../utils/prisma');
 
-// ── include reutilizável ──────────────────────────────────────────────────────
 const _includeCompleto = {
   movimentacoes: {
     include: {
@@ -11,17 +10,11 @@ const _includeCompleto = {
   },
 };
 
-// ── Listagem de relatórios (OS FECHADAS) ──────────────────────────────────────
 async function listar({ busca, materialId, materialNome, materialIdentificador, materialMedida, materialEspessura, dataInicio, dataFim } = {}) {
   const where = { status: 'FECHADA' };
 
   if (busca) where.numeroOS = { contains: busca, mode: 'insensitive' };
 
-  // ── Filtro de período ─────────────────────────────────────────────────────
-  // filtroData é extraído para o escopo da função pois é reutilizado tanto no
-  // where (para selecionar quais OS aparecem) quanto no include (para que as
-  // movimentações retornadas por OS respeitem o mesmo período — garantindo que
-  // o total calculado no Flutter bata com o total de Gastos por Categoria).
   let filtroData = null;
   if (dataInicio || dataFim) {
     filtroData = {};
@@ -31,14 +24,11 @@ async function listar({ busca, materialId, materialNome, materialIdentificador, 
       fim.setHours(23, 59, 59, 999);
       filtroData.lte = fim;
     }
-    // Filtra OS que possuam ao menos uma movimentação criada no período
     where.movimentacoes = where.movimentacoes
       ? { some: { ...where.movimentacoes.some, criadoEm: filtroData } }
       : { some: { criadoEm: filtroData } };
   }
 
-  // Filtra OS que possuam ao menos uma movimentação cujo material satisfaça
-  // todos os critérios informados (AND dentro do some).
   const filtroMaterial = {};
   if (materialId)            filtroMaterial.id            = Number(materialId);
   if (materialNome) {
@@ -57,12 +47,6 @@ async function listar({ busca, materialId, materialNome, materialIdentificador, 
     where.movimentacoes = { some: { material: filtroMaterial } };
   }
 
-  // Monta o where das movimentações no include:
-  // - Se há filtro de data E de material, aplica ambos
-  // - Se há só data, filtra por data
-  // - Se há só material, filtra por material
-  // Isso garante que as movimentações retornadas por cada OS coincidam
-  // exatamente com os dados usados no cálculo de Gastos por Categoria.
   let whereMovimentacoesInclude = undefined;
   const temData     = filtroData !== null;
   const temMaterial = Object.keys(filtroMaterial).length > 0;
@@ -98,7 +82,6 @@ async function buscarPorNumeroOS(numeroOS) {
   });
 }
 
-// ── Fechar OS: muda status para FECHADA ───────────────────────────────────────
 async function fecharOS(numeroOS) {
   const relacao = await prisma.relacaoOS.findUnique({ where: { numeroOS } });
   if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
@@ -113,7 +96,6 @@ async function fecharOS(numeroOS) {
   });
 }
 
-// ── Dados para PDF ────────────────────────────────────────────────────────────
 async function dadosParaPDF(numeroOS) {
   const relacao = await buscarPorNumeroOS(numeroOS);
   if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
@@ -127,23 +109,8 @@ async function dadosParaPDF(numeroOS) {
     return precoUnit > 0 ? precoUnit : precoM2;
   };
 
-  // ── Total líquido: saídas - entradas, agrupado por materialId ──────────────
-  // Processa as movimentações em ordem cronológica para garantir que apenas
-  // entradas que ocorreram APÓS a primeira saída do material sejam contadas
-  // como devoluções (redutoras de custo). Entradas anteriores à primeira saída
-  // são ignoradas no cálculo — eram movimentações independentes de estoque.
-  //
-  // Devoluções de RETALHO são um caso especial: a entrada é registrada num
-  // material diferente do que saiu (ex.: saiu "CHAPA" em UNIDADE, voltou
-  // "CHAPA - RETALHO" em M²), então não compartilham o mesmo materialId.
-  // O vínculo é feito via materialOrigemId, que aponta para o materialId
-  // consumido na saída original. Nesses casos abate-se o VALOR (R$) da
-  // entrada de retalho diretamente do total da saída original, já que as
-  // quantidades estão em unidades diferentes e não podem ser subtraídas
-  // diretamente.
-  const porMaterial = new Map(); // materialId → { preco, qtdSaida, qtdEntrada, valorRetalho }
+  const porMaterial = new Map();
 
-  // Ordena todas as movimentações por criadoEm (mais antiga primeiro)
   const todasOrdenadas = [...relacao.movimentacoes].sort(
     (a, b) => new Date(a.criadoEm) - new Date(b.criadoEm)
   );
@@ -156,26 +123,20 @@ async function dadosParaPDF(numeroOS) {
         porMaterial.set(id, { preco: _precoMov(m), qtdSaida: 0, qtdEntrada: 0, valorRetalho: 0 });
       }
       const entry = porMaterial.get(id);
-      // Caso haja múltiplas saídas com preços diferentes, usa o maior preço
       if (_precoMov(m) > entry.preco) entry.preco = _precoMov(m);
       entry.qtdSaida += Number(m.quantidade);
 
     } else if (m.tipo === 'ENTRADA') {
-      // Entrada de retalho vinculada a um material de origem: abate o VALOR
-      // (não a quantidade, pois unidade/material são diferentes) do total
-      // da saída original, desde que essa saída exista nesta OS.
       if (m.materialOrigemId != null && porMaterial.has(m.materialOrigemId)) {
         porMaterial.get(m.materialOrigemId).valorRetalho += _precoMov(m) * Number(m.quantidade);
         continue;
       }
 
-      // Entradas via OC são reposição de estoque, não devoluções — ignorar.
       const isEntradaOC =
         (m.observacao   && m.observacao.includes('via OC')) ||
         (m.descricaoItem && m.descricaoItem.includes('via OC'));
       if (isEntradaOC) continue;
 
-      // Só conta como devolução se o material já teve ao menos uma saída nessa OS
       if (porMaterial.has(id)) {
         porMaterial.get(id).qtdEntrada += Number(m.quantidade);
       }
@@ -212,7 +173,6 @@ async function dadosParaPDF(numeroOS) {
     };
   };
 
-  // Data representativa = criadoEm da movimentação mais antiga (criação real da OS)
   const todasMovs = [...relacao.movimentacoes];
   const primeiraMovimentacaoEm = todasMovs.length > 0
     ? todasMovs.reduce((a, b) => new Date(a.criadoEm) < new Date(b.criadoEm) ? a : b).criadoEm
@@ -231,7 +191,6 @@ async function dadosParaPDF(numeroOS) {
   };
 }
 
-// ── Reverter OS: muda status de FECHADA para EM_ANDAMENTO ────────────────────
 async function reverterOS(numeroOS) {
   const relacao = await prisma.relacaoOS.findUnique({ where: { numeroOS } });
   if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };

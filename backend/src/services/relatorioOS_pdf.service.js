@@ -2,21 +2,12 @@ const PDFDocument = require('pdfkit');
 const path        = require('path');
 const svc         = require('./relatorioOS.service');
 
-// ── Helpers de formatação ─────────────────────────────────────────────────────
-
-/**
- * Formata um valor monetário com até 6 casas decimais,
- * removendo zeros à direita (mínimo 2 casas).
- * Ex.: 1.5 → "R$ 1,50";  0.000125 → "R$ 0,000125";  1.23456 → "R$ 1,23456"
- */
 function formatCurrency(value) {
   const n = Number(value ?? 0);
-  // Renderiza com 6 casas e remove zeros à direita, mantendo mínimo 2
   const s6 = n.toFixed(6);
   const trimmed = s6.replace(/0+$/, '');
   const [intPart, decPart = ''] = trimmed.split('.');
   const dec = decPart.length < 2 ? decPart.padEnd(2, '0') : decPart;
-  // Formata parte inteira com separador de milhar brasileiro
   const intFormatted = new Intl.NumberFormat('pt-BR').format(parseInt(intPart, 10));
   return `R$ ${intFormatted},${dec}`;
 }
@@ -30,8 +21,6 @@ function formatNumber(value) {
   const n = Number(value ?? 0);
   return n % 1 === 0 ? String(n) : n.toFixed(2).replace('.', ',');
 }
-
-// ── Paleta ────────────────────────────────────────────────────────────────────
 
 const C = {
   black:      '#1A1A1A',
@@ -50,14 +39,10 @@ const C = {
   azulLight:  '#DBEAFE',
 };
 
-// ── Layout A4 portrait ────────────────────────────────────────────────────────
-
 const MARGIN    = 32;
 const PAGE_W    = 595.28;
 const PAGE_H    = 841.89;
 const CONTENT_W = PAGE_W - MARGIN * 2;
-
-// ── Primitivos de desenho ─────────────────────────────────────────────────────
 
 function fillRect(doc, x, y, w, h, color) {
   doc.fillColor(color).rect(x, y, w, h).fill();
@@ -68,15 +53,12 @@ function hline(doc, y, color = C.divider, lw = 0.5) {
      .moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).stroke();
 }
 
-// ── Cabeçalho de página ───────────────────────────────────────────────────────
-
 function drawPageHeader(doc, dados, logoPath) {
   const H = 70;
 
   fillRect(doc, 0, 0, PAGE_W, H, C.white);
   fillRect(doc, 0, 0, PAGE_W, 4, C.accent);
 
-  // Logo
   const logoW = 90;
   const logoX = MARGIN;
   const logoY = 14;
@@ -91,7 +73,6 @@ function drawPageHeader(doc, dados, logoPath) {
        .text('comunicação visual', logoX, logoY + 22, { lineBreak: false });
   }
 
-  // Dados da empresa
   const empresa = {
     nome:     'VISUAL PREMIUM',
     cnpjIe:   'CNPJ: 20.000.300/0001-88   IE: 9066233666',
@@ -112,14 +93,12 @@ function drawPageHeader(doc, dados, logoPath) {
   doc.font('Helvetica').fontSize(7).fillColor(C.gray)
      .text(empresa.telefone, infoX, infoY + 38, { width: infoW, lineBreak: false });
 
-  // Título direito
   const titleX = infoX + infoW + 12;
   const titleW = PAGE_W - MARGIN - titleX;
 
   doc.strokeColor(C.divider).lineWidth(0.8)
      .moveTo(titleX - 6, 10).lineTo(titleX - 6, H - 10).stroke();
 
-  // Número da OS limpo (sem sufixo interno #OC…)
   const numeroLimpo = dados.numeroOS.includes('#OC')
     ? dados.numeroOS.substring(0, dados.numeroOS.indexOf('#OC'))
     : dados.numeroOS;
@@ -135,8 +114,6 @@ function drawPageHeader(doc, dados, logoPath) {
   doc.strokeColor(C.divider).lineWidth(1)
      .moveTo(0, H).lineTo(PAGE_W, H).stroke();
 }
-
-// ── Cards de resumo ───────────────────────────────────────────────────────────
 
 function drawSummaryCards(doc, dados, y) {
   const saidas   = dados.itens;
@@ -162,7 +139,6 @@ function drawSummaryCards(doc, dados, y) {
        .text(card.value, x + 8, y + 22, { width: colW - 16, align: 'center', lineBreak: false });
   });
 
-  // badge FECHADA
   const badgeW = 60;
   const badgeH = 16;
   const badgeX = PAGE_W - MARGIN - badgeW;
@@ -174,8 +150,6 @@ function drawSummaryCards(doc, dados, y) {
   return y + boxH + 12;
 }
 
-// ── Seção (título laranja) ────────────────────────────────────────────────────
-
 function drawSectionHeader(doc, y, title) {
   fillRect(doc, MARGIN, y, CONTENT_W, 20, C.bgHeader);
   fillRect(doc, MARGIN, y, 4, 20, C.accent);
@@ -183,8 +157,6 @@ function drawSectionHeader(doc, y, title) {
      .text(title.toUpperCase(), MARGIN + 12, y + 7, { lineBreak: false });
   return y + 20;
 }
-
-// ── Cabeçalho da tabela de movimentações ──────────────────────────────────────
 
 function drawMovTableHeader(doc, y, comPreco) {
   const HEADER_H = 20;
@@ -203,8 +175,6 @@ function drawMovTableHeader(doc, y, comPreco) {
   }
   return y + HEADER_H;
 }
-
-// ── Definição de colunas ──────────────────────────────────────────────────────
 
 function buildCols(comPreco) {
   if (comPreco) {
@@ -232,19 +202,16 @@ function buildCols(comPreco) {
   }
 }
 
-// ── Linha de movimentação ─────────────────────────────────────────────────────
-
 function drawMovRow(doc, item, idx, y, comPreco, pageH) {
   const FOOTER_RESERVE = 50;
   const ROW_PAD_V      = 5;
   const FONT_SZ        = 8.5;
   const SUB_SZ         = 7;
-  const LINE_SUB       = 10; // altura de cada sublinha
+  const LINE_SUB       = 10;
 
   const cols  = buildCols(comPreco);
   const colW0 = cols[0].w - 8;
 
-  // Monta as sublinhas abaixo do nome
   const sublines = [];
   const partes = [item.medida, item.espessura].filter(Boolean);
   if (partes.length > 0) sublines.push(partes.join(' \u00b7 '));
@@ -255,7 +222,7 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
   const innerH = nomeH + sublines.length * LINE_SUB;
   const rowH   = Math.max(24, innerH + ROW_PAD_V * 2);
 
-  if (y + rowH > pageH - FOOTER_RESERVE) return null; // sinaliza nova página
+  if (y + rowH > pageH - FOOTER_RESERVE) return null;
 
   if (idx % 2 === 0) fillRect(doc, MARGIN, y, CONTENT_W, rowH, C.bgRow);
 
@@ -264,11 +231,9 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
 
   let cx = MARGIN;
 
-  // Nome do material
   doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
      .text(item.material || '\u2014', cx + 4, tyText, { width: colW0, lineBreak: false });
 
-  // Sublinhas: medida\u00b7espessura, unidade, obs
   let subY = tyText + nomeH + 1;
   for (const sub of sublines) {
     doc.font('Helvetica').fontSize(SUB_SZ).fillColor(C.lightGray)
@@ -279,7 +244,6 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
   cx += cols[0].w;
 
   if (comPreco) {
-    // Qtd
     const qtdLabel = item.unidade
       ? `${formatNumber(item.quantidade)} ${item.unidade}`
       : formatNumber(item.quantidade);
@@ -287,11 +251,9 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
        .text(qtdLabel, cx + 4, tySingle, { width: cols[1].w - 8, align: 'center', lineBreak: false });
     cx += cols[1].w;
 
-    // Preço por unidade (precoUnitario já normalizado no service: usa pm2 quando pu=0)
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(item.precoUnitario > 0 ? formatCurrency(item.precoUnitario) : '—',
              cx + 4, tySingle, { width: cols[2].w - 8, align: 'right', lineBreak: false });
-    // Mostra a unidade do material abaixo do preço (ex.: UNIDADE, M², G, ML, M/L…)
     if (item.unidade) {
       const unidLabel = item.usarM2 ? `por M²` : `por ${item.unidade}`;
       doc.font('Helvetica').fontSize(6.5).fillColor(C.lightGray)
@@ -299,17 +261,14 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
     }
     cx += cols[2].w;
 
-    // Total
     doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
        .text(item.total > 0 ? formatCurrency(item.total) : '—',
              cx + 4, tySingle, { width: cols[3].w - 8, align: 'right', lineBreak: false });
     cx += cols[3].w;
 
-    // Data
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.lightGray)
        .text(formatDate(item.data), cx + 4, tySingle, { width: cols[4].w - 8, align: 'right', lineBreak: false });
   } else {
-    // Qtd
     const qtdLabel = item.unidade
       ? `${formatNumber(item.quantidade)} ${item.unidade}`
       : formatNumber(item.quantidade);
@@ -317,19 +276,15 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
        .text(qtdLabel, cx + 4, tySingle, { width: cols[1].w - 8, align: 'center', lineBreak: false });
     cx += cols[1].w;
 
-    // Data
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.lightGray)
        .text(formatDate(item.data), cx + 4, tySingle, { width: cols[2].w - 8, align: 'right', lineBreak: false });
   }
 
-  // Linha divisória
   doc.strokeColor(C.divider).lineWidth(0.3)
      .moveTo(MARGIN, y + rowH).lineTo(PAGE_W - MARGIN, y + rowH).stroke();
 
   return y + rowH;
 }
-
-// ── Total geral (rodapé da seção de saídas) ───────────────────────────────────
 
 function drawTotalRow(doc, totalGeral, y) {
   const rowH = 26;
@@ -341,8 +296,6 @@ function drawTotalRow(doc, totalGeral, y) {
   return y + rowH;
 }
 
-// ── Footer de página ──────────────────────────────────────────────────────────
-
 function drawFooter(doc, pageNum, pageTotal) {
   const y = PAGE_H - 28;
   hline(doc, y - 8);
@@ -352,8 +305,6 @@ function drawFooter(doc, pageNum, pageTotal) {
      .text(`Página ${pageNum} de ${pageTotal}`,
            MARGIN, y, { width: CONTENT_W, align: 'right' });
 }
-
-// ── Geração do documento ──────────────────────────────────────────────────────
 
 function gerarDocumento(dados, logoPath, totalPaginas) {
   return new Promise((resolve, reject) => {
@@ -365,18 +316,15 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
     doc.on('end',   () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const saidas   = dados.itens;        // apenas SAIDA, já filtrado pelo service
-    const entradas = dados.entradas ?? []; // apenas ENTRADA
+    const saidas   = dados.itens;
+    const entradas = dados.entradas ?? [];
 
     const desenhar = () => {
-      // ── Cabeçalho de página ──────────────────────────────────────────────
       drawPageHeader(doc, dados, logoPath);
       let y = 84;
 
-      // ── Cards de resumo ──────────────────────────────────────────────────
       y = drawSummaryCards(doc, dados, y) + 4;
 
-      // ── Seção: Saídas ────────────────────────────────────────────────────
       if (saidas.length > 0) {
         y = drawSectionHeader(doc, y, `Saídas de material  (${saidas.length} ${saidas.length === 1 ? 'item' : 'itens'})`);
         y = drawMovTableHeader(doc, y, true);
@@ -396,7 +344,6 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
           }
         }
 
-        // Total geral de saídas
         if (dados.totalGeral > 0) {
           if (y + 26 > PAGE_H - 50) {
             if (totalPaginas !== null) drawFooter(doc, pageNum, totalPaginas);
@@ -409,9 +356,7 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
         }
       }
 
-      // ── Seção: Entradas ──────────────────────────────────────────────────
       if (entradas.length > 0) {
-        // Garante espaço antes de começar a seção
         if (y + 40 > PAGE_H - 50) {
           if (totalPaginas !== null) drawFooter(doc, pageNum, totalPaginas);
           pageNum++;
@@ -419,14 +364,13 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
           drawPageHeader(doc, dados, logoPath);
           y = 84;
         }
-        y += 8; // espaçamento entre seções
+        y += 8;
 
         y = drawSectionHeader(doc, y, `Entradas de material  (${entradas.length} ${entradas.length === 1 ? 'item' : 'itens'})`);
         y = drawMovTableHeader(doc, y, true);
 
         for (let i = 0; i < entradas.length; i++) {
           const item = entradas[i];
-          // Injeta sublinhas extras de contexto (retalho de origem)
           const itemComObs = { ...item };
           if (item.materialOrigemNome) {
             const retalhoInfo = `Retalho de ${item.materialOrigemNome} (abatido da saída)`;
@@ -449,7 +393,6 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
           }
         }
 
-        // Total de entradas
         const totalEntradas = entradas.reduce((acc, e) => {
           const preco = e.precoUnitario > 0 ? e.precoUnitario : 0;
           return acc + e.quantidade * preco;
@@ -462,7 +405,6 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
             drawPageHeader(doc, dados, logoPath);
             y = 84;
           }
-          // Rodapé de entradas em azul
           const rowH = 26;
           fillRect(doc, MARGIN, y, CONTENT_W, rowH, C.bgHeader);
           doc.font('Helvetica-Bold').fontSize(9).fillColor(C.gray)
@@ -475,12 +417,10 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
     };
 
     if (totalPaginas === null) {
-      // 1ª passagem: contar páginas
       doc.on('pageAdded', () => pageNum++);
       desenhar();
       doc.end();
     } else {
-      // 2ª passagem: footers corretos
       const origAddPage = doc.addPage.bind(doc);
       doc.addPage = (...args) => {
         drawFooter(doc, pageNum, totalPaginas);
@@ -494,15 +434,11 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
   });
 }
 
-// ── Export principal ──────────────────────────────────────────────────────────
-
 async function gerarPdfOS(numeroOS) {
-  // Busca dados já prontos (saídas + totalGeral)
   const dados = await svc.dadosParaPDF(numeroOS);
 
   const logoPath = path.join(__dirname, '../../../frontend/assets/images/logoPreta.png');
 
-  // 1ª passagem: descobrir total de páginas via contagem
   const totalReal = await new Promise((resolve, reject) => {
     const d     = new PDFDocument({ size: 'A4', layout: 'portrait', margin: 0 });
     let   count = 1;
@@ -514,11 +450,9 @@ async function gerarPdfOS(numeroOS) {
     gerarDocumentoContagem(dados, logoPath, d);
   });
 
-  // 2ª passagem: gera PDF real com footers corretos
   return gerarDocumento(dados, logoPath, totalReal);
 }
 
-// Versão de contagem (sem footers, usa doc externo)
 function gerarDocumentoContagem(dados, logoPath, doc) {
   const saidas   = dados.itens;
   const entradas = dados.entradas ?? [];
@@ -530,7 +464,7 @@ function gerarDocumentoContagem(dados, logoPath, doc) {
   y += 64;
 
   if (saidas.length > 0) {
-    y += 20 + 20; // section + header
+    y += 20 + 20;
     for (const item of saidas) {
       const rowH = Math.max(22, 10 + 10);
       if (y + rowH > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84 + 20; }
@@ -544,7 +478,7 @@ function gerarDocumentoContagem(dados, logoPath, doc) {
 
   if (entradas.length > 0) {
     if (y + 40 > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84; }
-    y += 8 + 20 + 20; // espaçamento + section + header
+    y += 8 + 20 + 20;
     for (const item of entradas) {
       const rowH = Math.max(22, 10 + 10);
       if (y + rowH > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84 + 20; }

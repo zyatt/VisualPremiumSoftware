@@ -18,9 +18,6 @@ function formatNumber(value) {
   }).format(value ?? 0);
 }
 
-// Formata a unidade para exibição (o valor interno no banco permanece em
-// maiúsculo). Ex.: 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²'/'M2' → 'm²'; 'KG' → 'Kg';
-// 'G' → 'g'. Espelha `formatarUnidadeExibicao` do app Flutter.
 function formatUnidade(unidade) {
   if (!unidade || !unidade.trim()) return '—';
   const u = unidade.trim().toUpperCase();
