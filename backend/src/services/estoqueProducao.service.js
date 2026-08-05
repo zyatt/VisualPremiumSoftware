@@ -11,7 +11,10 @@ function _calcularStatus(quantidade, estoqueMinimo, ativo) {
 }
 
 function _formatarMedidaRetalho(areaM2) {
-  return `${Number(areaM2).toFixed(2)}m²`;
+  // Não arredonda para um número fixo de casas — só limpa ruído de ponto
+  // flutuante (ex.: 1.9999999999998) mantendo a precisão real da área.
+  const arredondado = Math.round(Number(areaM2) * 10000) / 10000;
+  return `${arredondado}m²`;
 }
 
 function _normalizarProducao(producao) {
@@ -260,7 +263,7 @@ async function transferirEntreLinhas({
   return resultado;
 }
 
-async function listarEstoque({ producao, busca, categoria, identificador, medida, espessura } = {}) {
+async function listarEstoque({ producao, busca, categoria, identificador, medida, espessura, comprimento, largura } = {}) {
   const prod = _normalizarProducao(producao);
   const where = { quantidade: { gt: 0 }, producao: prod };
 
@@ -270,6 +273,17 @@ async function listarEstoque({ producao, busca, categoria, identificador, medida
   if (identificador) materialWhere.identificador = { contains: identificador, mode: 'insensitive' };
   if (medida)        materialWhere.medida        = { contains: medida,        mode: 'insensitive' };
   if (espessura)     materialWhere.espessura     = { contains: espessura,     mode: 'insensitive' };
+  // comprimento/largura são numéricos no banco — o filtro digitado (texto)
+  // é convertido para número antes de comparar. Valores não numéricos são
+  // ignorados (não filtram nada).
+  if (comprimento) {
+    const compNum = Number(String(comprimento).replace(',', '.'));
+    if (Number.isFinite(compNum)) materialWhere.comprimento = compNum;
+  }
+  if (largura) {
+    const largNum = Number(String(largura).replace(',', '.'));
+    if (Number.isFinite(largNum)) materialWhere.largura = largNum;
+  }
 
   const registros = await prisma.estoqueProducao.findMany({
     where: { ...where, material: materialWhere },
@@ -763,19 +777,46 @@ async function listarPendentes({ producao, tipo, status } = {}) {
   // esses campos para refletir o retalho, mantendo nome/categoria/
   // espessura do material de origem (o retalho herda esses atributos).
   return registros.map((r) => {
-    if (r.tipo !== 'RETALHO') return r;
-    const areaRetalho = Number(r.quantidade);
-    return {
-      ...r,
-      material: {
-        ...r.material,
-        unidade:       'M²',
-        identificador: 'RETALHO',
-        medida:        _formatarMedidaRetalho(areaRetalho),
-        largura:       null,
-        comprimento:   null,
-      },
-    };
+    if (r.tipo === 'RETALHO') {
+      const areaRetalho = Number(r.quantidade);
+      return {
+        ...r,
+        material: {
+          ...r.material,
+          unidade:       'M²',
+          identificador: 'RETALHO',
+          medida:        _formatarMedidaRetalho(areaRetalho),
+          largura:       null,
+          comprimento:   null,
+        },
+      };
+    }
+
+    // DEVOLUCAO de um material RETALHO cuja quantidade devolvida diverge da
+    // medida do retalho original: ao confirmar, será criado (ou somado) um
+    // retalho NOVO do tamanho devolvido (ver confirmarEntradaPendente). Aqui
+    // é só exibição — mostra essa medida nova em vez da medida do material
+    // de origem, pra refletir o que realmente vai ser criado.
+    if (r.tipo === 'DEVOLUCAO' && r.material?.identificador === 'RETALHO') {
+      const qtd = Number(r.quantidade);
+      const medidaOrigemNum = parseFloat(
+        String(r.material.medida ?? '').replace('m²', '').replace(',', '.').trim()
+      );
+      const medidaDiverge =
+        Number.isFinite(medidaOrigemNum) && Math.abs(medidaOrigemNum - qtd) > 0.0001;
+
+      if (medidaDiverge) {
+        return {
+          ...r,
+          material: {
+            ...r.material,
+            medida: _formatarMedidaRetalho(qtd),
+          },
+        };
+      }
+    }
+
+    return r;
   });
 }
 
@@ -816,28 +857,125 @@ async function confirmarEntradaPendente({ id, usuarioNome }) {
         data:  { quantidadePendente: { decrement: qtd } },
       });
 
-      const matAtualizado = await tx.material.update({
-        where: { id: pendencia.materialId },
-        data:  { quantidade: { increment: qtd } },
-      });
-      const novoStatus = _calcularStatus(
-        matAtualizado.quantidade,
-        matAtualizado.estoqueMinimo,
-        matAtualizado.ativo,
-      );
-      await tx.material.update({ where: { id: pendencia.materialId }, data: { status: novoStatus } });
+      const materialOrigem = await tx.material.findUnique({ where: { id: pendencia.materialId } });
+      if (!materialOrigem) throw { status: 404, message: 'Material da devolução não encontrado' };
+
+      // Se o material devolvido é um RETALHO e a quantidade devolvida não bate
+      // com a medida (área) gravada nele, não faz sentido somar direto no
+      // material original — a "medida" de um retalho É o seu tamanho. Ex.: um
+      // retalho de 3.5m² enviado à produção mas devolvido com só 1.5m² (o
+      // resto foi usado/gerou outro retalho lá) deve virar um retalho NOVO,
+      // de 1.5m², e não inflar o registro de 3.5m² com quantidade que na
+      // prática é de outro tamanho.
+      const ehRetalho = materialOrigem.identificador === 'RETALHO';
+      const medidaOrigemNum = ehRetalho
+        ? parseFloat(String(materialOrigem.medida ?? '').replace('m²', '').replace(',', '.').trim())
+        : NaN;
+      const medidaDiverge =
+        ehRetalho && Number.isFinite(medidaOrigemNum) && Math.abs(medidaOrigemNum - qtd) > 0.0001;
+
+      let matAtualizado;
+
+      if (medidaDiverge) {
+        const medidaNova = _formatarMedidaRetalho(qtd);
+
+        let retalhoNovo = await tx.material.findFirst({
+          where: {
+            nome:          { equals: materialOrigem.nome, mode: 'insensitive' },
+            identificador: { equals: 'RETALHO', mode: 'insensitive' },
+            medida:        { equals: medidaNova, mode: 'insensitive' },
+            espessura:     materialOrigem.espessura
+              ? { equals: materialOrigem.espessura, mode: 'insensitive' }
+              : null,
+          },
+        });
+
+        if (!retalhoNovo) {
+          try {
+            retalhoNovo = await tx.material.create({
+              data: {
+                nome:              materialOrigem.nome,
+                unidade:           'M²',
+                categoria:         materialOrigem.categoria ?? null,
+                medida:            medidaNova,
+                espessura:         materialOrigem.espessura ?? null,
+                identificador:     'RETALHO',
+                quantidade:        qtd,
+                estoqueMinimo:     0,
+                status:            _calcularStatus(qtd, 0, true),
+                estoqueConfirmado: true,
+                ativo:             true,
+                ultimoValorPago:   null,
+                ultimoValorPagoM2: materialOrigem.ultimoValorPagoM2 ?? null,
+              },
+            });
+          } catch (err) {
+            if (err?.code === 'P2002') {
+              retalhoNovo = await tx.material.findFirst({
+                where: {
+                  nome:      { equals: materialOrigem.nome, mode: 'insensitive' },
+                  medida:    { equals: medidaNova, mode: 'insensitive' },
+                  espessura: materialOrigem.espessura
+                    ? { equals: materialOrigem.espessura, mode: 'insensitive' }
+                    : null,
+                },
+              });
+              if (!retalhoNovo) throw err;
+              const novaQtd = Number(retalhoNovo.quantidade) + qtd;
+              retalhoNovo = await tx.material.update({
+                where: { id: retalhoNovo.id },
+                data: {
+                  quantidade: novaQtd,
+                  status:     _calcularStatus(novaQtd, Number(retalhoNovo.estoqueMinimo), retalhoNovo.ativo),
+                },
+              });
+            } else {
+              throw err;
+            }
+          }
+        } else {
+          const novaQtd = Number(retalhoNovo.quantidade) + qtd;
+          retalhoNovo = await tx.material.update({
+            where: { id: retalhoNovo.id },
+            data: {
+              quantidade: novaQtd,
+              status:     _calcularStatus(novaQtd, Number(retalhoNovo.estoqueMinimo), retalhoNovo.ativo),
+            },
+          });
+        }
+
+        matAtualizado = retalhoNovo;
+      } else {
+        matAtualizado = await tx.material.update({
+          where: { id: pendencia.materialId },
+          data:  { quantidade: { increment: qtd } },
+        });
+        const novoStatus = _calcularStatus(
+          matAtualizado.quantidade,
+          matAtualizado.estoqueMinimo,
+          matAtualizado.ativo,
+        );
+        matAtualizado = await tx.material.update({
+          where: { id: pendencia.materialId },
+          data:  { status: novoStatus },
+        });
+      }
 
       const NOME_BASE_DEVOLUCAO = `DEVOLUCAO-PRODUCAO${pendencia.producao}`;
       const relacao = await resolverRelacaoOSDescritiva(NOME_BASE_DEVOLUCAO);
 
+      const obsConfirmacao = medidaDiverge
+        ? `Devolução confirmada da produção ${pendencia.producao} para o estoque padrão – gerou retalho novo de ${_formatarMedidaRetalho(qtd)} (medida original do retalho enviado: ${materialOrigem.medida}) – ${usuarioNome ?? pendencia.usuarioNome ?? 'Usuário'}`
+        : `Devolução confirmada da produção ${pendencia.producao} para o estoque padrão – ${usuarioNome ?? pendencia.usuarioNome ?? 'Usuário'}`;
+
       await tx.movimentacaoEstoque.create({
         data: {
-          materialId: pendencia.materialId,
+          materialId: matAtualizado.id,
           tipo:        'ENTRADA',
           quantidade:  qtd,
           numeroOS:    relacao.numeroOS,
           relacaoOSId: relacao.id,
-          observacao:  `Devolução confirmada da produção ${pendencia.producao} para o estoque padrão – ${usuarioNome ?? pendencia.usuarioNome ?? 'Usuário'}`,
+          observacao:  obsConfirmacao,
           origemProducao: 'DEVOLUCAO',
           producao:       pendencia.producao,
         },

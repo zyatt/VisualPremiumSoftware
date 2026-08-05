@@ -2,23 +2,45 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import '../models/producao_model.dart';
 import '../models/estoque_producao_model.dart';
-import '../providers/producao_provider.dart';
 import '../providers/estoque_producao_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 
-/// Formata um valor monetário com até 6 casas decimais, removendo zeros
-/// à direita desnecessários (mínimo 2 casas). Ex.: 1.5 → "R$ 1,50";
-/// 0.000125 → "R$ 0,000125"; 1.234560 → "R$ 1,23456".
+/// Formata um valor monetário arredondado para 2 casas decimais.
+/// Ex.: 1.5 → "R$ 1,50"; 0.000125 → "R$ 0,00"; 1.234560 → "R$ 1,23".
 String _brl6(double v) {
-  final s6 = v.toStringAsFixed(6);
-  final trimmed = s6.replaceAll(RegExp(r'0+$'), '');
-  final partes = trimmed.split('.');
-  final dec = partes.length > 1 ? partes[1] : '';
-  final decFinal = dec.length < 2 ? dec.padRight(2, '0') : dec;
-  return 'R\$ ${partes[0].replaceAll('.', ',')},$decFinal';
+  final s2 = v.toStringAsFixed(2);
+  final partes = s2.split('.');
+  return 'R\$ ${partes[0].replaceAll('.', ',')},${partes[1]}';
+}
+
+/// Formata uma quantidade para EXIBIÇÃO — com separador de milhar (ponto)
+/// na parte inteira e vírgula como separador decimal (padrão brasileiro).
+/// Ex.: 1000 → "1.000"; 3.696 → "3,696"; 4.0 → "4".
+String formatarQuantidadeExibicao(double v) {
+  final bool isInteiro = v == v.truncateToDouble();
+  final String bruto = isInteiro ? v.toStringAsFixed(0) : v.toString();
+
+  final bool negativo = bruto.startsWith('-');
+  final String semSinal = negativo ? bruto.substring(1) : bruto;
+
+  final partes = semSinal.split('.');
+  final parteInteira = partes[0];
+  final parteDecimal = partes.length > 1 ? partes[1] : null;
+
+  final buffer = StringBuffer();
+  final len = parteInteira.length;
+  for (int i = 0; i < len; i++) {
+    if (i > 0 && (len - i) % 3 == 0) buffer.write('.');
+    buffer.write(parteInteira[i]);
+  }
+
+  final resultado = parteDecimal != null
+      ? '${buffer.toString()},$parteDecimal'
+      : buffer.toString();
+
+  return negativo ? '-$resultado' : resultado;
 }
 
 /// Formata a unidade para exibição (o valor interno permanece em maiúsculo,
@@ -129,6 +151,72 @@ class _EspessuraFormatter extends TextInputFormatter {
       selection: TextSelection.collapsed(offset: novoOffset),
     );
   }
+}
+
+/// Formatter para campos numéricos com separador de milhar (ponto) e vírgula
+/// decimal (padrão brasileiro), aplicado em tempo real enquanto o usuário
+/// digita. Ex.: digitar "1000" exibe "1.000"; digitar "1000,5" exibe
+/// "1.000,5". Usado para quantidades de baixa/devolução.
+class _MilharInputFormatter extends TextInputFormatter {
+  static String _aplicarMilhar(String digitosInteiros) {
+    final buffer = StringBuffer();
+    for (int i = 0; i < digitosInteiros.length; i++) {
+      if (i > 0 && (digitosInteiros.length - i) % 3 == 0) {
+        buffer.write('.');
+      }
+      buffer.write(digitosInteiros[i]);
+    }
+    return buffer.toString();
+  }
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text;
+
+    final cursorPos = newValue.selection.end.clamp(0, texto.length);
+    final antesDoCursor = texto.substring(0, cursorPos);
+    final digitosAntesCursor =
+        antesDoCursor.replaceAll(RegExp(r'[^\d,]'), '').length;
+
+    texto = texto.replaceAll(RegExp(r'[^\d,]'), '');
+
+    final partes = texto.split(',');
+    String inteiro = partes[0];
+    String? decimais = partes.length > 1 ? partes.sublist(1).join('') : null;
+
+    inteiro = inteiro.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+
+    final inteiroFormatado = _aplicarMilhar(inteiro);
+    final textoFormatado = decimais != null
+        ? '$inteiroFormatado,$decimais'
+        : (texto.contains(',') ? '$inteiroFormatado,' : inteiroFormatado);
+
+    int novoOffset = 0;
+    int contador = 0;
+    for (int i = 0; i < textoFormatado.length; i++) {
+      if (contador >= digitosAntesCursor) break;
+      if (textoFormatado[i] != '.') contador++;
+      novoOffset = i + 1;
+    }
+    novoOffset = novoOffset.clamp(0, textoFormatado.length);
+
+    return TextEditingValue(
+      text: textoFormatado,
+      selection: TextSelection.collapsed(offset: novoOffset),
+    );
+  }
+}
+
+/// Converte o texto de um campo formatado com [_MilharInputFormatter]
+/// (ex.: "1.000,50") para um double (1000.5).
+double? _parseMilhar(String texto) {
+  final v = texto.trim();
+  if (v.isEmpty) return null;
+  final semMilhar = v.replaceAll('.', '').replaceAll(',', '.');
+  return double.tryParse(semMilhar);
 }
 
 /// Corrige o texto de um campo de dimensão usada para não ultrapassar o
@@ -355,26 +443,6 @@ class _ProducaoPageState extends State<ProducaoPage>
                   ],
                 ),
                 const Spacer(),
-                OutlinedButton(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const _RetalhosPage(),
-                      ),
-                    );
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF00897B),
-                    side: const BorderSide(color: Color(0xFF00897B)),
-                    backgroundColor: const Color(0xFF00897B).withValues(alpha: 0.06),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ).copyWith(
-                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                  ),
-                  child: const Text('RETALHOS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-                ),
-                const SizedBox(width: 8),
                 IconButton(
                   onPressed: () {
                     final provider = context.read<EstoqueProducaoProvider>();
@@ -436,258 +504,6 @@ class _ProducaoPageState extends State<ProducaoPage>
           ],
         ),
       ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-// ABA ESTOQUE — grade de categorias
-// ─────────────────────────────────────────────────────────────────────
-
-class _EstoqueTab extends StatefulWidget {
-  const _EstoqueTab();
-
-  @override
-  State<_EstoqueTab> createState() => _EstoqueTabState();
-}
-
-class _EstoqueTabState extends State<_EstoqueTab> {
-  final _filtroCategoriaCtrl = TextEditingController();
-  String _filtroCategoria    = '';
-
-  static IconData _iconePara(String categoria) {
-    final c = categoria.toUpperCase();
-    if (c.contains('LONA'))      return Icons.straighten;
-    if (c.contains('BANNER'))    return Icons.flag;
-    if (c.contains('VINIL'))     return Icons.layers;
-    if (c.contains('PERFIL'))    return Icons.square_foot;
-    if (c.contains('TINTA'))     return Icons.format_paint;
-    if (c.contains('PAPEL'))     return Icons.description;
-    if (c.contains('ACESSORIO')) return Icons.handyman;
-    if (c.contains('COLA'))      return Icons.water_drop;
-    if (c.contains('TECIDO'))    return Icons.texture;
-    if (c.contains('MADEIRA'))   return Icons.foundation;
-    if (c.contains('METAL'))     return Icons.hardware;
-    return Icons.inventory_2;
-  }
-
-  static const _cores = [
-    Color(0xFF5E35B1), Color(0xFF1E88E5), Color(0xFF00897B),
-    Color(0xFFE53935), Color(0xFFF4511E), Color(0xFF8E24AA),
-    Color(0xFF039BE5), Color(0xFF43A047), Color(0xFFFFB300),
-    Color(0xFF6D4C41), Color(0xFF546E7A), Color(0xFFD81B60),
-  ];
-
-  @override
-  void dispose() {
-    _filtroCategoriaCtrl.dispose();
-    super.dispose();
-  }
-
-  void _navegarParaCategoria({
-    required String categoriaId,
-    required String categoriaLabel,
-    required Color cor,
-    required IconData icone,
-  }) {
-    // Geral e Sem categoria não possuem tela de identificadores —
-    // navegam diretamente para a listagem de materiais.
-    final pularIdentificadores =
-        categoriaId == _kCategoriaGeral ||
-        categoriaId == _kCategoriaSemCategoria;
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => pularIdentificadores
-            ? _ProducaoCategoriaPage(
-                categoriaId:    categoriaId,
-                categoriaLabel: categoriaLabel,
-                cor:            cor,
-                icone:          icone,
-              )
-            : _ProducaoIdentificadorPage(
-                categoriaId:    categoriaId,
-                categoriaLabel: categoriaLabel,
-                cor:            cor,
-                icone:          icone,
-              ),
-      ),
-    ).then((_) {
-      if (mounted) {
-        final p = context.read<ProducaoProvider>();
-        // Só recarrega se já tinha carregado com sucesso — evita que o retorno
-        // da navegação sobrescreva um estado de erro e cause rebuild espúrio.
-        if (p.categoriasCarregadas) p.carregarCategorias();
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(height: 16),
-
-        SizedBox(
-          width: 360,
-          child: TextField(
-            controller: _filtroCategoriaCtrl,
-            decoration: InputDecoration(
-              hintText:   'Buscar categoria...',
-              prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
-              isDense:    true,
-              suffixIcon: _filtroCategoria.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.close, size: 18),
-                      onPressed: () {
-                        _filtroCategoriaCtrl.clear();
-                        setState(() => _filtroCategoria = '');
-                      },
-                    )
-                  : null,
-            ),
-            onChanged: (v) => setState(() => _filtroCategoria = v.trim().toLowerCase()),
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        Expanded(
-          child: SingleChildScrollView(
-            child: Consumer<ProducaoProvider>(
-              builder: (_, provider, __) {
-                if (provider.carregandoCategorias && !provider.categoriasCarregadas) {
-                  return const SizedBox(
-                    height: 200,
-                    child: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
-                  );
-                }
-
-                if (provider.erroCategorias != null && !provider.categoriasCarregadas) {
-                  return SizedBox(
-                    height: 300,
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.cloud_off_outlined,
-                              size: 48, color: AppTheme.error),
-                          SizedBox(height: 12),
-                          Text(
-                            'Erro ao carregar categorias',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurface,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 15,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            provider.erroCategorias!,
-                            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 16),
-                          FilledButton.icon(
-                            onPressed: () => provider.carregarCategorias(),
-                            icon: const Icon(Icons.refresh, size: 18),
-                            label: const Text('Tentar novamente'),
-                            style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.primary)
-                              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
-
-                // Só exibe categorias fixas se o servidor já respondeu com sucesso
-                final servidorOk = provider.categoriasCarregadas;
-
-                bool corresponde(String label) =>
-                    _filtroCategoria.isEmpty ||
-                    label.toLowerCase().contains(_filtroCategoria);
-
-                final cards = <Widget>[
-                  if (servidorOk && corresponde('Geral'))
-                    _CategoriaCardProducao(
-                      categoria: 'Geral',
-                      cor:       const Color(0xFF5E35B1),
-                      icone:     Icons.grid_view_rounded,
-                      onTap: () => _navegarParaCategoria(
-                        categoriaId:    _kCategoriaGeral,
-                        categoriaLabel: 'Geral',
-                        cor:            const Color(0xFF5E35B1),
-                        icone:          Icons.grid_view_rounded,
-                      ),
-                    ),
-                  if (servidorOk && corresponde('Sem categoria'))
-                    _CategoriaCardProducao(
-                      categoria: 'Sem categoria',
-                      cor:       const Color(0xFF546E7A),
-                      icone:     Icons.help_outline,
-                      onTap: () => _navegarParaCategoria(
-                        categoriaId:    _kCategoriaSemCategoria,
-                        categoriaLabel: 'Sem categoria',
-                        cor:            const Color(0xFF546E7A),
-                        icone:          Icons.help_outline,
-                      ),
-                    ),
-                  for (int i = 0; i < provider.categorias.length; i++)
-                    if (corresponde(provider.categorias[i]))
-                      _CategoriaCardProducao(
-                        categoria: provider.categorias[i],
-                        cor:       _cores[i % _cores.length],
-                        icone:     _iconePara(provider.categorias[i]),
-                        onTap: () => _navegarParaCategoria(
-                          categoriaId:    provider.categorias[i],
-                          categoriaLabel: provider.categorias[i],
-                          cor:            _cores[i % _cores.length],
-                          icone:          _iconePara(provider.categorias[i]),
-                        ),
-                      ),
-                ];
-
-                if (cards.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: EdgeInsets.only(top: 80),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.search_off, size: 64, color: Theme.of(context).colorScheme.outline),
-                          SizedBox(height: 16),
-                          Text(
-                            _filtroCategoria.isNotEmpty
-                                ? 'Nenhuma categoria encontrada'
-                                : 'Nenhuma categoria cadastrada',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyLarge
-                                ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
-
-                return GridView.count(
-                  crossAxisCount:   4,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing:  16,
-                  childAspectRatio: 1.0,
-                  shrinkWrap:       true,
-                  physics:          const NeverScrollableScrollPhysics(),
-                  children:         cards,
-                );
-              },
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -768,297 +584,6 @@ class _CategoriaCardProducaoState extends State<_CategoriaCardProducao> {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PÁGINA DE IDENTIFICADORES (nível 2 da hierarquia: categoria → identificador)
-// ─────────────────────────────────────────────
-
-class _ProducaoIdentificadorPage extends StatefulWidget {
-  final String   categoriaId;
-  final String   categoriaLabel;
-  final Color    cor;
-  final IconData icone;
-
-  const _ProducaoIdentificadorPage({
-    required this.categoriaId,
-    required this.categoriaLabel,
-    required this.cor,
-    required this.icone,
-  });
-
-  @override
-  State<_ProducaoIdentificadorPage> createState() => _ProducaoIdentificadorPageState();
-}
-
-class _ProducaoIdentificadorPageState extends State<_ProducaoIdentificadorPage> {
-  final _filtroCtrl = TextEditingController();
-  String _filtro = '';
-  bool _carregando = true;
-  List<dynamic> _materiais = [];
-
-  String? _categoriaParaProvider() {
-    if (widget.categoriaId == _kCategoriaGeral)        return null;
-    if (widget.categoriaId == _kCategoriaSemCategoria) return '';
-    return widget.categoriaId;
-  }
-
-  static const _cores = [
-    Color(0xFF1E88E5), Color(0xFF00897B), Color(0xFFE53935),
-    Color(0xFFF4511E), Color(0xFF8E24AA), Color(0xFF039BE5),
-    Color(0xFF43A047), Color(0xFFFFB300), Color(0xFF6D4C41),
-    Color(0xFF546E7A), Color(0xFFD81B60), Color(0xFF5E35B1),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _carregar());
-  }
-
-  @override
-  void dispose() {
-    _filtroCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _carregar() async {
-    setState(() => _carregando = true);
-    try {
-      await context.read<ProducaoProvider>().carregarMateriais(
-        categoria: _categoriaParaProvider(),
-      );
-      if (!mounted) return;
-      setState(() {
-        _materiais = context.read<ProducaoProvider>().materiais;
-        _carregando = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _carregando = false);
-    }
-  }
-
-  List<String?> _identificadoresUnicos() {
-    final set = <String?>{};
-    for (final m in _materiais) {
-      final ident = m.identificador as String?;
-      set.add(ident?.trim().isNotEmpty == true ? ident!.trim() : null);
-    }
-    final lista = set.toList();
-    lista.sort((a, b) {
-      if (a == null && b == null) return 0;
-      if (a == null) return 1;
-      if (b == null) return -1;
-      return a.compareTo(b);
-    });
-    return lista;
-  }
-
-  int _contarMateriais(String? identificador) {
-    if (identificador == null) {
-      return _materiais.where((m) {
-        final ident = m.identificador as String?;
-        return ident == null || ident.trim().isEmpty;
-      }).length;
-    }
-    return _materiais.where((m) => (m.identificador as String?)?.trim() == identificador).length;
-  }
-
-  void _navegarParaIdentificador({
-    required String identificadorId,
-    required String? identificadorReal,
-  }) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => _ProducaoCategoriaPage(
-          categoriaId:                 widget.categoriaId,
-          categoriaLabel:              widget.categoriaLabel,
-          cor:                         widget.cor,
-          icone:                       widget.icone,
-          identificadorFiltro:         identificadorReal,
-          identificadorLabel:          identificadorId == _kIdentificadorTodos
-              ? null
-              : identificadorId == _kIdentificadorSemIdentificador
-                  ? 'Sem identificador'
-                  : identificadorId,
-          mostrarBotaoIdentificadores: true,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Cabeçalho ────────────────────────────────────────────────────
-            Row(
-              children: [
-                _BotaoVoltar(
-                  label: 'Categorias',
-                  tooltip: 'Voltar para a lista de categorias',
-                  onTap: () => Navigator.of(context).pop(),
-                ),
-                const SizedBox(width: 16),
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: widget.cor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(widget.icone, color: widget.cor, size: 20),
-                ),
-                SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.categoriaLabel,
-                      style: Theme.of(context)
-                          .textTheme
-                          .headlineMedium
-                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Selecione um identificador para ver os materiais',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-                Spacer(),
-                IconButton(
-                  onPressed: _carregar,
-                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  tooltip: 'Atualizar',
-                  style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                  ).copyWith(
-                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // ── Campo de busca ────────────────────────────────────────────────
-            SizedBox(
-              width: 360,
-              child: TextField(
-                controller: _filtroCtrl,
-                decoration: InputDecoration(
-                  hintText:   'Buscar identificador...',
-                  prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
-                  isDense:    true,
-                  suffixIcon: _filtro.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.close, size: 18),
-                          onPressed: () {
-                            _filtroCtrl.clear();
-                            setState(() => _filtro = '');
-                          },
-                        )
-                      : null,
-                ),
-                onChanged: (v) => setState(() => _filtro = v.trim().toLowerCase()),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // ── Grid de identificadores ───────────────────────────────────────
-            Expanded(
-              child: _carregando
-                  ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
-                  : _buildGrid(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGrid() {
-    final identificadores = _identificadoresUnicos();
-
-    bool corresponde(String label) =>
-        _filtro.isEmpty || label.toLowerCase().contains(_filtro);
-
-    final cards = <Widget>[];
-
-    // Card "Todos"
-    if (corresponde('todos')) {
-      cards.add(_IdentificadorCardProducao(
-        label:      'Todos',
-        quantidade: _materiais.length,
-        cor:        widget.cor,
-        icone:      Icons.grid_view_rounded,
-        onTap: () => _navegarParaIdentificador(
-          identificadorId:   _kIdentificadorTodos,
-          identificadorReal: null,
-        ),
-      ));
-    }
-
-    // Identificadores reais
-    for (int i = 0; i < identificadores.length; i++) {
-      final ident = identificadores[i];
-      final label = ident ?? 'Sem identificador';
-      if (!corresponde(label)) continue;
-      final cor = ident == null ? const Color(0xFF546E7A) : _cores[i % _cores.length];
-      cards.add(_IdentificadorCardProducao(
-        label:      label,
-        quantidade: _contarMateriais(ident),
-        cor:        cor,
-        icone:      ident == null ? Icons.help_outline : Icons.qr_code,
-        onTap: () => _navegarParaIdentificador(
-          identificadorId:   ident ?? _kIdentificadorSemIdentificador,
-          identificadorReal: ident,
-        ),
-      ));
-    }
-
-    if (cards.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.search_off, size: 64, color: Theme.of(context).colorScheme.outline),
-            SizedBox(height: 16),
-            Text(
-              'Nenhum identificador encontrado',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyLarge
-                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return SingleChildScrollView(
-      child: GridView.count(
-        crossAxisCount:   4,
-        crossAxisSpacing: 16,
-        mainAxisSpacing:  16,
-        childAspectRatio: 1.0,
-        shrinkWrap:       true,
-        physics:          const NeverScrollableScrollPhysics(),
-        children:         cards,
       ),
     );
   }
@@ -1156,428 +681,6 @@ class _IdentificadorCardProducaoState extends State<_IdentificadorCardProducao> 
   }
 }
 
-// ─────────────────────────────────────────────
-// PÁGINA DE MATERIAIS POR CATEGORIA
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ProducaoCategoriaPage extends StatefulWidget {
-  final String   categoriaId;
-  final String   categoriaLabel;
-  final Color    cor;
-  final IconData icone;
-  final String?  identificadorFiltro;
-  final String?  identificadorLabel;
-  final bool     mostrarBotaoIdentificadores;
-
-  const _ProducaoCategoriaPage({
-    required this.categoriaId,
-    required this.categoriaLabel,
-    required this.cor,
-    required this.icone,
-    this.identificadorFiltro,
-    this.identificadorLabel,
-    this.mostrarBotaoIdentificadores = false,
-  });
-
-  @override
-  State<_ProducaoCategoriaPage> createState() => _ProducaoCategoriaPageState();
-}
-
-class _ProducaoCategoriaPageState extends State<_ProducaoCategoriaPage> {
-  final _buscaCtrl         = TextEditingController();
-  final _identificadorCtrl = TextEditingController();
-  final _medidaCtrl        = TextEditingController();
-  final _espessuraCtrl     = TextEditingController();
-  String  _statusFiltro    = '';
-  bool    _statusHovered   = false;
-  Timer?  _debounce;
-
-  static const int _itensPorPagina = 50;
-  int _paginaAtual = 0;
-
-  String? _colunaOrdem;
-  bool    _crescente = true;
-
-  void _toggleOrdem(String sortKey) {
-    setState(() {
-      if (_colunaOrdem == sortKey) {
-        _crescente = !_crescente;
-      } else {
-        _colunaOrdem = sortKey;
-        _crescente   = true;
-      }
-    });
-  }
-
-  String? _categoriaParaProvider() {
-    if (widget.categoriaId == _kCategoriaGeral)        return null;
-    if (widget.categoriaId == _kCategoriaSemCategoria) return '';
-    return widget.categoriaId;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.identificadorFiltro != null) {
-      _identificadorCtrl.text = widget.identificadorFiltro!;
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _aplicarFiltros());
-  }
-
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    _buscaCtrl.dispose();
-    _identificadorCtrl.dispose();
-    _medidaCtrl.dispose();
-    _espessuraCtrl.dispose();
-    super.dispose();
-  }
-
-  void _aplicarFiltros() {
-    setState(() {}); // atualiza estado do botão "Limpar filtros" imediatamente
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), () {
-      setState(() => _paginaAtual = 0);
-      context.read<ProducaoProvider>().carregarMateriais(
-            busca:         _buscaCtrl.text.trim(),
-            categoria:     _categoriaParaProvider(),
-            status:        _statusFiltro.isEmpty ? null : _statusFiltro,
-            identificador: _identificadorCtrl.text.trim(),
-            medida:        _medidaCtrl.text.trim(),
-            espessura:     _espessuraCtrl.text.trim(),
-          );
-    });
-  }
-
-  void _limparFiltros() {
-    _buscaCtrl.clear();
-    _identificadorCtrl.clear();
-    _medidaCtrl.clear();
-    _espessuraCtrl.clear();
-    setState(() => _statusFiltro = '');
-    context.read<ProducaoProvider>().carregarMateriais(categoria: _categoriaParaProvider());
-  }
-
-  bool get _temFiltroAtivo =>
-      _buscaCtrl.text.trim().isNotEmpty ||
-      _identificadorCtrl.text.trim().isNotEmpty ||
-      _medidaCtrl.text.trim().isNotEmpty ||
-      _espessuraCtrl.text.trim().isNotEmpty ||
-      _statusFiltro.isNotEmpty;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                _BotaoVoltar(
-                  label: widget.mostrarBotaoIdentificadores
-                      ? widget.categoriaLabel
-                      : 'Categorias',
-                  tooltip: 'Voltar para a lista de categorias',
-                  onTap: () => Navigator.of(context).pop(),
-                ),
-                if (widget.mostrarBotaoIdentificadores && widget.identificadorLabel != null) ...[
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 6),
-                    child: Icon(Icons.chevron_right, size: 16, color: Theme.of(context).colorScheme.outline),
-                  ),
-                  Text(
-                    widget.identificadorLabel!,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-                const SizedBox(width: 16),
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: widget.cor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(widget.icone, color: widget.cor, size: 22),
-                ),
-                SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.categoriaLabel,
-                      style: Theme.of(context)
-                          .textTheme
-                          .headlineMedium
-                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Solicitação e controle de materiais',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-                Spacer(),
-                IconButton(
-                  onPressed: _aplicarFiltros,
-                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  tooltip: 'Atualizar',
-                  style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                  ).copyWith(
-                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: TextField(
-                    controller: _buscaCtrl,
-                    decoration: InputDecoration(
-                      hintText:   'Buscar material...',
-                      prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
-                      isDense:    true,
-                    ),
-                    onChanged: (_) => _aplicarFiltros(),
-                    onSubmitted: (_) => _aplicarFiltros(),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  onEnter: (_) => setState(() => _statusHovered = true),
-                  onExit:  (_) => setState(() => _statusHovered = false),
-                  child: SizedBox(
-                    width: 150,
-                    child: InputDecorator(
-                      decoration: const InputDecoration(
-                        labelText: 'Status',
-                        isDense:   true,
-                      ),
-                      isEmpty: _statusFiltro.isEmpty,
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: _statusFiltro.isEmpty ? null : _statusFiltro,
-                          isDense: true,
-                          isExpanded: true,
-                          mouseCursor: SystemMouseCursors.click,
-                          icon: Icon(
-                            Icons.arrow_drop_down,
-                            color: _statusHovered
-                                ? AppTheme.primary
-                                : Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          items: const [
-                            DropdownMenuItem(value: '',        child: Text('TODOS')),
-                            DropdownMenuItem(value: 'OK',      child: Text('OK')),
-                            DropdownMenuItem(value: 'LIMITE',  child: Text('LIMITE')),
-                            DropdownMenuItem(value: 'CRITICO', child: Text('CRITICO')),
-                          ],
-                          onChanged: (v) {
-                            setState(() => _statusFiltro = v ?? '');
-                            _aplicarFiltros();
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.outlined(
-                  tooltip: 'Limpar filtros',
-                  icon: Icon(Icons.filter_alt_off, color: scheme.onSurfaceVariant),
-                  onPressed: _temFiltroAtivo ? _limparFiltros : null,
-                  style: IconButton.styleFrom(
-                    side: BorderSide(color: scheme.outline),
-                  ).copyWith(
-                    mouseCursor: WidgetStateProperty.resolveWith((states) {
-                      if (states.contains(WidgetState.disabled)) {
-                        return SystemMouseCursors.basic;
-                      }
-                      return SystemMouseCursors.click;
-                    }),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _identificadorCtrl,
-                    decoration: InputDecoration(
-                      hintText:   'Identificador...',
-                      prefixIcon: Icon(Icons.qr_code, color: Theme.of(context).colorScheme.outline, size: 18),
-                      isDense:    true,
-                    ),
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [_UpperCaseFormatter()],
-                    onChanged: (_) => _aplicarFiltros(),
-                    onSubmitted: (_) => _aplicarFiltros(),
-                  ),
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _medidaCtrl,
-                    decoration: InputDecoration(
-                      hintText:   'Medida...',
-                      prefixIcon: Icon(Icons.straighten, color: Theme.of(context).colorScheme.outline, size: 18),
-                      isDense:    true,
-                    ),
-                    inputFormatters: [_DecimalCommaFormatter()],
-                    onChanged: (_) => _aplicarFiltros(),
-                    onSubmitted: (_) => _aplicarFiltros(),
-                  ),
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _espessuraCtrl,
-                    decoration: InputDecoration(
-                      hintText:   'Espessura...',
-                      prefixIcon: Icon(Icons.layers, color: Theme.of(context).colorScheme.outline, size: 18),
-                      suffixText: 'mm',
-                      isDense:    true,
-                    ),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [_EspessuraFormatter()],
-                    onChanged: (_) => _aplicarFiltros(),
-                    onSubmitted: (_) => _aplicarFiltros(),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            Expanded(
-              child: Consumer<ProducaoProvider>(
-                builder: (_, provider, __) {
-                  // Só mostra o spinner no primeiro carregamento (lista ainda
-                  // vazia). Em reloads subsequentes (troca de filtro/status,
-                  // atualização manual) a lista antiga continua visível até
-                  // os novos dados chegarem — evita trocar a lista pelo
-                  // spinner e de volta a cada reload, que é o que causava o
-                  // "piscar" ao selecionar categoria/filtros.
-                  if (provider.carregandoMateriais && provider.materiais.isEmpty) {
-                    return const Center(
-                        child: CircularProgressIndicator(color: AppTheme.primary));
-                  }
-                  if (provider.erro != null) {
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.cloud_off_outlined,
-                              size: 48, color: AppTheme.error),
-                          SizedBox(height: 12),
-                          Text(
-                            'Erro ao carregar materiais',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurface,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 15,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            provider.erro!.contains(': ')
-                                ? provider.erro!.substring(
-                                    provider.erro!.indexOf(': ') + 2)
-                                : provider.erro!,
-                            style: TextStyle(
-                                color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 16),
-                          FilledButton.icon(
-                            onPressed: () => provider.carregarMateriais(),
-                            icon: const Icon(Icons.refresh, size: 18),
-                            label: const Text('Tentar novamente'),
-                            style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.primary)
-                              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-                  if (provider.materiais.isEmpty) {
-                    return Center(
-                      child: Text(
-                        'Nenhum material encontrado',
-                        style: TextStyle(color: Theme.of(context).colorScheme.outline),
-                      ),
-                    );
-                  }
-
-                  final todos        = _ordenarMateriaisProducao(provider.materiais, _colunaOrdem, _crescente);
-                  final totalPaginas = (todos.length / _itensPorPagina).ceil();
-                  final paginaSegura = _paginaAtual.clamp(0, (totalPaginas - 1).clamp(0, 999));
-                  final inicio       = paginaSegura * _itensPorPagina;
-                  final fim          = (inicio + _itensPorPagina).clamp(0, todos.length);
-                  final paginados    = todos.sublist(inicio, fim);
-
-                  return Column(
-                    children: [
-                      Expanded(
-                        child: Card(
-                          clipBehavior: Clip.antiAlias,
-                          child: _TabelaMateriais(
-                            materiais: paginados,
-                            mostrarCategoria: widget.categoriaId == _kCategoriaGeral,
-                            colunaOrdem: _colunaOrdem,
-                            crescente: _crescente,
-                            onToggleOrdem: _toggleOrdem,
-                          ),
-                        ),
-                      ),
-                      if (totalPaginas > 1) ...[
-                        const SizedBox(height: 12),
-                        _BarraPaginacao(
-                          paginaAtual:     paginaSegura,
-                          totalPaginas:    totalPaginas,
-                          totalItens:      todos.length,
-                          itensPorPagina:  _itensPorPagina,
-                          onPaginaChanged: (p) => setState(() => _paginaAtual = p),
-                        ),
-                      ],
-                    ],
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // TABELA DE MATERIAIS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1659,827 +762,10 @@ int _compareNullableNum(num? a, num? b) {
   return a.compareTo(b);
 }
 
-/// Ordena a lista de materiais de produção conforme a chave de ordenação
-/// selecionada (label da coluna clicada) e a direção.
-List<MaterialProducaoModel> _ordenarMateriaisProducao(
-  List<MaterialProducaoModel> lista,
-  String? sortKey,
-  bool crescente,
-) {
-  if (sortKey == null) return lista;
-  final copia = List<MaterialProducaoModel>.from(lista);
-  int cmp(MaterialProducaoModel a, MaterialProducaoModel b) {
-    switch (sortKey) {
-      case 'id':            return a.id.compareTo(b.id);
-      case 'identificador':  return _compareNullableStr(a.identificador, b.identificador);
-      case 'nome':           return _compareNullableStr(a.nome, b.nome);
-      case 'categoria':      return _compareNullableStr(a.categoria, b.categoria);
-      case 'medida':         return _compareNullableStr(a.medida, b.medida);
-      case 'espessura':      return _compareNullableStr(a.espessura, b.espessura);
-      case 'comprimento':    return _compareNullableNum(a.comprimento, b.comprimento);
-      case 'largura':        return _compareNullableNum(a.largura, b.largura);
-      case 'quantidade':     return a.quantidade.compareTo(b.quantidade);
-      case 'unidade':        return _compareNullableStr(a.unidade, b.unidade);
-      case 'statusReal':     return _compareNullableStr(a.statusReal, b.statusReal);
-      default:               return 0;
-    }
-  }
-  copia.sort((a, b) => crescente ? cmp(a, b) : cmp(b, a));
-  return copia;
-}
-
-class _TabelaMateriais extends StatefulWidget {
-  final List<MaterialProducaoModel> materiais;
-  final bool mostrarCategoria;
-  final String? colunaOrdem;
-  final bool crescente;
-  final void Function(String sortKey) onToggleOrdem;
-
-  const _TabelaMateriais({
-    required this.materiais,
-    this.mostrarCategoria = true,
-    required this.colunaOrdem,
-    required this.crescente,
-    required this.onToggleOrdem,
-  });
-
-  static const List<_ColDef> _todosColsDef = [
-    _ColDef(label: 'Identificador', flex: 0.9, sortKey: 'identificador'),
-    _ColDef(label: 'Material',      flex: 2.0, sortKey: 'nome'),
-    _ColDef(label: 'Categoria',     flex: 1.0, sortKey: 'categoria'),
-    _ColDef(label: 'Medida',        flex: 0.8, sortKey: 'medida'),
-    _ColDef(label: 'Espessura',     flex: 0.7, sortKey: 'espessura'),
-    _ColDef(label: 'Comprimento',   flex: 0.8, sortKey: 'comprimento'),
-    _ColDef(label: 'Largura',       flex: 0.8, sortKey: 'largura'),
-    _ColDef(label: 'Estoque atual', flex: 0.7, sortKey: 'quantidade'),
-    _ColDef(label: 'Unidade',       flex: 0.9, sortKey: 'unidade'),
-    _ColDef(label: 'Status',        flex: 0.8, sortKey: 'statusReal'),
-  ];
-
-  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
-      ? SizedBox(width: col.fixed, child: child)
-      : Expanded(flex: (col.flex! * 10).round(), child: child);
-
-  @override
-  State<_TabelaMateriais> createState() => _TabelaMateriaisState();
-}
-
-class _TabelaMateriaisState extends State<_TabelaMateriais> {
-  List<_ColDef> get _cols => widget.mostrarCategoria
-      ? _TabelaMateriais._todosColsDef
-      : _TabelaMateriais._todosColsDef.where((c) => c.label != 'Categoria').toList();
-
-  Widget _cabecalho() => Container(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: Row(
-          children: [
-            for (final col in _cols)
-              _TabelaMateriais._colWrap(
-                col,
-                col.sortKey != null
-                    ? _CabecalhoOrdenavel(
-                        label:     col.label,
-                        ativo:     widget.colunaOrdem == col.sortKey,
-                        crescente: widget.crescente,
-                        onTap:     () => widget.onToggleOrdem(col.sortKey!),
-                      )
-                    : Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                        child: Text(
-                          col.label,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
-              ),
-          ],
-        ),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final cols      = _cols;
-    final materiais = widget.materiais;
-
-    Widget corpoRolavel = SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (int i = 0; i < materiais.length; i++) ...[
-            if (i > 0)
-              Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
-            _LinhaMateria(
-              material: materiais[i],
-              cols: cols,
-              mostrarCategoria: widget.mostrarCategoria,
-            ),
-          ],
-          if (materiais.isNotEmpty)
-            Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
-        ],
-      ),
-    );
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // Cabeçalho fixo — não entra no scroll vertical
-        _cabecalho(),
-        Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
-        // Corpo rolável ocupa o espaço restante
-        Expanded(child: corpoRolavel),
-      ],
-    );
-  }
-}
-
-class _LinhaMateria extends StatefulWidget {
-  final MaterialProducaoModel material;
-  final List<_ColDef> cols;
-  final bool mostrarCategoria;
-
-  const _LinhaMateria({
-    required this.material,
-    required this.cols,
-    this.mostrarCategoria = true,
-  });
-
-  @override
-  State<_LinhaMateria> createState() => _LinhaMateriaState();
-}
-
-class _LinhaMateriaState extends State<_LinhaMateria> {
-  bool _hovered = false;
-
-  static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
-      ? SizedBox(width: col.fixed, child: child)
-      : Expanded(flex: (col.flex! * 10).round(), child: child);
-
-  Widget _cell(String text) => Padding(
-        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-        ),
-      );
-
-  Widget _vDivider() => VerticalDivider(
-        width: 1, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant,
-      );
-
-  void _abrirSolicitacao(BuildContext context) {
-    final role = context.read<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
-    if (role == 'COMPRAS') return;
-    showDialog(
-      context: context,
-      builder: (_) => _SolicitarMaterialDialog(material: widget.material),
-    );
-  }
-
-  static String _fmtDim(double? v) {
-    if (v == null) return '—';
-    return v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final m          = widget.material;
-    final cols       = widget.cols;
-
-    final role       = context.watch<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
-    final podeOperar = role != 'COMPRAS';
-
-    final bgColor = _hovered && podeOperar
-        ? Color(0xFF009800).withValues(alpha: 0.10)
-        : Theme.of(context).colorScheme.surface;
-
-    // Índice incremental — evita erros de offset manual quando a coluna
-    // "Categoria" é ocultada (widget.mostrarCategoria == false).
-    var i = 0;
-    Widget nextCol(Widget child) => _colWrap(cols[i++], child);
-
-    return MouseRegion(
-      cursor: podeOperar ? SystemMouseCursors.click : SystemMouseCursors.basic,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: podeOperar ? () => _abrirSolicitacao(context) : null,
-        child: ColoredBox(
-          color: bgColor,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 52),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                nextCol(Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                  child: Text(
-                    m.nome,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                )),
-                _vDivider(),
-
-                if (widget.mostrarCategoria) ...[
-                  nextCol(_cell(m.categoria ?? '—')),
-                  _vDivider(),
-                ],
-
-                nextCol(_cell(m.medida ?? '—')),
-                _vDivider(),
-
-                nextCol(_cell(_fmtEspessura(m.espessura) ?? '—')),
-                _vDivider(),
-
-                nextCol(_cell(_fmtDim(m.comprimento))),
-                _vDivider(),
-
-                nextCol(_cell(_fmtDim(m.largura))),
-                _vDivider(),
-
-                nextCol(_cell(
-                  m.quantidade.toStringAsFixed(m.quantidade % 1 == 0 ? 0 : 2),
-                )),
-                _vDivider(),
-
-                nextCol(_cell(formatarUnidadeExibicao(m.unidade).isEmpty ? '—' : formatarUnidadeExibicao(m.unidade))),
-                _vDivider(),
-
-                nextCol(Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-                    child: _StatusBadge(status: m.statusReal),
-                  ),
-                )),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-}
-
-class _StatusBadge extends StatelessWidget {
-  final String status;
-  const _StatusBadge({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    final Color cor;
-    switch (status) {
-      case 'OK':      cor = AppTheme.statusOk;      break;
-      case 'LIMITE':  cor = AppTheme.statusBaixo;   break;
-      case 'CRITICO': cor = AppTheme.statusCritico; break;
-      default:        cor = Theme.of(context).colorScheme.outline;
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: cor.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cor.withValues(alpha: 0.4)),
-      ),
-      child: Text(
-        status,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: cor,
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DIALOG — SOLICITAR MATERIAL (baixa imediata)
-// ─────────────────────────────────────────────
-
-class _SolicitarMaterialDialog extends StatefulWidget {
-  final MaterialProducaoModel material;
-  const _SolicitarMaterialDialog({required this.material});
-
-  @override
-  State<_SolicitarMaterialDialog> createState() =>
-      _SolicitarMaterialDialogState();
-}
-
-class _SolicitarMaterialDialogState extends State<_SolicitarMaterialDialog> {
-  final _formKey     = GlobalKey<FormState>();
-  final _osCtrl      = TextEditingController();
-  final _qtdCtrl     = TextEditingController();
-  final _obsCtrl     = TextEditingController();
-  final _larguraCtrl = TextEditingController();
-  final _alturaCtrl  = TextEditingController();
-  bool  _enviando         = false;
-  bool  _modoDimensional  = false;
-  String? _erro;
-
-  @override
-  void dispose() {
-    _osCtrl.dispose();
-    _qtdCtrl.dispose();
-    _obsCtrl.dispose();
-    _larguraCtrl.dispose();
-    _alturaCtrl.dispose();
-    super.dispose();
-  }
-
-  /// True se a unidade do material é metro linear (m, m/l, ml, etc.).
-  bool get _eMetroLinear {
-    final u = widget.material.unidade?.toLowerCase().trim() ?? '';
-    return const {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'}.contains(u);
-  }
-
-  /// True se o material é UNIDADE (chapa/peça) e tem largura + comprimento
-  /// cadastrados.
-  bool get _podeInformarDimensao {
-    final m = widget.material;
-    if (_eMetroLinear) return false;
-    return (m.unidade?.toUpperCase() == 'UNIDADE') &&
-        m.largura != null && m.largura! > 0 &&
-        m.comprimento != null && m.comprimento! > 0;
-  }
-
-  /// Custo por m² sugerido para este material (gravado ou derivado do
-  /// custo unitário / área da chapa).
-  double? get _custoM2Sugerido {
-    final m = widget.material;
-    final custoM2Gravado = m.ultimoValorPagoM2;
-    if (custoM2Gravado != null && custoM2Gravado > 0) return custoM2Gravado;
-
-    final larg = m.largura;
-    final comp = m.comprimento;
-    if (larg != null && comp != null && larg > 0 && comp > 0) {
-      final pu = m.ultimoValorPago;
-      if (pu != null && pu > 0) return pu / (larg * comp);
-    }
-    return null;
-  }
-
-  String _fmt(double v) =>
-      v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
-
-  Future<void> _confirmar() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    final os = _osCtrl.text.trim();
-    
-    final qtd = _modoDimensional 
-        ? 1.0 
-        : double.tryParse(_qtdCtrl.text.replaceAll(',', '.'));
-
-    if (qtd == null || qtd <= 0) {
-      setState(() => _erro = 'Quantidade inválida');
-      return;
-    }
-
-    setState(() { _enviando = true; _erro = null; });
-
-    double? largUsada;
-    double? compUsado;
-    if (_modoDimensional && _podeInformarDimensao) {
-      final l = double.tryParse(_larguraCtrl.text.replaceAll(',', '.'));
-      final c = double.tryParse(_alturaCtrl.text.replaceAll(',', '.'));
-      if (l != null && l > 0 && c != null && c > 0) {
-        if (l > widget.material.largura! || c > widget.material.comprimento!) {
-          setState(() {
-            _enviando = false;
-            _erro = 'Dimensão usada não pode ultrapassar a da chapa '
-                '(${_fmt(widget.material.comprimento!)}×${_fmt(widget.material.largura!)} m)';
-          });
-          return;
-        }
-        largUsada = l;
-        compUsado = c;
-      }
-    }
-
-    final ok = await context.read<ProducaoProvider>().criarSolicitacao(
-          materialId:          widget.material.id,
-          quantidadeReservada: qtd,
-          numeroOS:            os,
-          larguraUsada:        largUsada,
-          comprimentoUsado:    compUsado,
-        );
-
-    if (!mounted) return;
-    setState(() => _enviando = false);
-
-    if (ok) {
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Material baixado com sucesso'),
-          backgroundColor: AppTheme.success,
-        ),
-      );
-    } else {
-      setState(() =>
-          _erro = context.read<ProducaoProvider>().erro ?? 'Erro ao solicitar');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final m = widget.material;
-    final disponivel = m.quantidade + m.emUso;
-    final unidade = formatarUnidadeExibicao(m.unidade);
-
-    final detalhes = <String>[];
-    if (m.identificador != null && m.identificador!.isNotEmpty) {
-      detalhes.add(m.identificador!);
-    }
-    if (m.medida != null && m.medida!.isNotEmpty) {
-      detalhes.add(m.medida!);
-    } else {
-      final comp = m.comprimento;
-      final larg = m.largura;
-      if (comp != null && comp > 0 && larg != null && larg > 0) {
-        detalhes.add('${_fmt(comp)}x${_fmt(larg)}m');
-      } else if (comp != null && comp > 0) {
-        detalhes.add('${_fmt(comp)}m');
-      } else if (larg != null && larg > 0) {
-        detalhes.add('${_fmt(larg)}m');
-      }
-    }
-    if (m.espessura != null) detalhes.add(_fmtEspessura(m.espessura)!);
-
-    return AlertDialog(
-      title: const Text('Baixa de Material'),
-      content: Form(
-        key: _formKey,
-        child: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text(
-                    m.nome,
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                  if (detalhes.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        detalhes.join(' · '),
-                        style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              TextFormField(
-                controller: _osCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Número da OS *',
-                  isDense:   true,
-                ),
-                textCapitalization: TextCapitalization.characters,
-                inputFormatters: [_UpperCaseFormatter()],
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Informe a OS' : null,
-              ),
-              const SizedBox(height: 12),
-
-              Builder(builder: (_) {
-                final m = widget.material;
-                if (!_podeInformarDimensao) {
-                  return const SizedBox.shrink();
-                }
-                final largura     = m.largura!;
-                final comprimento = m.comprimento!;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Tooltip(
-                      message: _modoDimensional
-                          ? 'Desativar e informar a quantidade diretamente'
-                          : 'Ativar para calcular pela dimensão usada da chapa',
-                      child: InkWell(
-                        onTap: () => setState(() {
-                          _modoDimensional = !_modoDimensional;
-                          if (_modoDimensional) {
-                            _qtdCtrl.text = '1';
-                            _larguraCtrl.clear();
-                            _alturaCtrl.clear();
-                          } else {
-                            _larguraCtrl.clear();
-                            _alturaCtrl.clear();
-                            _qtdCtrl.clear();
-                          }
-                        }),
-                        borderRadius: BorderRadius.circular(6),
-                        mouseCursor: SystemMouseCursors.click,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _modoDimensional
-                                    ? Icons.toggle_on
-                                    : Icons.toggle_off_outlined,
-                                size: 20,
-                                color: _modoDimensional
-                                    ? AppTheme.primary
-                                    : Theme.of(context).colorScheme.outline,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Informar dimensão usada',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: _modoDimensional
-                                      ? AppTheme.primary
-                                      : Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 5, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.primary.withValues(alpha: 0.10),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  'Chapa ${_fmt(comprimento)}×${_fmt(largura)} m',
-                                  style: const TextStyle(
-                                      fontSize: 10,
-                                      color: AppTheme.primary,
-                                      fontWeight: FontWeight.w600),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    if (_modoDimensional) ...[
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _alturaCtrl,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: InputDecoration(
-                                labelText: 'Comprimento usado (m)',
-                                isDense:    true,
-                                suffixText: '/ ${_fmt(comprimento)} m',
-                                suffixStyle: TextStyle(
-                                    fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                              ),
-                              onChanged: (_) => setState(() {
-                                _limitarDimensao(_alturaCtrl, comprimento);
-                              }),
-                            ),
-                          ),
-                          Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 8),
-                            child: Text('×',
-                                style: TextStyle(
-                                    fontSize: 16,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w700)),
-                          ),
-                          Expanded(
-                            child: TextField(
-                              controller: _larguraCtrl,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: InputDecoration(
-                                labelText: 'Largura usada (m)',
-                                isDense:    true,
-                                suffixText: '/ ${_fmt(largura)} m',
-                                suffixStyle: TextStyle(
-                                    fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                              ),
-                              onChanged: (_) => setState(() {
-                                _limitarDimensao(_larguraCtrl, largura);
-                              }),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      Builder(builder: (_) {
-                        final comp = double.tryParse(
-                            _alturaCtrl.text.replaceAll(',', '.'));
-                        final larg = double.tryParse(
-                            _larguraCtrl.text.replaceAll(',', '.'));
-                        if (larg == null || larg <= 0 ||
-                            comp == null || comp <= 0) {
-                          return const SizedBox.shrink();
-                        }
-                        final areaUsada   = larg * comp;
-                        final areaTotal   = largura * comprimento;
-                        final areaRetalho = double.parse(
-                            (areaTotal - areaUsada).toStringAsFixed(4));
-                        final temRetalho  = areaRetalho > 0.0001;
-
-                        final custoM2 = _custoM2Sugerido;
-                        final custoProporcional =
-                            (custoM2 != null && custoM2 > 0)
-                                ? custoM2 * areaUsada
-                                : null;
-
-                        return Container(
-                          margin: const EdgeInsets.only(top: 8),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withValues(alpha: 0.07),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: AppTheme.primary.withValues(alpha: 0.20)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.calculate_outlined,
-                                  size: 14, color: AppTheme.primary),
-                              SizedBox(width: 8),
-                              Expanded(
-                                child: RichText(
-                                  text: TextSpan(
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                    children: [
-                                      TextSpan(text: 'Área usada: '),
-                                      TextSpan(
-                                        text: '${_fmt(areaUsada)} m²',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            color: Theme.of(context).colorScheme.onSurface),
-                                      ),
-                                      if (temRetalho) ...[
-                                        TextSpan(text: '  ·  Retalho: '),
-                                        TextSpan(
-                                          text: '${_fmt(areaRetalho)} m²',
-                                          style: TextStyle(
-                                              fontWeight: FontWeight.w700,
-                                              color: AppTheme.success),
-                                        ),
-                                      ],
-                                      if (custoProporcional != null) ...[
-                                        TextSpan(text: '  ·  Custo: '),
-                                        TextSpan(
-                                          text: _brl6(custoProporcional),
-                                          style: TextStyle(
-                                              fontWeight: FontWeight.w700,
-                                              color: AppTheme.error),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }),
-                      const SizedBox(height: 8),
-                    ],
-
-                    const SizedBox(height: 4),
-                  ],
-                );
-              }),
-
-              TextFormField(
-                controller: _qtdCtrl,
-                decoration: InputDecoration(
-                  labelText: 'Quantidade *',
-                  isDense:   true,
-                  suffixText: unidade,
-                  helperText: _modoDimensional
-                      ? 'Bloqueado: quantidade fixa em 1'
-                      : null,
-                  helperStyle: TextStyle(
-                      fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                ),
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                readOnly: _modoDimensional,
-                validator: (v) {
-                  if (_erro != null) return _erro;
-                  final qtd =
-                      double.tryParse((v ?? '').replaceAll(',', '.'));
-                  if (qtd == null || qtd <= 0) return 'Quantidade inválida';
-                  return null;
-                },
-                onChanged: (_) {
-                  if (_erro != null) setState(() => _erro = null);
-                },
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Disponível: ${disponivel.toStringAsFixed(disponivel % 1 == 0 ? 0 : 2)} $unidade',
-                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
-              ),
-              const SizedBox(height: 12),
-
-              TextFormField(
-                controller: _obsCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Observação (opcional)',
-                  isDense:   true,
-                ),
-                maxLines: 2,
-              ),
-
-              if (_erro != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  _erro!,
-                  style: const TextStyle(
-                      fontSize: 12, color: AppTheme.statusCritico),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        Tooltip(
-          message: 'Cancelar e fechar sem enviar',
-          child: TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            style: TextButton.styleFrom().copyWith(
-              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-            ),
-            child: const Text('Cancelar'),
-          ),
-        ),
-        Tooltip(
-          message: 'Confirmar a saída deste material',
-          child: FilledButton(
-            onPressed: _enviando ? null : _confirmar,
-            style: ButtonStyle(
-              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-            ),
-            child: _enviando
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
-                  )
-                : const Text('Confirmar Saída'),
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 // ─────────────────────────────────────────────
 // ABA HISTÓRICO
 // ─────────────────────────────────────────────────────────────────────────
-
-/// Item genérico da timeline unificada de histórico: pode representar tanto
-/// uma OS finalizada (SolicitacaoProducaoModel) quanto uma movimentação do
-/// estoque de produção (MovimentacaoProducaoModel — transferência/baixa/estorno).
-class _HistoricoItem {
-  final DateTime data;
-  final SolicitacaoProducaoModel? solicitacao;
-  final MovimentacaoProducaoModel? movimentacao;
-
-  _HistoricoItem.solicitacao(SolicitacaoProducaoModel s)
-      : data = s.finalizadoEm ?? s.atualizadoEm,
-        solicitacao = s,
-        movimentacao = null;
-
-  _HistoricoItem.movimentacao(MovimentacaoProducaoModel m)
-      : data = m.criadoEm,
-        solicitacao = null,
-        movimentacao = m;
-}
 
 class _HistoricoTab extends StatefulWidget {
   const _HistoricoTab();
@@ -2502,7 +788,6 @@ class _HistoricoTabState extends State<_HistoricoTab> {
   void _buscar(String v) {
     setState(() => _paginaAtual = 0);
     final busca = v.trim();
-    context.read<ProducaoProvider>().carregarHistorico(busca: busca);
     context.read<EstoqueProducaoProvider>().carregarHistorico(busca: busca);
   }
 
@@ -2514,7 +799,7 @@ class _HistoricoTabState extends State<_HistoricoTab> {
         TextField(
           controller: _buscaCtrl,
           decoration: InputDecoration(
-            hintText:   'Buscar por material, OS ou usuário...',
+            hintText:   'Buscar por material, OS ou usuário',
             prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
             isDense:    true,
           ),
@@ -2522,27 +807,16 @@ class _HistoricoTabState extends State<_HistoricoTab> {
         ),
         const SizedBox(height: 16),
         Expanded(
-          child: Consumer2<ProducaoProvider, EstoqueProducaoProvider>(
-            builder: (_, producaoProv, estoqueProv, __) {
-              final carregando = producaoProv.carregandoHistorico || estoqueProv.carregandoHistorico;
+          child: Consumer<EstoqueProducaoProvider>(
+            builder: (_, estoqueProv, __) {
+              final carregando = estoqueProv.carregandoHistorico;
               if (carregando) {
                 return const Center(
                     child: CircularProgressIndicator(color: AppTheme.primary));
               }
 
-              // Solicitações (baixas pelo estoque padrão, aba "Estoque") e
-              // movimentações do estoque de produção (aba "Estoque Produção")
-              // são gravadas em tabelas totalmente independentes no backend —
-              // mesmo quando referenciam a mesma OS, uma nunca é espelho da
-              // outra. Por isso a timeline unificada apenas concatena as duas
-              // listas. (Antes havia um filtro que escondia a solicitação
-              // sempre que a mesma OS também tivesse uma baixa do estoque de
-              // produção, o que descartava baixas legítimas do estoque
-              // padrão.)
-              final itens = <_HistoricoItem>[
-                ...producaoProv.historico.map((s) => _HistoricoItem.solicitacao(s)),
-                ...estoqueProv.historico.map((m) => _HistoricoItem.movimentacao(m)),
-              ]..sort((a, b) => b.data.compareTo(a.data));
+              final itens = List<MovimentacaoProducaoModel>.from(estoqueProv.historico)
+                ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
 
               if (itens.isEmpty) {
                 return Center(
@@ -2566,11 +840,7 @@ class _HistoricoTabState extends State<_HistoricoTab> {
                       itemCount: paginados.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (_, i) {
-                        final item = paginados[i];
-                        if (item.solicitacao != null) {
-                          return _HistoricoCard(solicitacao: item.solicitacao!);
-                        }
-                        return _MovimentacaoEstoqueProducaoCard(movimentacao: item.movimentacao!);
+                        return _MovimentacaoEstoqueProducaoCard(movimentacao: paginados[i]);
                       },
                     ),
                   ),
@@ -2590,216 +860,6 @@ class _HistoricoTabState extends State<_HistoricoTab> {
           ),
         ),
       ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-// CARD DO HISTÓRICO
-// ─────────────────────────────────────────────
-
-class _HistoricoCard extends StatelessWidget {
-  final SolicitacaoProducaoModel solicitacao;
-  const _HistoricoCard({required this.solicitacao});
-
-  // Datas já chegam convertidas para fuso local via .toLocal() no model.
-
-  Future<void> _confirmarExclusao(BuildContext context) async {
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Excluir registro'),
-        content: Text(
-          'Excluir o histórico da OS ${solicitacao.numeroOS}?\n\n'
-          'Esta ação não pode ser desfeita.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            style: TextButton.styleFrom().copyWith(
-                mouseCursor:
-                    WidgetStateProperty.all(SystemMouseCursors.click)),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error)
-                .copyWith(
-                    mouseCursor: WidgetStateProperty.all(
-                        SystemMouseCursors.click)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Excluir'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmar != true || !context.mounted) return;
-
-    final ok = await context
-        .read<ProducaoProvider>()
-        .excluirHistorico(solicitacao.id);
-
-    if (!context.mounted) return;
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.read<ProducaoProvider>().erro ?? 'Erro ao excluir',
-          ),
-          backgroundColor: AppTheme.error,
-        ),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final s      = solicitacao;
-    final data   = s.finalizadoEm ?? s.atualizadoEm;
-    final dataStr = '${data.day.toString().padLeft(2, '0')}/'
-        '${data.month.toString().padLeft(2, '0')}/'
-        '${data.year} '
-        '${data.hour.toString().padLeft(2, '0')}:'
-        '${data.minute.toString().padLeft(2, '0')}';
-
-    final detalhes = <String>[];
-    if (s.materialIdentificador != null&& s.materialIdentificador!.isNotEmpty) {
-      detalhes.add(s.materialIdentificador!);
-    }
-    if (s.materialMedida != null) detalhes.add(s.materialMedida!);
-    if (s.materialEspessura != null) detalhes.add(_fmtEspessura(s.materialEspessura)!);
-
-    final role = context.watch<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
-    final podeExcluir = role == 'ADMIN' || role == 'GERENTE';
-
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppTheme.error.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.call_made,
-                  color: AppTheme.error, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Baixa para OS ${s.numeroOS}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    s.materialNome,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  if (detalhes.isNotEmpty)
-                    Text(
-                      detalhes.join(' · '),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  if (s.descricaoItem != null)
-                    Text(
-                      s.descricaoItem!,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.primary,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  if (s.baixas.isNotEmpty && s.baixas.last.observacao != null)
-                    Text(
-                      s.baixas.last.observacao!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  Text(
-                    'Usuário: ${s.usuarioNome}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Theme.of(context).colorScheme.outline,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '-${s.quantidadeUsada.toStringAsFixed(s.quantidadeUsada % 1 == 0 ? 0 : 2)} ${formatarUnidadeExibicao(s.materialUnidade)}',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.error,
-                  ),
-                ),
-                Text(
-                  dataStr,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
-                ),
-                if (podeExcluir) ...[
-                  const SizedBox(height: 4),
-                  SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: Tooltip(
-                      message: 'Excluir registro',
-                      child: IconButton(
-                        onPressed: () => _confirmarExclusao(context),
-                        padding: EdgeInsets.zero,
-                        visualDensity: VisualDensity.compact,
-                        constraints: const BoxConstraints(),
-                        icon: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            color: AppTheme.error.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: AppTheme.error.withValues(alpha: 0.25),
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.delete_outline,
-                            size: 16,
-                            color: AppTheme.error,
-                          ),
-                        ),
-                        style: IconButton.styleFrom().copyWith(
-                            mouseCursor: WidgetStateProperty.all(
-                                SystemMouseCursors.click)),
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -3040,8 +1100,7 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
 // ABA: Estoque Produção — materiais transferidos do estoque normal,
 // disponíveis para dar baixa em uma OS.
 // ═════════════════════════════════════════════════════════════════════════
-String _fmtQtdProducao(double v) =>
-    v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
+String _fmtQtdProducao(double v) => formatarQuantidadeExibicao(v);
 
 // ─────────────────────────────────────────────
 // ABA: Estoque Produção — nível 1 da hierarquia (categorias)
@@ -3173,7 +1232,7 @@ class _EstoqueProducaoTabState extends State<_EstoqueProducaoTab> {
             child: TextField(
               controller: _filtroCategoriaCtrl,
               decoration: InputDecoration(
-                hintText:   'Buscar categoria...',
+                hintText:   'Buscar categoria',
                 prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                 isDense:    true,
                 suffixIcon: _filtroCategoria.isNotEmpty
@@ -3641,6 +1700,8 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
   final _espessuraCtrl     = TextEditingController();
+  final _comprimentoCtrl   = TextEditingController();
+  final _larguraCtrl       = TextEditingController();
   Timer? _debounce;
 
   static const int _itensPorPagina = 50;
@@ -3702,6 +1763,8 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
     _espessuraCtrl.dispose();
+    _comprimentoCtrl.dispose();
+    _larguraCtrl.dispose();
     super.dispose();
   }
 
@@ -3720,6 +1783,8 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
           identificador: _identificadorCtrl.text.trim(),
           medida:        _medidaCtrl.text.trim(),
           espessura:     _espessuraCtrl.text.trim(),
+          comprimento:   _comprimentoCtrl.text.trim(),
+          largura:       _larguraCtrl.text.trim(),
         );
         provider.carregarEstoque(
           producao:      '2',
@@ -3728,6 +1793,8 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
           identificador: _identificadorCtrl.text.trim(),
           medida:        _medidaCtrl.text.trim(),
           espessura:     _espessuraCtrl.text.trim(),
+          comprimento:   _comprimentoCtrl.text.trim(),
+          largura:       _larguraCtrl.text.trim(),
         );
       } else {
         provider.carregarEstoque(
@@ -3736,16 +1803,22 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
           identificador: _identificadorCtrl.text.trim(),
           medida:        _medidaCtrl.text.trim(),
           espessura:     _espessuraCtrl.text.trim(),
+          comprimento:   _comprimentoCtrl.text.trim(),
+          largura:       _larguraCtrl.text.trim(),
         );
       }
     });
   }
 
   void _limparFiltros() {
-    _buscaCtrl.clear();
-    _identificadorCtrl.clear();
-    _medidaCtrl.clear();
-    _espessuraCtrl.clear();
+    setState(() {
+      _buscaCtrl.clear();
+      _identificadorCtrl.clear();
+      _medidaCtrl.clear();
+      _espessuraCtrl.clear();
+      _comprimentoCtrl.clear();
+      _larguraCtrl.clear();
+    });
     final provider = context.read<EstoqueProducaoProvider>();
     if (widget.combinada) {
       provider.carregarEstoque(producao: '1', categoria: _categoriaParaProvider());
@@ -3759,7 +1832,9 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
       _buscaCtrl.text.trim().isNotEmpty ||
       _identificadorCtrl.text.trim().isNotEmpty ||
       _medidaCtrl.text.trim().isNotEmpty ||
-      _espessuraCtrl.text.trim().isNotEmpty;
+      _espessuraCtrl.text.trim().isNotEmpty ||
+      _comprimentoCtrl.text.trim().isNotEmpty ||
+      _larguraCtrl.text.trim().isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -3850,7 +1925,7 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
                   child: TextField(
                     controller: _buscaCtrl,
                     decoration: InputDecoration(
-                      hintText:   'Buscar material...',
+                      hintText:   'Nome do material',
                       prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense:    true,
                     ),
@@ -3866,12 +1941,9 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
                   style: IconButton.styleFrom(
                     side: BorderSide(color: scheme.outline),
                   ).copyWith(
-                    mouseCursor: WidgetStateProperty.resolveWith((states) {
-                      if (states.contains(WidgetState.disabled)) {
-                        return SystemMouseCursors.basic;
-                      }
-                      return SystemMouseCursors.click;
-                    }),
+                    mouseCursor: WidgetStateProperty.all(
+                      _temFiltroAtivo ? SystemMouseCursors.click : SystemMouseCursors.basic,
+                    ),
                   ),
                 ),
               ],
@@ -3884,7 +1956,7 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
                   child: TextField(
                     controller: _identificadorCtrl,
                     decoration: InputDecoration(
-                      hintText:   'Identificador...',
+                      hintText:   'Identificador',
                       prefixIcon: Icon(Icons.qr_code, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
@@ -3899,7 +1971,7 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
                   child: TextField(
                     controller: _medidaCtrl,
                     decoration: InputDecoration(
-                      hintText:   'Medida...',
+                      hintText:   'Medida',
                       prefixIcon: Icon(Icons.straighten, color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense:    true,
                     ),
@@ -3911,9 +1983,41 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
                 SizedBox(width: 12),
                 Expanded(
                   child: TextField(
+                    controller: _comprimentoCtrl,
+                    decoration: InputDecoration(
+                      hintText:   'Comprimento',
+                      prefixIcon: Icon(Icons.height, color: Theme.of(context).colorScheme.outline, size: 18),
+                      suffixText: 'm',
+                      isDense:    true,
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: (_) => _aplicarFiltros(),
+                    onSubmitted: (_) => _aplicarFiltros(),
+                  ),
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _larguraCtrl,
+                    decoration: InputDecoration(
+                      hintText:   'Largura',
+                      prefixIcon: Icon(Icons.width_normal, color: Theme.of(context).colorScheme.outline, size: 18),
+                      suffixText: 'm',
+                      isDense:    true,
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: (_) => _aplicarFiltros(),
+                    onSubmitted: (_) => _aplicarFiltros(),
+                  ),
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
                     controller: _espessuraCtrl,
                     decoration: InputDecoration(
-                      hintText:   'Espessura...',
+                      hintText:   'Espessura',
                       prefixIcon: Icon(Icons.layers, color: Theme.of(context).colorScheme.outline, size: 18),
                       suffixText: 'mm',
                       isDense:    true,
@@ -4519,7 +2623,7 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
   /// [_confirmar].
   void _validarQuantidadeTotal() {
     final qtdTexto = _quantCtrl.text.trim();
-    final qtdInteira = qtdTexto.isEmpty ? null : double.tryParse(qtdTexto.replaceAll(',', '.'));
+    final qtdInteira = qtdTexto.isEmpty ? null : _parseMilhar(qtdTexto);
 
     final temDimensao = _modoDimensional &&
         _erroComprimento == null &&
@@ -4529,7 +2633,7 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
 
     final qtdTotal = (qtdInteira ?? 0) + (temDimensao ? 1 : 0);
     if (qtdTotal > widget.material.quantidade) {
-      _erro = 'Quantidade maior que o disponível (${_fmt(widget.material.quantidade)})';
+      _erro = 'Quantidade maior que o disponível (${formatarQuantidadeExibicao(widget.material.quantidade)})';
     } else if (_erro != null && _erro!.startsWith('Quantidade maior que o disponível')) {
       _erro = null;
     }
@@ -4569,9 +2673,7 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
       );
 
   Widget _secaoQuantidade(MaterialEstoqueProducaoModel m) {
-    final disponivel = m.quantidade == m.quantidade.truncateToDouble()
-        ? m.quantidade.toStringAsFixed(0)
-        : m.quantidade.toString();
+    final disponivel = formatarQuantidadeExibicao(m.quantidade);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -4599,6 +2701,7 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
               child: TextField(
                 controller: _quantCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [_MilharInputFormatter()],
                 decoration: InputDecoration(
                   labelText: 'Quantidade',
                   floatingLabelBehavior: FloatingLabelBehavior.always,
@@ -4944,7 +3047,7 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
     double? qtdParsed;
     if (exigeQuantidade) {
       final qtdTexto = _quantCtrl.text.trim();
-      qtdParsed = qtdTexto.isEmpty ? null : double.tryParse(qtdTexto.replaceAll(',', '.'));
+      qtdParsed = qtdTexto.isEmpty ? null : _parseMilhar(qtdTexto);
       erroQtd = (qtdParsed == null || qtdParsed <= 0) ? 'Informe a quantidade' : null;
     }
 
@@ -5268,7 +3371,7 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
                     ),
 
                     Builder(builder: (_) {
-                      final qtdInteira = double.tryParse(_quantCtrl.text.trim().replaceAll(',', '.'));
+                      final qtdInteira = _parseMilhar(_quantCtrl.text.trim());
                       final temQtdInteira = qtdInteira != null && qtdInteira > 0;
 
                       final comp = double.tryParse(_alturaCtrl.text.replaceAll(',', '.'));
@@ -5286,7 +3389,7 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
                       final unidade = formatarUnidadeExibicao(m.unidade);
                       final partes = <String>[];
                       if (temQtdInteira) {
-                        final qtdFmt = qtdInteira % 1 == 0 ? qtdInteira.toStringAsFixed(0) : _fmt(qtdInteira);
+                        final qtdFmt = formatarQuantidadeExibicao(qtdInteira);
                         partes.add('$qtdFmt ${qtdInteira == 1 ? unidade : '${unidade}s'} inteira${qtdInteira == 1 ? '' : 's'}');
                       }
                       if (temDimensao) {
@@ -5391,17 +3494,14 @@ class _DevolverEstoquePadraoDialogState extends State<_DevolverEstoquePadraoDial
     super.dispose();
   }
 
-  String _fmt(double v) =>
-      v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
-
   Future<void> _confirmar() async {
-    final qtd = double.tryParse(_quantCtrl.text.replaceAll(',', '.'));
+    final qtd = _parseMilhar(_quantCtrl.text);
     if (qtd == null || qtd <= 0) {
       setState(() => _erro = 'Informe uma quantidade válida');
       return;
     }
     if (qtd > widget.material.quantidade) {
-      setState(() => _erro = 'Quantidade maior que o disponível (${_fmt(widget.material.quantidade)})');
+      setState(() => _erro = 'Quantidade maior que o disponível (${formatarQuantidadeExibicao(widget.material.quantidade)})');
       return;
     }
 
@@ -5423,7 +3523,7 @@ class _DevolverEstoquePadraoDialogState extends State<_DevolverEstoquePadraoDial
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${_fmt(qtd)} ${formatarUnidadeExibicao(widget.material.unidade)} devolvido(s) ao estoque padrão'),
+          content: Text('${formatarQuantidadeExibicao(qtd)} ${formatarUnidadeExibicao(widget.material.unidade)} devolvido(s) ao estoque padrão'),
           backgroundColor: AppTheme.success,
         ),
       );
@@ -5452,7 +3552,7 @@ class _DevolverEstoquePadraoDialogState extends State<_DevolverEstoquePadraoDial
             ),
             const SizedBox(height: 4),
             Text(
-              'Disponível na Produção $_origem: ${_fmt(m.quantidade)} ${formatarUnidadeExibicao(m.unidade)}',
+              'Disponível na Produção $_origem: ${formatarQuantidadeExibicao(m.quantidade)} ${formatarUnidadeExibicao(m.unidade)}',
               style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
             ),
             const SizedBox(height: 16),
@@ -5500,6 +3600,7 @@ class _DevolverEstoquePadraoDialogState extends State<_DevolverEstoquePadraoDial
               controller: _quantCtrl,
               autofocus: true,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [_MilharInputFormatter()],
               decoration: InputDecoration(
                 labelText: 'Quantidade',
                 suffixText: formatarUnidadeExibicao(m.unidade),
@@ -5572,17 +3673,14 @@ class _TransferirEntreLinhasDialogState extends State<_TransferirEntreLinhasDial
     super.dispose();
   }
 
-  String _fmt(double v) =>
-      v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
-
   Future<void> _confirmar() async {
-    final qtd = double.tryParse(_quantCtrl.text.replaceAll(',', '.'));
+    final qtd = _parseMilhar(_quantCtrl.text);
     if (qtd == null || qtd <= 0) {
       setState(() => _erro = 'Informe uma quantidade válida');
       return;
     }
     if (qtd > widget.material.quantidade) {
-      setState(() => _erro = 'Quantidade maior que o disponível (${_fmt(widget.material.quantidade)})');
+      setState(() => _erro = 'Quantidade maior que o disponível (${formatarQuantidadeExibicao(widget.material.quantidade)})');
       return;
     }
 
@@ -5605,7 +3703,7 @@ class _TransferirEntreLinhasDialogState extends State<_TransferirEntreLinhasDial
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${_fmt(qtd)} ${formatarUnidadeExibicao(widget.material.unidade)} transferido(s) para Produção $_destino'),
+          content: Text('${formatarQuantidadeExibicao(qtd)} ${formatarUnidadeExibicao(widget.material.unidade)} transferido(s) para Produção $_destino'),
           backgroundColor: AppTheme.success,
         ),
       );
@@ -5634,7 +3732,7 @@ class _TransferirEntreLinhasDialogState extends State<_TransferirEntreLinhasDial
             ),
             const SizedBox(height: 4),
             Text(
-              'Disponível na Produção $_origem: ${_fmt(m.quantidade)} ${formatarUnidadeExibicao(m.unidade)}',
+              'Disponível na Produção $_origem: ${formatarQuantidadeExibicao(m.quantidade)} ${formatarUnidadeExibicao(m.unidade)}',
               style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
             ),
             const SizedBox(height: 16),
@@ -5682,6 +3780,7 @@ class _TransferirEntreLinhasDialogState extends State<_TransferirEntreLinhasDial
               controller: _quantCtrl,
               autofocus: true,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [_MilharInputFormatter()],
               decoration: InputDecoration(
                 labelText: 'Quantidade',
                 suffixText: formatarUnidadeExibicao(m.unidade),
@@ -5725,267 +3824,6 @@ class _TransferirEntreLinhasDialogState extends State<_TransferirEntreLinhasDial
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// PÁGINA DE RETALHOS — grade de categorias com filtro automático por RETALHO
-// ═════════════════════════════════════════════════════════════════════════
-
-class _RetalhosPage extends StatefulWidget {
-  const _RetalhosPage();
-
-  @override
-  State<_RetalhosPage> createState() => _RetalhosPageState();
-}
-
-class _RetalhosPageState extends State<_RetalhosPage> {
-  final _filtroCategoriaCtrl = TextEditingController();
-  String _filtroCategoria    = '';
-
-  static IconData _iconePara(String categoria) {
-    final c = categoria.toUpperCase();
-    if (c.contains('LONA'))      return Icons.straighten;
-    if (c.contains('BANNER'))    return Icons.flag;
-    if (c.contains('VINIL'))     return Icons.layers;
-    if (c.contains('PERFIL'))    return Icons.square_foot;
-    if (c.contains('TINTA'))     return Icons.format_paint;
-    if (c.contains('PAPEL'))     return Icons.description;
-    if (c.contains('ACESSORIO')) return Icons.handyman;
-    if (c.contains('COLA'))      return Icons.water_drop;
-    if (c.contains('TECIDO'))    return Icons.texture;
-    if (c.contains('MADEIRA'))   return Icons.foundation;
-    if (c.contains('METAL'))     return Icons.hardware;
-    return Icons.inventory_2;
-  }
-
-  static const _cores = [
-    Color(0xFF5E35B1), Color(0xFF1E88E5), Color(0xFF00897B),
-    Color(0xFFE53935), Color(0xFFF4511E), Color(0xFF8E24AA),
-    Color(0xFF039BE5), Color(0xFF43A047), Color(0xFFFFB300),
-    Color(0xFF6D4C41), Color(0xFF546E7A), Color(0xFFD81B60),
-  ];
-
-  static const Color _corRetalho = Color(0xFF00897B);
-
-  @override
-  void dispose() {
-    _filtroCategoriaCtrl.dispose();
-    super.dispose();
-  }
-
-  void _navegarParaRetalhos({
-    required String categoriaId,
-    required String categoriaLabel,
-    required Color cor,
-    required IconData icone,
-  }) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => _ProducaoCategoriaPage(
-          categoriaId:             categoriaId,
-          categoriaLabel:          categoriaLabel,
-          cor:                     cor,
-          icone:                   icone,
-          identificadorFiltro:     'RETALHO',
-          identificadorLabel:      'RETALHO',
-          mostrarBotaoIdentificadores: false,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Header ──────────────────────────────────────────────────────
-            Row(
-              children: [
-                _BotaoVoltar(
-                  label:   'Produção',
-                  tooltip: 'Voltar para Produção',
-                  onTap:   () => Navigator.of(context).pop(),
-                ),
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: _corRetalho.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: _corRetalho.withValues(alpha: 0.4)),
-                          ),
-                          child: Text(
-                            'RETALHOS',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: _corRetalho,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Selecione uma categoria para ver os retalhos',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                IconButton(
-                  onPressed: () => context.read<ProducaoProvider>().carregarCategorias(),
-                  icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  tooltip: 'Atualizar',
-                  style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                  ).copyWith(
-                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // ── Campo de busca de categoria ──────────────────────────────────
-            SizedBox(
-              width: 360,
-              child: TextField(
-                controller: _filtroCategoriaCtrl,
-                decoration: InputDecoration(
-                  hintText:   'Buscar categoria...',
-                  prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
-                  isDense:    true,
-                  suffixIcon: _filtroCategoria.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.close, size: 18),
-                          onPressed: () {
-                            _filtroCategoriaCtrl.clear();
-                            setState(() => _filtroCategoria = '');
-                          },
-                        )
-                      : null,
-                ),
-                onChanged: (v) => setState(() => _filtroCategoria = v.trim().toLowerCase()),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // ── Grid de categorias ───────────────────────────────────────────
-            Expanded(
-              child: SingleChildScrollView(
-                child: Consumer<ProducaoProvider>(
-                  builder: (_, provider, __) {
-                    if (provider.carregandoCategorias && !provider.categoriasCarregadas) {
-                      return const SizedBox(
-                        height: 200,
-                        child: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
-                      );
-                    }
-
-                    bool corresponde(String label) =>
-                        _filtroCategoria.isEmpty ||
-                        label.toLowerCase().contains(_filtroCategoria);
-
-                    final cards = <Widget>[
-                      // Card Geral — mostra TODOS os retalhos, sem filtro de categoria
-                      if (corresponde('Geral'))
-                        _CategoriaCardProducao(
-                          categoria: 'Geral',
-                          cor:       const Color(0xFF5E35B1),
-                          icone:     Icons.grid_view_rounded,
-                          onTap: () => _navegarParaRetalhos(
-                            categoriaId:    _kCategoriaGeral,
-                            categoriaLabel: 'Geral',
-                            cor:            const Color(0xFF5E35B1),
-                            icone:          Icons.grid_view_rounded,
-                          ),
-                        ),
-                      // Card Sem categoria — retalhos sem categoria
-                      if (corresponde('Sem categoria'))
-                        _CategoriaCardProducao(
-                          categoria: 'Sem categoria',
-                          cor:       const Color(0xFF546E7A),
-                          icone:     Icons.help_outline,
-                          onTap: () => _navegarParaRetalhos(
-                            categoriaId:    _kCategoriaSemCategoria,
-                            categoriaLabel: 'Sem categoria',
-                            cor:            const Color(0xFF546E7A),
-                            icone:          Icons.help_outline,
-                          ),
-                        ),
-                      // Cards de cada categoria real
-                      for (int i = 0; i < provider.categorias.length; i++)
-                        if (corresponde(provider.categorias[i]))
-                          _CategoriaCardProducao(
-                            categoria: provider.categorias[i],
-                            cor:       _cores[i % _cores.length],
-                            icone:     _iconePara(provider.categorias[i]),
-                            onTap: () => _navegarParaRetalhos(
-                              categoriaId:    provider.categorias[i],
-                              categoriaLabel: provider.categorias[i],
-                              cor:            _cores[i % _cores.length],
-                              icone:          _iconePara(provider.categorias[i]),
-                            ),
-                          ),
-                    ];
-
-                    if (cards.isEmpty) {
-                      return Center(
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 80),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.search_off, size: 64, color: Theme.of(context).colorScheme.outline),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Nenhuma categoria encontrada',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyLarge
-                                    ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }
-
-                    return GridView.count(
-                      crossAxisCount:   4,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing:  16,
-                      childAspectRatio: 1.0,
-                      shrinkWrap:       true,
-                      physics:          const NeverScrollableScrollPhysics(),
-                      children:         cards,
-                    );
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════
 // ABA: Histórico Estoque Produção — agora incorporada à aba "Histórico"
 // unificada acima. Este widget renderiza apenas o card de uma movimentação
 // (transferência/baixa/estorno) do estoque de produção.
@@ -6003,8 +3841,7 @@ class _MovimentacaoEstoqueProducaoCardState extends State<_MovimentacaoEstoquePr
       '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} '
       '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
-  String _fmtQtd(double v) =>
-      v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
+  String _fmtQtd(double v) => formatarQuantidadeExibicao(v);
 
   String _fmt(double v) =>
       v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
@@ -6063,12 +3900,15 @@ class _MovimentacaoEstoqueProducaoCardState extends State<_MovimentacaoEstoquePr
     final mov = widget.movimentacao;
     final ehTransferencia = mov.ehTransferencia;
     final ehTransferenciaLinha = mov.ehTransferenciaLinha;
+    final ehDevolucao = mov.ehDevolucao;
     final ehEstorno = mov.ehEstorno;
     final cor = ehTransferenciaLinha
         ? AppTheme.primary
         : ehTransferencia
             ? AppTheme.success
-            : (ehEstorno ? Theme.of(context).colorScheme.outline : AppTheme.error);
+            : (ehEstorno
+                ? Theme.of(context).colorScheme.outline
+                : (ehDevolucao ? Colors.orange : AppTheme.error));
 
     final detalhes = <String>[];
     if (mov.materialIdentificador != null && mov.materialIdentificador!.isNotEmpty) {
@@ -6103,7 +3943,9 @@ class _MovimentacaoEstoqueProducaoCardState extends State<_MovimentacaoEstoquePr
             ? 'Transferência para Produção ${mov.producao}'
             : (ehEstorno
                 ? 'Estorno: devolvido ao estoque padrão (retirado da Produção ${mov.producao})'
-                : 'Baixa para OS ${mov.numeroOS} — Produção ${mov.producao}'));
+                : (ehDevolucao
+                    ? 'Devolução para o estoque padrão — Produção ${mov.producao}'
+                    : 'Baixa para OS ${mov.numeroOS} — Produção ${mov.producao}')));
 
     final role = context.watch<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
     final podeExcluir = role == 'ADMIN' || role == 'GERENTE';
@@ -6126,7 +3968,9 @@ class _MovimentacaoEstoqueProducaoCardState extends State<_MovimentacaoEstoquePr
                     ? Icons.swap_horiz
                     : (ehTransferencia
                         ? Icons.call_received
-                        : (ehEstorno ? Icons.undo : Icons.call_made)),
+                        : (ehEstorno
+                            ? Icons.undo
+                            : (ehDevolucao ? Icons.keyboard_return : Icons.call_made))),
                 color: cor,
                 size: 20,
               ),

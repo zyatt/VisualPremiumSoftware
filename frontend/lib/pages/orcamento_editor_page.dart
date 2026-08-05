@@ -98,6 +98,19 @@ class _NoCommaFormatter extends TextInputFormatter {
   }
 }
 
+class _UpperCaseFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    return newValue.copyWith(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
+    );
+  }
+}
+
 class _DecimalInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -125,7 +138,7 @@ class _DecimalInputFormatter extends TextInputFormatter {
 
 String _brl(double? v) {
   if (v == null || v == 0) return '—';
-  return 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
+  return 'R\$ ${_formatarPreco(v)}';
 }
 
 String _formatQtd(double v) {
@@ -1334,8 +1347,16 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         title: const Text('Aprovar Orçamento', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
         content: const Text('Deseja aprovar este orçamento?\n\nApós a aprovação, o usuário Compras poderá gerar uma Ordem de Compra.', style: TextStyle(fontSize: 13)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-          FilledButton(style: FilledButton.styleFrom(backgroundColor: AppTheme.success), onPressed: () => Navigator.pop(ctx, true), child: const Text('Aprovar')),
+          TextButton(
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.success).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Aprovar'),
+          ),
         ],
       ),
     );
@@ -2321,7 +2342,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                   controller: _searchNomeCtrl,
 
                   autofocus: !context.watch<RoboHelperProvider>().tourAtivo,
-                  inputFormatters: [_NoCommaFormatter()],
+                  inputFormatters: [_NoCommaFormatter(), _UpperCaseFormatter()],
                   decoration: InputDecoration(
                     labelText: 'Nome do material',
                     isDense: true,
@@ -2360,7 +2381,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 flex: 2,
                 child: TextField(
                   controller: _searchIdentificadorCtrl,
-                  inputFormatters: [_NoCommaFormatter()],
+                  inputFormatters: [_NoCommaFormatter(), _UpperCaseFormatter()],
                   decoration: const InputDecoration(
                     labelText: 'Identificador',
                     prefixIcon: Icon(
@@ -2576,7 +2597,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                           final medidaOuDimensao = (m.medida != null && m.medida!.isNotEmpty)
                               ? m.medida
                               : _materialDimensaoFormatada(m.largura, m.comprimento);
-                          final sub = [m.categoria, medidaOuDimensao, _formatarEspessura(m.espessura), m.identificador, _formatarUnidadeExibicao(m.unidade)].where((s) => s != null && s.isNotEmpty).join(' • ');
+                          final sub = [medidaOuDimensao, _formatarEspessura(m.espessura)].where((s) => s != null && s.isNotEmpty).join(' • ');
                           return ListTile(
                             key: i == 0 ? _tourKeys.primeiroResultado : null,
                             dense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 2),
@@ -2585,6 +2606,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                               text: TextSpan(
                                 style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface),
                                 children: [
+                                  if (m.identificador != null && m.identificador!.isNotEmpty)
+                                    TextSpan(text: '${m.identificador}  ·  ', style: const TextStyle(fontWeight: FontWeight.w400)),
                                   TextSpan(text: m.nome, style: const TextStyle(fontWeight: FontWeight.w600)),
                                   if (sub.isNotEmpty)
                                     TextSpan(text: ' • $sub', style: const TextStyle(fontWeight: FontWeight.w400)),
@@ -3298,7 +3321,7 @@ class _QuantidadeFieldState extends State<_QuantidadeField> {
   late TextEditingController _ctrl;
   bool _editando = false;
 
-  String _formatValue(double v) => v.toStringAsFixed(v % 1 == 0 ? 0 : 2);
+  String _formatValue(double v) => _formatarPreco(v).replaceAll(RegExp(r',00$'), '');
 
   @override
   void initState() {
@@ -3329,12 +3352,12 @@ class _QuantidadeFieldState extends State<_QuantidadeField> {
       key: widget.tourKey,
       controller: _ctrl,
       keyboardType: TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
+      inputFormatters: [_PrecoInputFormatter()],
       decoration: InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 5), border: OutlineInputBorder(borderRadius: BorderRadius.circular(5)), isDense: true, filled: true, fillColor: Theme.of(context).colorScheme.surface),
       style: const TextStyle(fontSize: 11),
       onTap: () => setState(() => _editando = true),
       onChanged: (v) {
-        final parsed = double.tryParse(v.replaceAll(',', '.'));
+        final parsed = _parsePreco(v);
         if (parsed != null && parsed > 0) widget.onChanged(parsed);
       },
       onEditingComplete: () {
@@ -3364,7 +3387,8 @@ class _QtdUnidadeFieldState extends State<_QtdUnidadeField> {
 
   String _formatValue(double? v) {
     if (v == null) return '';
-    return v % 1 == 0 ? v.toStringAsFixed(0) : v.toString();
+    if (v % 1 == 0) return _formatarPreco(v).replaceAll(RegExp(r',00$'), '');
+    return _formatarPreco(v);
   }
 
   @override
@@ -3397,7 +3421,7 @@ class _QtdUnidadeFieldState extends State<_QtdUnidadeField> {
       key: widget.tourKey,
       controller: _ctrl,
       keyboardType: TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
+      inputFormatters: [_PrecoInputFormatter()],
       decoration: InputDecoration(
         hintText: '0.000',
         suffixIcon: (unidade != null && unidade.isNotEmpty)
@@ -3432,7 +3456,7 @@ class _QtdUnidadeFieldState extends State<_QtdUnidadeField> {
           widget.onChanged(0);
           return;
         }
-        final parsed = double.tryParse(v.replaceAll(',', '.'));
+        final parsed = _parsePreco(v);
         if (parsed != null) widget.onChanged(parsed);
       },
       onEditingComplete: () {
@@ -3709,6 +3733,95 @@ class _DialogVincularFornecedoresState extends State<_DialogVincularFornecedores
   }
 }
 
+/// Formatter para campos de preço em BRL: aplica separador de milhar (ponto)
+/// na parte inteira em tempo real enquanto o usuário digita, usando vírgula
+/// como separador decimal (padrão brasileiro). Ex.: digitar "1000" exibe
+/// "1.000"; digitar "1000,5" exibe "1.000,5".
+class _PrecoInputFormatter extends TextInputFormatter {
+  static String _aplicarMilhar(String digitosInteiros) {
+    final buffer = StringBuffer();
+    for (int i = 0; i < digitosInteiros.length; i++) {
+      if (i > 0 && (digitosInteiros.length - i) % 3 == 0) {
+        buffer.write('.');
+      }
+      buffer.write(digitosInteiros[i]);
+    }
+    return buffer.toString();
+  }
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text;
+
+    final cursorPos = newValue.selection.end.clamp(0, texto.length);
+    final antesDoCursor = texto.substring(0, cursorPos);
+    final digitosAntesCursor =
+        antesDoCursor.replaceAll(RegExp(r'[^\d,]'), '').length;
+
+    texto = texto.replaceAll(RegExp(r'[^\d,]'), '');
+
+    final partes = texto.split(',');
+    String inteiro = partes[0];
+    String? decimais = partes.length > 1 ? partes.sublist(1).join('') : null;
+    if (decimais != null && decimais.length > 2) {
+      decimais = decimais.substring(0, 2);
+    }
+
+    inteiro = inteiro.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+
+    final inteiroFormatado = _aplicarMilhar(inteiro);
+    final textoFormatado = decimais != null
+        ? '$inteiroFormatado,$decimais'
+        : (texto.contains(',') ? '$inteiroFormatado,' : inteiroFormatado);
+
+    int novoOffset = 0;
+    int contador = 0;
+    for (int i = 0; i < textoFormatado.length; i++) {
+      if (contador >= digitosAntesCursor) break;
+      if (textoFormatado[i] != '.') contador++;
+      novoOffset = i + 1;
+    }
+    novoOffset = novoOffset.clamp(0, textoFormatado.length);
+
+    return TextEditingValue(
+      text: textoFormatado,
+      selection: TextSelection.collapsed(offset: novoOffset),
+    );
+  }
+}
+
+/// Converte o texto de um campo formatado com [_PrecoInputFormatter]
+/// (ex.: "1.000,50") para um double (1000.5).
+double? _parsePreco(String texto) {
+  final v = texto.trim();
+  if (v.isEmpty) return null;
+  final semMilhar = v.replaceAll('.', '').replaceAll(',', '.');
+  return double.tryParse(semMilhar);
+}
+
+/// Formata um valor monetário no padrão brasileiro, com separador de
+/// milhar (ponto) e duas casas decimais (vírgula). Ex.: 1000.0 -> '1.000,00'.
+String _formatarPreco(num valor) {
+  final partes = valor.toStringAsFixed(2).split('.');
+  final inteiro = partes[0];
+  final decimais = partes[1];
+  final negativo = inteiro.startsWith('-');
+  final digitos = negativo ? inteiro.substring(1) : inteiro;
+
+  final buffer = StringBuffer();
+  for (int i = 0; i < digitos.length; i++) {
+    if (i > 0 && (digitos.length - i) % 3 == 0) {
+      buffer.write('.');
+    }
+    buffer.write(digitos[i]);
+  }
+
+  return '${negativo ? '-' : ''}${buffer.toString()},$decimais';
+}
+
 class _DialogEditarMaterial extends StatefulWidget {
   final String fornecedorNome;
   final String materialNome;
@@ -3737,7 +3850,7 @@ class _DialogEditarMaterialState extends State<_DialogEditarMaterial> {
   void initState() {
     super.initState();
     _precoCtrl = TextEditingController(
-      text: widget.precoAtual != null ? widget.precoAtual!.toStringAsFixed(2) : '',
+      text: widget.precoAtual != null ? _formatarPreco(widget.precoAtual!) : '',
     );
     _observacaoCtrl = TextEditingController(text: widget.observacaoAtual ?? '');
   }
@@ -3771,7 +3884,7 @@ class _DialogEditarMaterialState extends State<_DialogEditarMaterial> {
                   child: TextField(
                     controller: _precoCtrl,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
+                    inputFormatters: [_PrecoInputFormatter()],
                     decoration: const InputDecoration(labelText: 'Preço (R\$)', prefixText: 'R\$ ', isDense: true),
                   ),
                 ),
@@ -3800,7 +3913,7 @@ class _DialogEditarMaterialState extends State<_DialogEditarMaterial> {
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
           onPressed: () {
-            final preco = double.tryParse(_precoCtrl.text.replaceAll(',', '.'));
+            final preco = _parsePreco(_precoCtrl.text);
             final obs = _observacaoCtrl.text.trim().isEmpty ? null : _observacaoCtrl.text.trim();
             Navigator.pop(context, {'preco': preco, 'observacao': obs});
           },

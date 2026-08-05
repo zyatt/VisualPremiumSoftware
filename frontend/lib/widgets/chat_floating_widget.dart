@@ -24,7 +24,6 @@ class ChatFloatingWidget extends StatefulWidget {
   State<ChatFloatingWidget> createState() => _ChatFloatingWidgetState();
 }
 
-// ─── Indicador de presença (versão compacta do widget flutuante) ──────────────
 class _MiniStatusDot extends StatelessWidget {
   final bool online;
   final double size;
@@ -44,9 +43,6 @@ class _MiniStatusDot extends StatelessWidget {
   }
 }
 
-/// Mesma lógica de `_formatarStatusUsuario` em chat_page.dart, duplicada
-/// aqui para manter os dois arquivos de UI de chat independentes (padrão já
-/// usado no arquivo para outros widgets "Mini*").
 String _formatarStatusUsuarioMini(UsuarioChat usuario) {
   if (usuario.online) return 'Online';
   final ultimo = usuario.ultimoAcesso;
@@ -67,17 +63,8 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
   static const double _painelLargura = 320;
   static const double _painelAltura = 440;
 
-  // Centro da bolha em coordenadas absolutas da tela.
-  // Expandir/minimizar sempre parte desse centro — o widget cresce
-  // circularmente a partir do ponto em que o usuário clicou.
-  // Inicializado na primeira build quando o tamanho da tela é conhecido.
   double? _cx;
   double? _cy;
-
-  // Último tamanho de tela observado. Usado para detectar mudanças (ex:
-  // maximizar/restaurar a janela, entrar em fullscreen, rotacionar o
-  // dispositivo) e reposicionar a bolha proporcionalmente, em vez de
-  // deixá-la "presa" nas coordenadas absolutas antigas.
   Size? _telaAnterior;
 
   bool _expandido = false;
@@ -86,14 +73,7 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
   double _cxAoIniciar = 0;
   double _cyAoIniciar = 0;
 
-  // Último valor de ChatProvider.minimizarTrigger observado. Quando o
-  // provider incrementa esse contador (ex: troca de usuário logado),
-  // detectamos a mudança aqui e recolhemos a bolha, se estiver expandida.
   int? _ultimoMinimizarTrigger;
-
-  // Contrapartida: último valor de ChatProvider.abrirConversaTrigger
-  // observado. Ao mudar, expandimos a bolha (a conversa em si já foi
-  // selecionada pelo provider antes de incrementar o trigger).
   int? _ultimoAbrirConversaTrigger;
 
   @override
@@ -129,8 +109,6 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
   Widget build(BuildContext context) {
     final tela = MediaQuery.of(context).size;
 
-    // Observa o gatilho de minimizar (ex: troca de usuário logado) e
-    // recolhe a bolha se estiver expandida no momento em que ele mudar.
     final minimizarTrigger = context.watch<ChatProvider>().minimizarTrigger;
     if (_ultimoMinimizarTrigger != null &&
         minimizarTrigger != _ultimoMinimizarTrigger &&
@@ -141,8 +119,6 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
     }
     _ultimoMinimizarTrigger = minimizarTrigger;
 
-    // Idem, mas para o gatilho de ABRIR (expandir com uma conversa
-    // específica) — disparado após encaminhar solicitação/material.
     final abrirConversaTrigger = context.watch<ChatProvider>().abrirConversaTrigger;
     if (_ultimoAbrirConversaTrigger != null &&
         abrirConversaTrigger != _ultimoAbrirConversaTrigger &&
@@ -157,18 +133,11 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
     _ultimoAbrirConversaTrigger = abrirConversaTrigger;
 
     if (_cx == null || _cy == null) {
-      // Primeira build: ancora no canto inferior direito.
       _cx = tela.width  - 16 - _bolhaTamanho / 2;
       _cy = tela.height - 16 - _bolhaTamanho / 2;
     } else if (_telaAnterior != null &&
         (_telaAnterior!.width != tela.width ||
          _telaAnterior!.height != tela.height)) {
-      // A tela mudou de tamanho (ex: maximizar/restaurar a janela, entrar
-      // em fullscreen). Reescala a posição da bolha proporcionalmente para
-      // que ela mantenha a mesma posição RELATIVA na tela — se estava perto
-      // do canto inferior direito, continua perto do canto inferior
-      // direito na nova resolução, em vez de ficar "presa" no pixel
-      // absoluto antigo.
       _cx = _cx! * (tela.width  / _telaAnterior!.width);
       _cy = _cy! * (tela.height / _telaAnterior!.height);
       _cx = _cx!.clamp(_bolhaTamanho / 2, tela.width  - _bolhaTamanho / 2);
@@ -179,15 +148,22 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
     final largura = _expandido ? _painelLargura : _bolhaTamanho;
     final altura  = _expandido ? _painelAltura  : _bolhaTamanho;
 
-    final left = (_cx! - largura / 2).clamp(0.0, tela.width  - largura);
-    final top  = (_cy! - altura  / 2).clamp(0.0, tela.height - altura);
+    // Calcula left e top, garantindo que o painel expandido sempre fique
+    // completamente visível na tela. Quando expandido, ajusta o centro
+    // (_cx, _cy) se necessário para que o painel não ultrapasse os limites.
+    double left, top;
+    if (_expandido) {
+      // Ao expandir, ajusta o centro para garantir que o painel fique visível
+      final cxAjustado = _cx!.clamp(largura / 2, tela.width - largura / 2);
+      final cyAjustado = _cy!.clamp(altura / 2, tela.height - altura / 2);
+      left = (cxAjustado - largura / 2).clamp(0.0, tela.width - largura);
+      top = (cyAjustado - altura / 2).clamp(0.0, tela.height - altura);
+    } else {
+      // Bolha minimizada usa o centro original
+      left = (_cx! - largura / 2).clamp(0.0, tela.width - largura);
+      top = (_cy! - altura / 2).clamp(0.0, tela.height - altura);
+    }
 
-    // AnimatedPositioned anima left/top junto com largura/altura,
-    // garantindo que o painel expanda/minimize a partir do centro
-    // da bolha sem nenhum salto de posição.
-    // O GestureDetector fica DENTRO para capturar arrasto normalmente;
-    // durante o arrasto _arrastando=true e não há mudança de _expandido,
-    // então a animação não dispara enquanto o usuário arrasta.
     return AnimatedPositioned(
       duration: _arrastando
           ? Duration.zero
@@ -207,23 +183,7 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
         onPanUpdate: (details) {
           final delta = details.globalPosition - _inicioArrastoGlobal;
           if (delta.distance > 4) _arrastando = true;
-          // setState direto no callback de gesto: nada de
-          // addPostFrameCallback aqui. Adiar a atualização para o frame
-          // seguinte fazia o widget "perseguir" o dedo com 1 frame de
-          // atraso, o que dava a sensação de arrasto travado/pouco fluido.
-          // onPanUpdate já roda fora da fase de build, então setState
-          // direto é seguro e responde no mesmo frame do gesto.
           setState(() {
-            // O clamp do centro precisa refletir a metade da largura/altura
-            // REAIS do que está sendo arrastado (bolha OU painel expandido).
-            // Usar sempre _bolhaTamanho/2 aqui — mesmo com o painel expandido
-            // (320x440) — fazia _cx/_cy se moverem livremente numa faixa
-            // maior do que aquela em que `left`/`top` (que usam `largura`/
-            // `altura` reais) já estavam saturados. Resultado: o painel
-            // ficava "preso" visualmente por um trecho do arrasto até o
-            // centro finalmente sair da zona clampada — exatamente o
-            // travamento reportado ao arrastar o chat expandido perto da
-            // borda inferior da tela.
             final larguraAtual = _expandido ? _painelLargura : _bolhaTamanho;
             final alturaAtual  = _expandido ? _painelAltura  : _bolhaTamanho;
             _cx = (_cxAoIniciar + delta.dx)
@@ -254,29 +214,7 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
                 ),
               ],
             ),
-            // Só recorta (clip) quando o painel está expandido — é nele que
-            // a lista de conversa/scroll precisa ficar contida nos cantos
-            // arredondados. Em modo bolha, Clip.none evita que o badge de
-            // não-lidas (que fica posicionado levemente para fora do
-            // círculo) seja cortado pelo próprio container.
             clipBehavior: _expandido ? Clip.antiAlias : Clip.none,
-            // IMPORTANTE: o tamanho deste AnimatedContainer acompanha o
-            // AnimatedPositioned pai, ou seja, a CADA FRAME da animação de
-            // abrir/fechar ele tem uma largura/altura intermediária
-            // diferente (ex.: 56 -> 130 -> 220 -> 320). Se o conteúdo
-            // (ListView/ListTile da lista de usuários e da conversa) fosse
-            // filho direto daqui, ele seria relayoutado nessas larguras
-            // intermediárias a cada frame — é exatamente isso que causava
-            // os erros "RenderBox was not laid out", "child.hasSize is not
-            // true" (sliver) e "RenderFlex overflowed", além do piscar de
-            // tela ao expandir.
-            //
-            // A correção: o conteúdo é sempre desenhado no seu tamanho
-            // FINAL e FIXO (painel completo ou bolha completa) dentro de
-            // um SizedBox; o AnimatedContainer ao redor só recorta
-            // (Clip.antiAlias) a parte visível conforme cresce/encolhe.
-            // Assim o ListView nunca é relayoutado com larguras
-            // intermediárias — ele já nasce no tamanho certo.
             child: OverflowBox(
               alignment: Alignment.topLeft,
               minWidth: 0,
@@ -304,6 +242,7 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
     );
   }
 }
+
 class _BolhaIcone extends StatelessWidget {
   const _BolhaIcone({super.key});
 
@@ -388,8 +327,6 @@ class _BolhaIcone extends StatelessWidget {
     );
   }
 }
-
-// ─── Painel expandido (mini-chat) ─────────────────────────────────────────────
 
 class _MiniChatPainel extends StatefulWidget {
   final VoidCallback onFechar;
@@ -487,28 +424,11 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
     final chat = context.watch<ChatProvider>();
     final cs   = Theme.of(context).colorScheme;
 
-    // Sempre que a conversa ativa muda (inclusive na primeira vez que uma
-    // conversa é aberta), pede foco pro campo de mensagem explicitamente.
-    // Não dá pra confiar só em `autofocus: true` no TextField porque, se o
-    // provider já estava com usuarioAtivoId setado quando este painel
-    // montou (ex.: reaberto durante a mesma sessão), o Element do TextField
-    // pode ser reaproveitado entre rebuilds do Column — nesse caso
-    // `autofocus` não dispara de novo, já que ele só age na montagem
-    // inicial do Element, e não a cada troca de conversa.
     if (chat.usuarioAtivoId != _usuarioAtivoAnterior) {
       _usuarioAtivoAnterior = chat.usuarioAtivoId;
       if (chat.usuarioAtivoId != null) _focarCampoMensagem();
     }
 
-    // Material local e transparente: o ListTile/InkWell (lista de usuários)
-    // e os InkWell dos botões pintam o splash de toque no Material
-    // ANCESTRAL mais próximo. Sem um Material aqui perto, esse splash é
-    // pintado num Material distante (lá em cima, no Scaffold do app) e
-    // acaba ficando visualmente "embaixo" do nosso próprio
-    // AnimatedContainer/OverflowBox com fundo opaco — daí o aviso
-    // "ListTile background color or ink splashes may be invisible" e o
-    // toque sem feedback visual. Com este Material local o splash passa a
-    // ser pintado na camada certa, por cima do fundo.
     return Material(
       type: MaterialType.transparency,
       child: Column(
@@ -804,12 +724,6 @@ class _MiniConversa extends StatefulWidget {
 class _MiniConversaState extends State<_MiniConversa> {
   int? _conversaAnterior;
   int  _qtdMensagensAnterior = 0;
-
-  // true enquanto esperamos as mensagens de uma conversa recém-aberta (ou
-  // recém-trocada) chegarem, para então dar o salto pro fim. Sem isso, um
-  // jumpTo disparado a cada build (mesmo durante o carregamento, antes das
-  // mensagens existirem) pode "gastar" o salto num frame em que a lista
-  // ainda não tem o conteúdo final, deixando a conversa parada no topo.
   bool _aguardandoSaltoInicial = false;
 
   void _scrollToBottom({bool instantaneo = true}) {
@@ -830,10 +744,6 @@ class _MiniConversaState extends State<_MiniConversa> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       aplicar();
-      // Segundo salto no frame seguinte: garante que o layout final da
-      // lista (alturas variáveis, reações, etc.) já foi considerado —
-      // corrige o caso em que o primeiro jumpTo acontece antes da lista
-      // terminar de se estabilizar.
       if (instantaneo) {
         WidgetsBinding.instance.addPostFrameCallback((_) => aplicar());
       }
@@ -961,8 +871,6 @@ class _MiniConversaState extends State<_MiniConversa> {
   bool _mesmoDia(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 }
-
-// ─── Bolha de mensagem com hover (versão compacta do widget flutuante) ───────
 
 class _MiniBolhaMensagem extends StatefulWidget {
   final bool isMinha;
@@ -1165,12 +1073,6 @@ class _MiniBolhaMensagemState extends State<_MiniBolhaMensagem> {
   }
 }
 
-// ─── Divisor de data (versão compacta do widget flutuante) ───────────────────
-
-// ─── Risquinhos de status (estilo WhatsApp) ────────────────────────────────
-// 1 risquinho cinza  -> mensagem enviada, aguardando confirmação do servidor
-// 2 risquinhos cinza -> confirmada pelo servidor, ainda não visualizada
-// 2 risquinhos azuis -> visualizada (lida) pelo destinatário
 class _TicksMensagem extends StatelessWidget {
   final bool pendente;
   final bool lida;
@@ -1186,7 +1088,7 @@ class _TicksMensagem extends StatelessWidget {
     if (pendente) {
       return Icon(Icons.done, size: 12, color: corBase);
     }
-    final corLida = const Color(0xFF4FC3F7); // azul estilo WhatsApp
+    final corLida = const Color(0xFF4FC3F7);
     return Icon(
       Icons.done_all,
       size: 12,
@@ -1194,8 +1096,6 @@ class _TicksMensagem extends StatelessWidget {
     );
   }
 }
-
-// ─── Preview compacto da mensagem sendo respondida (mini-chat) ────────────────
 
 class _MiniPreviewResposta extends StatelessWidget {
   final MensagemChat mensagem;
@@ -1257,8 +1157,6 @@ class _MiniPreviewResposta extends StatelessWidget {
     );
   }
 }
-
-// ─── Entrada animada (versão compacta, ver explicação em chat_page.dart) ──────
 
 class _MiniEntradaAnimada extends StatefulWidget {
   final Widget child;

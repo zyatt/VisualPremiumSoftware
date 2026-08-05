@@ -93,7 +93,12 @@ async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
 
     const qtdUnit = item.qtdUnidade != null ? Number(item.qtdUnidade) : null;
     const precoUnitBruto = Number(item.precoUnitario ?? 0);
-    const precoPorEmbalagem = (qtdUnit != null && qtdUnit > 0)
+    // Quando o item tem qtdUnidade (ex.: 50 m/l por lona), o valor digitado
+    // pelo usuário em "Valor/(unidade)" já é o preço por unidade de medida
+    // (m/l, kg, g, ml...) e deve alimentar precoUnidadeMedida do vínculo,
+    // não o "preco" (que representa o valor por embalagem/peça inteira).
+    const usaUnidadeMedida = qtdUnit != null && qtdUnit > 0;
+    const precoPorEmbalagem = usaUnidadeMedida
       ? precoUnitBruto * qtdUnit
       : precoUnitBruto;
 
@@ -102,12 +107,14 @@ async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
       porMaterial.set(mid, {
         materialId: mid,
         usarM2:     item.usarM2 ?? false,
-        preco:      precoPorEmbalagem,
+        preco:      usaUnidadeMedida ? 0 : precoPorEmbalagem,
         precoM2:    Number(item.precoMetroQuadrado ?? 0),
+        precoUnidadeMedida: usaUnidadeMedida ? precoUnitBruto : 0,
       });
     } else {
-      if (precoPorEmbalagem > existing.preco) existing.preco = precoPorEmbalagem;
+      if (!usaUnidadeMedida && precoPorEmbalagem > existing.preco) existing.preco = precoPorEmbalagem;
       if (Number(item.precoMetroQuadrado ?? 0) > existing.precoM2) existing.precoM2 = Number(item.precoMetroQuadrado);
+      if (usaUnidadeMedida && precoUnitBruto > existing.precoUnidadeMedida) existing.precoUnidadeMedida = precoUnitBruto;
     }
   }
 
@@ -116,6 +123,7 @@ async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
     if (!dados.usarM2 && dados.preco > 0) updateData.preco = dados.preco;
     if (dados.usarM2 && dados.precoM2 > 0) updateData.precoMetroQuadrado = dados.precoM2;
     if (!dados.usarM2 && dados.precoM2 > 0) updateData.precoMetroQuadrado = dados.precoM2;
+    if (!dados.usarM2 && dados.precoUnidadeMedida > 0) updateData.precoUnidadeMedida = dados.precoUnidadeMedida;
 
     if (Object.keys(updateData).length === 0) continue;
 
@@ -126,6 +134,7 @@ async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
         materialId,
         preco:               updateData.preco               ?? null,
         precoMetroQuadrado:  updateData.precoMetroQuadrado  ?? null,
+        precoUnidadeMedida:  updateData.precoUnidadeMedida  ?? null,
         ativo: true,
       },
       update: {
@@ -583,6 +592,7 @@ async function finalizar(id, usuarioNome) {
         precoUnitario: precoUnitarioMovimentacao,
         precoM2: precoM2Final,
         quantidade: item.quantidade,
+        qtdUnidade: item.qtdUnidade != null ? Number(item.qtdUnidade) : null,
         usarM2: item.usarM2 ?? false,
       },
     });

@@ -10,8 +10,25 @@ import '../theme/app_theme.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-String _brl(double v) =>
-    v == 0 ? '—' : 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
+// Formata número com separador de milhar (.) e vírgula decimal, sempre 2 casas
+String _fmtMilhar(double v) {
+  final negativo = v < 0;
+  final fixado   = v.abs().toStringAsFixed(2);
+  final partes   = fixado.split('.');
+  final inteiro  = partes[0];
+  final decimal  = partes[1];
+
+  final buffer = StringBuffer();
+  final len = inteiro.length;
+  for (int i = 0; i < len; i++) {
+    if (i > 0 && (len - i) % 3 == 0) buffer.write('.');
+    buffer.write(inteiro[i]);
+  }
+
+  return '${negativo ? '-' : ''}${buffer.toString()},$decimal';
+}
+
+String _brl(double v) => v == 0 ? '—' : 'R\$ ${_fmtMilhar(v)}';
 
 String _fmtData(DateTime? dt) {
   if (dt == null) return '—';
@@ -20,25 +37,23 @@ String _fmtData(DateTime? dt) {
       '${dt.year}';
 }
 
-String _fmtQtd(double q) =>
-    q == q.truncateToDouble() ? q.toStringAsFixed(0) : q.toString();
-
-// Formata custo unitário com até 6 casas decimais, removendo zeros finais
-String _fmtCusto(double v) {
-  // Tenta de 2 a 6 casas, usa o mínimo que representa o valor fielmente
-  for (int casas = 2; casas <= 6; casas++) {
-    final s = v.toStringAsFixed(casas);
-    if (double.parse(s) == double.parse(v.toStringAsFixed(6))) {
-      return s.replaceAll('.', ',');
-    }
-  }
-  return v.toStringAsFixed(6).replaceAll('.', ',');
+// Quantidade: arredondada em 2 casas, com separador de milhar
+String _fmtQtd(double q) {
+  final arredondado = double.parse(q.toStringAsFixed(2));
+  return arredondado == arredondado.truncateToDouble()
+      ? _fmtMilhar(arredondado).replaceAll(',00', '')
+      : _fmtMilhar(arredondado);
 }
 
-String _fmtDim(double v) =>
-    v == v.truncateToDouble()
-        ? v.toStringAsFixed(0)
-        : v.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
+// Custo unitário: arredondado em 2 casas, com separador de milhar
+String _fmtCusto(double v) => _fmtMilhar(v);
+
+String _fmtDim(double v) {
+  final arredondado = double.parse(v.toStringAsFixed(2));
+  return arredondado == arredondado.truncateToDouble()
+      ? arredondado.toStringAsFixed(0)
+      : _fmtMilhar(arredondado);
+}
 
 String? _formatarMedidaOuDimensoes({
   required String? medida,
@@ -1012,7 +1027,7 @@ class _LinhaEstoque extends StatelessWidget {
               SizedBox(
                 width: 70,
                 child: Text(
-                  '${_fmtQtd(m.quantidade)} ${m.unidade ?? ''}',
+                  '${_fmtQtd(m.quantidade)} ${(m.unidade ?? '').toLowerCase()}',
                   textAlign: TextAlign.right,
                   style: TextStyle(
                       fontSize: 12,
@@ -1575,7 +1590,7 @@ class _LinhaGasto extends StatelessWidget {
                 width: 70,
                 child: Text(
                   m.qtdGasta > 0
-                      ? '${_fmtQtd(m.qtdGasta)} ${m.unidade ?? ''}'
+                      ? '${_fmtQtd(m.qtdGasta)} ${(m.unidade ?? '').toLowerCase()}'
                       : '—',
                   textAlign: TextAlign.right,
                   style: TextStyle(

@@ -22,15 +22,27 @@ String _fmtData(DateTime? dt) {
 }
 
 /// Formata um valor monetário com até 6 casas decimais, removendo zeros
-/// à direita desnecessários (mínimo 2 casas). Ex.: 1.5 → "R$ 1,50";
-/// 0.000125 → "R$ 0,000125"; 1.234560 → "R$ 1,23456".
+/// à direita desnecessários (mínimo 2 casas), com separador de milhar (ponto)
+/// na parte inteira. Ex.: 1.5 → "R$ 1,50"; 0.000125 → "R$ 0,000125";
+/// 1000 → "R$ 1.000,00"; 1234560.5 → "R$ 1.234.560,50".
 String _brl6(double v) {
   final s6 = v.toStringAsFixed(6);
   final trimmed = s6.replaceAll(RegExp(r'0+$'), '');
   final partes = trimmed.split('.');
   final dec = partes.length > 1 ? partes[1] : '';
   final decFinal = dec.length < 2 ? dec.padRight(2, '0') : dec;
-  return 'R\$ ${partes[0].replaceAll('.', ',')},$decFinal';
+
+  final inteiro = partes[0];
+  final negativo = inteiro.startsWith('-');
+  final digitos = negativo ? inteiro.substring(1) : inteiro;
+  final buffer = StringBuffer();
+  for (int i = 0; i < digitos.length; i++) {
+    if (i > 0 && (digitos.length - i) % 3 == 0) buffer.write('.');
+    buffer.write(digitos[i]);
+  }
+  final inteiroFormatado = '${negativo ? '-' : ''}${buffer.toString()}';
+
+  return 'R\$ $inteiroFormatado,$decFinal';
 }
 
 /// Formata um valor de dimensão/quantidade sem arredondar ou cortar a
@@ -47,8 +59,43 @@ String _fmtDim(double v) =>
 /// Formata uma quantidade de material sem arredondar/cortar a precisão
 /// real do valor (mesma lógica de _fmtDim, exposta com nome mais claro
 /// para os pontos que exibem quantidade em estoque, não dimensão).
+/// Mantida sem separador de milhar pois também é usada para inicializar/
+/// parsear campos editáveis de largura/comprimento (dimensões em metros,
+/// tipicamente pequenas — ex. "1.22"), onde um ponto de milhar quebraria
+/// a edição/leitura do valor.
 /// Ex.: 3.696 → "3.696"; 4.0 → "4".
 String formatarQuantidade(double v) => _fmtDim(v);
+
+/// Formata uma quantidade de estoque (unidades, m², m/l etc.) para
+/// EXIBIÇÃO como texto — com separador de milhar (ponto) na parte inteira
+/// e vírgula como separador decimal (padrão brasileiro). Diferente de
+/// [formatarQuantidade], que é usada em campos editáveis de dimensão e por
+/// isso não pode ter milhar.
+/// Ex.: 1000 → "1.000"; 3.696 → "3,696"; 4.0 → "4".
+String formatarQuantidadeExibicao(double v) {
+  final bool isInteiro = v == v.truncateToDouble();
+  final String bruto = isInteiro ? v.toStringAsFixed(0) : v.toString();
+
+  final bool negativo = bruto.startsWith('-');
+  final String semSinal = negativo ? bruto.substring(1) : bruto;
+
+  final partes = semSinal.split('.');
+  final parteInteira = partes[0];
+  final parteDecimal = partes.length > 1 ? partes[1] : null;
+
+  final buffer = StringBuffer();
+  final len = parteInteira.length;
+  for (int i = 0; i < len; i++) {
+    if (i > 0 && (len - i) % 3 == 0) buffer.write('.');
+    buffer.write(parteInteira[i]);
+  }
+
+  final resultado = parteDecimal != null
+      ? '${buffer.toString()},$parteDecimal'
+      : buffer.toString();
+
+  return negativo ? '-$resultado' : resultado;
+}
 
 /// Retorna a exibição de medida de um material: usa o campo [medida] quando
 /// preenchido; caso contrário, monta a partir de [largura]/[comprimento]
@@ -150,7 +197,8 @@ class _UpperCaseFormatter extends TextInputFormatter {
 // que o Future de showDialog leva para completar).
 class _RenomearOSDialog extends StatefulWidget {
   final String nomeAtual;
-  const _RenomearOSDialog({required this.nomeAtual});
+  final String? clienteAtual;
+  const _RenomearOSDialog({required this.nomeAtual, this.clienteAtual});
 
   @override
   State<_RenomearOSDialog> createState() => _RenomearOSDialogState();
@@ -158,27 +206,33 @@ class _RenomearOSDialog extends StatefulWidget {
 
 class _RenomearOSDialogState extends State<_RenomearOSDialog> {
   late final TextEditingController _ctrl;
+  late final TextEditingController _clienteCtrl;
 
   @override
   void initState() {
     super.initState();
     _ctrl = TextEditingController(text: widget.nomeAtual);
+    _clienteCtrl = TextEditingController(text: widget.clienteAtual ?? '');
   }
 
   @override
   void dispose() {
     _ctrl.dispose();
+    _clienteCtrl.dispose();
     super.dispose();
   }
 
   void _confirmar() {
     final nome = _ctrl.text.trim();
     if (nome.isEmpty) return;
-    if (nome == widget.nomeAtual) {
+    final cliente = _clienteCtrl.text.trim();
+    final nomeMudou = nome != widget.nomeAtual;
+    final clienteMudou = cliente != (widget.clienteAtual ?? '');
+    if (!nomeMudou && !clienteMudou) {
       Navigator.of(context).pop();
       return;
     }
-    Navigator.of(context).pop(nome);
+    Navigator.of(context).pop(_RenomearOSResultado(numeroOS: nome, cliente: cliente));
   }
 
   @override
@@ -219,18 +273,32 @@ class _RenomearOSDialogState extends State<_RenomearOSDialog> {
               hintText: 'Ex: 1234 ou MANUTENCAO',
               isDense: true,
             ),
-            onSubmitted: (v) {
-              final nome = v.trim();
-              if (nome.isNotEmpty && nome != widget.nomeAtual) {
-                Navigator.of(context).pop(nome);
-              }
-            },
+            onSubmitted: (_) => _confirmar(),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Cliente',
+            style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _clienteCtrl,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [_UpperCaseFormatter()],
+            decoration: const InputDecoration(
+              hintText: 'Nome do cliente',
+              isDense: true,
+              prefixIcon: Icon(Icons.person_outline, size: 18),
+            ),
+            onSubmitted: (_) => _confirmar(),
           ),
         ],
       ),
       actions: [
         Tooltip(
-          message: 'Cancelar sem alterar o nome',
+          message: 'Cancelar sem alterar',
           child: TextButton(
             onPressed: () => Navigator.of(context).pop(),
             style: TextButton.styleFrom().copyWith(
@@ -240,19 +308,27 @@ class _RenomearOSDialogState extends State<_RenomearOSDialog> {
           ),
         ),
         Tooltip(
-          message: 'Salvar o novo nome da OS',
+          message: 'Salvar as alterações',
           child: FilledButton.icon(
             onPressed: _confirmar,
             style: FilledButton.styleFrom().copyWith(
                 mouseCursor:
                     WidgetStateProperty.all(SystemMouseCursors.click)),
             icon: const Icon(Icons.check, size: 16),
-            label: const Text('Renomear'),
+            label: const Text('Salvar'),
           ),
         ),
       ],
     );
   }
+}
+
+/// Resultado do diálogo de renomear OS: novo número/nome e novo cliente
+/// (string vazia significa "remover cliente vinculado").
+class _RenomearOSResultado {
+  final String numeroOS;
+  final String cliente;
+  const _RenomearOSResultado({required this.numeroOS, required this.cliente});
 }
 
 // ── Formatter: medida/espessura (vírgula -> ponto, minúsculas, 1 ponto por número) ─────
@@ -289,6 +365,52 @@ class _MedidaEspessuraFormatter extends TextInputFormatter {
       extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
     );
     return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
+/// Formatter para o campo Medida no modo Retalho: só permite dígitos e um
+/// único ponto decimal (vírgula é convertida em ponto) antes do sufixo fixo
+/// "m²", que é sempre mantido ao final e não pode ser apagado nem editado
+/// pelo usuário — o texto digitado sempre entra à esquerda do "m²".
+class _MedidaRetalhoFormatter extends TextInputFormatter {
+  static const String sufixo = 'm²';
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text;
+
+    // Remove o sufixo (onde quer que esteja) para trabalhar só com a parte
+    // numérica digitada pelo usuário.
+    texto = texto.replaceAll(sufixo, '');
+
+    // Vírgula -> ponto
+    texto = texto.replaceAll(',', '.');
+
+    // Mantém apenas dígitos e ponto
+    texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
+
+    // Permite apenas 1 ponto decimal
+    final partes = texto.split('.');
+    if (partes.length > 2) {
+      texto = '${partes[0]}.${partes.sublist(1).join('')}';
+    }
+
+    final novoTexto = '$texto$sufixo';
+
+    // Cursor sempre logo após a parte numérica digitada (nunca dentro ou
+    // depois do sufixo).
+    int cursor = newValue.selection.baseOffset;
+    if (cursor < 0 || cursor > texto.length) {
+      cursor = texto.length;
+    }
+
+    return TextEditingValue(
+      text: novoTexto,
+      selection: TextSelection.collapsed(offset: cursor),
+    );
   }
 }
 
@@ -346,6 +468,73 @@ class _DecimalInputFormatter extends TextInputFormatter {
     );
     return newValue.copyWith(text: texto, selection: sel);
   }
+}
+
+/// Formatter para campos numéricos com separador de milhar (ponto) e vírgula
+/// decimal (padrão brasileiro), aplicado em tempo real enquanto o usuário
+/// digita. Ex.: digitar "1000" exibe "1.000"; digitar "1000,5" exibe
+/// "1.000,5". Usado tanto para preços/custos quanto para quantidades grandes.
+class _MilharInputFormatter extends TextInputFormatter {
+  static String _aplicarMilhar(String digitosInteiros) {
+    final buffer = StringBuffer();
+    for (int i = 0; i < digitosInteiros.length; i++) {
+      if (i > 0 && (digitosInteiros.length - i) % 3 == 0) {
+        buffer.write('.');
+      }
+      buffer.write(digitosInteiros[i]);
+    }
+    return buffer.toString();
+  }
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text;
+
+    final cursorPos = newValue.selection.end.clamp(0, texto.length);
+    final antesDoCursor = texto.substring(0, cursorPos);
+    final digitosAntesCursor =
+        antesDoCursor.replaceAll(RegExp(r'[^\d,]'), '').length;
+
+    texto = texto.replaceAll(RegExp(r'[^\d,]'), '');
+
+    final partes = texto.split(',');
+    String inteiro = partes[0];
+    String? decimais = partes.length > 1 ? partes.sublist(1).join('') : null;
+    // Sem limite de casas decimais: o usuário pode digitar quantas quiser.
+
+    inteiro = inteiro.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+
+    final inteiroFormatado = _aplicarMilhar(inteiro);
+    final textoFormatado = decimais != null
+        ? '$inteiroFormatado,$decimais'
+        : (texto.contains(',') ? '$inteiroFormatado,' : inteiroFormatado);
+
+    int novoOffset = 0;
+    int contador = 0;
+    for (int i = 0; i < textoFormatado.length; i++) {
+      if (contador >= digitosAntesCursor) break;
+      if (textoFormatado[i] != '.') contador++;
+      novoOffset = i + 1;
+    }
+    novoOffset = novoOffset.clamp(0, textoFormatado.length);
+
+    return TextEditingValue(
+      text: textoFormatado,
+      selection: TextSelection.collapsed(offset: novoOffset),
+    );
+  }
+}
+
+/// Converte o texto de um campo formatado com [_MilharInputFormatter]
+/// (ex.: "1.000,50") para um double (1000.5).
+double? _parseMilhar(String texto) {
+  final v = texto.trim();
+  if (v.isEmpty) return null;
+  final semMilhar = v.replaceAll('.', '').replaceAll(',', '.');
+  return double.tryParse(semMilhar);
 }
 
 // ── Ordenação da listagem de OS ────────────────────────────────────────────────
@@ -409,6 +598,7 @@ class ControleEstoquePage extends StatefulWidget {
 class _ControleEstoquePageState extends State<ControleEstoquePage>
     with SingleTickerProviderStateMixin {
   final TextEditingController _buscaCtrl        = TextEditingController();
+  final TextEditingController _buscaClienteCtrl = TextEditingController();
   final TextEditingController _buscaNomeCtrl    = TextEditingController();
   final TextEditingController _identificadorCtrl = TextEditingController();
   final TextEditingController _medidaCtrl        = TextEditingController();
@@ -512,6 +702,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     _debounceTimer?.cancel();
     _tabController.dispose();
     _buscaCtrl.dispose();
+    _buscaClienteCtrl.dispose();
     _buscaNomeCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
@@ -604,6 +795,14 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     return ordenada;
   }
 
+  List<RelacaoOSModel> _filtrarPorCliente(List<RelacaoOSModel> lista) {
+    final cliente = _UpperCaseFormatter._removerAcentos(_buscaClienteCtrl.text.trim()).toUpperCase();
+    if (cliente.isEmpty) return lista;
+    return lista
+        .where((r) => _UpperCaseFormatter._removerAcentos(r.cliente ?? '').toUpperCase().contains(cliente))
+        .toList();
+  }
+
   List<RelacaoOSModel> _filtrarPorMaterial(List<RelacaoOSModel> lista) {
     final nome          = _buscaNomeCtrl.text.trim().toLowerCase();
     final identificador = _identificadorCtrl.text.trim().toUpperCase();
@@ -656,12 +855,12 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
   Widget build(BuildContext context) {
     final provider = context.watch<EstoqueProvider>();
 
-    final emAndamento = _ordenarRelacoes(_filtrarPorData(_filtrarPorMaterial(
+    final emAndamento = _ordenarRelacoes(_filtrarPorData(_filtrarPorMaterial(_filtrarPorCliente(
       provider.relacoesOS.where((r) => r.status == 'EM_ANDAMENTO').toList(),
-    )));
-    final fechadas = _ordenarRelacoes(_filtrarPorData(_filtrarPorMaterial(
+    ))));
+    final fechadas = _ordenarRelacoes(_filtrarPorData(_filtrarPorMaterial(_filtrarPorCliente(
       provider.relacoesOS.where((r) => r.status == 'FECHADA').toList(),
-    )));
+    ))));
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -701,7 +900,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       FilledButton.icon(
                         onPressed: _abrirTransferenciaProducao,
                         icon: const Icon(Icons.factory_outlined, size: 18),
-                        label: const Text('Saída p/ Produção'),
+                        label: const Text('Produção'),
                         style: FilledButton.styleFrom(
                           backgroundColor: AppTheme.warning,
                           foregroundColor: Colors.white,
@@ -852,6 +1051,28 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                 ),
                 const SizedBox(width: 10),
                 Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _buscaClienteCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    decoration: InputDecoration(
+                      hintText: 'Nome do cliente',
+                      prefixIcon: Icon(Icons.person_outline,
+                          color: Theme.of(context).colorScheme.outline, size: 20),
+                      isDense: true,
+                    ),
+                    onChanged: (_) {
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                        Duration(milliseconds: 300),
+                        () => setState(() {}),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
                   flex: 3,
                   child: TextField(
                     controller: _buscaNomeCtrl,
@@ -876,6 +1097,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                 Builder(
                   builder: (context) {
                     final temFiltro = _buscaCtrl.text.isNotEmpty ||
+                        _buscaClienteCtrl.text.isNotEmpty ||
                         _buscaNomeCtrl.text.isNotEmpty ||
                         _identificadorCtrl.text.isNotEmpty ||
                         _medidaCtrl.text.isNotEmpty ||
@@ -892,6 +1114,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       onPressed: temFiltro
                           ? () {
                               _buscaCtrl.clear();
+                              _buscaClienteCtrl.clear();
                               _buscaNomeCtrl.clear();
                               _identificadorCtrl.clear();
                               _medidaCtrl.clear();
@@ -1779,12 +2002,6 @@ class _RelacaoOSCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foiAlterada = relacao.atualizadoEm != null &&
-        relacao.criadoEm != null &&
-        relacao.atualizadoEm!.difference(relacao.criadoEm!).inMinutes.abs() > 1;
-    final dataStr = _fmtData(relacao.atualizadoEm ?? relacao.criadoEm);
-    final criadoEmStr = _fmtData(relacao.criadoEm);
-
     // Remove sufixo interno "#OCx" / "#Sx" / "#Ex" de OS textuais antes de exibir
     final numeroOSRaw = relacao.numeroOS;
     final idxSufixo   = [
@@ -1796,8 +2013,6 @@ class _RelacaoOSCard extends StatelessWidget {
     final numeroOSDisplay = idxSufixo > 0
         ? numeroOSRaw.substring(0, idxSufixo)
         : numeroOSRaw;
-
-    final materiaisUnicos = relacao.movimentacoes.map((m) => m.materialId).toSet().length;
 
     final corSt = _corStatus(relacao.status);
 
@@ -1870,44 +2085,23 @@ class _RelacaoOSCard extends StatelessWidget {
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  SizedBox(height: 2),
-                  Text(
-                    '$materiaisUnicos '
-                    '${materiaisUnicos == 1 ? 'material' : 'materiais'}',
-                    style: TextStyle(
-                        fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  ),
-                  Row(
-                    children: [
-                      Icon(Icons.calendar_today_outlined, size: 11,
-                          color: Theme.of(context).colorScheme.outline),
-                      const SizedBox(width: 3),
-                      Text(
-                        'Criado em $criadoEmStr',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                  if (foiAlterada) ...[
-                    const SizedBox(height: 2),
+                  if ((relacao.cliente ?? '').trim().isNotEmpty) ...[
+                    SizedBox(height: 2),
                     Row(
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.only(right: 3),
-                          child: Icon(Icons.update, size: 11, color: AppTheme.primary),
-                        ),
-                        Text(
-                          'Alterada em $dataStr',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: AppTheme.primary,
-                            fontWeight: FontWeight.w600,
+                        Icon(Icons.person_outline, size: 14,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            relacao.cliente!.trim(),
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
@@ -2223,21 +2417,28 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
     // Remove sufixo interno antes de exibir no campo
     final nomeAtual = _numeroOSDisplay;
 
-    final novoNome = await showDialog<String>(
+    final resultado = await showDialog<_RenomearOSResultado>(
       context: context,
-      builder: (dialogCtx) => _RenomearOSDialog(nomeAtual: nomeAtual),
+      builder: (dialogCtx) => _RenomearOSDialog(
+        nomeAtual: nomeAtual,
+        clienteAtual: rel.cliente,
+      ),
     );
 
-    if (novoNome == null || novoNome.isEmpty || novoNome == nomeAtual) return;
+    if (resultado == null) return;
     if (!mounted) return;
 
-    final ok = await provider.renomearOS(rel.id, novoNome);
+    final ok = await provider.renomearOS(
+      rel.id,
+      resultado.numeroOS,
+      novoCliente: resultado.cliente,
+    );
     if (!mounted) return;
 
     if (ok) {
       messenger.showSnackBar(
         SnackBar(
-          content: Text('OS renomeada para "$novoNome"'),
+          content: Text('OS atualizada — "${resultado.numeroOS}"'),
           backgroundColor: AppTheme.primary,
         ),
       );
@@ -2277,6 +2478,20 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
             if (rel != null) ...[
               const SizedBox(width: 10),
               _StatusBadgeOS(status: rel.status),
+            ],
+            if (rel != null && (rel.cliente ?? '').trim().isNotEmpty) ...[
+              const SizedBox(width: 14),
+              Icon(Icons.person_outline, size: 16,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text(
+                rel.cliente!.trim(),
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
             ],
           ],
         ),
@@ -2422,6 +2637,79 @@ class _StatusBadgeOS extends StatelessWidget {
 
 // ─── Corpo do detalhe ─────────────────────────────────────────────────────────
 
+// ─── Card de resumo (materiais / datas) ──────────────────────────────────────
+
+class _SummaryCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String valor;
+  final Color cor;
+  final int flex;
+
+  const _SummaryCard({
+    required this.icon,
+    required this.label,
+    required this.valor,
+    required this.cor,
+    this.flex = 1,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      flex: flex,
+      child: Card(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: cor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: cor, size: 18),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                          fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Tooltip(
+                      message: valor,
+                      child: Text(
+                        valor,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: cor,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _RelacaoDetalheBody extends StatefulWidget {
   final RelacaoOSModel rel;
   const _RelacaoDetalheBody({required this.rel});
@@ -2434,25 +2722,85 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
   // Chave: materialId
   String _chaveGrupo(MovimentacaoModel mov) => '${mov.materialId}';
 
-  final TextEditingController _filtroCtrl = TextEditingController();
-  String _filtro = '';
+  final TextEditingController _nomeCtrl          = TextEditingController();
+  final TextEditingController _identificadorCtrl = TextEditingController();
+  final TextEditingController _medidaCtrl         = TextEditingController();
+  final TextEditingController _comprimentoCtrl    = TextEditingController();
+  final TextEditingController _larguraCtrl        = TextEditingController();
+  final TextEditingController _espessuraCtrl      = TextEditingController();
+  Timer? _debounceTimer;
 
   @override
   void dispose() {
-    _filtroCtrl.dispose();
+    _nomeCtrl.dispose();
+    _identificadorCtrl.dispose();
+    _medidaCtrl.dispose();
+    _comprimentoCtrl.dispose();
+    _larguraCtrl.dispose();
+    _espessuraCtrl.dispose();
+    _debounceTimer?.cancel();
     super.dispose();
   }
 
+  void _onFiltroDigitado(String _) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _limparFiltros() {
+    _nomeCtrl.clear();
+    _identificadorCtrl.clear();
+    _medidaCtrl.clear();
+    _comprimentoCtrl.clear();
+    _larguraCtrl.clear();
+    _espessuraCtrl.clear();
+    setState(() {});
+  }
+
+  bool get _temFiltro =>
+      _nomeCtrl.text.isNotEmpty ||
+      _identificadorCtrl.text.isNotEmpty ||
+      _medidaCtrl.text.isNotEmpty ||
+      _comprimentoCtrl.text.isNotEmpty ||
+      _larguraCtrl.text.isNotEmpty ||
+      _espessuraCtrl.text.isNotEmpty;
+
   bool _entradaCorresponde(MapEntry<String, List<MovimentacaoModel>> entry) {
-    if (_filtro.isEmpty) return true;
     final mov = entry.value.first;
-    final campos = [
-      mov.materialNome,
-      mov.materialIdentificador ?? '',
-      mov.materialMedida ?? '',
-      mov.materialEspessura ?? '',
-    ].join(' ').toLowerCase();
-    return campos.contains(_filtro);
+
+    final nome          = _nomeCtrl.text.trim().toLowerCase();
+    final identificador = _identificadorCtrl.text.trim().toLowerCase();
+    final medida        = _medidaCtrl.text.trim().toLowerCase();
+    final comprimento   = _comprimentoCtrl.text.trim().toUpperCase();
+    final largura       = _larguraCtrl.text.trim().toUpperCase();
+    final espessura     = _espessuraCtrl.text.trim().toLowerCase();
+
+    if (nome.isNotEmpty && !mov.materialNome.toLowerCase().contains(nome)) {
+      return false;
+    }
+    if (identificador.isNotEmpty) {
+      final v = (mov.materialIdentificador ?? '').toLowerCase();
+      if (!v.contains(identificador)) return false;
+    }
+    if (medida.isNotEmpty) {
+      final v = (mov.materialMedida ?? '').toLowerCase();
+      if (!v.contains(medida)) return false;
+    }
+    if (comprimento.isNotEmpty) {
+      final v = (mov.materialComprimento?.toString() ?? '').toUpperCase();
+      if (!v.contains(comprimento)) return false;
+    }
+    if (largura.isNotEmpty) {
+      final v = (mov.materialLargura?.toString() ?? '').toUpperCase();
+      if (!v.contains(largura)) return false;
+    }
+    if (espessura.isNotEmpty) {
+      final v = (mov.materialEspessura ?? '').toLowerCase();
+      if (!v.contains(espessura)) return false;
+    }
+    return true;
   }
 
   @override
@@ -2462,15 +2810,69 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
       materiaisMap.putIfAbsent(_chaveGrupo(mov), () => []).add(mov);
     }
 
+    final materiaisUnicos = materiaisMap.length;
+    final foiAlterada = widget.rel.atualizadoEm != null &&
+        widget.rel.criadoEm != null &&
+        widget.rel.atualizadoEm!.difference(widget.rel.criadoEm!).inMinutes.abs() > 1;
+    final dataAlteracaoStr = _fmtData(widget.rel.atualizadoEm ?? widget.rel.criadoEm);
+    final criadoEmStr = _fmtData(widget.rel.criadoEm);
+
+    final resumoCards = Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+      child: Row(
+        children: [
+          _SummaryCard(
+            icon: Icons.inventory_2_outlined,
+            label: materiaisUnicos == 1 ? 'Material' : 'Materiais',
+            valor: '$materiaisUnicos',
+            cor: AppTheme.primary,
+            flex: 2,
+          ),
+          const SizedBox(width: 12),
+          _SummaryCard(
+            icon: Icons.calendar_today_outlined,
+            label: 'Criado em',
+            valor: criadoEmStr,
+            cor: Theme.of(context).colorScheme.onSurfaceVariant,
+            flex: 3,
+          ),
+          if (foiAlterada) ...[
+            const SizedBox(width: 12),
+            _SummaryCard(
+              icon: widget.rel.status == 'FECHADA'
+                  ? Icons.lock_outline_rounded
+                  : Icons.update,
+              label: widget.rel.status == 'FECHADA'
+                  ? 'Fechada em'
+                  : 'Última saída em',
+              valor: dataAlteracaoStr,
+              cor: widget.rel.status == 'FECHADA'
+                  ? AppTheme.primary
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
+              flex: 3,
+            ),
+          ],
+        ],
+      ),
+    );
+
     if (materiaisMap.isEmpty) {
-      return Center(
-        child: Text(
-          'Nenhuma movimentação registrada',
-          style: Theme.of(context)
-              .textTheme
-              .bodyMedium
-              ?.copyWith(color: Theme.of(context).colorScheme.outline),
-        ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          resumoCards,
+          Expanded(
+            child: Center(
+              child: Text(
+                'Nenhuma movimentação registrada',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: Theme.of(context).colorScheme.outline),
+              ),
+            ),
+          ),
+        ],
       );
     }
 
@@ -2479,29 +2881,128 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        resumoCards,
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-          child: TextField(
-            controller: _filtroCtrl,
-            textCapitalization: TextCapitalization.characters,
-            inputFormatters: [_UpperCaseFormatter()],
-            decoration: InputDecoration(
-              hintText: 'Filtrar materiais por nome, identificador, medida ou espessura',
-              prefixIcon: Icon(Icons.filter_alt_outlined,
-                  color: Theme.of(context).colorScheme.outline, size: 20),
-              isDense: true,
-              suffixIcon: _filtro.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: 'Limpar filtro',
-                      icon: const Icon(Icons.close, size: 18),
-                      onPressed: () {
-                        _filtroCtrl.clear();
-                        setState(() => _filtro = '');
-                      },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _nomeCtrl,
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [_UpperCaseFormatter()],
+                      onChanged: _onFiltroDigitado,
+                      decoration: InputDecoration(
+                        hintText: 'Nome do material',
+                        prefixIcon: Icon(Icons.filter_alt_outlined,
+                            color: Theme.of(context).colorScheme.outline, size: 20),
+                        isDense: true,
+                      ),
                     ),
-            ),
-            onChanged: (v) => setState(() => _filtro = v.trim().toLowerCase()),
+                  ),
+                  const SizedBox(width: 10),
+                  IconButton.outlined(
+                    tooltip: 'Limpar filtros',
+                    icon: Icon(Icons.filter_alt_off,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    onPressed: _temFiltro ? _limparFiltros : null,
+                    style: IconButton.styleFrom(
+                      side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                    ).copyWith(
+                      mouseCursor: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.disabled)) {
+                          return SystemMouseCursors.basic;
+                        }
+                        return SystemMouseCursors.click;
+                      }),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _identificadorCtrl,
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [_UpperCaseFormatter()],
+                      onChanged: _onFiltroDigitado,
+                      decoration: InputDecoration(
+                        hintText: 'Identificador',
+                        prefixIcon: Icon(Icons.qr_code,
+                            color: Theme.of(context).colorScheme.outline, size: 18),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _medidaCtrl,
+                      inputFormatters: [_MedidaEspessuraFormatter()],
+                      onChanged: _onFiltroDigitado,
+                      decoration: InputDecoration(
+                        hintText: 'Medida',
+                        prefixIcon: Icon(Icons.straighten,
+                            color: Theme.of(context).colorScheme.outline, size: 18),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _comprimentoCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [_EspessuraFormatter()],
+                      onChanged: _onFiltroDigitado,
+                      decoration: InputDecoration(
+                        hintText: 'Comprimento',
+                        suffixText: 'm',
+                        prefixIcon: Icon(Icons.height,
+                            color: Theme.of(context).colorScheme.outline, size: 18),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _larguraCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [_EspessuraFormatter()],
+                      onChanged: _onFiltroDigitado,
+                      decoration: InputDecoration(
+                        hintText: 'Largura',
+                        suffixText: 'm',
+                        prefixIcon: Icon(Icons.width_normal,
+                            color: Theme.of(context).colorScheme.outline, size: 18),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _espessuraCtrl,
+                      inputFormatters: [_EspessuraFormatter()],
+                      onChanged: _onFiltroDigitado,
+                      decoration: InputDecoration(
+                        hintText: 'Espessura',
+                        suffixText: 'mm',
+                        prefixIcon: Icon(Icons.layers,
+                            color: Theme.of(context).colorScheme.outline, size: 18),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
         Expanded(
@@ -2591,7 +3092,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
   }
 
   String _formatQtd(double qtd, String? unidade) {
-    final qStr = formatarQuantidade(qtd);
+    final qStr = formatarQuantidadeExibicao(qtd);
     final unFmt = formatarUnidadeExibicao(unidade);
     return unFmt.isNotEmpty ? '$qStr $unFmt' : qStr;
   }
@@ -3356,7 +3857,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
               Spacer(),
               _UltimoPrecoRow(movimentacoes: widget.movimentacoes, unidade: unidade),
               SizedBox(height: 6),
-              _TotaisResumoMini(totais: totais, unidade: unidade),
+              _TotaisResumoMini(totais: totais, unidade: unidade, movimentacoes: widget.movimentacoes),
               SizedBox(height: 4),
               Text(
                 '${widget.movimentacoes.length} '
@@ -3795,13 +4296,9 @@ class _TotaisMovimentacao {
   static String _brl(double v) =>
       _brl6(v);
 
-  String get qtdEntradaStr => qtdEntrada == qtdEntrada.truncate()
-      ? qtdEntrada.toStringAsFixed(0)
-      : qtdEntrada.toStringAsFixed(2);
+  String get qtdEntradaStr => formatarQuantidadeExibicao(qtdEntrada);
 
-  String get qtdSaidaStr => qtdSaida == qtdSaida.truncate()
-      ? qtdSaida.toStringAsFixed(0)
-      : qtdSaida.toStringAsFixed(2);
+  String get qtdSaidaStr => formatarQuantidadeExibicao(qtdSaida);
 
   String get valorEntradaStr => _brl(valorEntrada);
   String get valorSaidaStr   => _brl(valorSaida);
@@ -3856,7 +4353,29 @@ class _TotaisMovimentacao {
 class _TotaisResumoMini extends StatelessWidget {
   final _TotaisMovimentacao totais;
   final String? unidade;
-  const _TotaisResumoMini({required this.totais, required this.unidade});
+  final List<MovimentacaoModel> movimentacoes;
+  const _TotaisResumoMini({
+    required this.totais,
+    required this.unidade,
+    required this.movimentacoes,
+  });
+
+  /// Retorna a medida usada "(0.5x1m)" quando existir exatamente uma
+  /// movimentação do [tipo] informado e ela tiver sido feita em modo
+  /// dimensional (retalho com largura/comprimento usados). Com mais de uma
+  /// movimentação do mesmo tipo não há uma única medida a exibir no chip
+  /// resumido, então retorna null e o detalhe fica só no histórico.
+  String? _medidaUsada(String tipo) {
+    final doTipo = movimentacoes.where((m) => m.tipo == tipo).toList();
+    if (doTipo.length != 1) return null;
+    final m = doTipo.first;
+    if (!m.usouModoDimensional ||
+        m.comprimentoUsado == null ||
+        m.larguraUsada == null) {
+      return null;
+    }
+    return '(${_fmtDim(m.comprimentoUsado!)}x${_fmtDim(m.larguraUsada!)}m)';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3864,6 +4383,9 @@ class _TotaisResumoMini extends StatelessWidget {
     final temEntrada = totais.qtdEntrada > 0;
     final temSaida   = totais.qtdSaida   > 0;
     if (!temEntrada && !temSaida) return const SizedBox.shrink();
+
+    final medidaEntrada = temEntrada ? _medidaUsada('ENTRADA') : null;
+    final medidaSaida   = temSaida   ? _medidaUsada('SAIDA')   : null;
 
     return Wrap(
       spacing: 4,
@@ -3873,14 +4395,16 @@ class _TotaisResumoMini extends StatelessWidget {
           _TotalChip(
             icon: Icons.arrow_upward,
             cor: AppTheme.success,
-            qtd: '${totais.qtdEntradaStr}${unStr.isNotEmpty ? ' $unStr' : ''}',
+            qtd: '${totais.qtdEntradaStr}${unStr.isNotEmpty ? ' $unStr' : ''}'
+                '${medidaEntrada != null ? ' $medidaEntrada' : ''}',
             valor: totais.valorEntradaStr,
           ),
         if (temSaida)
           _TotalChip(
             icon: Icons.arrow_downward,
             cor: AppTheme.error,
-            qtd: '${totais.qtdSaidaStr}${unStr.isNotEmpty ? ' $unStr' : ''}',
+            qtd: '${totais.qtdSaidaStr}${unStr.isNotEmpty ? ' $unStr' : ''}'
+                '${medidaSaida != null ? ' $medidaSaida' : ''}',
             valor: totais.valorSaidaStr,
           ),
       ],
@@ -4220,7 +4744,7 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
     setState(() => _erroEstoque = null);
     if (!_formKey.currentState!.validate()) return;
 
-    final quant = double.tryParse(_quantCtrl.text.replaceAll(',', '.'));
+    final quant = _parseMilhar(_quantCtrl.text);
 
     final provider  = context.read<EstoqueProvider>();
     final navigator = Navigator.of(context);
@@ -4307,11 +4831,12 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
               controller: _quantCtrl,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [_MilharInputFormatter()],
               decoration: const InputDecoration(labelText: 'Quantidade'),
               validator: (v) {
                 if (_erroEstoque != null) return _erroEstoque;
                 final quant =
-                    double.tryParse((v ?? '').replaceAll(',', '.'));
+                    _parseMilhar(v ?? '');
                 if (quant == null || quant <= 0) {
                   return 'Informe uma quantidade válida';
                 }
@@ -4362,7 +4887,7 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
               controller: _obsCtrl,
               maxLines: 2,
               decoration: const InputDecoration(
-                  labelText: 'Observação (opcional)'),
+                  labelText: 'Observação'),
             ),
           ],
         ),
@@ -4416,8 +4941,17 @@ class _MovimentacaoGlobalDialogState
     extends State<_MovimentacaoGlobalDialog> {
   final _formKey      = GlobalKey<FormState>();
   final _numeroOSCtrl = TextEditingController();
+  final _clienteCtrl  = TextEditingController();
   final List<_ItemMovimentacao> _itensSelecionados = [];
   bool _enviando = false;
+
+  // ── Autofill de cliente ao digitar um número de OS já existente ────────
+  // Quando a OS já tem cliente vinculado, mostramos o nome como texto
+  // informativo (não editável aqui — edição só via "Renomear OS" no
+  // detalhe). Sem cliente vinculado, o campo abaixo fica livre para digitar.
+  String? _clienteVinculado;
+  bool _buscandoCliente = false;
+  Timer? _debounceCliente;
 
   final _nomeCtrl          = TextEditingController();
   final _identificadorCtrl = TextEditingController();
@@ -4453,12 +4987,15 @@ class _MovimentacaoGlobalDialogState
       _numeroOSCtrl.text = candidates.isEmpty
           ? raw
           : raw.substring(0, candidates.first);
+      _agendarBuscaCliente();
     }
   }
 
   @override
   void dispose() {
     _numeroOSCtrl.dispose();
+    _clienteCtrl.dispose();
+    _debounceCliente?.cancel();
     _nomeCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
@@ -4470,6 +5007,46 @@ class _MovimentacaoGlobalDialogState
       i.dispose();
     }
     super.dispose();
+  }
+
+  /// Agenda a busca do cliente já vinculado ao número de OS digitado
+  /// (debounced). Quando encontrado, fixa o campo como somente leitura com
+  /// o nome vinculado; quando não encontrado (OS nova ou sem cliente),
+  /// libera o campo para digitação, preservando o que já foi digitado.
+  void _agendarBuscaCliente() {
+    _debounceCliente?.cancel();
+    final numero = _numeroOSCtrl.text.trim();
+    if (numero.isEmpty) {
+      if (_clienteVinculado != null) {
+        setState(() {
+          _clienteVinculado = null;
+          _buscandoCliente = false;
+        });
+      }
+      return;
+    }
+    _debounceCliente = Timer(const Duration(milliseconds: 400), () async {
+      if (!mounted) return;
+      setState(() => _buscandoCliente = true);
+      final cliente = await context
+          .read<EstoqueProvider>()
+          .buscarClientePorNumeroOS(numero);
+      if (!mounted) return;
+      final encontrado = (cliente != null && cliente.trim().isNotEmpty) ? cliente.trim() : null;
+      final tinhaVinculadoAntes = _clienteVinculado != null;
+      setState(() {
+        _clienteVinculado = encontrado;
+        _buscandoCliente = false;
+      });
+      if (encontrado != null) {
+        _clienteCtrl.text = encontrado;
+      } else if (tinhaVinculadoAntes) {
+        // Deixou de haver cliente vinculado (número trocado para uma OS
+        // nova/sem cliente) — limpa o texto que estava travado, já que ele
+        // pertencia à OS anterior, não foi digitado pelo usuário.
+        _clienteCtrl.clear();
+      }
+    });
   }
 
   Set<String> get _chavesSelecionadas =>
@@ -4579,6 +5156,13 @@ class _MovimentacaoGlobalDialogState
       numeroOS = numeroOS.trim();
     }
 
+    // Só envia cliente quando o usuário digitou um novo (OS ainda sem
+    // cliente vinculado); se já existe cliente vinculado, não reenviamos —
+    // o backend preserva o valor já salvo de qualquer forma.
+    final clienteDigitado = _clienteVinculado == null && _clienteCtrl.text.trim().isNotEmpty
+        ? _clienteCtrl.text.trim()
+        : null;
+
     final provider  = context.read<EstoqueProvider>();
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -4587,7 +5171,7 @@ class _MovimentacaoGlobalDialogState
     bool todosOk = true;
 
     for (final item in _itensSelecionados) {
-      final quant = double.parse(item.quantCtrl.text.replaceAll(',', '.'));
+      final quant = _parseMilhar(item.quantCtrl.text) ?? 0;
       final obs = item.obsCtrl.text.trim().isEmpty
           ? null
           : item.obsCtrl.text.trim();
@@ -4627,6 +5211,7 @@ class _MovimentacaoGlobalDialogState
         observacao:       obs,
         larguraUsada:     largUsada,
         comprimentoUsado: compUsado,
+        cliente:          clienteDigitado,
       );
       
       if (!ok) {
@@ -4697,7 +5282,7 @@ class _MovimentacaoGlobalDialogState
                     ),
                     const SizedBox(width: 24),
                     SizedBox(
-                      width: 260,
+                      width: 220,
                       child: TextFormField(
                         controller: _numeroOSCtrl,
                         enabled: widget.numeroOSFixo == null,
@@ -4723,6 +5308,54 @@ class _MovimentacaoGlobalDialogState
                                 (v == null || v.trim().isEmpty))
                             ? 'Informe o número da OS'
                             : null,
+                        onChanged: widget.numeroOSFixo == null
+                            ? (_) => _agendarBuscaCliente()
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // ── Campo Cliente ──────────────────────────────────────
+                    // Se a OS digitada já tem cliente vinculado, mostra como
+                    // texto travado (edição só via "Renomear OS" no
+                    // detalhe). Sem cliente vinculado, campo livre e opcional.
+                    // Mantém sempre o MESMO TextFormField (não troca o tipo
+                    // de widget conforme o estado) para não perder o foco
+                    // quando o autofill resolve — trocar para InputDecorator
+                    // destruía e recriava o Element, jogando o foco para o
+                    // campo Número da OS.
+                    SizedBox(
+                      width: 220,
+                      child: TextFormField(
+                        controller: _clienteCtrl,
+                        readOnly: _clienteVinculado != null,
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: [_UpperCaseFormatter()],
+                        decoration: InputDecoration(
+                          labelText: _clienteVinculado != null ? 'Cliente' : 'Cliente',
+                          isDense: true,
+                          filled: _clienteVinculado != null,
+                          fillColor: _clienteVinculado != null
+                              ? AppTheme.primary.withValues(alpha: 0.07)
+                              : null,
+                          prefixIcon: _buscandoCliente
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: SizedBox(
+                                    height: 14,
+                                    width: 14,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                )
+                              : const Icon(Icons.person_outline, size: 18),
+                          suffixIcon: _clienteVinculado != null
+                              ? const Tooltip(
+                                  message: 'Cliente já vinculado a esta OS — '
+                                      'para alterar, use "Renomear OS" no detalhe',
+                                  child: Icon(Icons.lock_outline,
+                                      size: 14, color: AppTheme.primary),
+                                )
+                              : null,
+                        ),
                       ),
                     ),
                     if (widget.numeroOSFixo == null) ...[
@@ -4784,7 +5417,7 @@ class _MovimentacaoGlobalDialogState
                                     controller: _nomeCtrl,
                                     autofocus: true,
                                     decoration: InputDecoration(
-                                      hintText: 'Buscar por nome',
+                                      hintText: 'Nome do material',
                                       prefixIcon: Icon(Icons.search,
                                           color: Theme.of(context).colorScheme.outline, size: 18),
                                       isDense: true,
@@ -5146,6 +5779,55 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
   bool _modoRetalho = false;
   bool _hoverRetalho = false;
 
+  /// Detecta se o texto contém a palavra "RETALHO" (ou variações próximas
+  /// como "RETALHOS", "RETALH", "RETALHOO", "RETALHP" etc.) em qualquer
+  /// palavra do texto. Usado para impedir que o usuário digite isso no campo
+  /// Nome — retalhos devem ser identificados pelo campo Identificador, não
+  /// pelo nome do material.
+  ///
+  /// A detecção usa distância de edição (Levenshtein) em vez de apenas uma
+  /// regex exata, para pegar erros de digitação comuns (letra faltando,
+  /// duplicada ou trocada), sem disparar em palavras muito diferentes.
+  static const _palavraRetalho = 'RETALHO';
+
+  static int _distanciaEdicao(String a, String b) {
+    final la = a.length, lb = b.length;
+    final d = List.generate(la + 1, (_) => List<int>.filled(lb + 1, 0));
+    for (var i = 0; i <= la; i++) {
+      d[i][0] = i;
+    }
+    for (var j = 0; j <= lb; j++) {
+      d[0][j] = j;
+    }
+    for (var i = 1; i <= la; i++) {
+      for (var j = 1; j <= lb; j++) {
+        final custo = a[i - 1] == b[j - 1] ? 0 : 1;
+        d[i][j] = [
+          d[i - 1][j] + 1,
+          d[i][j - 1] + 1,
+          d[i - 1][j - 1] + custo,
+        ].reduce((x, y) => x < y ? x : y);
+      }
+    }
+    return d[la][lb];
+  }
+
+  static bool _pareceRetalho(String palavra) {
+    final p = palavra.toUpperCase();
+    if (p.length < 5) return false; // evita falso-positivo em palavras curtas
+    // Compara contra a raiz "RETALHO" e também contra "RETALHOS" (plural),
+    // tolerando até 2 edições de diferença (insere/remove/troca letra).
+    final distBase   = _distanciaEdicao(p, _palavraRetalho);
+    final distPlural = _distanciaEdicao(p, '${_palavraRetalho}S');
+    final tolerancia = p.length <= 7 ? 2 : 3;
+    return distBase <= tolerancia || distPlural <= tolerancia;
+  }
+
+  static bool _contemRetalho(String texto) {
+    final palavras = texto.split(RegExp(r'[^A-Za-zÀ-ÿ]+'));
+    return palavras.any((p) => p.isNotEmpty && _pareceRetalho(p));
+  }
+
   // ── Detecção de possível material duplicado ───────────────────────────
   Timer? _debounceDuplicata;
   bool _verificandoDuplicata = false;
@@ -5448,12 +6130,22 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     });
   }
 
+  /// Considera o campo Medida "vazio" quando não há valor digitado — seja
+  /// porque o campo está realmente vazio (modo normal), seja porque no modo
+  /// Retalho só contém o sufixo fixo "m²" sem número à esquerda.
+  bool _medidaRetalhoEstaVazia() {
+    final texto = _medida.text.trim();
+    if (!_modoRetalho) return texto.isEmpty;
+    return texto == _MedidaRetalhoFormatter.sufixo || texto.isEmpty;
+  }
+
   void _ativarModoRetalho() {
     setState(() {
       _modoRetalho = true;
       _identificador.text = 'RETALHO';
       _unidade = 'M²';
-      _medida.clear();
+      _medida.text = _MedidaRetalhoFormatter.sufixo;
+      _medida.selection = const TextSelection.collapsed(offset: 0);
       _largura.clear();
       _comprimento.clear();
       _estoqueMinimo.text = '0';
@@ -5465,6 +6157,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
       _modoRetalho = false;
       _identificador.clear();
       _unidade = null;
+      _medida.clear();
     });
   }
 
@@ -5506,14 +6199,14 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
 
     final custoValor = _custoCtrl.text.trim().isEmpty
         ? null
-        : double.tryParse(_custoCtrl.text.trim().replaceAll(',', '.'));
+        : _parseMilhar(_custoCtrl.text.trim());
 
     final dados = {
       'nome':          _nome.text.trim(),
       'identificador': _identificador.text.trim().isEmpty ? null : _identificador.text.trim(),
       'unidade':       (_unidade == null || _unidade!.isEmpty) ? null : _unidade,
       'categoria':     _categoria.text.trim().isEmpty ? null : _categoria.text.trim(),
-      'medida':        _modoRetalho ? null : (_medida.text.trim().isEmpty ? null : _medida.text.trim()),
+      'medida':        (_medidaRetalhoEstaVazia() ? null : _medida.text.trim()),
       'espessura':     _espessura.text.trim().isEmpty ? null : _espessura.text.trim(),
       'largura':       _modoRetalho ? null : (_largura.text.trim().isEmpty ? null : double.tryParse(_largura.text.trim())),
       'comprimento':   _modoRetalho ? null : (_comprimento.text.trim().isEmpty ? null : double.tryParse(_comprimento.text.trim())),
@@ -5558,7 +6251,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
       child: SizedBox(
-        width: 560,
+        width: 560 + 260,
         height: 680,
         child: Column(
           children: [
@@ -5650,12 +6343,67 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
             const Divider(height: 0),
 
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Painel lateral (possíveis duplicatas), à esquerda — sempre visível
+                  Container(
+                    width: 260,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                      borderRadius: const BorderRadius.only(
+                        topLeft:    Radius.circular(12),
+                        bottomLeft: Radius.circular(12),
+                      ),
+                      border: Border(
+                        right: BorderSide(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6)),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
+                          child: Row(
+                            children: [
+                              Icon(Icons.search_outlined, size: 16,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Materiais semelhantes',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(14),
+                            child: _AvisoPossivelDuplicataCE(
+                              carregando: _verificandoDuplicata,
+                              duplicatas: _possiveisDuplicatas,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Formulário
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
                     children: [
                       if (_erroDialog != null) ...[
                         Container(
@@ -5695,14 +6443,28 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         decoration: const InputDecoration(labelText: 'Nome *'),
                         textCapitalization: TextCapitalization.characters,
                         inputFormatters: [_UpperCaseFormatter()],
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
                         onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
-                        validator: (v) =>
-                            v == null || v.trim().isEmpty ? 'Nome é obrigatório' : null,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Nome é obrigatório';
+                          if (_contemRetalho(v)) {
+                            return 'Não digite "RETALHO" no nome — digite no campo Identificador';
+                          }
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 10),
                       TextFormField(
                         controller: _identificador,
                         readOnly: _modoRetalho,
+                        onChanged: (v) {
+                          // Ativa o modo Retalho automaticamente ao digitar essa
+                          // palavra no Identificador, travando os campos como se o
+                          // usuário tivesse clicado no botão "Modo Retalho".
+                          if (!_modoRetalho && _contemRetalho(v)) {
+                            _ativarModoRetalho();
+                          }
+                        },
                         decoration: InputDecoration(
                           labelText: 'Identificador',
                           suffixIcon: _modoRetalho
@@ -5804,7 +6566,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                                       child: Icon(Icons.lock_outline, size: 16),
                                     ),
                                   ),
-                                  child: const Text('M²', style: TextStyle(fontSize: 14)),
+                                  child: const Text('m²', style: TextStyle(fontSize: 14)),
                                 )
                               : MouseRegion(
                                   cursor: SystemMouseCursors.click,
@@ -5851,28 +6613,26 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                       if (_unidade != 'ML' && _unidade != 'G') ...[
                       TextFormField(
                         controller: _medida,
-                        readOnly: _modoRetalho,
                         decoration: InputDecoration(
                           labelText: 'Medida',
+                          hintText: _modoRetalho ? 'Ex.: 1.63' : null,
                           suffixIcon: _modoRetalho
                               ? const Tooltip(
-                                  message: 'Bloqueado no modo Retalho',
-                                  child: Icon(Icons.lock_outline, size: 16),
+                                  message: 'No modo Retalho, informe apenas o valor em m²',
+                                  child: Icon(Icons.straighten, size: 16),
                                 )
                               : null,
                         ),
                         textCapitalization: TextCapitalization.none,
-                        inputFormatters: [_MedidaEspessuraFormatter()],
+                        keyboardType: _modoRetalho
+                            ? const TextInputType.numberWithOptions(decimal: true)
+                            : TextInputType.text,
+                        inputFormatters: [
+                          _modoRetalho ? _MedidaRetalhoFormatter() : _MedidaEspessuraFormatter(),
+                        ],
                         onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                       ),
                       ], // end if not ML/G (medida)
-                      if (_verificandoDuplicata || _possiveisDuplicatas.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        _AvisoPossivelDuplicataCE(
-                          carregando: _verificandoDuplicata,
-                          duplicatas: _possiveisDuplicatas,
-                        ),
-                      ],
                       if (_unidade != 'ML' && _unidade != 'G') ...[
                       const SizedBox(height: 10),
                       Row(children: [
@@ -5968,7 +6728,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                                   : 'Custo (última compra)',
                             ),
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            inputFormatters: [_DecimalInputFormatter()],
+                            inputFormatters: [_MilharInputFormatter()],
                           ),
                         ),
                       ]),
@@ -6000,7 +6760,10 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                       ),
                     ],
                   ),
-                ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
 
@@ -6217,7 +6980,7 @@ class _TransferenciaProducaoDialogState
       setState(() => _erro = 'Selecione um material');
       return;
     }
-    final qtd = double.tryParse(_quantCtrl.text.replaceAll(',', '.'));
+    final qtd = _parseMilhar(_quantCtrl.text);
     if (qtd == null || qtd <= 0) {
       setState(() => _erro = 'Informe uma quantidade válida');
       return;
@@ -6448,7 +7211,7 @@ class _TransferenciaProducaoDialogState
                                         if (medidaFmt != null) medidaFmt,
                                         if (formatarEspessuraComSufixo(m.espessura) != null) formatarEspessuraComSufixo(m.espessura)!,
                                       ].join(' • ');
-                                      final qtdStr = formatarQuantidade(m.quantidade);
+                                      final qtdStr = formatarQuantidadeExibicao(m.quantidade);
                                       final corQtd = m.quantidade <= 0
                                           ? AppTheme.error
                                           : Theme.of(context).colorScheme.onSurfaceVariant;
@@ -6487,7 +7250,7 @@ class _TransferenciaProducaoDialogState
                                 style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                             Text(
                               [
-                                'Disponível: ${formatarQuantidade(_selecionado!.quantidade)} ${formatarUnidadeExibicao(_selecionado!.unidade)}',
+                                'Disponível: ${formatarQuantidadeExibicao(_selecionado!.quantidade)} ${formatarUnidadeExibicao(_selecionado!.unidade)}',
                                 if (_selecionado!.identificador != null && _selecionado!.identificador!.isNotEmpty)
                                   _selecionado!.identificador!,
                                 if (formatarMedidaOuDimensoes(
@@ -6529,7 +7292,7 @@ class _TransferenciaProducaoDialogState
                   controller: _quantCtrl,
                   autofocus: true,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [_DecimalInputFormatter()],
+                  inputFormatters: [_MilharInputFormatter()],
                   decoration: InputDecoration(
                     labelText: 'Quantidade *',
                     suffixText: formatarUnidadeExibicao(_selecionado!.unidade),
@@ -6540,7 +7303,7 @@ class _TransferenciaProducaoDialogState
                 const SizedBox(height: 10),
                 TextField(
                   controller: _obsCtrl,
-                  decoration: const InputDecoration(labelText: 'Observação (opcional)', isDense: true),
+                  decoration: const InputDecoration(labelText: 'Observação', isDense: true),
                 ),
 
                 const SizedBox(height: 14),
@@ -6590,7 +7353,6 @@ class _TransferenciaProducaoDialogState
     return Padding(
       padding: const EdgeInsets.only(top: 16),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
@@ -6599,22 +7361,29 @@ class _TransferenciaProducaoDialogState
             style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            height: 380,
+          Expanded(
             child: provider.carregandoPendentes
                 ? const Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary))
                 : pendentes.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.inbox_outlined, size: 32, color: Theme.of(context).colorScheme.outlineVariant),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Nenhuma entrada aguardando confirmação',
-                              style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 13),
-                            ),
-                          ],
+                    ? Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                        ),
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.inbox_outlined, size: 32, color: Theme.of(context).colorScheme.outlineVariant),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Nenhuma entrada aguardando confirmação',
+                                style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 13),
+                              ),
+                            ],
+                          ),
                         ),
                       )
                     : ListView.separated(
@@ -6690,7 +7459,7 @@ class _TransferenciaProducaoDialogState
                                             ),
                                           ),
                                           Text(
-                                            '${formatarQuantidade(p.quantidade)} ${formatarUnidadeExibicao(p.materialUnidade)}',
+                                            '${formatarQuantidadeExibicao(p.quantidade)} ${formatarUnidadeExibicao(p.materialUnidade)}',
                                             style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: corTipo),
                                           ),
                                         ],
@@ -6776,7 +7545,7 @@ class _TransferenciaProducaoDialogState
                   children: [
                     const Icon(Icons.factory_outlined, color: AppTheme.warning),
                     const SizedBox(width: 8),
-                    Text('Saída para Produção', style: Theme.of(context).textTheme.headlineSmall),
+                    Text('Produção', style: Theme.of(context).textTheme.headlineSmall),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -6786,7 +7555,7 @@ class _TransferenciaProducaoDialogState
                   labelColor: AppTheme.warning,
                   indicatorColor: AppTheme.warning,
                   tabs: [
-                    const Tab(text: 'Saída'),
+                    const Tab(text: 'Transferência'),
                     Tab(
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -6823,7 +7592,7 @@ class _TransferenciaProducaoDialogState
                     controller: _tabController,
                     children: [
                       SingleChildScrollView(child: _buildAbaSaida(context)),
-                      SingleChildScrollView(child: _buildAbaPendentes(context)),
+                      _buildAbaPendentes(context),
                     ],
                   ),
                 ),
@@ -7400,6 +8169,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                   enabled: !item.usarModoDimensional,
                   keyboardType:
                       TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_MilharInputFormatter()],
                   decoration: InputDecoration(
                     labelText: 'Quantidade *',
                     isDense: true,
@@ -7408,7 +8178,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                   validator: (v) {
                     if (item.erroEstoque != null) return item.erroEstoque;
                     final quant =
-                        double.tryParse((v ?? '').replaceAll(',', '.'));
+                        _parseMilhar(v ?? '');
                     if (quant == null || quant <= 0) return 'Qtd. inválida';
                     return null;
                   },
@@ -7423,7 +8193,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                   controller: item.obsCtrl,
                   maxLines: 1,
                   decoration: const InputDecoration(
-                    labelText: 'Observação (opcional)',
+                    labelText: 'Observação',
                     isDense: true,
                     prefixIcon: Icon(Icons.notes, size: 16),
                   ),
@@ -7593,7 +8363,7 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    formatarQuantidade(m.quantidade),
+                    formatarQuantidadeExibicao(m.quantidade),
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -7786,7 +8556,25 @@ class _AvisoPossivelDuplicataCE extends StatelessWidget {
       );
     }
 
-    if (duplicatas.isEmpty) return const SizedBox.shrink();
+    if (duplicatas.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.check_circle_outline, size: 14,
+                color: Theme.of(context).colorScheme.outline),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Nenhum material parecido encontrado até agora',
+                style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.outline),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     final temExata = duplicatas.any((d) => d.exata);
     final cor      = temExata ? AppTheme.error : AppTheme.warning;
@@ -7841,7 +8629,7 @@ class _AvisoPossivelDuplicataCE extends StatelessWidget {
               if (formatarEspessuraComSufixo(m.espessura) != null)   formatarEspessuraComSufixo(m.espessura)!,
             ].join(' • ');
 
-            final qtdTxt = formatarQuantidade(m.quantidade);
+            final qtdTxt = formatarQuantidadeExibicao(m.quantidade);
 
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 3),

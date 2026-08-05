@@ -38,6 +38,7 @@ class RelatorioOSProvider extends ChangeNotifier {
 
   // ── Filtros ativos ────────────────────────────────────────────────────────
   String? _buscaAtiva;
+  String? _clienteAtivo;
   String? _materialIdAtivo;
   String? _materialNomeAtivo;
   String? _materialIdentificadorAtivo;
@@ -59,6 +60,7 @@ class RelatorioOSProvider extends ChangeNotifier {
 
   Future<void> carregar({
     String? busca,
+    String? cliente,
     String? materialId,
     String? materialNome,
     String? materialIdentificador,
@@ -70,6 +72,7 @@ class RelatorioOSProvider extends ChangeNotifier {
     DateTime? dataFim,
   }) async {
     _buscaAtiva                  = busca;
+    _clienteAtivo                = cliente;
     _materialIdAtivo             = materialId;
     _materialNomeAtivo           = materialNome;
     _materialIdentificadorAtivo  = materialIdentificador;
@@ -85,6 +88,7 @@ class RelatorioOSProvider extends ChangeNotifier {
     try {
       _relatorios = await _repo.listarRelatoriosOS(
         busca:                 busca,
+        cliente:               cliente,
         materialId:            materialId,
         materialNome:          materialNome,
         materialIdentificador: materialIdentificador,
@@ -106,6 +110,7 @@ class RelatorioOSProvider extends ChangeNotifier {
   /// Recarrega preservando todos os filtros ativos.
   Future<void> recarregar() => carregar(
         busca:                 _buscaAtiva,
+        cliente:               _clienteAtivo,
         materialId:            _materialIdAtivo,
         materialNome:          _materialNomeAtivo,
         materialIdentificador: _materialIdentificadorAtivo,

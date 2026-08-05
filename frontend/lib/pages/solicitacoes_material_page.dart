@@ -3,16 +3,20 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../models/material_model.dart';
 import '../models/solicitacao_material_model.dart';
 import '../providers/solicitacao_material_provider.dart';
 import '../providers/material_provider.dart';
+import '../providers/orcamento_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_client.dart';
 import '../pages/controle_estoque_page.dart' show MaterialFormDialog, formatarUnidadeExibicao, formatarMedidaOuDimensoes, formatarQuantidade;
+import '../pages/orcamento_page.dart';
+import '../pages/historico_solicitacoes_page.dart' hide formatarUnidadeExibicao;
 import '../widgets/escolher_usuario_chat_dialog.dart';
 import '../providers/robo_helper_provider.dart';
 
@@ -232,6 +236,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
         await context.read<SolicitacaoMaterialProvider>().carregar();
+        if (!mounted) return;
         _atualizarTotaisGlobais();
         final helper = context.read<RoboHelperProvider>();
         helper.notificarRota('/solicitacoes-material');
@@ -401,6 +406,17 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
       _totalResolvidosGlobal = resolvidos;
       _totaisGlobaisCarregados = true;
     });
+  }
+
+  /// Abre a página de histórico geral de solicitações (todos os materiais de
+  /// todas as OS, em ordem cronológica). Ao tocar em um item lá, a página de
+  /// histórico marca a solicitação correspondente como "pendente de abertura"
+  /// no provider e fecha — esta tela, que já observa esse estado via
+  /// `_tentarAbrirSolicitacaoPendente`, então abre o diálogo automaticamente.
+  Future<void> _abrirHistoricoSolicitacoes() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const HistoricoSolicitacoesPage()),
+    );
   }
 
   Future<void> _abrirFormSolicitacao([SolicitacaoMaterialModel? solicitacao]) async {
@@ -863,6 +879,22 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                       ).copyWith(
                         mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                       ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Tooltip(
+                  message: 'Ver histórico geral de solicitações',
+                  child: OutlinedButton.icon(
+                    onPressed: _abrirHistoricoSolicitacoes,
+                    icon: const Icon(Icons.history, size: 18),
+                    label: const Text('Histórico'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.onSurface,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    ).copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                     ),
                   ),
                 ),
@@ -2703,6 +2735,9 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
   late DateTime _dataNecessidade;
   late String _andamento;
 
+  MaterialProvider? _materialProviderRef;
+  bool _recarregandoPorMaterial = false;
+
   @override
   void initState() {
     super.initState();
@@ -2725,7 +2760,30 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Escuta o MaterialProvider: se um material desta solicitação for
+    // editado em outra tela (ex.: Estoque) enquanto este dialog já está
+    // aberto, o nome/dados do material exibidos aqui ficariam desatualizados
+    // até fechar e reabrir. Recarregando a solicitação a cada notificação do
+    // MaterialProvider, os dados do material ficam em dia automaticamente.
+    final novoProvider = context.read<MaterialProvider>();
+    if (!identical(_materialProviderRef, novoProvider)) {
+      _materialProviderRef?.removeListener(_onMateriaisAlterados);
+      _materialProviderRef = novoProvider;
+      _materialProviderRef!.addListener(_onMateriaisAlterados);
+    }
+  }
+
+  void _onMateriaisAlterados() {
+    if (!mounted || _recarregandoPorMaterial || _solicitacaoAtual.id < 0) return;
+    _recarregandoPorMaterial = true;
+    _recarregarSolicitacao().whenComplete(() => _recarregandoPorMaterial = false);
+  }
+
+  @override
   void dispose() {
+    _materialProviderRef?.removeListener(_onMateriaisAlterados);
     _tabCtrl.dispose();
     _numeroOSCtrl.dispose();
     _clienteCtrl.dispose();
@@ -6096,6 +6154,7 @@ class _MaterialItemSeletorState extends State<_MaterialItemSeletor> {
 /// Um material "achatado", vindo de um item original OU de um adicional,
 /// junto com o contexto da OS de onde ele veio.
 class MaterialAchatadoSolicitado {
+  final int materialId;
   final String nome;
   final String? categoria;
   final String? identificador;
@@ -6111,6 +6170,7 @@ class MaterialAchatadoSolicitado {
   final DateTime dataNecessidade;
 
   MaterialAchatadoSolicitado({
+    required this.materialId,
     required this.nome,
     required this.categoria,
     required this.identificador,
@@ -6125,6 +6185,22 @@ class MaterialAchatadoSolicitado {
     required this.dataSolicitacao,
     required this.dataNecessidade,
   });
+
+  /// Chave estável do material dentro de uma solicitação/adicional — usada
+  /// para reconhecer o "mesmo" item entre rebuilds, já que a lista achatada
+  /// é reconstruída a cada build() (novas instâncias). Combina a
+  /// solicitação, o material e o momento em que foi adicionado (item
+  /// original vs. adicional na mesma solicitação nunca coincidem nesse
+  /// horário).
+  @override
+  bool operator ==(Object other) =>
+      other is MaterialAchatadoSolicitado &&
+      other.solicitacaoId == solicitacaoId &&
+      other.materialId == materialId &&
+      other.dataSolicitacao == dataSolicitacao;
+
+  @override
+  int get hashCode => Object.hash(solicitacaoId, materialId, dataSolicitacao);
 }
 
 /// Um grupo de materiais "equivalentes" (mesmo material na prática, com
@@ -6263,6 +6339,7 @@ List<MaterialAchatadoSolicitado> _achatarMateriais(
   for (final s in solicitacoes) {
     for (final item in s.itens) {
       resultado.add(MaterialAchatadoSolicitado(
+        materialId: item.materialId,
         nome: item.materialNome,
         categoria: (item.materialCategoria?.trim().isEmpty ?? true)
             ? null
@@ -6282,6 +6359,7 @@ List<MaterialAchatadoSolicitado> _achatarMateriais(
     }
     for (final ad in s.adicionais) {
       resultado.add(MaterialAchatadoSolicitado(
+        materialId: ad.materialId,
         nome: ad.materialNome,
         categoria: (ad.materialCategoria?.trim().isEmpty ?? true)
             ? null
@@ -6554,6 +6632,12 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
   bool _crescente = true;
   _ModoAgrupamento _modoAgrupamento = _ModoAgrupamento.categoria;
 
+  /// Materiais (pendentes) selecionados pra enviar pra orçamento — mesmo
+  /// padrão do "Orçar filtrados" (estoque) e "Orçar selecionados" (alertas
+  /// de estoque no AppShell).
+  final Set<MaterialAchatadoSolicitado> _selecionados = {};
+  bool _orcandoSelecionados = false;
+
   void _alternarOrdenacao(_ColunaOrdenavel coluna) {
     setState(() {
       if (_coluna == coluna) {
@@ -6563,6 +6647,175 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
         _crescente = true;
       }
     });
+  }
+
+  void _toggleSelecao(MaterialAchatadoSolicitado m) {
+    setState(() {
+      if (_selecionados.contains(m)) {
+        _selecionados.remove(m);
+        return;
+      }
+      // Evita selecionar o mesmo material (mesmo materialId) mais de uma
+      // vez — mesmo que apareça em OS/linhas diferentes, pra orçamento só
+      // faz sentido entrar uma vez.
+      final jaSelecionadoEmOutraLinha =
+          _selecionados.any((s) => s.materialId == m.materialId);
+      if (jaSelecionadoEmOutraLinha) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${m.nome} já está selecionado.'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
+      _selecionados.add(m);
+    });
+  }
+
+  void _selecionarTodos(List<_GrupoGenerico> grupos) {
+    final todosOsMateriais = grupos.expand((g) => g.materiais).toList();
+    setState(() {
+      final todosJaSelecionados =
+          todosOsMateriais.isNotEmpty && todosOsMateriais.every(_selecionados.contains);
+      if (todosJaSelecionados) {
+        _selecionados.removeWhere(todosOsMateriais.contains);
+      } else {
+        // Ao selecionar tudo, mantém só a primeira ocorrência de cada
+        // materialId — o mesmo material solicitado em OSs diferentes não
+        // precisa (nem deve) entrar mais de uma vez no orçamento.
+        final idsJaVistos = _selecionados.map((s) => s.materialId).toSet();
+        for (final m in todosOsMateriais) {
+          if (idsJaVistos.add(m.materialId)) {
+            _selecionados.add(m);
+          }
+        }
+      }
+    });
+  }
+
+  bool _mesmoValor(String? a, String? b) {
+    final ta = (a ?? '').trim().toUpperCase();
+    final tb = (b ?? '').trim().toUpperCase();
+    if (ta.isEmpty || tb.isEmpty) return true; // campo não informado → não restringe
+    return ta == tb;
+  }
+
+  /// Envia os materiais selecionados pra um novo orçamento — replica o
+  /// fluxo de "Orçar filtrados"/"Orçar selecionados" já usado em Estoque e
+  /// nos Alertas de Estoque: casa cada material selecionado com o
+  /// [MaterialModel] real (via materialId, com fallback por atributos),
+  /// monta os [ItemOrcamentoData] com os preços por fornecedor já
+  /// cadastrados, e navega para o editor de orçamento.
+  Future<void> _orcarSelecionados() async {
+    if (_selecionados.isEmpty || _orcandoSelecionados) return;
+    setState(() => _orcandoSelecionados = true);
+
+    try {
+      final materialProvider = context.read<MaterialProvider>();
+      // A página de Solicitações não carrega o MaterialProvider por conta
+      // própria (só quem visita Estoque faz isso) — sem isso, a lista de
+      // materiais fica vazia e nenhum item é localizado. Carrega sob
+      // demanda aqui, uma única vez, antes de tentar casar os
+      // selecionados.
+      if (materialProvider.materiais.isEmpty) {
+        await materialProvider.carregar();
+        if (!mounted) return;
+      }
+
+      final todos = materialProvider.materiais;
+      final itens = <ItemOrcamentoData>[];
+      final naoEncontrados = <String>[];
+      final jaAdicionados = <int>{};
+
+      for (final m in _selecionados) {
+        MaterialModel? encontrado;
+        for (final mat in todos) {
+          if (mat.id == m.materialId) {
+            encontrado = mat;
+            break;
+          }
+        }
+        // Fallback: caso o materialId não bata (ex.: material
+        // recadastrado), tenta localizar por atributos, igual ao "Orçar
+        // selecionados" dos alertas de estoque.
+        encontrado ??= todos.cast<MaterialModel?>().firstWhere(
+              (mat) =>
+                  mat != null &&
+                  _mesmoValor(mat.nome, m.nome) &&
+                  _mesmoValor(mat.categoria, m.categoria) &&
+                  _mesmoValor(mat.identificador, m.identificador),
+              orElse: () => null,
+            );
+
+        if (encontrado == null) {
+          naoEncontrados.add(m.nome);
+          continue;
+        }
+        if (!jaAdicionados.add(encontrado.id)) continue; // evita duplicar
+
+        final precos = <int, PrecoFornecedorData>{};
+        for (final fm in encontrado.fornecedorMateriais) {
+          precos[fm.fornecedorId] = PrecoFornecedorData(
+            fornecedorNome: fm.fornecedorNome,
+            preco: fm.preco > 0 ? fm.preco : null,
+          );
+        }
+
+        itens.add(ItemOrcamentoData(
+          materialId: encontrado.id,
+          materialNome: encontrado.nome,
+          materialUnidade: encontrado.unidade,
+          materialCategoria: encontrado.categoria,
+          materialMedida: encontrado.medida,
+          materialEspessura: encontrado.espessura,
+          materialIdentificador: encontrado.identificador,
+          materialStatus: encontrado.status,
+          materialLargura: encontrado.largura,
+          materialComprimento: encontrado.comprimento,
+          estoqueMinimo: encontrado.estoqueMinimo,
+          precos: precos,
+        ));
+      }
+
+      if (!mounted) return;
+
+      if (itens.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Não foi possível localizar os materiais selecionados.'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+        return;
+      }
+
+      final titulo = itens.length == 1
+          ? 'Orç. ${itens.first.materialNome}'
+          : 'Orç. materiais solicitados (${itens.length})';
+
+      context.read<OrcamentoProvider>().adicionarItensEmLote(titulo, itens);
+
+      if (naoEncontrados.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${naoEncontrados.length} material(is) não encontrado(s) e não foram incluídos: ${naoEncontrados.join(', ')}',
+            ),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+
+      setState(() => _selecionados.clear());
+
+      // Ao entrar em /orcamento, abre direto no editor (aba "abertos") com
+      // este orçamento recém-criado, em vez da lista de aprovação.
+      OrcamentoPage.abrirEditorAoEntrar = true;
+      context.go('/orcamento');
+    } finally {
+      if (mounted) setState(() => _orcandoSelecionados = false);
+    }
   }
 
   int _comparar(MaterialAchatadoSolicitado a, MaterialAchatadoSolicitado b) {
@@ -6595,15 +6848,64 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
   @override
   Widget build(BuildContext context) {
     final grupos = _agruparPorModo(widget.solicitacoes, _modoAgrupamento);
+    final totalMateriais = grupos.fold<int>(0, (soma, g) => soma + g.materiais.length);
+    final todosSelecionados = totalMateriais > 0 &&
+        grupos.expand((g) => g.materiais).every(_selecionados.contains);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: _SeletorAgrupamento(
-            modoAtivo: _modoAgrupamento,
-            onSelecionar: (modo) => setState(() => _modoAgrupamento = modo),
+          child: Row(
+            children: [
+              Expanded(
+                child: _SeletorAgrupamento(
+                  modoAtivo: _modoAgrupamento,
+                  onSelecionar: (modo) => setState(() => _modoAgrupamento = modo),
+                ),
+              ),
+              if (totalMateriais > 0) ...[
+                TextButton.icon(
+                  onPressed: () => _selecionarTodos(grupos),
+                  icon: Icon(
+                    todosSelecionados
+                        ? Icons.check_box
+                        : Icons.check_box_outline_blank,
+                    size: 18,
+                  ),
+                  label: Text(todosSelecionados
+                      ? 'Desmarcar todos'
+                      : 'Selecionar todos'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                ),
+                const SizedBox(width: 4),
+                OutlinedButton.icon(
+                  onPressed: (_selecionados.isEmpty || _orcandoSelecionados)
+                      ? null
+                      : _orcarSelecionados,
+                  icon: _orcandoSelecionados
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: AppTheme.primary),
+                        )
+                      : const Icon(Icons.request_quote, size: 16),
+                  label: Text(_selecionados.isEmpty
+                      ? 'Orçar selecionados'
+                      : 'Orçar selecionados (${_selecionados.length})'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.primary,
+                    side: const BorderSide(color: AppTheme.primary),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    visualDensity: VisualDensity.compact,
+                  ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                ),
+              ],
+            ],
           ),
         ),
         Expanded(
@@ -6655,6 +6957,8 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
                             colunaAtiva: _coluna,
                             crescente: _crescente,
                             onOrdenar: _alternarOrdenacao,
+                            selecionados: _selecionados,
+                            onToggleSelecao: _toggleSelecao,
                           ),
                         ],
                       ),
@@ -6789,12 +7093,16 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
   final _ColunaOrdenavel? colunaAtiva;
   final bool crescente;
   final void Function(_ColunaOrdenavel) onOrdenar;
+  final Set<MaterialAchatadoSolicitado> selecionados;
+  final void Function(MaterialAchatadoSolicitado) onToggleSelecao;
 
   const _TabelaMateriaisCategoria({
     required this.materiais,
     required this.colunaAtiva,
     required this.crescente,
     required this.onOrdenar,
+    required this.selecionados,
+    required this.onToggleSelecao,
   });
 
   @override
@@ -6821,6 +7129,7 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
             ),
             child: Row(
               children: [
+                const SizedBox(width: 32),
                 const Expanded(flex: 4, child: _CelulaCabecalho('MATERIAL')),
                 Expanded(
                   flex: 3,
@@ -6877,14 +7186,28 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
               if (m.medidaOuDimensao != null) m.medidaOuDimensao!,
             ].join(' · ');
 
-            return Container(
+            final selecionado = selecionados.contains(m);
+
+            return InkWell(
+              mouseCursor: SystemMouseCursors.click,
+              onTap: () => onToggleSelecao(m),
+              child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
+                color: selecionado ? AppTheme.primary.withValues(alpha: 0.06) : null,
                 border: ultima ? null : Border(bottom: BorderSide(color: corBorda)),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  SizedBox(
+                    width: 32,
+                    child: Checkbox(
+                      value: selecionado,
+                      onChanged: (_) => onToggleSelecao(m),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
                   Expanded(
                     flex: 4,
                     child: Column(
@@ -6966,6 +7289,7 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
               ),
             );
           }),

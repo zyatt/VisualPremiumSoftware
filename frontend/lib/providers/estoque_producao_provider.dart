@@ -101,6 +101,8 @@ class EstoqueProducaoProvider with ChangeNotifier {
     String? identificador,
     String? medida,
     String? espessura,
+    String? comprimento,
+    String? largura,
   }) async {
     final linha = producao ?? _producao;
     if (linha == null) return;
@@ -116,6 +118,8 @@ class EstoqueProducaoProvider with ChangeNotifier {
         identificador: identificador,
         medida: medida,
         espessura: espessura,
+        comprimento: comprimento,
+        largura: largura,
       );
       _estoquePorLinha[linha] = lista;
     } catch (e) {

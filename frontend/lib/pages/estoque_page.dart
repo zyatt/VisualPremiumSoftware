@@ -49,6 +49,23 @@ String formatarUnidadeExibicao(String? unidade) {
   }
 }
 
+/// Monta o label dinâmico do campo/coluna de preço por unidade de medida,
+/// ex.: 'Preço m/l', 'Preço g', 'Preço ml'. Quando a unidade não é
+/// conhecida, cai de volta em 'Preço unidade'.
+String labelPrecoUnidade(String? unidade) {
+  final u = formatarUnidadeExibicao(unidade);
+  if (u == '—' || u.isEmpty) return 'Preço unidade';
+  return 'Preço $u';
+}
+
+/// Indica se o campo/coluna de preço por unidade de medida faz sentido para
+/// este material. Quando a unidade já é "Unidade", o campo seria redundante
+/// com o "Valor"/"Unit." comum, então não deve aparecer.
+bool deveExibirPrecoUnidade(String? unidade) {
+  if (unidade == null || unidade.trim().isEmpty) return false;
+  return unidade.trim().toUpperCase() != 'UNIDADE';
+}
+
 /// TextEditingController que expõe [notify] publicamente. `notifyListeners()`
 /// é `@protected` em `ChangeNotifier`, então não pode ser chamado de fora da
 /// própria classe/subclasse — usamos essa subclasse só para forçar o
@@ -130,6 +147,52 @@ class _MedidaEspessuraFormatter extends TextInputFormatter {
   }
 }
 
+/// Formatter para o campo Medida no modo Retalho: só permite dígitos e um
+/// único ponto decimal (vírgula é convertida em ponto) antes do sufixo fixo
+/// "m²", que é sempre mantido ao final e não pode ser apagado nem editado
+/// pelo usuário — o texto digitado sempre entra à esquerda do "m²".
+class _MedidaRetalhoFormatter extends TextInputFormatter {
+  static const String sufixo = 'm²';
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text;
+
+    // Remove o sufixo (onde quer que esteja) para trabalhar só com a parte
+    // numérica digitada pelo usuário.
+    texto = texto.replaceAll(sufixo, '');
+
+    // Vírgula -> ponto
+    texto = texto.replaceAll(',', '.');
+
+    // Mantém apenas dígitos e ponto
+    texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
+
+    // Permite apenas 1 ponto decimal
+    final partes = texto.split('.');
+    if (partes.length > 2) {
+      texto = '${partes[0]}.${partes.sublist(1).join('')}';
+    }
+
+    final novoTexto = '$texto$sufixo';
+
+    // Cursor sempre logo após a parte numérica digitada (nunca dentro ou
+    // depois do sufixo).
+    int cursor = newValue.selection.baseOffset;
+    if (cursor < 0 || cursor > texto.length) {
+      cursor = texto.length;
+    }
+
+    return TextEditingValue(
+      text: novoTexto,
+      selection: TextSelection.collapsed(offset: cursor),
+    );
+  }
+}
+
 /// Formatter para o campo Espessura: aceita apenas dígitos, ponto e vírgula
 /// (vírgula é convertida em ponto), bloqueando letras e qualquer outro
 /// caractere. Também permite apenas 1 ponto no total (evita "2..5"/"2.5.5").
@@ -180,6 +243,90 @@ class _DecimalInputFormatter extends TextInputFormatter {
   }
 }
 
+/// Formatter para campos de preço em BRL: aplica separador de milhar (ponto)
+/// na parte inteira em tempo real enquanto o usuário digita, usando vírgula
+/// como separador decimal (padrão brasileiro). Ex.: digitar "1000" exibe
+/// "1.000"; digitar "1000,5" exibe "1.000,5".
+///
+/// O texto exposto ao controller já vem SEM separador de milhar (apenas
+/// dígitos + ponto decimal, ex.: "1000.5") para não quebrar `double.parse`
+/// no restante do código — a exibição com milhar é feita só visualmente
+/// através do `TextEditingValue` retornado aqui.
+class _PrecoInputFormatter extends TextInputFormatter {
+  static String _aplicarMilhar(String digitosInteiros) {
+    final buffer = StringBuffer();
+    for (int i = 0; i < digitosInteiros.length; i++) {
+      if (i > 0 && (digitosInteiros.length - i) % 3 == 0) {
+        buffer.write('.');
+      }
+      buffer.write(digitosInteiros[i]);
+    }
+    return buffer.toString();
+  }
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text;
+
+    // Conta quantos caracteres "digitados" (dígitos/vírgula) existiam antes
+    // do cursor no valor novo, para poder recolocar o cursor no lugar certo
+    // depois de re-formatar.
+    final cursorPos = newValue.selection.end.clamp(0, texto.length);
+    final antesDoCursor = texto.substring(0, cursorPos);
+    final digitosAntesCursor =
+        antesDoCursor.replaceAll(RegExp(r'[^\d,]'), '').length;
+
+    // Aceita apenas dígitos e vírgula (o ponto de milhar é recalculado, não
+    // digitado pelo usuário).
+    texto = texto.replaceAll(RegExp(r'[^\d,]'), '');
+
+    final partes = texto.split(',');
+    String inteiro = partes[0];
+    String? decimais = partes.length > 1 ? partes.sublist(1).join('') : null;
+    if (decimais != null && decimais.length > 2) {
+      decimais = decimais.substring(0, 2);
+    }
+
+    // Remove zeros à esquerda supérfluos, mantendo pelo menos um dígito.
+    inteiro = inteiro.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+
+    final inteiroFormatado = _aplicarMilhar(inteiro);
+    final textoFormatado = decimais != null
+        ? '$inteiroFormatado,$decimais'
+        : (texto.contains(',') ? '$inteiroFormatado,' : inteiroFormatado);
+
+    // Reposiciona o cursor: conta dígitos+vírgula até atingir a mesma
+    // quantidade que havia antes do cursor original, pulando os pontos de
+    // milhar (que não contam como "digitados" pelo usuário).
+    int novoOffset = 0;
+    int contador = 0;
+    for (int i = 0; i < textoFormatado.length; i++) {
+      if (contador >= digitosAntesCursor) break;
+      if (textoFormatado[i] != '.') contador++;
+      novoOffset = i + 1;
+    }
+    novoOffset = novoOffset.clamp(0, textoFormatado.length);
+
+    return TextEditingValue(
+      text: textoFormatado,
+      selection: TextSelection.collapsed(offset: novoOffset),
+    );
+  }
+}
+
+/// Converte o texto de um campo formatado com [_PrecoInputFormatter]
+/// (ex.: "1.000,50") para um double (1000.5), para uso em cálculos/envio
+/// ao backend.
+double? _parsePreco(String texto) {
+  final v = texto.trim();
+  if (v.isEmpty) return null;
+  final semMilhar = v.replaceAll('.', '').replaceAll(',', '.');
+  return double.tryParse(semMilhar);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,7 +371,7 @@ class _EstoquePageState extends State<EstoquePage> {
   String _filtroCategoria    = '';
 
   // ── Pontos de interesse para o tour guiado do robô assistente ───────────
-  // ("Como selecionar uma categoria?"): card "Geral" → card de categoria
+  // ("Como selecionar uma categoria"): card "Geral" → card de categoria
   // específica → campo de busca.
   final _tourKeyCardGeral       = GlobalKey();
   final _tourKeyCardEspecifica  = GlobalKey();
@@ -250,12 +397,23 @@ class _EstoquePageState extends State<EstoquePage> {
     final helper = context.read<RoboHelperProvider>();
     helper.registrarOpcoes('/estoque', [
       RoboHelpOption(
-        titulo: 'Como selecionar uma categoria?',
+        titulo: 'Como selecionar uma categoria',
         paradas: [
           RoboTourStop(
             key: () => _tourKeyCardGeral,
             texto: 'Este é o card "Geral" — toque nele para ver materiais '
                 'de todas as categorias misturados.',
+            aoEntrar: () async {
+              // Limpa o campo de busca de categorias antes do tour: se
+              // houver um filtro digitado (ex.: "AA"), os cards podem
+              // estar todos escondidos ("Nenhuma categoria encontrada"),
+              // e o robô não teria nada para destacar.
+              if (_filtroCategoriaCtrl.text.isNotEmpty) {
+                _filtroCategoriaCtrl.clear();
+                setState(() => _filtroCategoria = '');
+                await Future<void>.delayed(const Duration(milliseconds: 50));
+              }
+            },
           ),
           RoboTourStop(
             key: () => _tourKeyCardEspecifica,
@@ -264,7 +422,7 @@ class _EstoquePageState extends State<EstoquePage> {
           ),
           RoboTourStop(
             key: () => _tourKeyCampoBusca,
-            texto: 'Prefere digitar? Use este campo para filtrar as '
+            texto: 'Use este campo para filtrar as '
                 'categorias pelo nome enquanto digita.',
           ),
         ],
@@ -596,7 +754,7 @@ class _EstoquePageState extends State<EstoquePage> {
                 controller: _filtroCategoriaCtrl,
                 inputFormatters: [_UpperCaseFormatter()],
                 decoration: InputDecoration(
-                  hintText:   'Buscar categoria...',
+                  hintText:   'Buscar categoria',
                   prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                   isDense:    true,
                   suffixIcon: _filtroCategoria.isNotEmpty
@@ -980,6 +1138,46 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
   bool _carregando = true;
   List<MaterialModel> _materiais = [];
 
+  // ── Pontos de interesse para o tour guiado do robô assistente ───────────
+  // ("Como selecionar um identificador"): card "Todos" → card de
+  // identificador específico.
+  final _tourKeyCardTodos      = GlobalKey();
+  final _tourKeyCardEspecifico = GlobalKey();
+
+  /// Registra no RoboHelperProvider a dica desta página. Chamado a cada
+  /// build (é barato) para garantir que aponte para as keys corretas mesmo
+  /// após reconstruções — seguindo o mesmo padrão de EstoquePage.
+  void _registrarAjudaRobo() {
+    final rota = ModalRoute.of(context);
+    if (rota != null && !rota.isCurrent) return;
+
+    final helper = context.read<RoboHelperProvider>();
+    helper.registrarOpcoes('/estoque', [
+      RoboHelpOption(
+        titulo: 'Como selecionar um identificador',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyCardTodos,
+            texto: 'Este é o card "Todos" — toque nele para ver os '
+                'materiais desta categoria, independente do identificador.',
+            aoEntrar: () async {
+              if (_filtroCtrl.text.isNotEmpty) {
+                _filtroCtrl.clear();
+                setState(() => _filtro = '');
+                await Future<void>.delayed(const Duration(milliseconds: 50));
+              }
+            },
+          ),
+          RoboTourStop(
+            key: () => _tourKeyCardEspecifico,
+            texto: 'Ou escolha um card de identificador específico para ver '
+                'somente os materiais daquele identificador.',
+          ),
+        ],
+      ),
+    ]);
+  }
+
   // ── Helpers de ícone / cor para identificadores ──────────────────────────
   static const _cores = [
     Color(0xFF1E88E5), Color(0xFF00897B), Color(0xFFE53935),
@@ -997,12 +1195,21 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _carregar());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _carregar();
+      context.read<RoboHelperProvider>().notificarRota('/estoque');
+    });
   }
 
   @override
   void dispose() {
     _filtroCtrl.dispose();
+    // Evita que o robô continue oferecendo "Como selecionar um
+    // identificador?" em outra página depois que o usuário sai daqui.
+    try {
+      context.read<RoboHelperProvider>().encerrarTour();
+      context.read<RoboHelperProvider>().limparOpcoes('/estoque');
+    } catch (_) {}
     super.dispose();
   }
 
@@ -1026,6 +1233,9 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
         _materiais = context.read<MaterialProvider>().materiais;
         _carregando = false;
       });
+      // Registra a dica só depois que os identificadores foram carregados —
+      // é quando os cards (e suas GlobalKeys) já existem na árvore.
+      if (mounted) _registrarAjudaRobo();
     } catch (_) {
       if (mounted) setState(() => _carregando = false);
     }
@@ -1060,6 +1270,11 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
     required String identificadorId,
     required String? identificadorReal,
   }) {
+    // A dica "Como selecionar um identificador" só faz sentido nesta
+    // própria página — limpamos antes de navegar para dentro dela.
+    context.read<RoboHelperProvider>().encerrarTour();
+    context.read<RoboHelperProvider>().limparOpcoes('/estoque');
+
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => EstoqueCategoriaPage(
@@ -1150,7 +1365,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
                 controller: _filtroCtrl,
                 inputFormatters: [_UpperCaseFormatter()],
                 decoration: InputDecoration(
-                  hintText:   'Buscar identificador...',
+                  hintText:   'Buscar identificador',
                   prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
                   isDense:    true,
                   suffixIcon: _filtro.isNotEmpty
@@ -1191,6 +1406,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
     // Card "Todos"
     if (corresponde('todos')) {
       cards.add(_IdentificadorCard(
+        key:         _tourKeyCardTodos,
         label:       'Todos',
         quantidade:  _materiais.length,
         cor:         widget.cor,
@@ -1210,7 +1426,11 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
       final cor = ident == null
           ? const Color(0xFF546E7A)
           : _cores[i % _cores.length];
+      // Só o primeiro card de identificador específico ganha a tour key
+      // (é o único destacado nesta parada da dica).
+      final ehPrimeiro = cards.length == (corresponde('todos') ? 1 : 0);
       cards.add(_IdentificadorCard(
+        key:         ehPrimeiro ? _tourKeyCardEspecifico : null,
         label:       label,
         quantidade:  _contarMateriais(ident),
         cor:         cor,
@@ -1338,6 +1558,7 @@ class _IdentificadorCard extends StatefulWidget {
   final VoidCallback onTap;
 
   const _IdentificadorCard({
+    super.key,
     required this.label,
     required this.quantidade,
     required this.cor,
@@ -1590,7 +1811,7 @@ class _CategoriaFiltroDropdownState extends State<_CategoriaFiltroDropdown> {
                       autofocus: true,
                       inputFormatters: [_UpperCaseFormatter()],
                       decoration: InputDecoration(
-                        hintText:   'Buscar categoria...',
+                        hintText:   'Buscar categoria',
                         isDense:    true,
                         prefixIcon: Icon(Icons.search, size: 18, color: scheme.outline),
                       ),
@@ -2175,7 +2396,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         onReativar:  (!isCompras && material != null) ? _reativar  : null,
         onExcluir:   (!isCompras && material != null) ? _excluir   : null,
         roleUsuario: roleAtual,
-        somenteLeitura: isCompras && material != null,
+        somenteLeitura: false,
         tourKeys: _materialTourKeys,
       ),
     );
@@ -3797,7 +4018,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
  
     Widget estoqueAtualCell() {
       return maybeOpacity(_cell(
-        formatarQuantidade(m.quantidade),
+        formatarQuantidadeExibicao(m.quantidade),
         context,
         inativo: inativo,
       ));
@@ -3888,7 +4109,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
  
                 // Estoque mínimo
                 _colWrap(cols[widget.mostrarCategoria ? 9 : 8], maybeOpacity(_cell(
-                  formatarQuantidade(m.estoqueMinimo),
+                  formatarQuantidadeExibicao(m.estoqueMinimo),
                   context,
                   inativo: inativo,
                 ))),
@@ -4044,6 +4265,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
   bool get _editando => widget.material != null;
   late bool _estoqueConfirmado;
+  bool _fornecedoresExpandido = false;
 
   /// COMPRAS não pode definir a quantidade no cadastro — a entrada de
   /// estoque deve ser feita pela página de Controle de Estoque (movimentação
@@ -4065,13 +4287,29 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
           'COMPRAS' &&
       !_editando;
 
-  /// Mesma regra de [_bloquearQuantidade]: COMPRAS também não pode definir o
+  /// Mesma regra de [_bloquearEstoqueMinimo]: COMPRAS também não pode definir o
   /// estoque mínimo no cadastro — ambos ficam a cargo de quem faz a entrada
   /// real de estoque (Controle de Estoque / OS).
   bool get _bloquearEstoqueMinimo => _bloquearQuantidade;
 
   /// Versão `context.read` de [_bloquearEstoqueMinimo], para uso fora do build.
   bool get _bloquearEstoqueMinimoAtual => _bloquearQuantidadeAtual;
+
+  /// COMPRAS, ao editar um material já existente, só pode alterar a
+  /// Categoria e confirmar o Estoque — os demais campos (nome, identificador,
+  /// unidade, medida, dimensões etc.) continuam bloqueados, pois seguem
+  /// sendo de responsabilidade de quem cadastra/movimenta o material.
+  /// Usa o mesmo padrão watch/read de [_bloquearQuantidade] pelos mesmos
+  /// motivos (reagir a troca de usuário durante o build vs. em handlers).
+  bool get _bloqueadoParaCompras =>
+      (context.watch<UsuarioProvider>().usuarioLogado?.role ?? widget.roleUsuario) ==
+          'COMPRAS' &&
+      _editando;
+
+  bool get _bloqueadoParaComprasAtual =>
+      (context.read<UsuarioProvider>().usuarioLogado?.role ?? widget.roleUsuario) ==
+          'COMPRAS' &&
+      _editando;
 
   /// Normaliza valores de unidade salvos com grafia antiga no banco de dados.
   /// Ex.: "M2" (sem símbolo Unicode) → "M²"
@@ -4159,6 +4397,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     _nome          = TextEditingController(text: m?.nome ?? '');
     _identificador = TextEditingController(text: m?.identificador ?? '');
     _unidade       = _normalizarUnidade(m?.unidade);
+    // Se o material sendo editado já é um retalho (identificador "RETALHO"),
+    // o formulário deve abrir com o modo Retalho já ativado.
+    _modoRetalho   = (m?.identificador?.trim().toUpperCase() == _palavraRetalho);
     _categoria     = _NotifiableTextEditingController(text: m?.categoria ?? '');
     // Ao focar o campo vazio, força o RawAutocomplete a reavaliar as opções
     // (ele só reage a mudanças no texto do controller, não ao foco).
@@ -4170,7 +4411,17 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         _categoria.notify();
       }
     });
-    _medida        = TextEditingController(text: m?.medida ?? '');
+    // No modo Retalho o campo Medida sempre deve conter o sufixo fixo "m²";
+    // se o material salvo já tiver um valor (ex.: "0.69m²"), preserva-o,
+    // senão parte só do sufixo.
+    final medidaInicialTexto = m?.medida ?? '';
+    _medida        = TextEditingController(
+      text: _modoRetalho
+          ? (medidaInicialTexto.trim().isEmpty
+              ? _MedidaRetalhoFormatter.sufixo
+              : medidaInicialTexto)
+          : medidaInicialTexto,
+    );
     _espessura     = TextEditingController(text: m?.espessura ?? '');
     _largura       = TextEditingController(text: m?.largura != null ? formatarQuantidade(m!.largura!) : '');
     _comprimento   = TextEditingController(text: m?.comprimento != null ? formatarQuantidade(m!.comprimento!) : '');
@@ -4482,12 +4733,22 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     });
   }
 
+  /// Considera o campo Medida "vazio" quando não há valor digitado — seja
+  /// porque o campo está realmente vazio (modo normal), seja porque no modo
+  /// Retalho só contém o sufixo fixo "m²" sem número à esquerda.
+  bool _medidaRetalhoEstaVazia() {
+    final texto = _medida.text.trim();
+    if (!_modoRetalho) return texto.isEmpty;
+    return texto == _MedidaRetalhoFormatter.sufixo || texto.isEmpty;
+  }
+
   void _ativarModoRetalho() {
     setState(() {
       _modoRetalho = true;
       _identificador.text = 'RETALHO';
       _unidade = 'M²';
-      _medida.clear();
+      _medida.text = _MedidaRetalhoFormatter.sufixo;
+      _medida.selection = const TextSelection.collapsed(offset: 0);
       _largura.clear();
       _comprimento.clear();
       _estoqueMinimo.text = '0';
@@ -4499,6 +4760,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       _modoRetalho = false;
       _identificador.clear();
       _unidade = null;
+      _medida.clear();
     });
   }
 
@@ -4525,17 +4787,26 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     }
     setState(() { _salvando = true; _erroDialog = null; });
 
+    // Defesa em profundidade: além do readOnly na UI, garante que COMPRAS
+    // editando um material existente não consiga enviar alterações para os
+    // campos que não são de sua responsabilidade — preserva os valores
+    // originais do material nesse caso. Categoria e Estoque confirmado
+    // ficam de fora dessa lista propositalmente: são os únicos campos que
+    // COMPRAS pode alterar.
+    final material = widget.material;
+    final bloqueado = _bloqueadoParaComprasAtual && material != null;
+
     final dados = {
-      'nome':          _nome.text.trim(),
-      'identificador': _identificador.text.trim().isEmpty ? null : _identificador.text.trim(),
-      'unidade':       (_unidade == null || _unidade!.isEmpty) ? null : _unidade,
+      'nome':          bloqueado ? material.nome          : _nome.text.trim(),
+      'identificador': bloqueado ? material.identificador  : (_identificador.text.trim().isEmpty ? null : _identificador.text.trim()),
+      'unidade':       bloqueado ? material.unidade         : ((_unidade == null || _unidade!.isEmpty) ? null : _unidade),
       'categoria':     _categoria.text.trim().isEmpty ? null : _categoria.text.trim(),
-      'medida':        _modoRetalho ? null : (_medida.text.trim().isEmpty ? null : _medida.text.trim()),
-      'espessura':     _espessura.text.trim().isEmpty ? null : _espessura.text.trim(),
-      'largura':       _modoRetalho ? null : (_largura.text.trim().isEmpty ? null : double.tryParse(_largura.text.trim())),
-      'comprimento':   _modoRetalho ? null : (_comprimento.text.trim().isEmpty ? null : double.tryParse(_comprimento.text.trim())),
-      'quantidade':    _bloquearQuantidadeAtual ? 0 : (double.tryParse(_quantidade.text) ?? 0),
-      'estoqueMinimo': (_modoRetalho || _bloquearEstoqueMinimoAtual) ? 0.0 : (double.tryParse(_estoqueMinimo.text) ?? 0),
+      'medida':        bloqueado ? material.medida          : (_medidaRetalhoEstaVazia() ? null : _medida.text.trim()),
+      'espessura':     bloqueado ? material.espessura       : (_espessura.text.trim().isEmpty ? null : _espessura.text.trim()),
+      'largura':       bloqueado ? material.largura         : (_modoRetalho ? null : (_largura.text.trim().isEmpty ? null : double.tryParse(_largura.text.trim()))),
+      'comprimento':   bloqueado ? material.comprimento     : (_modoRetalho ? null : (_comprimento.text.trim().isEmpty ? null : double.tryParse(_comprimento.text.trim()))),
+      'quantidade':    bloqueado ? material.quantidade      : (_bloquearQuantidadeAtual ? 0 : (double.tryParse(_quantidade.text) ?? 0)),
+      'estoqueMinimo': bloqueado ? material.estoqueMinimo   : ((_modoRetalho || _bloquearEstoqueMinimoAtual) ? 0.0 : (double.tryParse(_estoqueMinimo.text) ?? 0)),
       'estoqueConfirmado': _estoqueConfirmado,
     };
 
@@ -4611,7 +4882,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               child: TextFormField(
               controller: _nome,
               autofocus: !_editando,
-              readOnly: widget.somenteLeitura,
+              readOnly: _bloqueadoParaCompras,
               decoration: const InputDecoration(labelText: 'Nome *'),
               textCapitalization: TextCapitalization.characters,
               inputFormatters: [_UpperCaseFormatter()],
@@ -4631,7 +4902,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               key: widget.tourKeys?.identificador,
               child: TextFormField(
               controller: _identificador,
-              readOnly: _modoRetalho || widget.somenteLeitura,
+              readOnly: _modoRetalho || _bloqueadoParaCompras,
               onChanged: (v) {
                 // Ativa o modo Retalho automaticamente ao digitar essa
                 // palavra no Identificador, travando os campos como se o
@@ -4758,13 +5029,13 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                         child: const Text('m²', style: TextStyle(fontSize: 14)),
                       )
                     : MouseRegion(
-                        cursor: widget.somenteLeitura ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                        cursor: _bloqueadoParaCompras ? SystemMouseCursors.basic : SystemMouseCursors.click,
                         child: DropdownButtonFormField<String>(
                           initialValue: _unidade,
                           decoration: const InputDecoration(labelText: 'Unidade *'),
                           hint: const Text('Selecione'),
                           icon: const Icon(Icons.arrow_drop_down),
-                          mouseCursor: widget.somenteLeitura ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                          mouseCursor: _bloqueadoParaCompras ? SystemMouseCursors.basic : SystemMouseCursors.click,
                           items: const [
                             DropdownMenuItem(
                               value: 'UNIDADE',
@@ -4793,7 +5064,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                           ],
                           validator: (v) =>
                               (v == null || v.isEmpty) ? 'Selecione uma unidade' : null,
-                          onChanged: widget.somenteLeitura ? null : (v) => setState(() => _unidade = v),
+                          onChanged: _bloqueadoParaCompras ? null : (v) => setState(() => _unidade = v),
                         ),
                       ),
               ),
@@ -4805,29 +5076,28 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               key: widget.tourKeys?.medida,
               child: TextFormField(
                 controller: _medida,
-                readOnly: _modoRetalho || widget.somenteLeitura,
+                readOnly: _bloqueadoParaCompras,
                 decoration: InputDecoration(
                   labelText: 'Medida',
+                  hintText: _modoRetalho ? 'Ex.: 1.63' : null,
                   suffixIcon: _modoRetalho
                       ? const Tooltip(
-                          message: 'Bloqueado no modo Retalho',
-                          child: Icon(Icons.lock_outline, size: 16),
+                          message: 'No modo Retalho, informe apenas o valor em m²',
+                          child: Icon(Icons.straighten, size: 16),
                         )
                       : null,
                 ),
                 textCapitalization: TextCapitalization.none,
-                inputFormatters: [_MedidaEspessuraFormatter()],
+                keyboardType: _modoRetalho
+                    ? const TextInputType.numberWithOptions(decimal: true)
+                    : TextInputType.text,
+                inputFormatters: [
+                  _modoRetalho ? _MedidaRetalhoFormatter() : _MedidaEspessuraFormatter(),
+                ],
                 onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
               ),
             ),
             ], // end if not ML/G (medida)
-            if (_verificandoDuplicata || _possiveisDuplicatas.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              _AvisoPossivelDuplicata(
-                carregando: _verificandoDuplicata,
-                duplicatas: _possiveisDuplicatas,
-              ),
-            ],
             if (_unidade != 'ML' && _unidade != 'G') ...[
             const SizedBox(height: 10),
             Row(children: [
@@ -4836,7 +5106,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   key: widget.tourKeys?.comprimento,
                   child: TextFormField(
                   controller: _comprimento,
-                  readOnly: _modoRetalho || widget.somenteLeitura,
+                  readOnly: _modoRetalho || _bloqueadoParaCompras,
                   decoration: InputDecoration(
                     labelText: 'Comprimento',
                     suffixText: 'm',
@@ -4860,7 +5130,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   key: widget.tourKeys?.largura,
                   child: TextFormField(
                   controller: _largura,
-                  readOnly: _modoRetalho || widget.somenteLeitura,
+                  readOnly: _modoRetalho || _bloqueadoParaCompras,
                   decoration: InputDecoration(
                     labelText: 'Largura',
                     suffixText: 'm',
@@ -4884,7 +5154,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   key: widget.tourKeys?.espessura,
                   child: TextFormField(
                   controller: _espessura,
-                  readOnly: widget.somenteLeitura,
+                  readOnly: _bloqueadoParaCompras,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
                     labelText: 'Espessura',
@@ -4908,7 +5178,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     ? _QuantidadeBloqueadaInfo()
                     : TextFormField(
                   controller: _quantidade,
-                  readOnly: widget.somenteLeitura,
+                  readOnly: _bloqueadoParaCompras,
                   decoration: const InputDecoration(labelText: 'Quantidade'),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [_DecimalInputFormatter()],
@@ -4927,7 +5197,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     ? _EstoqueMinimoBloqueadoInfo()
                     : TextFormField(
                   controller: _estoqueMinimo,
-                  readOnly: _modoRetalho || widget.somenteLeitura,
+                  readOnly: _modoRetalho || _bloqueadoParaCompras,
                   decoration: InputDecoration(
                     labelText: 'Estoque mínimo',
                     suffixIcon: _modoRetalho
@@ -5000,6 +5270,73 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       ),
     );
 
+    // Formata um valor monetário com separador de milhar (ex.: 1.000,00)
+    String formatarMoeda(double valor) {
+      final partes = valor.toStringAsFixed(2).split('.');
+      final inteiro = partes[0];
+      final decimal = partes[1];
+      final buffer = StringBuffer();
+      for (int i = 0; i < inteiro.length; i++) {
+        final posicaoDaDireita = inteiro.length - i;
+        buffer.write(inteiro[i]);
+        if (posicaoDaDireita > 1 && posicaoDaDireita % 3 == 1) {
+          buffer.write('.');
+        }
+      }
+      return 'R\$ ${buffer.toString()},$decimal';
+    }
+
+    // ── Painel lateral de possíveis duplicatas (esquerda, sempre visível) ─
+    final Widget avisoPanel = Container(
+      width: 260,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: const BorderRadius.only(
+          topLeft:    Radius.circular(12),
+          bottomLeft: Radius.circular(12),
+        ),
+        border: Border(
+          right: BorderSide(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
+            child: Row(
+              children: [
+                Icon(Icons.search_outlined, size: 16,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Materiais semelhantes',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(14),
+              child: _AvisoPossivelDuplicata(
+                carregando: _verificandoDuplicata,
+                duplicatas: _possiveisDuplicatas,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
     // ── Painel lateral de fornecedores (apenas no modo edição) ────────────
     Widget? fornecedorPanel;
     if (temFornecedor) {
@@ -5007,7 +5344,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         ..sort((a, b) => a.preco.compareTo(b.preco));
 
       fornecedorPanel = Container(
-        width: 260,
+        width: _fornecedoresExpandido ? 380 : 220,
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
           borderRadius: BorderRadius.only(
@@ -5021,24 +5358,44 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Cabeçalho do painel
-            Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 10),
-              child: Row(
-                children: [
-                  Icon(Icons.store_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  SizedBox(width: 6),
-                  Text(
-                    'Fornecedores (${fornecedores.length})',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
+            // Cabeçalho do painel (clicável para expandir/recolher)
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: InkWell(
+              onTap: () => setState(() => _fornecedoresExpandido = !_fornecedoresExpandido),
+              mouseCursor: SystemMouseCursors.click,
+              borderRadius: BorderRadius.only(
+                topRight: Radius.circular(12),
+                bottomRight: _fornecedoresExpandido ? Radius.zero : Radius.circular(12),
+              ),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 12, 16),
+                child: Row(
+                  children: [
+                    Icon(Icons.store_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Fornecedores (${fornecedores.length})',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Icon(
+                      _fornecedoresExpandido ? Icons.chevron_left : Icons.chevron_right,
+                      size: 18,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
-                  ),
-                ],
+                  ],
+                ),
+              ),
               ),
             ),
+            if (_fornecedoresExpandido) ...[
             Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
 
             // Cabeçalho das colunas
@@ -5054,23 +5411,36 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     ),
                   ),
                   SizedBox(
-                    width: 68,
+                    width: 84,
                     child: Text(
-                      'Unit.',
+                      'Preço Unidade',
                       textAlign: TextAlign.right,
+                      maxLines: 2,
                       style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
                           color: Theme.of(context).colorScheme.outline),
                     ),
                   ),
                   SizedBox(
-                    width: 68,
+                    width: 84,
                     child: Text(
-                      'm²',
+                      'Preço m²',
                       textAlign: TextAlign.right,
+                      maxLines: 2,
                       style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
                           color: Theme.of(context).colorScheme.outline),
                     ),
                   ),
+                  if (deveExibirPrecoUnidade(material?.unidade))
+                    SizedBox(
+                      width: 84,
+                      child: Text('Preço ${formatarUnidadeExibicao(material!.unidade)}',
+                        textAlign: TextAlign.right,
+                        maxLines: 2,
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
+                            color: Theme.of(context).colorScheme.outline),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -5086,8 +5456,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     final isMediano = material!.precoMediano != null &&
                         fm.preco == material.precoMediano;
 
-                    final fmPreco   = fm.preco > 0 ? 'R\$ ${fm.preco.toStringAsFixed(2)}' : '—';
-                    final fmPrecoM2 = fm.precoMetroQuadrado > 0 ? 'R\$ ${fm.precoMetroQuadrado.toStringAsFixed(2)}' : '—';
+                    final fmPreco   = fm.preco > 0 ? formatarMoeda(fm.preco) : '—';
+                    final fmPrecoM2 = fm.precoMetroQuadrado > 0 ? formatarMoeda(fm.precoMetroQuadrado) : '—';
+                    final fmPrecoUnidade = fm.precoUnidadeMedida > 0 ? formatarMoeda(fm.precoUnidadeMedida) : '—';
                     return Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -5109,15 +5480,24 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                                 ),
                               ),
                               SizedBox(
-                                width: 68,
+                                width: 84,
                                 child: Text(fmPreco, textAlign: TextAlign.right,
+                                    maxLines: 1, softWrap: false, overflow: TextOverflow.visible,
                                     style: const TextStyle(fontSize: 11)),
                               ),
                               SizedBox(
-                                width: 68,
+                                width: 84,
                                 child: Text(fmPrecoM2, textAlign: TextAlign.right,
+                                    maxLines: 1, softWrap: false, overflow: TextOverflow.visible,
                                     style: const TextStyle(fontSize: 11)),
                               ),
+                              if (deveExibirPrecoUnidade(material.unidade))
+                                SizedBox(
+                                  width: 84,
+                                  child: Text(fmPrecoUnidade, textAlign: TextAlign.right,
+                                      maxLines: 1, softWrap: false, overflow: TextOverflow.visible,
+                                      style: const TextStyle(fontSize: 11)),
+                                ),
                             ],
                           ),
                         ),
@@ -5131,22 +5511,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
             ),
 
-            // Dica de clique
-            Padding(
-              padding: EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, size: 12, color: Theme.of(context).colorScheme.outline),
-                  SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      'Clique em um fornecedor para criar um orçamento com este material.',
-                      style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.outline),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            SizedBox(height: 8),
+            ],
           ],
         ),
       );
@@ -5215,7 +5581,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
         child: SizedBox(
-        width: temFornecedor ? 840 : 560,
+        width: 560 + (temFornecedor ? 400 : 0) + 260,
         height: 680,
         child: Column(
           children: [
@@ -5348,6 +5714,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Painel lateral (possíveis duplicatas), à esquerda — sempre visível
+                  avisoPanel,
                   // Formulário
                   Expanded(
                     child: Padding(
@@ -5367,7 +5735,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               child: Row(
                 children: [
-                  if (_editando && !widget.somenteLeitura) ...[
+                  if (_editando) ...[
                     if (widget.material!.ativo && widget.onDesativar != null)
                       Tooltip(
                         message: 'Desativar este material (ele deixa de aparecer nas listagens ativas)',
@@ -5421,11 +5789,11 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                         ),
                       ),
                   ],
-                  if (widget.somenteLeitura) ...[
+                  if (_bloqueadoParaCompras) ...[
                     Icon(Icons.lock_outline, size: 14, color: Theme.of(context).colorScheme.outline),
                     const SizedBox(width: 6),
                     Text(
-                      'Apenas consulta — você não tem permissão para editar materiais.',
+                      'Você pode alterar apenas a Categoria e confirmar o Estoque.',
                       style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.outline),
                     ),
                   ],
@@ -5607,7 +5975,25 @@ class _AvisoPossivelDuplicata extends StatelessWidget {
       );
     }
 
-    if (duplicatas.isEmpty) return const SizedBox.shrink();
+    if (duplicatas.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.check_circle_outline, size: 14,
+                color: Theme.of(context).colorScheme.outline),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Nenhum material parecido encontrado até agora',
+                style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.outline),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     final temExata = duplicatas.any((d) => d.exata);
     final cor = temExata ? AppTheme.error : AppTheme.warning;
@@ -5663,7 +6049,7 @@ class _AvisoPossivelDuplicata extends StatelessWidget {
                 '${m.espessura!.trim().replaceAll(RegExp(r"mm\s*$", caseSensitive: false), '').trim()}mm',
             ].join(' • ');
 
-            final qtdTxt = formatarQuantidade(m.quantidade);
+            final qtdTxt = formatarQuantidadeExibicao(m.quantidade);
 
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 3),
@@ -5787,16 +6173,24 @@ class _EstoqueMinimoBloqueadoInfo extends StatelessWidget {
   }
 }
 
-/// Formata um valor monetário com até 6 casas decimais, removendo zeros
-/// desnecessários à direita (mínimo 2 casas para manter padrão monetário).
-/// Ex: 1.5 → "1,50" | 0.123456 → "0,123456" | 1.00 → "1,00"
-String _formatarCusto(double valor) {
-  // Tenta de 6 até 2 casas decimais e usa a primeira que não tenha zero final
-  for (int casas = 6; casas >= 2; casas--) {
-    final str = valor.toStringAsFixed(casas);
-    if (!str.endsWith('0')) return str;
+/// Formata um valor monetário APENAS para exibição visual: sempre 2 casas
+/// decimais, com separador de milhar '.' e decimal ',' (padrão BR).
+/// Não altera o valor real do dado, apenas a string exibida na tela.
+/// Ex: 1000 → "1.000,00" | 152.638889 → "152,64" | 1234567.8 → "1.234.567,80"
+String _formatarCustoVisual(double valor) {
+  final fixo = valor.toStringAsFixed(2);
+  final partes = fixo.split('.');
+  final inteiro = partes[0];
+  final decimal = partes.length > 1 ? partes[1] : '00';
+
+  final buffer = StringBuffer();
+  final len = inteiro.length;
+  for (int i = 0; i < len; i++) {
+    if (i > 0 && (len - i) % 3 == 0) buffer.write('.');
+    buffer.write(inteiro[i]);
   }
-  return valor.toStringAsFixed(2);
+
+  return '${buffer.toString()},$decimal';
 }
 
 /// Formata uma quantidade de material SEM arredondar/truncar o valor real.
@@ -5804,6 +6198,9 @@ String _formatarCusto(double valor) {
 /// estoque, ex.: 3.696 exibido como "3.70"), esta função mostra o número
 /// exatamente como ele é: inteiro sem casas decimais, ou com o número de
 /// casas necessário para representá-lo por completo (sem zeros à direita).
+/// Mantida sem separador de milhar pois também é usada para inicializar/
+/// parsear campos editáveis de largura/comprimento (dimensões em metros,
+/// tipicamente pequenas), onde um ponto de milhar quebraria a edição.
 /// Ex.: 3.696 → "3.696" | 3.70 → "3.7" | 4 → "4"
 String formatarQuantidade(double valor) {
   if (valor == valor.truncateToDouble()) return valor.toStringAsFixed(0);
@@ -5811,6 +6208,36 @@ String formatarQuantidade(double valor) {
   // de um double (sem zeros à direita além do necessário), preservando a
   // precisão real do valor armazenado.
   return valor.toString();
+}
+
+/// Formata uma quantidade de estoque para EXIBIÇÃO como texto — com
+/// separador de milhar (ponto) na parte inteira e vírgula como separador
+/// decimal (padrão brasileiro). Diferente de [formatarQuantidade], que é
+/// usada em campos editáveis de dimensão e por isso não pode ter milhar.
+/// Ex.: 1000 → "1.000"; 3.696 → "3,696"; 4.0 → "4".
+String formatarQuantidadeExibicao(double v) {
+  final bool isInteiro = v == v.truncateToDouble();
+  final String bruto = isInteiro ? v.toStringAsFixed(0) : v.toString();
+
+  final bool negativo = bruto.startsWith('-');
+  final String semSinal = negativo ? bruto.substring(1) : bruto;
+
+  final partes = semSinal.split('.');
+  final parteInteira = partes[0];
+  final parteDecimal = partes.length > 1 ? partes[1] : null;
+
+  final buffer = StringBuffer();
+  final len = parteInteira.length;
+  for (int i = 0; i < len; i++) {
+    if (i > 0 && (len - i) % 3 == 0) buffer.write('.');
+    buffer.write(parteInteira[i]);
+  }
+
+  final resultado = parteDecimal != null
+      ? '${buffer.toString()},$parteDecimal'
+      : buffer.toString();
+
+  return negativo ? '-$resultado' : resultado;
 }
 
 class _CustoCell extends StatefulWidget {
@@ -5834,7 +6261,7 @@ class _CustoCellState extends State<_CustoCell> {
   @override
   Widget build(BuildContext context) {
     final hasValue  = widget.valor != null && widget.valor! > 0;
-    final label     = hasValue ? 'R\$ ${_formatarCusto(widget.valor!)}' : '—';
+    final label     = hasValue ? 'R\$ ${_formatarCustoVisual(widget.valor!)}' : '—';
     final showHover = widget.temHistorico && _hovered;
 
     return MouseRegion(
@@ -5925,10 +6352,10 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
   }
 
   Future<void> _salvarCustoManual() async {
-    final unitStr = _ctrlUnit.text.trim().replaceAll(',', '.');
-    final m2Str   = _ctrlM2.text.trim().replaceAll(',', '.');
-    final unit = double.tryParse(unitStr);
-    final m2   = double.tryParse(m2Str);
+    final unitStr = _ctrlUnit.text.trim();
+    final m2Str   = _ctrlM2.text.trim();
+    final unit = _parsePreco(unitStr);
+    final m2   = _parsePreco(m2Str);
 
     if ((unitStr.isEmpty || unit == null) && (m2Str.isEmpty || m2 == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -5993,12 +6420,13 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                 child: TextField(
                   controller: _ctrlUnit,
                   decoration: const InputDecoration(
-                    labelText: 'Custo unitário (R\$)',
+                    labelText: 'Preço',
                     prefixText: 'R\$ ',
                     isDense: true,
                     border: OutlineInputBorder(),
                   ),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_PrecoInputFormatter()],
                   style: const TextStyle(fontSize: 13),
                 ),
               ),
@@ -6007,12 +6435,13 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                 child: TextField(
                   controller: _ctrlM2,
                   decoration: const InputDecoration(
-                    labelText: 'Custo por m² (R\$)',
+                    labelText: 'Preço m²',
                     prefixText: 'R\$ ',
                     isDense: true,
                     border: OutlineInputBorder(),
                   ),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_PrecoInputFormatter()],
                   style: const TextStyle(fontSize: 13),
                 ),
               ),
@@ -6148,7 +6577,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                     style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                                   ),
                                   TextSpan(
-                                    text: 'R\$ ${ultimoCusto.toStringAsFixed(2)}',
+                                    text: 'R\$ ${_formatarCustoVisual(ultimoCusto)}',
                                     style: const TextStyle(
                                       color: Color(0xFFE85D04),
                                       fontWeight: FontWeight.w700,
@@ -6167,7 +6596,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                     style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                                   ),
                                   TextSpan(
-                                    text: 'R\$ ${ultimoCustoM2.toStringAsFixed(2)}',
+                                    text: 'R\$ ${_formatarCustoVisual(ultimoCustoM2)}',
                                     style: const TextStyle(
                                       color: Color(0xFFE85D04),
                                       fontWeight: FontWeight.w700,
@@ -6198,7 +6627,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                     ),
                   ),
                   SizedBox(
-                    width: 80,
+                    width: 70,
                     child: Text(
                       'OC #',
                       textAlign: TextAlign.center,
@@ -6207,7 +6636,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                     ),
                   ),
                   SizedBox(
-                    width: 70,
+                    width: 60,
                     child: Text(
                       'Qtd',
                       textAlign: TextAlign.right,
@@ -6218,7 +6647,16 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                   SizedBox(
                     width: 90,
                     child: Text(
-                      'Custo unit.',
+                      'm/l por unid.',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 90,
+                    child: Text(
+                      'Valor/m/l',
                       textAlign: TextAlign.right,
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
                           color: Theme.of(context).colorScheme.onSurfaceVariant),
@@ -6361,9 +6799,25 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                   ),
                                 ),
                                 SizedBox(
-                                  width: 70,
+                                  width: 60,
                                   child: Text(
-                                    formatarQuantidade(h.quantidade),
+                                    formatarQuantidadeExibicao(h.quantidade),
+                                    textAlign: TextAlign.right,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: isUltimo ? FontWeight.w700 : FontWeight.normal,
+                                      color: isUltimo
+                                          ? Theme.of(context).colorScheme.onSurface
+                                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 90,
+                                  child: Text(
+                                    !h.usarM2 && h.qtdUnidade != null && h.qtdUnidade! > 0
+                                        ? '${formatarQuantidadeExibicao(h.qtdUnidade!)} m/l'
+                                        : '—',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
                                       fontSize: 13,
@@ -6378,7 +6832,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                   width: 90,
                                   child: Text(
                                     !h.usarM2 && h.precoUnitario > 0
-                                        ? 'R\$ ${h.precoUnitario.toStringAsFixed(6)}'
+                                        ? 'R\$ ${_formatarCustoVisual(h.precoUnitario)}'
                                         : '—',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
@@ -6396,7 +6850,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                   width: 90,
                                   child: Text(
                                     h.usarM2 && h.precoM2 != null && h.precoM2! > 0
-                                        ? 'R\$ ${h.precoM2!.toStringAsFixed(6)}'
+                                        ? 'R\$ ${_formatarCustoVisual(h.precoM2!)}'
                                         : '—',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
@@ -6413,7 +6867,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                 SizedBox(
                                   width: 90,
                                   child: Text(
-                                    'R\$ ${h.total.toStringAsFixed(6)}',
+                                    'R\$ ${_formatarCustoVisual(h.total)}',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
                                       fontSize: 13,
@@ -6750,7 +7204,7 @@ class _BannerSecao extends StatelessWidget {
               final unidade = formatarUnidadeExibicao(a.unidade as String?);
               final unidadeExibir = unidade == '—' ? '' : unidade;
               final qtd     = a.quantidade as double;
-              final qtdStr  = formatarQuantidade(qtd);
+              final qtdStr  = formatarQuantidadeExibicao(qtd);
               final selecionado = selecionados.contains(a);
               return InkWell(
                 onTap: () => onToggle(a),

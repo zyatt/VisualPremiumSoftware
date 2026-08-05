@@ -113,18 +113,24 @@ class RelacaoOSModel {
   final int id;
   final String numeroOS;
   final String? descricao;
+  final String? cliente;
   final String status;
   final DateTime? criadoEm;
   final DateTime? atualizadoEm;
+  /// Nome do usuário que fechou esta OS (snapshot no momento do fechamento).
+  /// Null enquanto a OS está em andamento, ou após ser revertida.
+  final String? fechadoPorNome;
   final List<MovimentacaoModel> movimentacoes;
 
   RelacaoOSModel({
     required this.id,
     required this.numeroOS,
     this.descricao,
+    this.cliente,
     this.status = 'EM_ANDAMENTO',
     this.criadoEm,
     this.atualizadoEm,
+    this.fechadoPorNome,
     required this.movimentacoes,
   });
 
@@ -142,6 +148,7 @@ class RelacaoOSModel {
         id:           (json['id'] as num?)?.toInt() ?? 0,
         numeroOS:     json['numeroOS'],
         descricao:    json['descricao'],
+        cliente:      json['cliente'],
         status:       json['status'] ?? 'EM_ANDAMENTO',
         criadoEm:     json['criadoEm'] != null
             ? DateTime.tryParse(json['criadoEm'].toString())?.toLocal()
@@ -149,6 +156,7 @@ class RelacaoOSModel {
         atualizadoEm: json['atualizadoEm'] != null
             ? DateTime.tryParse(json['atualizadoEm'].toString())?.toLocal()
             : null,
+        fechadoPorNome: json['fechadoPorNome'],
         movimentacoes: (json['movimentacoes'] as List? ?? [])
             .map((m) => MovimentacaoModel.fromJson(m))
             .toList(),

@@ -14,13 +14,28 @@ class HistoricoPrecoModel {
   final double precoUnitario;
   final double? precoM2;
   final double quantidade;
+  /// Quantidade da unidade de medida por embalagem/peça (ex.: 11 m/l por
+  /// unidade de adesivo). Quando informado, [quantidade] representa o número
+  /// de embalagens compradas, e a quantidade real usada no cálculo do total
+  /// é quantidade × qtdUnidade (mesma regra da OC).
+  final double? qtdUnidade;
   final bool usarM2;
   final DateTime criadoEm;
   final DateTime? dataOrdem;
 
+  /// Quantidade real usada no estoque/cálculo do total: quando há
+  /// [qtdUnidade] (ex.: 11 m/l por unidade), multiplica; senão usa
+  /// [quantidade] diretamente.
+  double get quantidadeReal {
+    if (!usarM2 && qtdUnidade != null && qtdUnidade! > 0) {
+      return quantidade * qtdUnidade!;
+    }
+    return quantidade;
+  }
+
   double get total {
-    if (usarM2 && precoM2 != null && precoM2! > 0) return quantidade * precoM2!;
-    return quantidade * precoUnitario;
+    if (usarM2 && precoM2 != null && precoM2! > 0) return quantidadeReal * precoM2!;
+    return quantidadeReal * precoUnitario;
   }
 
   HistoricoPrecoModel({
@@ -32,6 +47,7 @@ class HistoricoPrecoModel {
     required this.precoUnitario,
     this.precoM2,
     required this.quantidade,
+    this.qtdUnidade,
     this.usarM2 = false,
     required this.criadoEm,
     this.dataOrdem,
@@ -49,6 +65,9 @@ class HistoricoPrecoModel {
             ? double.tryParse(json['precoM2'].toString())
             : null,
         quantidade: double.tryParse(json['quantidade'].toString()) ?? 0,
+        qtdUnidade: json['qtdUnidade'] != null
+            ? double.tryParse(json['qtdUnidade'].toString())
+            : null,
         usarM2:     json['usarM2'] ?? false,
         criadoEm:   DateTime.parse(json['criadoEm']).toLocal(),
         dataOrdem:  json['ordemCompra']?['data'] != null
@@ -63,6 +82,7 @@ class FornecedorMaterialModel {
   final String fornecedorNome;
   final double preco;
   final double precoMetroQuadrado;
+  final double precoUnidadeMedida;
   final bool ativo;
   final double? materialLargura;
   final double? materialComprimento;
@@ -75,6 +95,7 @@ class FornecedorMaterialModel {
     required this.fornecedorNome,
     required this.preco,
     required this.precoMetroQuadrado,
+    this.precoUnidadeMedida = 0,
     required this.ativo,
     this.materialLargura,
     this.materialComprimento,
@@ -90,6 +111,9 @@ class FornecedorMaterialModel {
             : 0,
         precoMetroQuadrado: json['precoMetroQuadrado'] != null
             ? double.tryParse(json['precoMetroQuadrado'].toString()) ?? 0
+            : 0,
+        precoUnidadeMedida: json['precoUnidadeMedida'] != null
+            ? double.tryParse(json['precoUnidadeMedida'].toString()) ?? 0
             : 0,
         ativo:              json['ativo'] ?? true,
         materialLargura:    json['material']?['largura'] != null

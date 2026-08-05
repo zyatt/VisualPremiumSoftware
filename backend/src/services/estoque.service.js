@@ -104,6 +104,7 @@ async function registrarMovimentacao({
   larguraUsada, comprimentoUsado,
   materialOrigemId,
   usuarioNome,
+  cliente,
 }) {
   const material = await prisma.material.findUnique({ where: { id: materialId } });
   if (!material) throw { status: 404, message: 'Material não encontrado' };
@@ -136,16 +137,28 @@ async function registrarMovimentacao({
 
   const delta = tipo === 'ENTRADA' ? quantidade : -quantidade;
 
+  const clienteTrim = (cliente ?? '').trim();
+
   let relacao;
 
   if (osEhNumerica || osTemSufixo) {
     relacao = await prisma.relacaoOS.upsert({
       where:  { numeroOS },
-      create: { numeroOS, status: 'EM_ANDAMENTO' },
+      create: { numeroOS, status: 'EM_ANDAMENTO', cliente: clienteTrim || null },
       update: {},
     });
   } else {
     relacao = await resolverRelacaoOSDescritiva(numeroOS);
+  }
+
+  // Só grava o cliente informado se a relação ainda não tiver um vinculado —
+  // não sobrescreve um cliente já salvo por causa de uma movimentação
+  // subsequente que veio sem esse campo preenchido.
+  if (clienteTrim && !relacao.cliente) {
+    relacao = await prisma.relacaoOS.update({
+      where: { id: relacao.id },
+      data:  { cliente: clienteTrim },
+    });
   }
   const precoUnitarioFinal = precoUnitario ?? null;
 
@@ -602,7 +615,7 @@ async function excluirRelacaoOS(relacaoOSId) {
   }
 }
 
-async function fecharOS(relacaoOSId) {
+async function fecharOS(relacaoOSId, fechadoPorNome) {
   const relacao = await prisma.relacaoOS.findUnique({ where: { id: relacaoOSId } });
   if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
   if (relacao.status === 'FECHADA') {
@@ -611,7 +624,7 @@ async function fecharOS(relacaoOSId) {
 
   return prisma.relacaoOS.update({
     where:   { id: relacaoOSId },
-    data:    { status: 'FECHADA' },
+    data:    { status: 'FECHADA', fechadoPorNome: fechadoPorNome ?? null },
     include: _includeMovimentacoes,
   });
 }
@@ -705,7 +718,7 @@ async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, preco
   return movimentacaoAtualizada;
 }
 
-async function renomearOS(id, novoNumeroOS) {
+async function renomearOS(id, novoNumeroOS, novoCliente) {
   const novoNome = (novoNumeroOS ?? '').trim().toUpperCase();
   if (!novoNome) throw { status: 400, message: 'Nome da OS não pode ser vazio' };
 
@@ -717,9 +730,15 @@ async function renomearOS(id, novoNumeroOS) {
     throw { status: 409, message: `Já existe uma OS com o nome "${novoNome}"` };
   }
 
+  // novoCliente undefined = campo não enviado, não altera; string vazia =
+  // remove o cliente vinculado; string preenchida = atualiza.
+  const clienteData = novoCliente === undefined
+    ? {}
+    : { cliente: novoCliente.trim() === '' ? null : novoCliente.trim() };
+
   const atualizada = await prisma.relacaoOS.update({
     where: { id },
-    data:  { numeroOS: novoNome },
+    data:  { numeroOS: novoNome, ...clienteData },
     include: _includeMovimentacoes,
   });
 
@@ -729,6 +748,20 @@ async function renomearOS(id, novoNumeroOS) {
   });
 
   return atualizada;
+}
+
+/**
+ * Busca o cliente vinculado a um número de OS já existente (qualquer
+ * status), usado para autofill ao digitar o número da OS nas telas de
+ * entrada/saída. Retorna null se a OS não existir ou não tiver cliente.
+ */
+async function buscarClientePorNumeroOS(numeroOS) {
+  const relacao = await prisma.relacaoOS.findFirst({
+    where:   { numeroOS },
+    orderBy: { criadoEm: 'desc' },
+    select:  { cliente: true },
+  });
+  return relacao?.cliente ?? null;
 }
 
 module.exports = {
@@ -742,4 +775,5 @@ module.exports = {
   renomearOS,
   atualizarPrecoMovimentacao,
   resolverRelacaoOSDescritiva,
+  buscarClientePorNumeroOS,
 };

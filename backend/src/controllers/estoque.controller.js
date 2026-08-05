@@ -4,6 +4,11 @@ const prisma = require('../utils/prisma');
 const listar                = async (req, res, next) => { try { res.json(await svc.listarEmAndamento(req.query.busca)); } catch(e){next(e);} };
 const buscarPorNumeroOS     = async (req, res, next) => { try { res.json(await svc.buscarPorNumeroOS(req.params.numeroOS)); } catch(e){next(e);} };
 
+const buscarClientePorNumeroOS = async (req, res, next) => {
+  try { res.json({ cliente: await svc.buscarClientePorNumeroOS(req.params.numeroOS) }); }
+  catch(e){ next(e); }
+};
+
 const registrarMovimentacao = async (req, res, next) => {
   try {
     const usuario = await prisma.usuario.findUnique({
@@ -17,11 +22,20 @@ const registrarMovimentacao = async (req, res, next) => {
 
 const removerMovimentacao   = async (req, res, next) => { try { res.json(await svc.removerMovimentacao(+req.params.movimentacaoId)); } catch(e){next(e);} };
 const excluirRelacaoOS      = async (req, res, next) => { try { await svc.excluirRelacaoOS(+req.params.relacaoOSId); res.status(204).send(); } catch(e){next(e);} };
-const fecharOS              = async (req, res, next) => { try { res.json(await svc.fecharOS(+req.params.relacaoOSId)); } catch(e){next(e);} };
+const fecharOS              = async (req, res, next) => {
+  try {
+    const usuario = await prisma.usuario.findUnique({
+      where: { id: req.usuario.id },
+      select: { nome: true },
+    });
+    const usuarioNome = usuario?.nome ?? req.usuario?.username ?? 'Usuário';
+    res.json(await svc.fecharOS(+req.params.relacaoOSId, usuarioNome));
+  } catch(e){ next(e); }
+};
 const listarTodas = async (req, res, next) => { try { res.json(await svc.listarTodas(req.query.busca)); } catch(e){next(e);} };
 const renomearOS = async (req, res, next) => {
   try {
-    res.json(await svc.renomearOS(Number(req.params.id), req.body.novoNumeroOS));
+    res.json(await svc.renomearOS(Number(req.params.id), req.body.novoNumeroOS, req.body.novoCliente));
   } catch (e) { next(e); }
 };
 
@@ -31,4 +45,4 @@ const atualizarPrecoMovimentacao = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-module.exports = { listar, buscarPorNumeroOS, registrarMovimentacao, removerMovimentacao, excluirRelacaoOS, fecharOS, listarTodas, renomearOS, atualizarPrecoMovimentacao };
+module.exports = { listar, buscarPorNumeroOS, buscarClientePorNumeroOS, registrarMovimentacao, removerMovimentacao, excluirRelacaoOS, fecharOS, listarTodas, renomearOS, atualizarPrecoMovimentacao };

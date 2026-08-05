@@ -13,19 +13,62 @@ import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
 import 'controle_estoque_page.dart' show formatarMedidaOuDimensoes, formatarUnidadeExibicao;
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+/// Envolve `formatarUnidadeExibicao` para pluralizar corretamente quando a
+/// unidade for "Unidade": 1 -> "Unidade", diferente de 1 -> "Unidades".
+/// Demais unidades (m², ml, m, g, etc.) são retornadas como já vêm.
+String formatarUnidadeComPlural(String? unidade, double quantidade) {
+  final base = formatarUnidadeExibicao(unidade);
+  if (base.trim().toLowerCase() == 'unidade') {
+    return quantidade == 1 ? 'Unidade' : 'Unidades';
+  }
+  return base;
+}
 
-/// Formata um valor monetário com até 6 casas decimais,
-/// removendo zeros à direita desnecessários (mínimo 2 casas).
+/// Formata um valor monetário arredondado para 2 casas decimais,
+/// aplicando separador de milhar (ponto) na parte inteira.
 String _brl(double v) {
   if (v == 0) return '—';
-  final s6 = v.toStringAsFixed(6);
-  // Remove zeros à direita mas mantém ao menos 2 casas decimais
-  final trimmed = s6.replaceAll(RegExp(r'0+$'), '');
-  final partes = trimmed.split('.');
-  final dec = partes.length > 1 ? partes[1] : '';
-  final decFinal = dec.length < 2 ? dec.padRight(2, '0') : dec;
-  return 'R\$ ${partes[0]},$decFinal';
+  final s2 = v.toStringAsFixed(2);
+  final partes = s2.split('.');
+  final decFinal = partes[1];
+
+  final parteInteira = partes[0];
+  final buffer = StringBuffer();
+  final len = parteInteira.length;
+  for (int i = 0; i < len; i++) {
+    if (i > 0 && (len - i) % 3 == 0) buffer.write('.');
+    buffer.write(parteInteira[i]);
+  }
+
+  return 'R\$ ${buffer.toString()},$decFinal';
+}
+
+/// Formata uma quantidade com separador de milhar (ponto) na parte inteira
+/// e vírgula como separador decimal (padrão brasileiro).
+/// Ex.: 1000 → "1.000"; 3.696 → "3,696"; 25 → "25".
+String _formatarQtd(double v) {
+  final bool isInteiro = v == v.truncateToDouble();
+  final String bruto = isInteiro ? v.toStringAsFixed(0) : v.toString();
+
+  final bool negativo = bruto.startsWith('-');
+  final String semSinal = negativo ? bruto.substring(1) : bruto;
+
+  final partes = semSinal.split('.');
+  final parteInteira = partes[0];
+  final parteDecimal = partes.length > 1 ? partes[1] : null;
+
+  final buffer = StringBuffer();
+  final len = parteInteira.length;
+  for (int i = 0; i < len; i++) {
+    if (i > 0 && (len - i) % 3 == 0) buffer.write('.');
+    buffer.write(parteInteira[i]);
+  }
+
+  final resultado = parteDecimal != null
+      ? '${buffer.toString()},$parteDecimal'
+      : buffer.toString();
+
+  return negativo ? '-$resultado' : resultado;
 }
 
 String _fmtData(DateTime? dt) {
@@ -188,6 +231,7 @@ class _EspessuraFormatter extends TextInputFormatter {
 class _RelatorioOSPageState extends State<RelatorioOSPage> {
   // ── Controllers ───────────────────────────────────────────────────────────
   final _buscaOSCtrl       = TextEditingController(); // busca por nº OS
+  final _buscaClienteCtrl  = TextEditingController(); // busca por cliente (local)
   final _materialNomeCtrl  = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
@@ -212,6 +256,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   void dispose() {
     _debounce?.cancel();
     _buscaOSCtrl.dispose();
+    _buscaClienteCtrl.dispose();
     _materialNomeCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
@@ -265,6 +310,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
     _comprimentoCtrl.clear();
     _larguraCtrl.clear();
     _espessuraCtrl.clear();
+    _buscaClienteCtrl.clear();
     setState(() {
       _dataInicio = null;
       _dataFim    = null;
@@ -274,6 +320,16 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
 
   bool get _temFiltroData => _dataInicio != null || _dataFim != null;
 
+  bool get _temFiltroCliente => _buscaClienteCtrl.text.trim().isNotEmpty;
+
+  List<RelacaoOSModel> _filtrarPorCliente(List<RelacaoOSModel> lista) {
+    final cliente = _UpperCaseFormatter._rem(_buscaClienteCtrl.text.trim()).toUpperCase();
+    if (cliente.isEmpty) return lista;
+    return lista
+        .where((r) => _UpperCaseFormatter._rem(r.cliente ?? '').toUpperCase().contains(cliente))
+        .toList();
+  }
+
   bool get _temFiltroMaterial =>
       _materialNomeCtrl.text.isNotEmpty ||
       _identificadorCtrl.text.isNotEmpty ||
@@ -281,7 +337,8 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
       _comprimentoCtrl.text.isNotEmpty ||
       _larguraCtrl.text.isNotEmpty ||
       _espessuraCtrl.text.isNotEmpty ||
-      _temFiltroData;
+      _temFiltroData ||
+      _temFiltroCliente;
 
   void _abrirDetalhe(RelacaoOSModel rel) {
     Navigator.of(context).push(
@@ -294,6 +351,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<RelatorioOSProvider>();
+    final relatoriosFiltrados = _filtrarPorCliente(provider.relatorios);
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -354,6 +412,22 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     decoration: InputDecoration(
                       hintText: 'Buscar por número da OS',
                       prefixIcon: Icon(Icons.search,
+                          color: Theme.of(context).colorScheme.outline, size: 20),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _buscaClienteCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    onChanged: (v) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: 'Nome do cliente',
+                      prefixIcon: Icon(Icons.person_outline,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
                     ),
@@ -526,14 +600,14 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
             const SizedBox(height: 16),
 
             // ── Barra de resumo: contagem + total geral filtrado ─────────────
-            if (!provider.carregando && provider.erro == null && provider.relatorios.isNotEmpty)
+            if (!provider.carregando && provider.erro == null && relatoriosFiltrados.isNotEmpty)
               Builder(
                 builder: (_) {
-                  final total = provider.relatorios.fold<double>(
+                  final total = relatoriosFiltrados.fold<double>(
                     0,
                     (acc, rel) => acc + _totalLiquido(rel.movimentacoes),
                   );
-                  final qtd = provider.relatorios.length;
+                  final qtd = relatoriosFiltrados.length;
                   return Container(
                     margin: const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -623,7 +697,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                             ],
                           ),
                         )
-                      : provider.relatorios.isEmpty
+                      : relatoriosFiltrados.isEmpty
                           ? Center(
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -636,8 +710,8 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                                   ),
                                   SizedBox(height: 12),
                                   Text(
-                                    provider.temFiltroMaterial
-                                        ? 'Nenhuma OS com este material'
+                                    provider.temFiltroMaterial || _temFiltroCliente
+                                        ? 'Nenhuma OS encontrada'
                                         : 'Nenhuma OS fechada',
                                     style: Theme.of(context)
                                         .textTheme
@@ -647,8 +721,8 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                                   ),
                                   SizedBox(height: 4),
                                   Text(
-                                    provider.temFiltroMaterial
-                                        ? 'Tente ajustar os filtros de material'
+                                    provider.temFiltroMaterial || _temFiltroCliente
+                                        ? 'Tente ajustar os filtros'
                                         : 'As OS fechadas aparecerão aqui',
                                     style: Theme.of(context)
                                         .textTheme
@@ -661,7 +735,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                               ),
                             )
                           : _RelatorioOSGrid(
-                              relatorios: provider.relatorios,
+                              relatorios: relatoriosFiltrados,
                               onTap: _abrirDetalhe,
                             ),
             ),
@@ -1032,29 +1106,6 @@ class _RelatorioOSCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Data representativa = primeira movimentação (criação real da OS)
-    final todasMovs = relatorio.movimentacoes;
-    DateTime? dataRepresentativa;
-    if (todasMovs.isNotEmpty) {
-      dataRepresentativa = todasMovs
-          .map((m) => m.criadoEm)
-          .whereType<DateTime>()
-          .fold<DateTime?>(null, (min, d) => min == null || d.isBefore(min) ? d : min);
-    }
-    dataRepresentativa ??= relatorio.criadoEm;
-    final dataStr = _fmtData(dataRepresentativa);
-
-    final saidas = relatorio.movimentacoes
-        .where((m) => m.tipo == 'SAIDA')
-        .toList();
-    final entradas = relatorio.movimentacoes
-        .where((m) => m.tipo == 'ENTRADA')
-        .toList();
-
-    final totalGeral = _totalLiquido(relatorio.movimentacoes);
-    final materiaisUnicos =
-        relatorio.movimentacoes.map((m) => m.materialNome).toSet().length;
-
     return Tooltip(
       message: 'Abrir ${_tituloOS(relatorio.numeroOS)}',
       child: Card(
@@ -1117,33 +1168,27 @@ class _RelatorioOSCard extends StatelessWidget {
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  SizedBox(height: 2),
-                  Text(
-                    '$materiaisUnicos '
-                    '${materiaisUnicos == 1 ? 'material' : 'materiais'}',
-                    style: TextStyle(
-                        fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  ),
-                  if (entradas.isNotEmpty)
-                    Text(
-                      '${entradas.length} entrada(s). · ${saidas.length} saída(s).',
-                      style: TextStyle(
-                          fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  if ((relatorio.cliente ?? '').trim().isNotEmpty) ...[
+                    SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Icon(Icons.person_outline, size: 14,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            relatorio.cliente!.trim(),
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
-                  if (totalGeral > 0)
-                    Text(
-                      _brl(totalGeral),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: _corFechada,
-                      ),
-                    ),
-                  Text(
-                    dataStr,
-                    style: TextStyle(
-                        fontSize: 11, color: Theme.of(context).colorScheme.outline),
-                  ),
+                  ],
                 ],
               ),
             ],
@@ -1382,6 +1427,20 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
                 ),
               ),
             ),
+            if (rel != null && (rel.cliente ?? '').trim().isNotEmpty) ...[
+              const SizedBox(width: 14),
+              Icon(Icons.person_outline, size: 16,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text(
+                rel.cliente!.trim(),
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ],
         ),
         actions: [
@@ -1497,6 +1556,7 @@ class _RelatorioDetalheBody extends StatelessWidget {
                 label: 'Saídas',
                 valor: '${saidas.length}',
                 cor: AppTheme.error,
+                flex: 2,
               ),
               const SizedBox(width: 12),
               _SummaryCard(
@@ -1504,6 +1564,7 @@ class _RelatorioDetalheBody extends StatelessWidget {
                 label: 'Entradas',
                 valor: '${entradas.length}',
                 cor: AppTheme.primary,
+                flex: 2,
               ),
               const SizedBox(width: 12),
               _SummaryCard(
@@ -1511,6 +1572,7 @@ class _RelatorioDetalheBody extends StatelessWidget {
                 label: 'Total em saídas',
                 valor: _brl(totalGeral),
                 cor: _corFechada,
+                flex: 3,
               ),
               const SizedBox(width: 12),
               _SummaryCard(
@@ -1526,6 +1588,7 @@ class _RelatorioDetalheBody extends StatelessWidget {
                   return _fmtData(primeira ?? rel.criadoEm);
                 }(),
                 cor: Theme.of(context).colorScheme.onSurfaceVariant,
+                flex: 3,
               ),
               const SizedBox(width: 12),
               _SummaryCard(
@@ -1533,7 +1596,18 @@ class _RelatorioDetalheBody extends StatelessWidget {
                 label: 'Fechada em',
                 valor: _fmtData(rel.atualizadoEm ?? rel.criadoEm),
                 cor: AppTheme.primary,
+                flex: 3,
               ),
+              if (rel.fechadoPorNome != null && rel.fechadoPorNome!.isNotEmpty) ...[
+                const SizedBox(width: 12),
+                _SummaryCard(
+                  icon: Icons.person_outline_rounded,
+                  label: 'Fechado por',
+                  valor: rel.fechadoPorNome!,
+                  cor: Theme.of(context).colorScheme.onSurfaceVariant,
+                  flex: 4,
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 24),
@@ -1571,17 +1645,20 @@ class _SummaryCard extends StatelessWidget {
   final String label;
   final String valor;
   final Color cor;
+  final int flex;
 
   const _SummaryCard({
     required this.icon,
     required this.label,
     required this.valor,
     required this.cor,
+    this.flex = 1,
   });
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
+      flex: flex,
       child: Card(
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1610,14 +1687,18 @@ class _SummaryCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      valor,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: cor,
+                    Tooltip(
+                      message: valor,
+                      child: Text(
+                        valor,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: cor,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
@@ -1786,16 +1867,14 @@ class _MovimentacaoSection extends StatelessWidget {
                   final qtdTotal = grupo.fold(0.0, (acc, m) => acc + m.quantidade);
                   final total    = precoEfetivo * qtdTotal;
 
-                  final qtdStr = qtdTotal == qtdTotal.truncateToDouble()
-                      ? qtdTotal.toStringAsFixed(0)
-                      : qtdTotal.toString();
+                  final qtdStr = _formatarQtd(qtdTotal);
 
                   final dataRef = grupo.map((m) => m.criadoEm).reduce(
                     (a, b) => a.isAfter(b) ? a : b,
                   );
 
                   final unidLabel = (ref.materialUnidade ?? '').isNotEmpty
-                      ? 'por ${formatarUnidadeExibicao(ref.materialUnidade)}'
+                      ? 'por ${formatarUnidadeComPlural(ref.materialUnidade, 1)}'
                       : null;
 
                   return Column(
@@ -1823,8 +1902,8 @@ class _MovimentacaoSection extends StatelessWidget {
                                       if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
                                       if ((ref.materialEspessura ?? '').isNotEmpty)
                                         '${ref.materialEspessura!.replaceAll(RegExp(r'\s*mm\s*$', caseSensitive: false), '')}mm',
-                                      if ((ref.materialIdentificador ?? '').isNotEmpty) ref.materialIdentificador!,
                                     ].join(' · ');
+                                    final identificador = (ref.materialIdentificador ?? '').trim();
                                     return Text.rich(
                                       TextSpan(
                                         style: TextStyle(
@@ -1833,6 +1912,13 @@ class _MovimentacaoSection extends StatelessWidget {
                                           color: Theme.of(context).colorScheme.onSurface,
                                         ),
                                         children: [
+                                          if (identificador.isNotEmpty)
+                                            TextSpan(
+                                              text: '$identificador  ·  ',
+                                              style: TextStyle(
+                                                color: Theme.of(context).colorScheme.onSurface,
+                                              ),
+                                            ),
                                           TextSpan(text: ref.materialNome),
                                           if (detalhe.isNotEmpty)
                                             TextSpan(text: '  ·  $detalhe'),
@@ -1864,7 +1950,7 @@ class _MovimentacaoSection extends StatelessWidget {
                             SizedBox(
                               width: 80,
                               child: Text(
-                                '$qtdStr ${formatarUnidadeExibicao(ref.materialUnidade)}',
+                                '$qtdStr ${formatarUnidadeComPlural(ref.materialUnidade, qtdTotal)}',
                                 textAlign: TextAlign.right,
                                 style: TextStyle(
                                     fontSize: 13,

@@ -8,6 +8,7 @@ class FornecedorMaterialVinculoModel {
   final String? materialEspessura;
   final double preco;
   final double precoMetroQuadrado;
+  final double precoUnidadeMedida;
   final bool ativo;
   final String? materialUnidade;
   final double? materialLargura;
@@ -23,6 +24,7 @@ class FornecedorMaterialVinculoModel {
     this.materialEspessura,
     required this.preco,
     required this.precoMetroQuadrado,
+    this.precoUnidadeMedida = 0,
     required this.ativo,
     this.materialUnidade,
     this.materialLargura,
@@ -99,6 +101,9 @@ class FornecedorMaterialVinculoModel {
         materialEspessura:    json['material']?['espessura'],
         preco:                double.tryParse(json['preco'].toString()) ?? 0,
         precoMetroQuadrado:   double.tryParse(json['precoMetroQuadrado'].toString()) ?? 0,
+        precoUnidadeMedida:   json['precoUnidadeMedida'] != null
+            ? double.tryParse(json['precoUnidadeMedida'].toString()) ?? 0
+            : 0,
         ativo:                json['ativo'] ?? true,
         materialUnidade:      json['material']?['unidade'],
         materialLargura:      json['material']?['largura'] != null

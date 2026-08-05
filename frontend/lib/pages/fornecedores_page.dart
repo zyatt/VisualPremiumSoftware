@@ -19,6 +19,70 @@ String _resolverUrlImagem(String url) {
   return '$base$url';
 }
 
+/// Formata a unidade para exibição. Ex.: 'UNIDADE' → 'Unidade'; 'M' → 'm';
+/// 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²' → 'm²'; 'KG' → 'Kg'; 'G' → 'g'.
+String _formatarUnidadeExibicao(String? unidade) {
+  if (unidade == null || unidade.trim().isEmpty) return '—';
+  final u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'M':
+      return 'm';
+    case 'M/L':
+      return 'm/l';
+    case 'ML':
+      return 'ml';
+    case 'M²':
+    case 'M2':
+      return 'm²';
+    case 'KG':
+      return 'Kg';
+    case 'G':
+      return 'g';
+    case 'UNIDADE':
+      return 'Unidade';
+    default:
+      return unidade;
+  }
+}
+
+/// Formata um valor monetário no padrão brasileiro, com separador de
+/// milhar (ponto) e duas casas decimais (vírgula). Ex.: 1000.0 -> '1.000,00';
+/// 1234567.5 -> '1.234.567,50'.
+String _formatarPreco(num valor) {
+  final partes = valor.toStringAsFixed(2).split('.');
+  final inteiro = partes[0];
+  final decimais = partes[1];
+  final negativo = inteiro.startsWith('-');
+  final digitos = negativo ? inteiro.substring(1) : inteiro;
+
+  final buffer = StringBuffer();
+  for (int i = 0; i < digitos.length; i++) {
+    if (i > 0 && (digitos.length - i) % 3 == 0) {
+      buffer.write('.');
+    }
+    buffer.write(digitos[i]);
+  }
+
+  return '${negativo ? '-' : ''}${buffer.toString()},$decimais';
+}
+
+/// Monta o label dinâmico do campo/coluna de preço por unidade de medida,
+/// ex.: 'Preço m/l', 'Preço g', 'Preço ml'. Quando a unidade não é
+/// conhecida, cai de volta em 'Preço unidade'.
+String _labelPrecoUnidade(String? unidade) {
+  final u = _formatarUnidadeExibicao(unidade);
+  if (u == '—' || u.isEmpty) return 'Preço unidade';
+  return 'Preço $u';
+}
+
+/// Indica se o campo/coluna de preço por unidade de medida faz sentido para
+/// este material. Quando a unidade já é "Unidade", o campo seria redundante
+/// com o "Preço" comum, então não deve aparecer.
+bool _deveExibirPrecoUnidade(String? unidade) {
+  if (unidade == null || unidade.trim().isEmpty) return false;
+  return unidade.trim().toUpperCase() != 'UNIDADE';
+}
+
 /// Formata a dimensão (largura x comprimento) de um material como "50x1.27m"
 /// — usado como fallback quando o material não tem `medida` cadastrada.
 /// Mesma convenção usada em outras telas (comprimento x largura, minúsculo).
@@ -137,6 +201,90 @@ class _DecimalInputFormatter extends TextInputFormatter {
     );
     return newValue.copyWith(text: texto, selection: sel);
   }
+}
+
+/// Formatter para campos de preço em BRL: aplica separador de milhar (ponto)
+/// na parte inteira em tempo real enquanto o usuário digita, usando vírgula
+/// como separador decimal (padrão brasileiro). Ex.: digitar "1000" exibe
+/// "1.000"; digitar "1000,5" exibe "1.000,5".
+///
+/// O texto exposto ao controller já vem SEM separador de milhar (apenas
+/// dígitos + ponto decimal, ex.: "1000.5") para não quebrar `double.parse`
+/// no restante do código — a exibição com milhar é feita só visualmente
+/// através do `TextEditingValue` retornado aqui.
+class _PrecoInputFormatter extends TextInputFormatter {
+  static String _aplicarMilhar(String digitosInteiros) {
+    final buffer = StringBuffer();
+    for (int i = 0; i < digitosInteiros.length; i++) {
+      if (i > 0 && (digitosInteiros.length - i) % 3 == 0) {
+        buffer.write('.');
+      }
+      buffer.write(digitosInteiros[i]);
+    }
+    return buffer.toString();
+  }
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text;
+
+    // Conta quantos caracteres de máscara (pontos de milhar) existiam antes
+    // do cursor no valor antigo, para poder recolocar o cursor no lugar
+    // certo depois de re-formatar.
+    final cursorPos = newValue.selection.end.clamp(0, texto.length);
+    final antesDoCursor = texto.substring(0, cursorPos);
+    final digitosAntesCursor =
+        antesDoCursor.replaceAll(RegExp(r'[^\d,]'), '').length;
+
+    // Aceita apenas dígitos e vírgula (o ponto de milhar é recalculado, não
+    // digitado pelo usuário).
+    texto = texto.replaceAll(RegExp(r'[^\d,]'), '');
+
+    final partes = texto.split(',');
+    String inteiro = partes[0];
+    String? decimais = partes.length > 1 ? partes.sublist(1).join('') : null;
+    if (decimais != null && decimais.length > 2) {
+      decimais = decimais.substring(0, 2);
+    }
+
+    // Remove zeros à esquerda supérfluos, mantendo pelo menos um dígito.
+    inteiro = inteiro.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+    if (inteiro.isEmpty) inteiro = '';
+
+    final inteiroFormatado = _aplicarMilhar(inteiro);
+    final textoFormatado = decimais != null
+        ? '$inteiroFormatado,$decimais'
+        : (texto.contains(',') ? '$inteiroFormatado,' : inteiroFormatado);
+
+    // Reposiciona o cursor: conta dígitos+vírgula até atingir a mesma
+    // quantidade que havia antes do cursor original, pulando os pontos de
+    // milhar (que não contam como "digitados" pelo usuário).
+    int novoOffset = 0;
+    int contador = 0;
+    for (int i = 0; i < textoFormatado.length; i++) {
+      if (contador >= digitosAntesCursor) break;
+      if (textoFormatado[i] != '.') contador++;
+      novoOffset = i + 1;
+    }
+    novoOffset = novoOffset.clamp(0, textoFormatado.length);
+
+    return TextEditingValue(
+      text: textoFormatado,
+      selection: TextSelection.collapsed(offset: novoOffset),
+    );
+  }
+}
+
+/// Converte o texto de um campo formatado com [_PrecoInputFormatter]
+/// (ex.: "1.000,50") para um double (1000.5), para uso em cálculos/envio
+/// ao backend.
+double _parsePreco(String texto) {
+  if (texto.trim().isEmpty) return 0;
+  final semMilhar = texto.replaceAll('.', '').replaceAll(',', '.');
+  return double.tryParse(semMilhar) ?? 0;
 }
 
 class _CnpjInputFormatter extends TextInputFormatter {
@@ -2551,11 +2699,15 @@ class _VinculoCardState extends State<_VinculoCard> {
                                     color: Theme.of(context).colorScheme.onSurface),
                               ),
                               const SizedBox(height: 4),
-                              Row(
+                              Wrap(
+                                spacing: 10,
+                                runSpacing: 4,
                                 children: [
-                                  _PriceTag(label: 'Valor:', valor: v.preco),
-                                  const SizedBox(width: 10),
-                                  _PriceTag(label: 'Valor m²:', valor: v.precoMetroQuadrado),
+                                  _PriceTag(label: 'Preço:', valor: v.preco),
+                                  if (v.precoMetroQuadrado > 0)
+                                    _PriceTag(label: 'Preço m²:', valor: v.precoMetroQuadrado),
+                                  if (v.precoUnidadeMedida > 0 && _deveExibirPrecoUnidade(v.materialUnidade))
+                                    _PriceTag(label: '${_labelPrecoUnidade(v.materialUnidade)}:', valor: v.precoUnidadeMedida),
                                 ],
                               ),
                             ],
@@ -2594,7 +2746,7 @@ class _PriceTag extends StatelessWidget {
         children: [
           TextSpan(text: '$label '),
           TextSpan(
-            text: 'R\$ ${FornecedorMaterialVinculoModel.formatarPreco(valor)}',
+            text: 'R\$ ${_formatarPreco(valor)}',
             style: const TextStyle(
                 color: AppTheme.success, fontWeight: FontWeight.w600),
           ),
@@ -2632,6 +2784,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
   final _materialEspessuraCtrl = TextEditingController();
   final _precoCtrl = TextEditingController();
   final _precoM2Ctrl = TextEditingController();
+  final _precoUnidadeMedidaCtrl = TextEditingController();
   bool _salvando = false;
 
   List<Map<String, dynamic>> _sugestoes = [];
@@ -2640,6 +2793,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
   bool _idNaoEncontrado = false;
   Timer? _debounceId;
   bool _ignorarListeners = false;
+  String? _unidadeSelecionada;
 
   bool get _editando => widget.vinculo != null;
 
@@ -2656,8 +2810,10 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
       _materialLarguraCtrl.text = v.materialLargura?.toString() ?? '';
       _materialEspessuraCtrl.text = v.materialEspessura ?? '';
       _materialIdSelecionado = v.materialId;
-      _precoCtrl.text = v.preco == 0 ? '' : FornecedorMaterialVinculoModel.formatarPreco(v.preco).replaceAll(',', '.');
-      _precoM2Ctrl.text = v.precoMetroQuadrado == 0 ? '' : FornecedorMaterialVinculoModel.formatarPreco(v.precoMetroQuadrado).replaceAll(',', '.');
+      _unidadeSelecionada = v.materialUnidade;
+      _precoCtrl.text = v.preco == 0 ? '' : _formatarPreco(v.preco);
+      _precoM2Ctrl.text = v.precoMetroQuadrado == 0 ? '' : _formatarPreco(v.precoMetroQuadrado);
+      _precoUnidadeMedidaCtrl.text = v.precoUnidadeMedida == 0 ? '' : _formatarPreco(v.precoUnidadeMedida);
     }
 
     _materialIdCtrl.addListener(_onIdChanged);
@@ -2688,6 +2844,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     _materialEspessuraCtrl.dispose();
     _precoCtrl.dispose();
     _precoM2Ctrl.dispose();
+    _precoUnidadeMedidaCtrl.dispose();
     super.dispose();
   }
 
@@ -2883,6 +3040,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     final comprimento  = material['comprimento'];
     final largura      = material['largura'];
     final espessura    = material['espessura']    as String?;
+    final unidade      = material['unidade']      as String?;
 
     _ignorarListeners = true;
     _materialIdCtrl.text            = id.toString();
@@ -2898,6 +3056,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
       _materialIdSelecionado = id;
       _idNaoEncontrado       = false;
       _sugestoes             = [];
+      _unidadeSelecionada    = unidade;
     });
   }
 
@@ -2908,13 +3067,14 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     final prov = context.read<FornecedorProvider>();
 
     double? parsePreco(String text) {
-      final v = text.trim().replaceAll(',', '.');
-      return v.isEmpty ? null : double.tryParse(v);
+      final v = text.trim();
+      return v.isEmpty ? null : _parsePreco(v);
     }
 
     final dados = {
       'preco': parsePreco(_precoCtrl.text),
       'precoMetroQuadrado': parsePreco(_precoM2Ctrl.text),
+      'precoUnidadeMedida': parsePreco(_precoUnidadeMedidaCtrl.text),
     };
 
     bool sucesso;
@@ -3143,7 +3303,6 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                             : _materialDimensaoFormatada(m['largura'], m['comprimento']);
                         final espessura = m['espessura'] as String?;
                         final detalhe = [
-                          if (identificador != null && identificador.isNotEmpty) identificador,
                           if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
                           if (espessura != null && espessura.isNotEmpty)
                             _comSufixoMm(espessura),
@@ -3180,27 +3339,22 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        m['nome'] ?? '',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: Theme.of(context).colorScheme.onSurface,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
+                                  child: Text.rich(
+                                    TextSpan(
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Theme.of(context).colorScheme.onSurface,
                                       ),
-                                      if (detalhe.isNotEmpty)
-                                        Text(
-                                          detalhe,
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                    ],
+                                      children: [
+                                        if (identificador != null && identificador.isNotEmpty)
+                                          TextSpan(text: '$identificador  ·  '),
+                                        TextSpan(text: m['nome'] ?? ''),
+                                        if (detalhe.isNotEmpty)
+                                          TextSpan(text: '  ·  $detalhe'),
+                                      ],
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
                                   ),
                                 ),
                                 if (jaVinculado)
@@ -3238,13 +3392,13 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                   child: TextFormField(
                     controller: _precoCtrl,
                     decoration: const InputDecoration(
-                      labelText: 'Valor (R\$)',
+                      labelText: 'Preço',
                       prefixText: 'R\$ ',
                       isDense: true,
                     ),
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [_DecimalInputFormatter()],
+                    inputFormatters: [_PrecoInputFormatter()],
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -3252,16 +3406,30 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                   child: TextFormField(
                     controller: _precoM2Ctrl,
                     decoration: const InputDecoration(
-                      labelText: 'Valor m² (R\$)',
+                      labelText: 'Preço m²',
                       prefixText: 'R\$ ',
                       isDense: true,
                     ),
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [_DecimalInputFormatter()],
+                    inputFormatters: [_PrecoInputFormatter()],
                   ),
                 ),
               ]),
+              if (_deveExibirPrecoUnidade(_unidadeSelecionada)) ...[
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _precoUnidadeMedidaCtrl,
+                  decoration: InputDecoration(
+                    labelText: '${_labelPrecoUnidade(_unidadeSelecionada)}',
+                    prefixText: 'R\$ ',
+                    isDense: true,
+                  ),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_PrecoInputFormatter()],
+                ),
+              ],
             ],
           ),
         ),
@@ -3311,6 +3479,7 @@ class _FornecedorVinculoEntry {
   bool selecionado;
   final TextEditingController precoCtrl;
   final TextEditingController precoM2Ctrl;
+  final TextEditingController precoUnidadeMedidaCtrl;
   final bool jaVinculado;
 
   _FornecedorVinculoEntry({
@@ -3318,12 +3487,14 @@ class _FornecedorVinculoEntry {
     required this.selecionado,
     required this.precoCtrl,
     required this.precoM2Ctrl,
+    TextEditingController? precoUnidadeMedidaCtrl,
     this.jaVinculado = false,
-  });
+  }) : precoUnidadeMedidaCtrl = precoUnidadeMedidaCtrl ?? TextEditingController();
 
   void dispose() {
     precoCtrl.dispose();
     precoM2Ctrl.dispose();
+    precoUnidadeMedidaCtrl.dispose();
   }
 }
 
@@ -3363,6 +3534,7 @@ class _VincularPorMaterialDialogState
   bool   _ignorarListeners  = false;
   List<Map<String, dynamic>> _sugestoes = [];
   Timer? _debounceId;
+  String? _unidadeSelecionada;
 
   List<_FornecedorVinculoEntry> _entradas = [];
   bool _carregandoFornecedores = false;
@@ -3542,6 +3714,7 @@ class _VincularPorMaterialDialogState
         selecionado: true,
         precoCtrl:   TextEditingController(),
         precoM2Ctrl: TextEditingController(),
+        precoUnidadeMedidaCtrl: TextEditingController(),
         jaVinculado: false,
       ));
       _sugestoesFornecedor.removeWhere((s) => s.id == f.id);
@@ -3592,12 +3765,15 @@ class _VincularPorMaterialDialogState
 
       String precoInicial   = '';
       String precoM2Inicial = '';
+      String precoUnidadeMedidaInicial = '';
       if (!materialTrocou && antigo != null && antigo.precoCtrl.text.isNotEmpty) {
         precoInicial   = antigo.precoCtrl.text;
         precoM2Inicial = antigo.precoM2Ctrl.text;
+        precoUnidadeMedidaInicial = antigo.precoUnidadeMedidaCtrl.text;
       } else if (jaVinculado) {
-        precoInicial   = vinculo.preco.toStringAsFixed(2);
-        precoM2Inicial = vinculo.precoMetroQuadrado.toStringAsFixed(2);
+        precoInicial   = _formatarPreco(vinculo.preco);
+        precoM2Inicial = _formatarPreco(vinculo.precoMetroQuadrado);
+        precoUnidadeMedidaInicial = _formatarPreco(vinculo.precoUnidadeMedida);
       }
 
       novas.add(_FornecedorVinculoEntry(
@@ -3605,6 +3781,7 @@ class _VincularPorMaterialDialogState
         selecionado: materialTrocou ? jaVinculado : (antigo?.selecionado ?? jaVinculado),
         precoCtrl:   TextEditingController(text: precoInicial),
         precoM2Ctrl: TextEditingController(text: precoM2Inicial),
+        precoUnidadeMedidaCtrl: TextEditingController(text: precoUnidadeMedidaInicial),
         jaVinculado: jaVinculado,
       ));
 
@@ -3831,6 +4008,7 @@ class _VincularPorMaterialDialogState
     final espessura     = material['espessura']     as String?;
     final largura       = material['largura'];
     final comprimento   = material['comprimento'];
+    final unidade       = material['unidade']       as String?;
 
     _ignorarListeners = true;
     _materialIdCtrl.text            = id.toString();
@@ -3847,6 +4025,7 @@ class _VincularPorMaterialDialogState
     setState(() {
       _idNaoEncontrado = false;
       _sugestoes       = [];
+      _unidadeSelecionada = unidade;
     });
 
     _carregarFornecedoresDoMaterial(id);
@@ -3860,8 +4039,8 @@ class _VincularPorMaterialDialogState
     setState(() => _salvando = true);
 
     double? parsePreco(String text) {
-      final v = text.trim().replaceAll(',', '.');
-      return v.isEmpty ? null : double.tryParse(v);
+      final v = text.trim();
+      return v.isEmpty ? null : _parsePreco(v);
     }
 
     final prov   = context.read<FornecedorProvider>();
@@ -3873,6 +4052,7 @@ class _VincularPorMaterialDialogState
         'materialId': _materialIdSelecionado,
         'preco':               parsePreco(entrada.precoCtrl.text),
         'precoMetroQuadrado':  parsePreco(entrada.precoM2Ctrl.text),
+        'precoUnidadeMedida':  parsePreco(entrada.precoUnidadeMedidaCtrl.text),
       };
       final ok = await prov.vincularMaterial(entrada.fornecedor.id, dados);
       if (ok) {
@@ -4186,7 +4366,6 @@ class _VincularPorMaterialDialogState
                               : _materialDimensaoFormatada(m['largura'], m['comprimento']);
                           final espessura = m['espessura'] as String?;
                           final detalhe   = [
-                            if (identificador != null && identificador.isNotEmpty) identificador,
                             if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
                             if (espessura != null && espessura.isNotEmpty)
                             _comSufixoMm(espessura),
@@ -4220,6 +4399,13 @@ class _VincularPorMaterialDialogState
                                     child: Text.rich(
                                       TextSpan(
                                         children: [
+                                          if (identificador != null && identificador.isNotEmpty)
+                                            TextSpan(
+                                              text: '$identificador  ·  ',
+                                              style: TextStyle(
+                                                  fontSize: 13,
+                                                  color: Theme.of(context).colorScheme.onSurface),
+                                            ),
                                           TextSpan(
                                             text: m['nome'] ?? '',
                                             style: TextStyle(
@@ -4403,6 +4589,7 @@ class _VincularPorMaterialDialogState
                             final entrada = _entradas[i];
                             return _FornecedorVinculoTile(
                               entrada:   entrada,
+                              unidadeMaterial: _unidadeSelecionada,
                               onRemover: () {
                                 final f = entrada.fornecedor;
                                 setState(() {
@@ -4673,7 +4860,7 @@ class _FornecedorVinculoTileSimulado extends StatelessWidget {
                 enabled: false,
                 controller: TextEditingController(text: valor),
                 decoration: const InputDecoration(
-                  labelText: 'Valor (R\$)',
+                  labelText: 'Preço',
                   prefixText: 'R\$ ',
                   isDense: true,
                   contentPadding:
@@ -4688,7 +4875,7 @@ class _FornecedorVinculoTileSimulado extends StatelessWidget {
                 enabled: false,
                 controller: TextEditingController(text: valorM2),
                 decoration: const InputDecoration(
-                  labelText: 'Valor m²',
+                  labelText: 'Preço m²',
                   prefixText: 'R\$ ',
                   isDense: true,
                   contentPadding:
@@ -4706,10 +4893,12 @@ class _FornecedorVinculoTileSimulado extends StatelessWidget {
 class _FornecedorVinculoTile extends StatefulWidget {
   final _FornecedorVinculoEntry entrada;
   final VoidCallback? onRemover;
+  final String? unidadeMaterial;
 
   const _FornecedorVinculoTile({
     required this.entrada,
     this.onRemover,
+    this.unidadeMaterial,
   });
 
   @override
@@ -4795,7 +4984,7 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
               child: TextField(
                 controller: e.precoCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Valor (R\$)',
+                  labelText: 'Preço',
                   prefixText: 'R\$ ',
                   isDense: true,
                   contentPadding:
@@ -4803,7 +4992,7 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
                 ),
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [_DecimalInputFormatter()],
+                inputFormatters: [_PrecoInputFormatter()],
               ),
             ),
             const SizedBox(width: 8),
@@ -4812,7 +5001,7 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
               child: TextField(
                 controller: e.precoM2Ctrl,
                 decoration: const InputDecoration(
-                  labelText: 'Valor m²',
+                  labelText: 'Preço m²',
                   prefixText: 'R\$ ',
                   isDense: true,
                   contentPadding:
@@ -4820,9 +5009,29 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
                 ),
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [_DecimalInputFormatter()],
+                inputFormatters: [_PrecoInputFormatter()],
               ),
             ),
+            const SizedBox(width: 8),
+            if (_deveExibirPrecoUnidade(widget.unidadeMaterial)) ...[
+              SizedBox(
+                width: 110,
+                child: TextField(
+                  controller: e.precoUnidadeMedidaCtrl,
+                  decoration: InputDecoration(
+                    labelText: _labelPrecoUnidade(widget.unidadeMaterial),
+                    prefixText: 'R\$ ',
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [_PrecoInputFormatter()],
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
 
             if (widget.onRemover != null) ...[
               const SizedBox(width: 4),

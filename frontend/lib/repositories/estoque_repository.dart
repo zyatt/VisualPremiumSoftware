@@ -22,6 +22,7 @@ class EstoqueRepository {
 
   Future<List<RelacaoOSModel>> listarRelatoriosOS({
     String? busca,
+    String? cliente,
     String? materialId,
     String? materialNome,
     String? materialIdentificador,
@@ -35,6 +36,9 @@ class EstoqueRepository {
     final params = <String>[];
     if (busca != null && busca.isNotEmpty) {
       params.add('busca=${Uri.encodeComponent(busca)}');
+    }
+    if (cliente != null && cliente.isNotEmpty) {
+      params.add('cliente=${Uri.encodeComponent(cliente)}');
     }
     if (materialId != null && materialId.isNotEmpty) {
       params.add('materialId=${Uri.encodeComponent(materialId)}');
@@ -94,6 +98,7 @@ class EstoqueRepository {
     double? larguraUsada,
     double? comprimentoUsado,
     int? materialOrigemId,
+    String? cliente,
   }) async {
     final data = await ApiClient.post('/estoque/movimentacoes', {
       'materialId': materialId,
@@ -107,6 +112,7 @@ class EstoqueRepository {
       if (larguraUsada != null)     'larguraUsada':     larguraUsada,
       if (comprimentoUsado != null) 'comprimentoUsado': comprimentoUsado,
       if (materialOrigemId != null) 'materialOrigemId': materialOrigemId,
+      if (cliente != null && cliente.trim().isNotEmpty) 'cliente': cliente.trim(),
     });
     return MovimentacaoModel.fromJson(data);
   }
@@ -124,13 +130,34 @@ class EstoqueRepository {
   }
 
   /// Renomeia a OS: altera o numeroOS da RelacaoOS e de todas as suas movimentações.
+  /// Opcionalmente também atualiza o cliente vinculado (null/vazio remove o
+  /// cliente; omitido mantém o valor atual).
   /// Só permitido para OS em andamento.
-  Future<RelacaoOSModel> renomearOS(int relacaoOSId, String novoNumeroOS) async {
+  Future<RelacaoOSModel> renomearOS(
+    int relacaoOSId,
+    String novoNumeroOS, {
+    String? novoCliente,
+  }) async {
     final data = await ApiClient.patch(
       '/estoque/$relacaoOSId/renomear',
-      {'novoNumeroOS': novoNumeroOS},
+      {
+        'novoNumeroOS': novoNumeroOS,
+        if (novoCliente != null) 'novoCliente': novoCliente,
+      },
     );
     return RelacaoOSModel.fromJson(data);
+  }
+
+  /// Busca o cliente já vinculado a um número de OS (para autofill ao
+  /// digitar o número da OS nas telas de entrada/saída). Retorna null se
+  /// a OS não existir ou não tiver cliente vinculado.
+  Future<String?> buscarClientePorNumeroOS(String numeroOS) async {
+    try {
+      final data = await ApiClient.get('/estoque/${Uri.encodeComponent(numeroOS)}/cliente');
+      return data['cliente'] as String?;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Fecha a OS: muda status para FECHADA no backend.

@@ -453,44 +453,6 @@ async function marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioR
     comprado: status === 'COMPRADO',
   }, usuarioId);
 
-  if (status === 'COMPRADO' || status === 'ESTOQUE') {
-    try {
-      await _verificarTodosResolvidos(registro.solicitacaoId);
-      const sol = await prisma.solicitacaoMaterial.findUnique({
-        where: { id: registro.solicitacaoId },
-      });
-      if (sol && sol.andamento !== 'FINALIZADO') {
-        await prisma.solicitacaoMaterial.update({
-          where: { id: registro.solicitacaoId },
-          data: { andamento: 'FINALIZADO' },
-        });
-
-        await prisma.logEdicaoSolicitacao.create({
-          data: {
-            solicitacaoId: registro.solicitacaoId,
-            editorId:      usuarioId,
-            editorNome:    usuarioNome ?? 'Desconhecido',
-            antes:         { andamento: sol.andamento },
-            depois:        { andamento: 'FINALIZADO' },
-          },
-        });
-
-        console.log(`[Solicitações] Solicitação ${registro.solicitacaoId} auto-finalizada (todos os itens comprados/estoque) por ${usuarioNome ?? usuarioId}`);
-        _broadcast('solicitacao_atualizada', {
-          id:          registro.solicitacaoId,
-          numeroOS:    sol.numeroOS,
-          nomeCliente: sol.nomeCliente,
-          editorNome:  usuarioNome ?? 'Desconhecido',
-          acao:        'auto_finalizacao',
-          antes:       { andamento: sol.andamento },
-          depois:      { andamento: 'FINALIZADO' },
-        }, usuarioId);
-        _broadcast('solicitacao_finalizada', { solicitacaoId: registro.solicitacaoId }, usuarioId);
-      }
-    } catch {
-    }
-  }
-
   return atualizado;
 }
 
@@ -502,7 +464,7 @@ async function marcarEstoque(tipo, itemId, usuarioId, usuarioNome, usuarioRole, 
   return marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioRole, estoque ? 'ESTOQUE' : 'PENDENTE');
 }
 
-async function _verificarTodosResolvidos(solicitacaoId) {
+async function _verificarTodosComprados(solicitacaoId) {
   const [itens, adicionais] = await Promise.all([
     prisma.itemSolicitacaoMaterial.findMany({ where: { solicitacaoId }, select: { comprado: true, estoque: true } }),
     prisma.adicionalSolicitacaoMaterial.findMany({ where: { solicitacaoId }, select: { comprado: true, estoque: true } }),
@@ -519,8 +481,6 @@ async function _verificarTodosResolvidos(solicitacaoId) {
     };
   }
 }
-
-const _verificarTodosComprados = _verificarTodosResolvidos;
 
 async function excluir(id, usuarioId, usuarioRole) {
   const sol = await prisma.solicitacaoMaterial.findUnique({

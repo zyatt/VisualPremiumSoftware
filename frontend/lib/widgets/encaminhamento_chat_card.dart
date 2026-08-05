@@ -180,11 +180,12 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
 
       final espessura = (dados['espessura'] as String?)?.trim();
       final identificador = (dados['identificador'] as String?)?.trim();
-      final extras = [identificador, espessura]
-          .whereType<String>()
-          .where((s) => s.isNotEmpty)
-          .join(' · ');
-      if (extras.isNotEmpty) linhas.add(extras);
+      if (identificador != null && identificador.isNotEmpty) {
+        linhas.add(identificador);
+      }
+      if (espessura != null && espessura.isNotEmpty) {
+        linhas.add('Espessura: ${espessura}mm');
+      }
     } else {
       // tipo == 'solicitacao'
       titulo = 'OS ${dados['numeroOS'] ?? '-'}';

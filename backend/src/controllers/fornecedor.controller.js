@@ -115,7 +115,7 @@ const listarPorMaterial = async (req, res, next) => {
 
 const vincularMaterial = async (req, res, next) => {
   try {
-    const { materialId, preco, precoMetroQuadrado } = req.body;
+    const { materialId, preco, precoMetroQuadrado, precoUnidadeMedida } = req.body;
 
     res.json(
       await svc.vincularMaterial(
@@ -123,6 +123,7 @@ const vincularMaterial = async (req, res, next) => {
         materialId,
         preco,
         precoMetroQuadrado,
+        precoUnidadeMedida,
       ),
     );
   } catch (e) {

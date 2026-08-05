@@ -10,10 +10,11 @@ const _includeCompleto = {
   },
 };
 
-async function listar({ busca, materialId, materialNome, materialIdentificador, materialMedida, materialEspessura, dataInicio, dataFim } = {}) {
+async function listar({ busca, cliente, materialId, materialNome, materialIdentificador, materialMedida, materialEspessura, dataInicio, dataFim } = {}) {
   const where = { status: 'FECHADA' };
 
   if (busca) where.numeroOS = { contains: busca, mode: 'insensitive' };
+  if (cliente) where.cliente = { contains: cliente, mode: 'insensitive' };
 
   let filtroData = null;
   if (dataInicio || dataFim) {
@@ -82,7 +83,7 @@ async function buscarPorNumeroOS(numeroOS) {
   });
 }
 
-async function fecharOS(numeroOS) {
+async function fecharOS(numeroOS, fechadoPorNome) {
   const relacao = await prisma.relacaoOS.findUnique({ where: { numeroOS } });
   if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
   if (relacao.status === 'FECHADA') {
@@ -91,7 +92,7 @@ async function fecharOS(numeroOS) {
 
   return prisma.relacaoOS.update({
     where:  { numeroOS },
-    data:   { status: 'FECHADA' },
+    data:   { status: 'FECHADA', fechadoPorNome: fechadoPorNome ?? null },
     include: _includeCompleto,
   });
 }
@@ -143,6 +144,11 @@ async function dadosParaPDF(numeroOS) {
     }
   }
 
+  const totalSaidas = Array.from(porMaterial.values()).reduce((acc, { preco, qtdSaida, qtdEntrada }) => {
+    const qtdLiquida = Math.max(0, qtdSaida - qtdEntrada);
+    return acc + preco * qtdLiquida;
+  }, 0);
+
   const totalGeral = Array.from(porMaterial.values()).reduce((acc, { preco, qtdSaida, qtdEntrada, valorRetalho }) => {
     const qtdLiquida   = Math.max(0, qtdSaida - qtdEntrada);
     const valorBruto   = preco * qtdLiquida;
@@ -173,6 +179,40 @@ async function dadosParaPDF(numeroOS) {
     };
   };
 
+  /// Agrupa itens já mapeados (_mapItem) pelo mesmo material — várias baixas/
+  /// entradas do mesmo material em momentos diferentes viram uma única linha
+  /// no relatório, somando quantidade e total, mantendo a data mais recente
+  /// e concatenando observações distintas (sem repetir a mesma observação).
+  const _agruparPorMaterial = (itensMapeados, movsOriginais) => {
+    const grupos = new Map();
+    for (let i = 0; i < itensMapeados.length; i++) {
+      const item = itensMapeados[i];
+      const materialId = movsOriginais[i].materialId;
+      if (!grupos.has(materialId)) {
+        grupos.set(materialId, { ...item, observacoes: new Set(), origens: new Set() });
+        const novoGrupo = grupos.get(materialId);
+        if (item.observacao) novoGrupo.observacoes.add(item.observacao);
+        if (item.materialOrigemNome) novoGrupo.origens.add(item.materialOrigemNome);
+        continue;
+      }
+      const grupo = grupos.get(materialId);
+      grupo.quantidade += item.quantidade;
+      grupo.total       += item.total;
+      if (new Date(item.data) > new Date(grupo.data)) grupo.data = item.data;
+      if (item.precoUnitario > grupo.precoUnitario) grupo.precoUnitario = item.precoUnitario;
+      if (item.observacao) grupo.observacoes.add(item.observacao);
+      if (item.materialOrigemNome) grupo.origens.add(item.materialOrigemNome);
+    }
+    return Array.from(grupos.values()).map((g) => {
+      const { observacoes, origens, ...resto } = g;
+      return {
+        ...resto,
+        observacao:         observacoes.size > 0 ? Array.from(observacoes).join(' | ') : null,
+        materialOrigemNome: origens.size > 0 ? Array.from(origens).join(', ') : null,
+      };
+    });
+  };
+
   const todasMovs = [...relacao.movimentacoes];
   const primeiraMovimentacaoEm = todasMovs.length > 0
     ? todasMovs.reduce((a, b) => new Date(a.criadoEm) < new Date(b.criadoEm) ? a : b).criadoEm
@@ -181,12 +221,14 @@ async function dadosParaPDF(numeroOS) {
   return {
     numeroOS:              relacao.numeroOS,
     descricao:             relacao.descricao,
+    cliente:               relacao.cliente,
     status:                relacao.status,
     criadoEm:              primeiraMovimentacaoEm,
     fechadaEm:             relacao.atualizadoEm,
     geradoEm:              new Date(),
-    itens:                 saidas.map(_mapItem),
-    entradas:              entradas.map(_mapItem),
+    itens:                 _agruparPorMaterial(saidas.map(_mapItem), saidas),
+    entradas:              _agruparPorMaterial(entradas.map(_mapItem), entradas),
+    totalSaidas,
     totalGeral,
   };
 }
@@ -200,7 +242,7 @@ async function reverterOS(numeroOS) {
 
   return prisma.relacaoOS.update({
     where:   { numeroOS },
-    data:    { status: 'EM_ANDAMENTO' },
+    data:    { status: 'EM_ANDAMENTO', fechadoPorNome: null },
     include: _includeCompleto,
   });
 }

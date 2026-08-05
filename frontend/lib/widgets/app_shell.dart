@@ -13,6 +13,7 @@ import '../pages/orcamento_page.dart';
 import '../providers/veiculo_provider.dart';
 import '../providers/solicitacao_material_provider.dart';
 import '../providers/material_provider.dart';
+import '../providers/estoque_producao_provider.dart';
 import '../providers/chat_provider.dart';
 import '../rotas/app_router.dart';
 import 'chat_floating_widget.dart';
@@ -596,6 +597,10 @@ class _SidebarContentState extends State<_SidebarContent> {
     final chatProv   = context.watch<ChatProvider>();
     final nChat      = chatProv.totalNaoLidas;
 
+    // Badge de materiais pendentes de confirmação (transferência p/ produção)
+    final nPendentesProducao =
+        context.watch<EstoqueProducaoProvider>().totalPendentes;
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
     // Cores adaptadas ao tema
@@ -683,12 +688,14 @@ class _SidebarContentState extends State<_SidebarContent> {
                           widget.currentRoute
                               .startsWith('${item.route}/'));
 
-                  // Badge de notificação: solicitações ou chat
+                  // Badge de notificação: solicitações, chat ou controle de estoque
                   final badge = item.route == '/solicitacoes-material' && nSolicitacoes > 0
                       ? nSolicitacoes
                       : item.route == '/chat' && nChat > 0
                           ? nChat
-                          : 0;
+                          : item.route == '/controle-estoque' && nPendentesProducao > 0
+                              ? nPendentesProducao
+                              : 0;
 
                   return _SidebarTile(
                     item: item,

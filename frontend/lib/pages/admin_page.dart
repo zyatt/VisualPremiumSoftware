@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 
 import '../repositories/usuario_repository.dart';
 import '../repositories/configuracao_repository.dart';
+import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 
 String _mensagemErro(Object e) {
@@ -177,10 +179,12 @@ class _UsuariosTabState extends State<_UsuariosTab> {
   }
 
   void _abrirFormularioEdicao(Map<String, dynamic> usuario) {
+    final idUsuarioLogado = context.read<UsuarioProvider>().usuarioLogado?.id;
     showDialog(
       context: context,
       builder: (_) => _UsuarioFormDialog(
         usuario: usuario,
+        idUsuarioLogado: idUsuarioLogado,
         onSalvo: _carregar,
         onExcluir: (onConfirmado) =>
             _excluir(usuario, onConfirmado: onConfirmado),
@@ -239,7 +243,7 @@ class _UsuariosTabState extends State<_UsuariosTab> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          content: Text(_mensagemErro(e)),
           backgroundColor: AppTheme.error,
         ));
       }
@@ -726,10 +730,16 @@ class _RoleLabel extends StatelessWidget {
 
 class _UsuarioFormDialog extends StatefulWidget {
   final Map<String, dynamic>? usuario;
+  final int? idUsuarioLogado;
   final VoidCallback onSalvo;
   final Future<bool> Function(VoidCallback onConfirmado)? onExcluir;
 
-  const _UsuarioFormDialog({this.usuario, required this.onSalvo, this.onExcluir});
+  const _UsuarioFormDialog({
+    this.usuario,
+    this.idUsuarioLogado,
+    required this.onSalvo,
+    this.onExcluir,
+  });
 
   @override
   State<_UsuarioFormDialog> createState() => _UsuarioFormDialogState();
@@ -751,6 +761,14 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
   String? _erroDialog;
 
   bool get _isEdicao => widget.usuario != null;
+
+  /// True quando o usuário sendo editado é o próprio usuário logado —
+  /// nesse caso ele não pode se autodesativar nem se autoexcluir, pois
+  /// perderia acesso ao sistema sem outro admin ativo para reverter.
+  bool get _isSelf =>
+      _isEdicao &&
+      widget.idUsuarioLogado != null &&
+      widget.usuario!['id'] == widget.idUsuarioLogado;
 
   static const _roles = [
     'ADMIN',
@@ -793,7 +811,10 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
         'nome': _nomeCtrl.text.trim(),
         'username': _usernameCtrl.text.trim(),
         'role': _role,
-        'ativo': _ativo,
+        // Garante que o próprio usuário nunca seja salvo como inativo,
+        // mesmo que _ativo tenha sido alterado por algum caminho que não
+        // passe pelo Switch (defesa extra além do onChanged desabilitado).
+        'ativo': _isSelf ? true : _ativo,
       };
       if (_senhaCtrl.text.isNotEmpty) dados['senha'] = _senhaCtrl.text;
 
@@ -986,32 +1007,41 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                   children: [
                     Switch(
                       value: _ativo,
-                      onChanged: (v) => setState(() => _ativo = v),
+                      // Impede que o próprio usuário logado se desative:
+                      // ele perderia acesso imediatamente e ninguém
+                      // conseguiria reverter sem mexer direto no banco.
+                      onChanged: _isSelf
+                          ? null
+                          : (v) => setState(() => _ativo = v),
                       activeThumbColor: Colors.white,
                       activeTrackColor: AppTheme.primary,
                     ),
                     SizedBox(width: 8),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Usuário ativo',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Usuário ativo',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                        Text(
-                          _ativo
-                              ? 'Pode realizar login'
-                              : 'Não pode realizar login',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            fontSize: 11,
+                          Text(
+                            _isSelf
+                                ? 'Você não pode desativar seu próprio usuário'
+                                : (_ativo
+                                    ? 'Pode realizar login'
+                                    : 'Não pode realizar login'),
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              fontSize: 11,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -1025,7 +1055,7 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
           children: [
             if (_isEdicao && widget.onExcluir != null)
               TextButton(
-                onPressed: (_salvando || _excluindo) ? null : _excluir,
+                onPressed: (_salvando || _excluindo || _isSelf) ? null : _excluir,
                 style: TextButton.styleFrom(foregroundColor: AppTheme.error).copyWith(
                   mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                 ),
@@ -1553,6 +1583,9 @@ class _FaixaLinha extends StatelessWidget {
             visualDensity: VisualDensity.compact,
             tooltip: 'Remover faixa',
             onPressed: onRemover,
+            style: const ButtonStyle(
+              mouseCursor: WidgetStatePropertyAll(SystemMouseCursors.click),
+            ),
           ),
         ],
       ),

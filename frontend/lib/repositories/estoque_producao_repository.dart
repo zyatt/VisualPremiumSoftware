@@ -67,6 +67,8 @@ class EstoqueProducaoRepository {
     String? identificador,
     String? medida,
     String? espessura,
+    String? comprimento,
+    String? largura,
   }) async {
     final params = <String, String>{'producao': producao};
     if (busca != null && busca.isNotEmpty)                 params['busca']         = busca;
@@ -74,6 +76,8 @@ class EstoqueProducaoRepository {
     if (identificador != null && identificador.isNotEmpty) params['identificador'] = identificador;
     if (medida != null && medida.isNotEmpty)               params['medida']        = medida;
     if (espessura != null && espessura.isNotEmpty)         params['espessura']     = espessura;
+    if (comprimento != null && comprimento.isNotEmpty)     params['comprimento']   = comprimento;
+    if (largura != null && largura.isNotEmpty)             params['largura']       = largura;
 
     final query = params.entries
         .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')

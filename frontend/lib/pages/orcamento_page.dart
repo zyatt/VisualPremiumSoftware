@@ -150,7 +150,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   // "Novo Orçamento" abaixo apenas garante que uma aba/editor esteja aberto
   // quando o tour chega nessa parada.
   final _tourKeyNovoOrcamento = GlobalKey();
-  RoboHelperProvider? _roboHelperPagina;
 
   @override
   void initState() {
@@ -164,9 +163,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FornecedorProvider>().carregar();
       _carregarOrcamentosServidor(origem: 'initState');
-      final helper = context.read<RoboHelperProvider>();
-      helper.notificarRota('/orcamento');
-      _roboHelperPagina = helper;
+      context.read<RoboHelperProvider>().notificarRota('/orcamento');
     });
   }
 

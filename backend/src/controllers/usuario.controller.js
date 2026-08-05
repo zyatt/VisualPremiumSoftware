@@ -38,14 +38,18 @@ async function criar(req, res, next) {
 
 async function atualizar(req, res, next) {
   try {
-    const usuario = await usuarioService.atualizar(Number(req.params.id), req.body);
+    const usuario = await usuarioService.atualizar(
+      Number(req.params.id),
+      req.body,
+      req.usuario.id,
+    );
     res.json(usuario);
   } catch (err) { next(err); }
 }
 
 async function remover(req, res, next) {
   try {
-    await usuarioService.remover(Number(req.params.id));
+    await usuarioService.remover(Number(req.params.id), req.usuario.id);
     res.status(204).send();
   } catch (err) { next(err); }
 }

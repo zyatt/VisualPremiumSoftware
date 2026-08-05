@@ -97,6 +97,7 @@ class EstoqueProvider extends ChangeNotifier {
     double? larguraUsada,
     double? comprimentoUsado,
     int? materialOrigemId,
+    String? cliente,
   }) async {
     try {
       await _repo.registrarMovimentacao(
@@ -111,6 +112,7 @@ class EstoqueProvider extends ChangeNotifier {
         larguraUsada:     larguraUsada,
         comprimentoUsado: comprimentoUsado,
         materialOrigemId: materialOrigemId,
+        cliente:          cliente,
       );
       await carregarRelacoesOS();
       return true;
@@ -137,6 +139,7 @@ class EstoqueProvider extends ChangeNotifier {
     double? larguraUsada,
     double? comprimentoUsado,
     int? materialOrigemId,
+    String? cliente,
   }) async {
     try {
       await _repo.registrarMovimentacao(
@@ -151,6 +154,7 @@ class EstoqueProvider extends ChangeNotifier {
         larguraUsada:     larguraUsada,
         comprimentoUsado: comprimentoUsado,
         materialOrigemId: materialOrigemId,
+        cliente:          cliente,
       );
       return true;
     } catch (e) {
@@ -213,11 +217,20 @@ class EstoqueProvider extends ChangeNotifier {
     }
   }
 
-  /// Renomeia a OS: altera o numeroOS no backend e recarrega a lista.
-  Future<bool> renomearOS(int relacaoOSId, String novoNumeroOS) async {
+  /// Renomeia a OS: altera o numeroOS (e opcionalmente o cliente) no
+  /// backend e recarrega a lista.
+  Future<bool> renomearOS(
+    int relacaoOSId,
+    String novoNumeroOS, {
+    String? novoCliente,
+  }) async {
     try {
-      final atualizada = await _repo.renomearOS(relacaoOSId, novoNumeroOS);
-      // Atualiza a seleção com os dados atualizados (numeroOS novo)
+      final atualizada = await _repo.renomearOS(
+        relacaoOSId,
+        novoNumeroOS,
+        novoCliente: novoCliente,
+      );
+      // Atualiza a seleção com os dados atualizados (numeroOS/cliente novos)
       _relacaoSelecionada = atualizada;
       await carregarRelacoesOS();
       notifyListeners();
@@ -227,6 +240,13 @@ class EstoqueProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  /// Busca o cliente já vinculado a um número de OS (autofill ao digitar
+  /// o número da OS nas telas de entrada/saída). Não altera estado nem
+  /// notifica — chamado sob demanda pela UI.
+  Future<String?> buscarClientePorNumeroOS(String numeroOS) {
+    return _repo.buscarClientePorNumeroOS(numeroOS);
   }
 
   /// Fecha a OS: muda status para FECHADA no backend e remove da lista

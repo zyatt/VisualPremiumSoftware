@@ -62,8 +62,8 @@ model Material {
   identificador               String?
   valor                       Decimal?                   @db.Decimal(15, 6)
   valorMetroQuadrado          Decimal?                   @db.Decimal(15, 6)
-  quantidade                  Decimal                    @default(0) @db.Decimal(10, 3)
-  estoqueMinimo               Decimal                    @default(0) @db.Decimal(10, 3)
+  quantidade                  Decimal                    @default(0) @db.Decimal(15, 6)
+  estoqueMinimo               Decimal                    @default(0) @db.Decimal(15, 6)
   status                      StatusEstoque              @default(OK)
   estoqueConfirmado           Boolean                    @default(false)
   ativo                       Boolean                    @default(true)
@@ -112,7 +112,8 @@ model HistoricoPrecoMaterial {
   fornecedorId  Int
   precoUnitario Decimal?    @db.Decimal(15, 6)
   precoM2       Decimal?    @db.Decimal(15, 6)
-  quantidade    Decimal     @db.Decimal(10, 3)
+  quantidade    Decimal     @db.Decimal(15, 6)
+  qtdUnidade    Decimal?    @db.Decimal(15, 6)
   usarM2        Boolean     @default(false)
   criadoEm      DateTime    @default(now())
   fornecedor    Fornecedor  @relation(fields: [fornecedorId], references: [id])
@@ -148,6 +149,7 @@ model FornecedorMaterial {
   materialId         Int
   preco              Decimal?   @db.Decimal(15, 6)
   precoMetroQuadrado Decimal?   @db.Decimal(15, 6)
+  precoUnidadeMedida Decimal?   @db.Decimal(15, 6)
   ativo              Boolean    @default(true)
   criadoEm           DateTime   @default(now())
   atualizadoEm       DateTime   @updatedAt
@@ -187,7 +189,7 @@ model OrcamentoItem {
   orcamentoId   Int
   materialId    Int
   fornecedorId  Int?
-  quantidade    Decimal     @default(1) @db.Decimal(10, 3)
+  quantidade    Decimal     @default(1) @db.Decimal(15, 6)
   qtdUnidade    Decimal?    @db.Decimal(15, 6)
   precoUnitario Decimal?    @db.Decimal(15, 6)
   precoM2       Decimal?    @db.Decimal(15, 6)
@@ -245,7 +247,7 @@ model OrdemCompraItem {
   materialId         Int?
   descricaoItem      String?
   numeroOS           String
-  quantidade         Decimal     @db.Decimal(10, 3)
+  quantidade         Decimal     @db.Decimal(15, 6)
   qtdUnidade         Decimal?    @db.Decimal(15, 6)
   precoUnitario      Decimal     @db.Decimal(15, 6)
   precoMetroQuadrado Decimal?    @db.Decimal(15, 6)
@@ -262,7 +264,16 @@ model RelacaoOS {
   id            Int                   @id @default(autoincrement())
   numeroOS      String                @unique
   descricao     String?
+  /// Nome do cliente vinculado a esta OS (opcional). Preenchido pelo
+  /// usuário ao dar entrada/saída na OS, ou renomeado depois através do
+  /// mesmo fluxo usado para renomear a OS.
+  cliente       String?
   status        String                @default("EM_ANDAMENTO")
+  /// Nome do usuário que fechou esta OS (snapshot no momento do fechamento,
+  /// não uma FK — evita quebrar o histórico se o usuário for excluído
+  /// depois). Fica null enquanto a OS está em andamento, ou se foi revertida
+  /// e ainda não fechada de novo.
+  fechadoPorNome String?
   criadoEm      DateTime              @default(now())
   atualizadoEm  DateTime              @updatedAt
   movimentacoes MovimentacaoEstoque[]
@@ -274,7 +285,7 @@ model MovimentacaoEstoque {
   id               Int          @id @default(autoincrement())
   materialId       Int
   tipo             String
-  quantidade       Decimal      @db.Decimal(10, 3)
+  quantidade       Decimal      @db.Decimal(15, 6)
   numeroOS         String
   relacaoOSId      Int
   ordemCompraId    Int?
@@ -320,12 +331,12 @@ model EstoqueProducao {
   materialId   Int
   /// '1' ou '2' — identifica a qual linha de produção este saldo pertence.
   producao     String
-  quantidade   Decimal  @default(0) @db.Decimal(10, 3)
+  quantidade   Decimal  @default(0) @db.Decimal(15, 6)
   /// Quantidade devolvida ao estoque padrão mas ainda pendente de
   /// confirmação em Controle de Estoque. Fica "no limbo": já saiu de
   /// [quantidade] (disponível na produção) mas ainda não voltou pro
   /// Material do estoque padrão. Ver EntradaPendente (tipo DEVOLUCAO).
-  quantidadePendente Decimal @default(0) @db.Decimal(10, 3)
+  quantidadePendente Decimal @default(0) @db.Decimal(15, 6)
   criadoEm     DateTime @default(now())
   atualizadoEm DateTime @updatedAt
   material     Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
@@ -348,7 +359,7 @@ model EntradaPendente {
   tipo               String    // 'RETALHO' | 'DEVOLUCAO'
   status             String    @default("PENDENTE") // 'PENDENTE' | 'CONFIRMADA' | 'RECUSADA'
   materialId         Int
-  quantidade         Decimal   @db.Decimal(10, 3)
+  quantidade         Decimal   @db.Decimal(15, 6)
   /// Linha de produção de origem ('1' ou '2').
   producao           String
   numeroOS           String?
@@ -381,7 +392,7 @@ model MovimentacaoProducao {
   id          Int      @id @default(autoincrement())
   materialId  Int
   tipo        String   // 'TRANSFERENCIA' | 'BAIXA'
-  quantidade  Decimal  @db.Decimal(10, 3)
+  quantidade  Decimal  @db.Decimal(15, 6)
   numeroOS    String?  // preenchido apenas em BAIXA
   observacao  String?
   usuarioNome String?
@@ -402,8 +413,8 @@ model SolicitacaoProducao {
   materialId          Int
   descricaoItem       String?
   observacao          String?
-  quantidadeReservada Decimal                   @db.Decimal(10, 3)
-  quantidadeUsada     Decimal                   @default(0) @db.Decimal(10, 3)
+  quantidadeReservada Decimal                   @db.Decimal(15, 6)
+  quantidadeUsada     Decimal                   @default(0) @db.Decimal(15, 6)
   status              StatusSolicitacaoProducao @default(FINALIZADA)
   usuarioId           Int
   usuarioNome         String
@@ -420,7 +431,7 @@ model SolicitacaoProducao {
 model BaixaProducao {
   id            Int                 @id @default(autoincrement())
   solicitacaoId Int
-  quantidade    Decimal             @db.Decimal(10, 3)
+  quantidade    Decimal             @db.Decimal(15, 6)
   observacao    String?
   criadoEm      DateTime            @default(now())
   solicitacao   SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
@@ -524,7 +535,7 @@ model ItemSolicitacaoMaterial {
   id              Int                  @id @default(autoincrement())
   solicitacaoId   Int
   materialId      Int
-  quantidade      Decimal              @db.Decimal(10, 3)
+  quantidade      Decimal              @db.Decimal(15, 6)
   observacao      String?
   imagemUrl       String?
  
@@ -555,7 +566,7 @@ model AdicionalSolicitacaoMaterial {
   id              Int                  @id @default(autoincrement())
   solicitacaoId   Int
   materialId      Int
-  quantidade      Decimal              @db.Decimal(10, 3)
+  quantidade      Decimal              @db.Decimal(15, 6)
   observacao      String?
   imagemUrl       String?
  
@@ -665,7 +676,7 @@ model OrcamentoVendaItem {
   id               Int                        @id @default(autoincrement())
   orcamentoVendaId Int
   produtoId        Int
-  quantidade       Decimal                    @default(1) @db.Decimal(10, 3)
+  quantidade       Decimal                    @default(1) @db.Decimal(15, 6)
   observacao       String?
   criadoEm         DateTime                   @default(now())
   orcamentoVenda   OrcamentoVenda             @relation(fields: [orcamentoVendaId], references: [id], onDelete: Cascade)

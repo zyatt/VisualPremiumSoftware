@@ -13,6 +13,7 @@ router.get('/pdf', authMiddleware, roleMiddleware(LEITURA), pdfCtrl.gerarPdf);
 
 router.get('/',          authMiddleware, roleMiddleware(LEITURA),  ctrl.listar);
 router.get('/todas', authMiddleware, roleMiddleware(LEITURA), ctrl.listarTodas);
+router.get('/:numeroOS/cliente', authMiddleware, roleMiddleware(LEITURA), ctrl.buscarClientePorNumeroOS);
 router.get('/:numeroOS', authMiddleware, roleMiddleware(LEITURA),  ctrl.buscarPorNumeroOS);
 
 router.post('/movimentacoes',                    authMiddleware, roleMiddleware(ESCRITA),  ctrl.registrarMovimentacao);

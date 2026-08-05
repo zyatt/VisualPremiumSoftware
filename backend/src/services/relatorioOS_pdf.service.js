@@ -4,12 +4,10 @@ const svc         = require('./relatorioOS.service');
 
 function formatCurrency(value) {
   const n = Number(value ?? 0);
-  const s6 = n.toFixed(6);
-  const trimmed = s6.replace(/0+$/, '');
-  const [intPart, decPart = ''] = trimmed.split('.');
-  const dec = decPart.length < 2 ? decPart.padEnd(2, '0') : decPart;
+  const s2 = n.toFixed(2);
+  const [intPart, decPart] = s2.split('.');
   const intFormatted = new Intl.NumberFormat('pt-BR').format(parseInt(intPart, 10));
-  return `R$ ${intFormatted},${dec}`;
+  return `R$ ${intFormatted},${decPart}`;
 }
 
 function formatDate(date) {
@@ -20,6 +18,30 @@ function formatDate(date) {
 function formatNumber(value) {
   const n = Number(value ?? 0);
   return n % 1 === 0 ? String(n) : n.toFixed(2).replace('.', ',');
+}
+
+/// Normaliza a unidade para exibição minúscula no PDF (mesma convenção usada
+/// no app): 'M/L' -> 'm/l'; 'M' -> 'm'; 'ML' -> 'ml'; 'M²'/'M2' -> 'm²';
+/// 'UNIDADE' -> 'Unidade' ou 'Unidades'; 'G' -> 'g'. Preserva valores
+/// desconhecidos, só com a caixa baixa aplicada.
+/// Quando `unidade` for 'UNIDADE', o parâmetro `quantidade` define o plural:
+/// 1 -> 'Unidade', diferente de 1 -> 'Unidades'.
+function formatUnidade(unidade, quantidade) {
+  if (!unidade) return unidade;
+  const norm = unidade.trim().toUpperCase();
+  if (norm === 'UNIDADE') {
+    const qtd = Number(quantidade ?? 0);
+    return qtd === 1 ? 'Unidade' : 'Unidades';
+  }
+  const mapa = {
+    'M/L':     'm/l',
+    'M':       'm',
+    'ML':      'ml',
+    'M²':      'm²',
+    'M2':      'm²',
+    'G':       'g',
+  };
+  return mapa[norm] ?? unidade.toLowerCase();
 }
 
 const C = {
@@ -108,8 +130,15 @@ function drawPageHeader(doc, dados, logoPath) {
      .text('RELATÓRIO DE ORDEM DE SERVIÇO', titleX, 14, { width: titleW, align: 'right', lineBreak: false });
   doc.font('Helvetica-Bold').fontSize(13).fillColor(C.black)
      .text(tituloOS, titleX, 28, { width: titleW, align: 'right', lineBreak: false });
-  doc.font('Helvetica').fontSize(7).fillColor(C.lightGray)
-     .text(`Gerado em ${formatDate(new Date())}`, titleX, 50, { width: titleW, align: 'right', lineBreak: false });
+  if (dados.cliente && dados.cliente.trim()) {
+    doc.font('Helvetica').fontSize(7.5).fillColor(C.accent)
+       .text(dados.cliente.trim(), titleX, 43, { width: titleW, align: 'right', lineBreak: false });
+    doc.font('Helvetica').fontSize(7).fillColor(C.lightGray)
+       .text(`Gerado em ${formatDate(new Date())}`, titleX, 53, { width: titleW, align: 'right', lineBreak: false });
+  } else {
+    doc.font('Helvetica').fontSize(7).fillColor(C.lightGray)
+       .text(`Gerado em ${formatDate(new Date())}`, titleX, 50, { width: titleW, align: 'right', lineBreak: false });
+  }
 
   doc.strokeColor(C.divider).lineWidth(1)
      .moveTo(0, H).lineTo(PAGE_W, H).stroke();
@@ -122,7 +151,7 @@ function drawSummaryCards(doc, dados, y) {
   const cards = [
     { label: 'Saídas',          value: String(saidas.length),            color: C.vermelho, bg: C.vermelhoLt },
     { label: 'Entradas',        value: String(entradas.length),          color: C.azul,     bg: C.azulLight  },
-    { label: 'Total em saídas', value: formatCurrency(dados.totalGeral), color: C.verde,    bg: C.verdeLight },
+    { label: 'Total geral',     value: formatCurrency(dados.totalGeral), color: C.verde,    bg: C.verdeLight },
     { label: 'Fechada em',      value: formatDate(dados.fechadaEm),      color: C.gray,     bg: C.bgHeader   },
   ];
 
@@ -215,10 +244,13 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
   const sublines = [];
   const partes = [item.medida, item.espessura].filter(Boolean);
   if (partes.length > 0) sublines.push(partes.join(' \u00b7 '));
-  if (item.unidade)      sublines.push(item.unidade);
   if (item.observacao)   sublines.push(`Obs: ${item.observacao}`);
 
-  const nomeH = doc.heightOfString(item.material || '\u2014', { width: colW0, fontSize: FONT_SZ });
+  const nomeCompleto = item.identificador
+    ? `${item.identificador} \u00b7 ${item.material || '\u2014'}`
+    : (item.material || '\u2014');
+
+  const nomeH = doc.heightOfString(nomeCompleto, { width: colW0, fontSize: FONT_SZ });
   const innerH = nomeH + sublines.length * LINE_SUB;
   const rowH   = Math.max(24, innerH + ROW_PAD_V * 2);
 
@@ -231,8 +263,17 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
 
   let cx = MARGIN;
 
-  doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
-     .text(item.material || '\u2014', cx + 4, tyText, { width: colW0, lineBreak: false });
+  if (item.identificador) {
+    const idLabel = `${item.identificador} \u00b7 `;
+    const idW = doc.font('Helvetica-Bold').fontSize(FONT_SZ).widthOfString(idLabel);
+    doc.fillColor(C.black)
+       .text(idLabel, cx + 4, tyText, { width: colW0, lineBreak: false });
+    doc.fillColor(C.black)
+       .text(item.material || '\u2014', cx + 4 + idW, tyText, { width: colW0 - idW, lineBreak: false });
+  } else {
+    doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
+       .text(item.material || '\u2014', cx + 4, tyText, { width: colW0, lineBreak: false });
+  }
 
   let subY = tyText + nomeH + 1;
   for (const sub of sublines) {
@@ -245,7 +286,7 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
 
   if (comPreco) {
     const qtdLabel = item.unidade
-      ? `${formatNumber(item.quantidade)} ${item.unidade}`
+      ? `${formatNumber(item.quantidade)} ${formatUnidade(item.unidade, item.quantidade)}`
       : formatNumber(item.quantidade);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(qtdLabel, cx + 4, tySingle, { width: cols[1].w - 8, align: 'center', lineBreak: false });
@@ -255,7 +296,7 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
        .text(item.precoUnitario > 0 ? formatCurrency(item.precoUnitario) : '—',
              cx + 4, tySingle, { width: cols[2].w - 8, align: 'right', lineBreak: false });
     if (item.unidade) {
-      const unidLabel = item.usarM2 ? `por M²` : `por ${item.unidade}`;
+      const unidLabel = item.usarM2 ? `por m²` : `por ${formatUnidade(item.unidade, 1)}`;
       doc.font('Helvetica').fontSize(6.5).fillColor(C.lightGray)
          .text(unidLabel, cx + 4, tySingle + FONT_SZ + 1, { width: cols[2].w - 8, align: 'right', lineBreak: false });
     }
@@ -270,7 +311,7 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
        .text(formatDate(item.data), cx + 4, tySingle, { width: cols[4].w - 8, align: 'right', lineBreak: false });
   } else {
     const qtdLabel = item.unidade
-      ? `${formatNumber(item.quantidade)} ${item.unidade}`
+      ? `${formatNumber(item.quantidade)} ${formatUnidade(item.unidade, item.quantidade)}`
       : formatNumber(item.quantidade);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(qtdLabel, cx + 4, tySingle, { width: cols[1].w - 8, align: 'center', lineBreak: false });
@@ -286,13 +327,13 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
   return y + rowH;
 }
 
-function drawTotalRow(doc, totalGeral, y) {
+function drawTotalRow(doc, total, y, label = 'Total geral', color = C.verde) {
   const rowH = 26;
   fillRect(doc, MARGIN, y, CONTENT_W, rowH, C.bgHeader);
   doc.font('Helvetica-Bold').fontSize(9).fillColor(C.gray)
-     .text('Total geral', MARGIN + 4, y + 9, { lineBreak: false });
-  doc.font('Helvetica-Bold').fontSize(11).fillColor(C.verde)
-     .text(formatCurrency(totalGeral), MARGIN, y + 8, { width: CONTENT_W - 4, align: 'right', lineBreak: false });
+     .text(label, MARGIN + 4, y + 9, { lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(color)
+     .text(formatCurrency(total), MARGIN, y + 8, { width: CONTENT_W - 4, align: 'right', lineBreak: false });
   return y + rowH;
 }
 
@@ -330,21 +371,30 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
         y = drawMovTableHeader(doc, y, true);
 
         for (let i = 0; i < saidas.length; i++) {
-          const next = drawMovRow(doc, saidas[i], i, y, true, PAGE_H);
+          const item = saidas[i];
+          const itemComObs = { ...item };
+          if (item.espessura != null && String(item.espessura).trim() !== '') {
+            const espessuraStr = String(item.espessura).trim();
+            itemComObs.espessura = /mm\s*$/i.test(espessuraStr)
+              ? espessuraStr
+              : `${espessuraStr}mm`;
+          }
+
+          const next = drawMovRow(doc, itemComObs, i, y, true, PAGE_H);
           if (next === null) {
             if (totalPaginas !== null) drawFooter(doc, pageNum, totalPaginas);
             pageNum++;
             doc.addPage();
             drawPageHeader(doc, dados, logoPath);
             y = drawMovTableHeader(doc, 84, true);
-            const retry = drawMovRow(doc, saidas[i], i, y, true, PAGE_H);
+            const retry = drawMovRow(doc, itemComObs, i, y, true, PAGE_H);
             y = retry !== null ? retry : y + 22;
           } else {
             y = next;
           }
         }
 
-        if (dados.totalGeral > 0) {
+        if (dados.totalSaidas > 0) {
           if (y + 26 > PAGE_H - 50) {
             if (totalPaginas !== null) drawFooter(doc, pageNum, totalPaginas);
             pageNum++;
@@ -352,7 +402,7 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
             drawPageHeader(doc, dados, logoPath);
             y = 84;
           }
-          y = drawTotalRow(doc, dados.totalGeral, y) + 4;
+          y = drawTotalRow(doc, dados.totalSaidas, y, 'Total saídas', C.verde) + 4;
         }
       }
 
@@ -377,6 +427,12 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
             itemComObs.observacao = item.observacao
               ? `${item.observacao} | ${retalhoInfo}`
               : retalhoInfo;
+          }
+          if (item.espessura != null && String(item.espessura).trim() !== '') {
+            const espessuraStr = String(item.espessura).trim();
+            itemComObs.espessura = /mm\s*$/i.test(espessuraStr)
+              ? espessuraStr
+              : `${espessuraStr}mm`;
           }
 
           const next = drawMovRow(doc, itemComObs, i, y, true, PAGE_H);
@@ -413,6 +469,17 @@ function gerarDocumento(dados, logoPath, totalPaginas) {
              .text(formatCurrency(totalEntradas), MARGIN, y + 8, { width: CONTENT_W - 4, align: 'right', lineBreak: false });
           y += rowH + 4;
         }
+      }
+
+      if (dados.totalSaidas > 0) {
+        if (y + 26 > PAGE_H - 50) {
+          if (totalPaginas !== null) drawFooter(doc, pageNum, totalPaginas);
+          pageNum++;
+          doc.addPage();
+          drawPageHeader(doc, dados, logoPath);
+          y = 84;
+        }
+        y = drawTotalRow(doc, dados.totalGeral, y, 'Total geral', C.verde) + 4;
       }
     };
 
@@ -470,7 +537,7 @@ function gerarDocumentoContagem(dados, logoPath, doc) {
       if (y + rowH > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84 + 20; }
       y += rowH;
     }
-    if (dados.totalGeral > 0) {
+    if (dados.totalSaidas > 0) {
       if (y + 26 > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84; }
       y += 30;
     }
@@ -484,6 +551,11 @@ function gerarDocumentoContagem(dados, logoPath, doc) {
       if (y + rowH > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84 + 20; }
       y += rowH;
     }
+    if (y + 26 > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84; }
+    y += 30;
+  }
+
+  if (dados.totalSaidas > 0) {
     if (y + 26 > PAGE_H - 50) { doc.addPage(); pageNum++; y = 84; }
     y += 30;
   }

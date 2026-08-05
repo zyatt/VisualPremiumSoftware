@@ -184,14 +184,27 @@ function _normalizarPrecoDecimal(valor) {
   return parseFloat(num.toFixed(6)).toString();
 }
 
-async function vincularMaterial(fornecedorId, materialId, preco, precoMetroQuadrado) {
+async function vincularMaterial(fornecedorId, materialId, preco, precoMetroQuadrado, precoUnidadeMedida) {
   const precoVal   = _normalizarPrecoDecimal(preco);
   const precoM2Val = _normalizarPrecoDecimal(precoMetroQuadrado);
+  const precoUnidadeMedidaVal = _normalizarPrecoDecimal(precoUnidadeMedida);
 
   return prisma.fornecedorMaterial.upsert({
     where: { fornecedorId_materialId: { fornecedorId, materialId } },
-    create: { fornecedorId, materialId, preco: precoVal, precoMetroQuadrado: precoM2Val, ativo: true },
-    update: { preco: precoVal, precoMetroQuadrado: precoM2Val, ativo: true },
+    create: {
+      fornecedorId,
+      materialId,
+      preco: precoVal,
+      precoMetroQuadrado: precoM2Val,
+      precoUnidadeMedida: precoUnidadeMedidaVal,
+      ativo: true,
+    },
+    update: {
+      preco: precoVal,
+      precoMetroQuadrado: precoM2Val,
+      precoUnidadeMedida: precoUnidadeMedidaVal,
+      ativo: true,
+    },
   });
 }
 
@@ -203,9 +216,14 @@ async function desvincularMaterial(fornecedorId, materialId) {
 }
 
 async function atualizarPrecoVinculo(fornecedorId, materialId, data) {
+  const updateData = { ...data };
+  if (updateData.preco !== undefined) updateData.preco = _normalizarPrecoDecimal(updateData.preco);
+  if (updateData.precoMetroQuadrado !== undefined) updateData.precoMetroQuadrado = _normalizarPrecoDecimal(updateData.precoMetroQuadrado);
+  if (updateData.precoUnidadeMedida !== undefined) updateData.precoUnidadeMedida = _normalizarPrecoDecimal(updateData.precoUnidadeMedida);
+
   return prisma.fornecedorMaterial.update({
     where: { fornecedorId_materialId: { fornecedorId, materialId } },
-    data,
+    data: updateData,
   });
 }
 

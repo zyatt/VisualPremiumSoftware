@@ -26,12 +26,36 @@ String _fmtHora(DateTime? dt) {
 String _fmtDim(double v) =>
     v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
 
-/// Formata uma quantidade sem arredondar/cortar a precisão real do valor.
+/// Formata uma quantidade sem arredondar/cortar a precisão real do valor,
+/// aplicando separador de milhar (ponto) na parte inteira e vírgula como
+/// separador decimal (padrão brasileiro).
 /// Diferente de `toStringAsFixed(2)`, que exibia apenas 2 casas mesmo quando
 /// o valor real tinha mais precisão (ex.: 3.696 aparecia como "3.70").
-/// Ex.: 3.696 → "3.696"; 4.0 → "4".
-String _formatarQuantidade(double v) =>
-    v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
+/// Ex.: 3.696 → "3,696"; 4.0 → "4"; 1000 → "1.000"; 1000.5 → "1.000,5".
+String _formatarQuantidade(double v) {
+  final bool isInteiro = v == v.truncateToDouble();
+  final String bruto = isInteiro ? v.toStringAsFixed(0) : v.toString();
+
+  final bool negativo = bruto.startsWith('-');
+  final String semSinal = negativo ? bruto.substring(1) : bruto;
+
+  final partes = semSinal.split('.');
+  final parteInteira = partes[0];
+  final parteDecimal = partes.length > 1 ? partes[1] : null;
+
+  final buffer = StringBuffer();
+  final len = parteInteira.length;
+  for (int i = 0; i < len; i++) {
+    if (i > 0 && (len - i) % 3 == 0) buffer.write('.');
+    buffer.write(parteInteira[i]);
+  }
+
+  final resultado = parteDecimal != null
+      ? '${buffer.toString()},$parteDecimal'
+      : buffer.toString();
+
+  return negativo ? '-$resultado' : resultado;
+}
 
 /// Retorna a exibição de medida de um material: usa o campo [medida] quando
 /// preenchido; caso contrário, monta a partir de [largura]/[comprimento]
@@ -281,6 +305,8 @@ class _HistoricoMovimentacoesPageState
   final TextEditingController _buscaUsuarioCtrl   = TextEditingController();
   final TextEditingController _identificadorCtrl  = TextEditingController();
   final TextEditingController _medidaCtrl         = TextEditingController();
+  final TextEditingController _comprimentoCtrl    = TextEditingController();
+  final TextEditingController _larguraCtrl        = TextEditingController();
   final TextEditingController _espessuraCtrl      = TextEditingController();
   Timer? _debounceTimer;
 
@@ -304,6 +330,8 @@ class _HistoricoMovimentacoesPageState
     _buscaUsuarioCtrl.dispose();
     _identificadorCtrl.dispose();
     _medidaCtrl.dispose();
+    _comprimentoCtrl.dispose();
+    _larguraCtrl.dispose();
     _espessuraCtrl.dispose();
     _debounceTimer?.cancel();
     super.dispose();
@@ -322,6 +350,8 @@ class _HistoricoMovimentacoesPageState
     _buscaUsuarioCtrl.clear();
     _identificadorCtrl.clear();
     _medidaCtrl.clear();
+    _comprimentoCtrl.clear();
+    _larguraCtrl.clear();
     _espessuraCtrl.clear();
     setState(() {
       _filtroTipo   = _FiltroTipo.todos;
@@ -337,6 +367,8 @@ class _HistoricoMovimentacoesPageState
     final usuario        = _buscaUsuarioCtrl.text.trim().toLowerCase();
     final identificador  = _identificadorCtrl.text.trim().toLowerCase();
     final medida         = _medidaCtrl.text.trim().toLowerCase();
+    final comprimento    = _comprimentoCtrl.text.trim().toUpperCase();
+    final largura        = _larguraCtrl.text.trim().toUpperCase();
     final espessura      = _espessuraCtrl.text.trim().toLowerCase();
 
     final itens = <_ItemHistorico>[];
@@ -362,6 +394,14 @@ class _HistoricoMovimentacoesPageState
               ) ??
               '';
           if (!medidaFmt.toLowerCase().contains(medida)) continue;
+        }
+        if (comprimento.isNotEmpty) {
+          final v = (m.materialComprimento?.toString() ?? '').toUpperCase();
+          if (!v.contains(comprimento)) continue;
+        }
+        if (largura.isNotEmpty) {
+          final v = (m.materialLargura?.toString() ?? '').toUpperCase();
+          if (!v.contains(largura)) continue;
         }
         if (espessura.isNotEmpty) {
           final v = (m.materialEspessura ?? '').toLowerCase();
@@ -486,7 +526,7 @@ class _HistoricoMovimentacoesPageState
                     inputFormatters: [_UpperCaseFormatter()],
                     onChanged: _onFiltroDigitado,
                     decoration: InputDecoration(
-                      hintText: 'Buscar por número da OS...',
+                      hintText: 'Buscar por número da OS',
                       prefixIcon: Icon(Icons.search,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
@@ -501,7 +541,7 @@ class _HistoricoMovimentacoesPageState
                     inputFormatters: [_UpperCaseFormatter()],
                     onChanged: _onFiltroDigitado,
                     decoration: InputDecoration(
-                      hintText: 'Filtrar por material...',
+                      hintText: 'Filtrar por material',
                       prefixIcon: Icon(Icons.inventory_2_outlined,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
@@ -514,7 +554,7 @@ class _HistoricoMovimentacoesPageState
                     controller: _buscaUsuarioCtrl,
                     onChanged: _onFiltroDigitado,
                     decoration: InputDecoration(
-                      hintText: 'Filtrar por quem fez...',
+                      hintText: 'Filtrar por usuário',
                       prefixIcon: Icon(Icons.person_outline,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
@@ -529,6 +569,8 @@ class _HistoricoMovimentacoesPageState
                         _buscaUsuarioCtrl.text.isNotEmpty ||
                         _identificadorCtrl.text.isNotEmpty ||
                         _medidaCtrl.text.isNotEmpty ||
+                        _comprimentoCtrl.text.isNotEmpty ||
+                        _larguraCtrl.text.isNotEmpty ||
                         _espessuraCtrl.text.isNotEmpty ||
                         _filtroTipo != _FiltroTipo.todos ||
                         _filtroOrigem != null ||
@@ -566,7 +608,7 @@ class _HistoricoMovimentacoesPageState
                     inputFormatters: [_UpperCaseFormatter()],
                     onChanged: _onFiltroDigitado,
                     decoration: InputDecoration(
-                      hintText: 'Identificador...',
+                      hintText: 'Identificador',
                       prefixIcon: Icon(Icons.qr_code,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -580,8 +622,40 @@ class _HistoricoMovimentacoesPageState
                     inputFormatters: [_MedidaEspessuraFormatter()],
                     onChanged: _onFiltroDigitado,
                     decoration: InputDecoration(
-                      hintText: 'Medida...',
+                      hintText: 'Medida',
                       prefixIcon: Icon(Icons.straighten,
+                          color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _comprimentoCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: _onFiltroDigitado,
+                    decoration: InputDecoration(
+                      hintText: 'Comprimento',
+                      suffixText: 'm',
+                      prefixIcon: Icon(Icons.height,
+                          color: Theme.of(context).colorScheme.outline, size: 18),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _larguraCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [_EspessuraFormatter()],
+                    onChanged: _onFiltroDigitado,
+                    decoration: InputDecoration(
+                      hintText: 'Largura',
+                      suffixText: 'm',
+                      prefixIcon: Icon(Icons.width_normal,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
                     ),

@@ -127,6 +127,19 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     }
   }
 
+  /// Busca os logs de edição de uma solicitação específica, sem alterar o
+  /// estado principal do provider (`_logs`/`carregandoLogs`, usados pelo
+  /// diálogo de visualização). Usado pela página de Histórico de
+  /// Solicitações, que precisa buscar os logs de várias solicitações em
+  /// paralelo para montar a linha do tempo geral.
+  Future<List<LogEdicaoSolicitacaoModel>> buscarLogsSemAlterarEstado(int solicitacaoId) async {
+    try {
+      return await _repo.listarLogs(solicitacaoId);
+    } catch (_) {
+      return [];
+    }
+  }
+
   bool _paginaAberta = false;
   bool _visualizacaoPersistedaNaSessao = false;
   bool _persistindoVisualizacao = false;

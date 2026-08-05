@@ -58,13 +58,51 @@ async function criar(data) {
   });
 }
 
-async function atualizar(id, data) {
+async function atualizar(id, data, idSolicitante) {
+  // Impede que o usuário logado desative a própria conta: ele perderia
+  // acesso imediatamente e ninguém mais estaria logado para reverter,
+  // exigindo intervenção manual no banco.
+  if (idSolicitante != null && id === idSolicitante && data.ativo === false) {
+    throw { status: 400, message: 'Você não pode desativar seu próprio usuário.' };
+  }
   if (data.senha) data.senha = await bcrypt.hash(data.senha, 10);
   return prisma.usuario.update({ where: { id }, data });
 }
 
-async function remover(id) {
-  return prisma.usuario.delete({ where: { id } });
+/// Detecta se um erro lançado pelo Prisma/driver adapter é uma violação de
+/// foreign key com RESTRICT. Cobre os diferentes formatos observados:
+/// - Prisma Client "clássico": err.code === 'P2003'
+/// - Prisma com driver adapter (@prisma/adapter-pg): o erro chega como
+///   DriverAdapterError, sem err.code no formato Prisma — o código real do
+///   Postgres (23503) fica em propriedades aninhadas que variam por versão
+///   (err.cause?.code, err.originalError?.code, etc.), então também
+///   verificamos a mensagem, que inclui sempre "violates ... foreign key
+///   constraint" nesses casos.
+function isForeignKeyViolation(err) {
+  if (!err) return false;
+  if (err.code === 'P2003') return true;
+  if (err.code === '23503') return true;
+  if (err?.cause?.code === '23503') return true;
+  if (err?.originalError?.code === '23503') return true;
+  const msg = String(err.message || '');
+  return msg.includes('foreign key constraint') && /violates|RESTRICT/i.test(msg);
+}
+
+async function remover(id, idSolicitante) {
+  if (idSolicitante != null && id === idSolicitante) {
+    throw { status: 400, message: 'Você não pode excluir seu próprio usuário.' };
+  }
+  try {
+    return await prisma.usuario.delete({ where: { id } });
+  } catch (err) {
+    if (isForeignKeyViolation(err)) {
+      throw {
+        status: 409,
+        message: 'Não é possível excluir o usuário, pois ele possui registros vinculados no sistema.',
+      };
+    }
+    throw err;
+  }
 }
 
 module.exports = { login, refresh, trocarUsuario, listar, criar, atualizar, remover };
