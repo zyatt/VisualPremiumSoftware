@@ -1,14 +1,25 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../models/material_model.dart';
+import '../repositories/orcamento_repository.dart';
+import '../utils/api_client.dart';
 
 // ─── Data classes ─────────────────────────────────────────────────────────────
 
 class PrecoFornecedorData {
   double? preco;
   String fornecedorNome;
+  /// Preço por m² deste material para este fornecedor. Mantido em sincronia
+  /// com [preco] pela UI do editor (ver `_DialogEditarMaterial`): preencher
+  /// um recalcula o outro a partir da área do material (largura x
+  /// comprimento para itens em UNIDADE, ou largura x qtdUnidade para os
+  /// demais). Guardado à parte para não recalcular a área toda vez que o
+  /// valor precisar ser exibido.
+  double? precoMetroQuadrado;
   /// Observação de disponibilidade digitada pelo usuário para este
   /// material × fornecedor (ex: "Em falta", "Prazo 5 dias").
   String? observacao;
@@ -16,12 +27,14 @@ class PrecoFornecedorData {
   PrecoFornecedorData({
     required this.fornecedorNome,
     this.preco,
+    this.precoMetroQuadrado,
     this.observacao,
   });
 
   Map<String, dynamic> toJson() => {
         'fornecedorNome': fornecedorNome,
         'preco': preco,
+        'precoMetroQuadrado': precoMetroQuadrado,
         'observacao': observacao,
       };
 
@@ -29,6 +42,7 @@ class PrecoFornecedorData {
       PrecoFornecedorData(
         fornecedorNome: j['fornecedorNome'] as String,
         preco: (j['preco'] as num?)?.toDouble(),
+        precoMetroQuadrado: (j['precoMetroQuadrado'] as num?)?.toDouble(),
         observacao: j['observacao'] as String?,
       );
 }
@@ -119,6 +133,30 @@ class ItemOrcamentoData {
     return '${fmt(c)}x${fmt(l)}m';
   }
 
+  /// Área em m² de uma unidade deste material, usada para converter entre
+  /// preço unitário e preço por m² (ver `_DialogEditarMaterial`):
+  /// - Para materiais em "UNIDADE" (ex.: chapas): largura x comprimento do
+  ///   próprio material (ex.: uma chapa 2x1m tem 2m² por unidade).
+  /// - Para os demais (M/L, M², KG etc.): esses materiais não usam
+  ///   `materialComprimento` — só têm largura fixa (ex.: uma lona de 1,4m
+  ///   de largura). O "comprimento" de cada unidade/rolo vendido é o que o
+  ///   usuário informa no campo "Qtd por Unidade" (`qtdUnidade`, ex.: 50m
+  ///   por rolo), então a área por unidade é largura x qtdUnidade.
+  /// Retorna null quando não há dados suficientes para calcular (largura
+  /// ausente, ou comprimento/qtdUnidade ausente conforme o caso).
+  double? get areaM2PorUnidade {
+    final l = materialLargura;
+    if (l == null || l <= 0) return null;
+    if (!precisaQtdUnidade) {
+      final c = materialComprimento;
+      if (c == null || c <= 0) return null;
+      return l * c;
+    }
+    final q = qtdUnidade;
+    if (q == null || q <= 0) return null;
+    return l * q;
+  }
+
   Map<String, dynamic> toJson() => {
         'itemId': itemId,
         'materialId': materialId,
@@ -137,6 +175,23 @@ class ItemOrcamentoData {
         'precos': precos.map((k, v) => MapEntry(k.toString(), v.toJson())),
         'fornecedorSelecionado': fornecedorSelecionado,
       };
+
+  /// Igual a [toJson], mas sem `itemId`. Usado apenas para calcular a
+  /// assinatura de "houve alteração" (ver `OrcamentoTab._calcularAssinatura`).
+  /// `itemId` é um UUID gerado localmente (ver construtor) e o backend nunca
+  /// o devolve — toda vez que os itens são reconstruídos a partir de uma
+  /// resposta do servidor (SSE, auto-sync, reabertura), cada item ganha um
+  /// UUID novo mesmo com os mesmos dados de negócio. Se `itemId` entrasse na
+  /// assinatura, ela nunca mais bateria com a assinatura salva após o
+  /// primeiro reload remoto, e `houveAlteracao` ficaria travado em `true`
+  /// para sempre — foi exatamente isso que fez o editor achar (por engano)
+  /// que havia "alterações locais não salvas" e recusar aplicar atualizações
+  /// vindas de outros usuários via SSE, mesmo em uma aba que só visualiza.
+  Map<String, dynamic> toJsonComparavel() {
+    final m = toJson();
+    m.remove('itemId');
+    return m;
+  }
 
   factory ItemOrcamentoData.fromJson(Map<String, dynamic> j) =>
       ItemOrcamentoData(
@@ -190,6 +245,13 @@ class OrcamentoTab {
   /// Garante que o editor fique visível logo após clicar em "Novo Orçamento".
   bool modoEdicao;
 
+  /// true quando este orçamento pertence a outro usuário e está sendo
+  /// editado por ele agora — a trava de edição (POST /travar) falhou ao
+  /// abrir esta aba pela seção "Orçamentos em Aberto", então o editor deve
+  /// ficar em modo somente-leitura (sem salvar/enviar itens) até a pessoa
+  /// terminar. Nunca persistido: é sempre recalculado ao reabrir a aba.
+  bool somenteLeitura;
+
   /// Modo de precificação usado no comparativo de preços e ao gerar a OC:
   /// 'UNIDADE' — o preço do fornecedor é por unidade/peça (padrão; total =
   /// preço × quantidade), ou 'METRO_LINEAR' — o preço do fornecedor já é
@@ -197,6 +259,14 @@ class OrcamentoTab {
   /// Quantidade por Unidade × quantidade). Só afeta a visualização/
   /// conversão; os preços cadastrados não são alterados.
   String modoPrecificacao;
+
+  /// ID do usuário que criou este orçamento no servidor. Preenchido ao
+  /// carregar/reabrir do servidor (ver `setCriadorIdTab` chamado pela page
+  /// em `_reabrirOrcamento`) ou, para uma aba nova, implicitamente é quem
+  /// está criando agora — ver `_criarOrcamentoNoServidorImpl`. Usado para
+  /// decidir se o usuário atual pode excluir o orçamento (só o criador
+  /// pode): ver `OrcamentoProvider.souCriadorDaAbaAtiva`.
+  int? criadorId;
 
   /// true quando esta aba foi criada automaticamente pelo tour do robô
   /// assistente "Como criar um orçamento" (via `adicionarAba(criadaPeloTour:
@@ -211,6 +281,42 @@ class OrcamentoTab {
   /// tenha sido salva por engano antes desta correção).
   final bool criadaPeloTour;
 
+  /// "Fotografia" (assinatura) do conteúdo da aba no momento em que ela foi
+  /// carregada/sincronizada com o servidor pela última vez (ver
+  /// `OrcamentoProvider.marcarComoSalvo`). Comparada com o conteúdo atual em
+  /// `houveAlteracao` para saber se existem mudanças locais não persistidas.
+  /// Nunca serializada: é recalculada a cada hidratação a partir do servidor.
+  String? _assinaturaSalva;
+
+  String _calcularAssinatura() {
+    final itensOrdenados = itens.map((i) => i.toJsonComparavel()).toList()
+      ..sort((a, b) => (a['materialId'] as int? ?? 0)
+          .compareTo(b['materialId'] as int? ?? 0));
+    return jsonEncode({
+      'titulo': titulo,
+      'modoPrecificacao': modoPrecificacao,
+      'fornecedoresOcultos': List<int>.of(fornecedoresOcultos)..sort(),
+      'itens': itensOrdenados,
+    });
+  }
+
+  /// Registra o estado atual como "salvo" — chamado logo após a aba ser
+  /// hidratada a partir do servidor (abertura/reabertura do editor) ou logo
+  /// após um save bem-sucedido. A partir daqui, `houveAlteracao` volta a
+  /// `false` até o usuário mexer em algo.
+  void marcarComoSalvo() {
+    _assinaturaSalva = _calcularAssinatura();
+  }
+
+  /// true se o conteúdo atual da aba diverge do que foi registrado em
+  /// `marcarComoSalvo`. Se `marcarComoSalvo` nunca foi chamado (aba nova,
+  /// nunca sincronizada), considera que não há "alteração" a perder — é só
+  /// um rascunho vazio/local que ainda será criado.
+  bool get houveAlteracao {
+    if (_assinaturaSalva == null) return false;
+    return _assinaturaSalva != _calcularAssinatura();
+  }
+
   OrcamentoTab({
     required this.id,
     required this.titulo,
@@ -221,8 +327,10 @@ class OrcamentoTab {
     this.jaFinalizado = false,
     this.modoGerarOC = false,
     this.modoEdicao = false,
+    this.somenteLeitura = false,
     this.modoPrecificacao = 'UNIDADE',
     this.criadaPeloTour = false,
+    this.criadorId,
   }) : itens = itens ?? [],
        fornecedoresOcultos = fornecedoresOcultos ?? [];
 
@@ -239,6 +347,7 @@ class OrcamentoTab {
         'modoGerarOC': modoGerarOC,
         'modoEdicao': modoEdicao,
         'modoPrecificacao': modoPrecificacao,
+        'criadorId': criadorId,
         // 'criadaPeloTour' NÃO é serializado de propósito: uma aba do tour
         // nunca deveria chegar a ser persistida (ver _salvarAbas), então
         // este campo nem precisa sobreviver a um round-trip JSON. Se um
@@ -261,6 +370,7 @@ class OrcamentoTab {
         modoGerarOC: j['modoGerarOC'] as bool? ?? false,
         modoEdicao: j['modoEdicao'] as bool? ?? false,
         modoPrecificacao: j['modoPrecificacao'] as String? ?? 'UNIDADE',
+        criadorId: j['criadorId'] as int?,
         itens: (j['itens'] as List)
             .map((i) => ItemOrcamentoData.fromJson(i as Map<String, dynamic>))
             .toList(),
@@ -271,16 +381,343 @@ class OrcamentoTab {
 // NOTA: o histórico de orçamentos (salvos/cancelados) foi movido para o
 // servidor. O provider agora só gerencia a aba em edição (rascunho local).
 
+// ─── Orçamento em aberto (seção "Orçamentos em Aberto") ───────────────────
+// Retrato leve de um orçamento com status ABERTO no servidor, usado para
+// montar os cards agrupados por usuário criador. Não confundir com
+// [OrcamentoTab], que é o estado local (rascunho) de uma aba do editor.
+class OrcamentoAbertoInfo {
+  final int id;
+  final String titulo;
+  final int? criadorId;
+  final String? criadorNome;
+  final int quantidadeItens;
+  final DateTime atualizadoEm;
+  /// Id do usuário que está com este orçamento aberto no editor agora
+  /// (null = ninguém editando no momento).
+  final int? travaUsuarioId;
+  final String? travaUsuarioNome;
+
+  OrcamentoAbertoInfo({
+    required this.id,
+    required this.titulo,
+    this.criadorId,
+    this.criadorNome,
+    required this.quantidadeItens,
+    required this.atualizadoEm,
+    this.travaUsuarioId,
+    this.travaUsuarioNome,
+  });
+
+  bool get emEdicaoPorAlguem => travaUsuarioId != null;
+
+  factory OrcamentoAbertoInfo.fromJson(Map<String, dynamic> j) => OrcamentoAbertoInfo(
+        id: j['id'] as int,
+        titulo: j['titulo'] as String? ?? 'Orçamento',
+        criadorId: j['criadorId'] as int? ?? (j['criador'] as Map?)?['id'] as int?,
+        criadorNome: (j['criador'] as Map?)?['nome'] as String?,
+        quantidadeItens: (j['itens'] as List? ?? []).length,
+        atualizadoEm: DateTime.tryParse(j['atualizadoEm']?.toString() ?? '') ?? DateTime.now(),
+        travaUsuarioId: j['travaUsuarioId'] as int? ?? (j['travaUsuario'] as Map?)?['id'] as int?,
+        travaUsuarioNome: (j['travaUsuario'] as Map?)?['nome'] as String?,
+      );
+}
+
 class OrcamentoProvider extends ChangeNotifier {
   // Chaves agora dependem do usuário — sem prefixo, sem dados de outro usuário
   static String _kAbas(int userId)     => 'orcamento_abas_$userId';
   static String _kAbaAtiva(int userId) => 'orcamento_aba_ativa_$userId';
 
   final _uuid = const Uuid();
+  final _repo = OrcamentoRepository();
   int? _userId; // usuário atual
+  String? _userNome; // nome do usuário atual (ver trocarUsuario)
+
+  /// Nome de exibição do usuário logado, se conhecido. Usado como fallback
+  /// nos cards de "Orçamentos em Aberto" quando o card é do PRÓPRIO usuário
+  /// e o campo `criadorNome` vindo do servidor ainda não chegou (ex: logo
+  /// após criar o orçamento, antes do primeiro refresh completo) — em vez
+  /// de mostrar "Usuário #<id>" para si mesmo.
+  String? get usuarioAtualNome => _userNome;
+  /// Getter público do id do usuário logado, usado pelo editor para setar
+  /// `criadorId` ao persistir um orçamento recém-criado fora do fluxo normal
+  /// de `_criarOrcamentoNoServidorImpl` (ex.: auto-save silencioso ao sair).
+  int? get usuarioAtualId => _userId;
+
+  // ─── Sinalização de edição local para auto-save em tempo real ────────────
+  // Incrementado sempre que o usuário faz uma edição local nos itens da aba
+  // ativa (quantidade, preço, fornecedor, adicionar/remover material) que
+  // ainda não foi persistida no servidor. O editor (orcamento_editor_page)
+  // observa este contador para agendar um auto-save debounced — sem isso,
+  // outras pessoas vendo o mesmo orçamento só recebiam as mudanças quando
+  // quem editava saía da tela. NÃO é incrementado por `substituirItensTab`
+  // (usado para aplicar mudanças que VIERAM de outro usuário via SSE) nem
+  // por `adicionarItensEmLote` (carregamento inicial ao reabrir uma aba) —
+  // só edições que o próprio usuário fez agora, que precisam subir.
+  int _edicaoLocalTrigger = 0;
+  int get edicaoLocalTrigger => _edicaoLocalTrigger;
+  void _sinalizarEdicaoLocal() => _edicaoLocalTrigger++;
+
+  /// Busca os dados ATUAIS de um orçamento no servidor (status, título,
+  /// quantidade de itens etc.). Usado pelo EncaminhamentoChatCard para
+  /// exibir o status em tempo real em vez do retrato congelado no momento
+  /// do encaminhamento — ver `_mesclarComOrcamentoAtual` naquele arquivo.
+  Future<Map<String, dynamic>?> buscarPorId(int id) async {
+    try {
+      return await _repo.buscarPorId(id);
+    } catch (_) {
+      return null;
+    }
+  }
 
   final List<OrcamentoTab> _abas = [];
   List<OrcamentoTab> get abas => List.unmodifiable(_abas);
+
+  // ─── Seção "Orçamentos em Aberto" (compartilhados entre usuários) ─────────
+  // Lista bruta vinda do servidor (todos com status ABERTO, de qualquer
+  // usuário). Atualizada via GET inicial + eventos SSE em tempo real.
+  List<OrcamentoAbertoInfo> _orcamentosAbertos = [];
+  bool _carregandoOrcamentosAbertos = false;
+  String? _erroOrcamentosAbertos;
+
+  List<OrcamentoAbertoInfo> get orcamentosAbertos => List.unmodifiable(_orcamentosAbertos);
+  bool get carregandoOrcamentosAbertos => _carregandoOrcamentosAbertos;
+  String? get erroOrcamentosAbertos => _erroOrcamentosAbertos;
+
+  /// Agrupa [orcamentosAbertos] por criador, na ordem de última atualização
+  /// (usuário com o orçamento mais recentemente alterado aparece primeiro).
+  /// Usuários sem nenhum orçamento em aberto simplesmente não aparecem —
+  /// não é uma lista de todos os usuários do sistema.
+  List<MapEntry<int, List<OrcamentoAbertoInfo>>> get orcamentosAbertosPorUsuario {
+    final Map<int, List<OrcamentoAbertoInfo>> agrupado = {};
+    for (final o in _orcamentosAbertos) {
+      if (o.criadorId == null) continue; // sem criador identificável, não mostra card
+      agrupado.putIfAbsent(o.criadorId!, () => []).add(o);
+    }
+    final entradas = agrupado.entries.toList()
+      ..sort((a, b) {
+        final maisRecenteA = a.value.map((o) => o.atualizadoEm).reduce((x, y) => x.isAfter(y) ? x : y);
+        final maisRecenteB = b.value.map((o) => o.atualizadoEm).reduce((x, y) => x.isAfter(y) ? x : y);
+        return maisRecenteB.compareTo(maisRecenteA);
+      });
+    return entradas;
+  }
+
+  Future<void> carregarOrcamentosAbertos() async {
+    _carregandoOrcamentosAbertos = true;
+    _erroOrcamentosAbertos = null;
+    notifyListeners();
+    try {
+      final data = await _repo.listarAbertos();
+      _orcamentosAbertos = data
+          .map((j) => OrcamentoAbertoInfo.fromJson(j as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      _erroOrcamentosAbertos = e.toString().replaceFirst('Exception: ', '');
+      debugPrint('OrcamentoProvider.carregarOrcamentosAbertos erro: $e');
+    } finally {
+      _carregandoOrcamentosAbertos = false;
+      notifyListeners();
+    }
+  }
+
+  // ─── SSE: mantém a lista de orçamentos em aberto sincronizada em tempo
+  // real entre todos os usuários conectados. Mesmo padrão de conexão do
+  // ChatProvider (ver chat_provider.dart), com reconexão automática.
+  StreamSubscription<String>? _sseSub;
+  String _sseBuffer = '';
+
+  void _conectarSSE() {
+    _sseSub?.cancel();
+    final token = ApiClient.token;
+    if (token == null) return;
+
+    final uri = Uri.parse('${ApiClient.baseUrl}/api/orcamentos/stream');
+    final client = http.Client();
+
+    final req = http.Request('GET', uri)
+      ..headers['Authorization'] = 'Bearer $token'
+      ..headers['Accept'] = 'text/event-stream'
+      ..headers['Cache-Control'] = 'no-cache';
+
+    client.send(req).then((streamedResp) {
+      final stream = streamedResp.stream.transform(utf8.decoder).transform(const LineSplitter());
+      _sseSub = stream.listen(
+        _processarLinhaSSE,
+        onError: (e) {
+          debugPrint('OrcamentoProvider SSE erro: $e');
+          Future.delayed(const Duration(seconds: 5), _conectarSSE);
+        },
+        onDone: () {
+          Future.delayed(const Duration(seconds: 5), _conectarSSE);
+        },
+      );
+    }).catchError((e) {
+      debugPrint('OrcamentoProvider SSE connect erro: $e');
+      Future.delayed(const Duration(seconds: 5), _conectarSSE);
+    });
+  }
+
+  void _processarLinhaSSE(String linha) {
+    if (!linha.startsWith('data: ')) return;
+    _sseBuffer = linha.substring(6);
+    try {
+      final evento = jsonDecode(_sseBuffer) as Map<String, dynamic>;
+      final tipo = evento['tipo'] as String?;
+
+      switch (tipo) {
+        case 'orcamento_criado':
+          final info = OrcamentoAbertoInfo.fromJson(evento['orcamento'] as Map<String, dynamic>);
+          _orcamentosAbertos.removeWhere((o) => o.id == info.id);
+          _orcamentosAbertos.insert(0, info);
+          notifyListeners();
+          break;
+
+        case 'orcamento_voltou_a_aberto':
+          final info = OrcamentoAbertoInfo.fromJson(evento['orcamento'] as Map<String, dynamic>);
+          _orcamentosAbertos.removeWhere((o) => o.id == info.id);
+          _orcamentosAbertos.insert(0, info);
+          notifyListeners();
+          break;
+
+        case 'orcamento_saiu_de_aberto':
+          final id = evento['orcamentoId'] as int?;
+          if (id != null) {
+            _orcamentosAbertos.removeWhere((o) => o.id == id);
+            notifyListeners();
+          }
+          break;
+
+        case 'orcamento_item_alterado':
+          // Item mudou (qtd/preço/fornecedor/título etc): a contagem de
+          // itens e o "atualizado em" exibidos no card podem ter mudado —
+          // refaz o GET leve para esse único orçamento ficar consistente
+          // sem precisar recarregar a lista inteira.
+          final id = evento['orcamentoId'] as int?;
+          if (id != null) _atualizarUmOrcamentoAberto(id);
+          // Também notifica quem está no editor deste orçamento agora, para
+          // puxar as mudanças do outro usuário em tempo real — EXCETO
+          // quando o próprio evento foi gerado por este usuário (eco do
+          // seu próprio auto-save debounced, ver
+          // OrcamentoEditorPage._onProviderTempoRealChanged). Sem esse
+          // filtro, o autor recebia de volta o próprio salvamento como se
+          // fosse "mudança externa" e recarregava a aba a partir do
+          // servidor, podendo sobrescrever uma edição local seguinte feita
+          // enquanto o auto-save anterior ainda estava em voo.
+          final origemUsuarioId = evento['origemUsuarioId'] as int?;
+          final ecoDoProprioUsuario = origemUsuarioId != null && origemUsuarioId == _userId;
+          if (id != null && !ecoDoProprioUsuario) _emitirMudancaExterna(id);
+          break;
+
+        case 'orcamento_travado':
+          final id = evento['orcamentoId'] as int?;
+          final uid = evento['travaUsuarioId'] as int?;
+          final nome = evento['travaUsuarioNome'] as String?;
+          if (id != null) _atualizarTravaLocal(id, uid, nome);
+          break;
+
+        case 'orcamento_destravado':
+          final id = evento['orcamentoId'] as int?;
+          if (id != null) _atualizarTravaLocal(id, null, null);
+          break;
+      }
+    } catch (_) {
+      // Linha malformada/incompleta — ignora, o próximo "data:" corrige.
+    }
+    _sseBuffer = '';
+  }
+
+  void _atualizarTravaLocal(int orcamentoId, int? travaUsuarioId, String? travaUsuarioNome) {
+    final idx = _orcamentosAbertos.indexWhere((o) => o.id == orcamentoId);
+    if (idx != -1) {
+      final atual = _orcamentosAbertos[idx];
+      _orcamentosAbertos[idx] = OrcamentoAbertoInfo(
+        id: atual.id,
+        titulo: atual.titulo,
+        criadorId: atual.criadorId,
+        criadorNome: atual.criadorNome,
+        quantidadeItens: atual.quantidadeItens,
+        atualizadoEm: atual.atualizadoEm,
+        travaUsuarioId: travaUsuarioId,
+        travaUsuarioNome: travaUsuarioNome,
+      );
+      notifyListeners();
+    }
+    // Se o orçamento travado/destravado for o que está aberto no editor
+    // agora, avisa quem está editando (ver getter/listener em
+    // OrcamentoEditorPage para reagir a isso, ex: mostrar aviso ou travar UI).
+    //
+    // IMPORTANTE: quando `travaUsuarioId == _userId`, a trava é do PRÓPRIO
+    // usuário (ex: acabou de criar o orçamento e travou para si mesmo em
+    // _criarOrcamentoNoServidorImpl, ou o heartbeat renovou). Esse caso não
+    // deve disparar o aviso de "trava externa" — mesmo com o fix em
+    // OrcamentoEditorPage._onProviderTempoRealChanged (que já ignora esse
+    // cenário via _idsComTravaMinha), filtrar aqui na origem evita qualquer
+    // corrida residual e deixa a intenção explícita: só é "trava externa"
+    // se pertencer de fato a outra pessoa.
+    final travaEhDeOutroUsuario = travaUsuarioId != null && travaUsuarioId != _userId;
+    final destravouEAntesEraDeOutro = travaUsuarioId == null; // destravamento sempre é relevante notificar
+    if (_abas.any((a) => a.servidorId == orcamentoId) &&
+        (travaEhDeOutroUsuario || destravouEAntesEraDeOutro)) {
+      _travaExternaTrigger++;
+      _travaExternaOrcamentoId = orcamentoId;
+      _travaExternaUsuarioNome = travaUsuarioNome;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _atualizarUmOrcamentoAberto(int orcamentoId) async {
+    try {
+      final data = await _repo.buscarPorId(orcamentoId);
+      if (data['status'] != 'ABERTO') return; // já saiu do pool, outro evento cuida disso
+      final info = OrcamentoAbertoInfo.fromJson(data);
+      final idx = _orcamentosAbertos.indexWhere((o) => o.id == orcamentoId);
+      if (idx != -1) {
+        _orcamentosAbertos[idx] = info;
+      } else {
+        _orcamentosAbertos.insert(0, info);
+      }
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  // ─── Notificação ao editor aberto de que o orçamento mudou por fora ───────
+  // O OrcamentoEditorPage escuta este provider e, ao ver o contador mudar
+  // para um servidorId igual ao da aba que está mostrando na tela, recarrega
+  // os dados do servidor (mesmo fluxo já usado pelo botão "Atualizar"/
+  // auto-sync de 30s, só que disparado na hora em vez de esperar o timer).
+  int _mudancaExternaTrigger = 0;
+  int? _mudancaExternaOrcamentoId;
+  int get mudancaExternaTrigger => _mudancaExternaTrigger;
+  int? get mudancaExternaOrcamentoId => _mudancaExternaOrcamentoId;
+
+  void _emitirMudancaExterna(int orcamentoId) {
+    _mudancaExternaOrcamentoId = orcamentoId;
+    _mudancaExternaTrigger++;
+    notifyListeners();
+  }
+
+  // Mesmo mecanismo para avisos de trava (outro usuário assumiu ou liberou
+  // a edição de um orçamento que está aberto localmente).
+  int _travaExternaTrigger = 0;
+  int? _travaExternaOrcamentoId;
+  String? _travaExternaUsuarioNome;
+  int get travaExternaTrigger => _travaExternaTrigger;
+  int? get travaExternaOrcamentoId => _travaExternaOrcamentoId;
+  String? get travaExternaUsuarioNome => _travaExternaUsuarioNome;
+
+  /// Chamado no login/restauração de sessão (mesmo ponto onde o ChatProvider
+  /// é inicializado — ver usuario_provider.dart) para abrir a conexão SSE e
+  /// carregar a lista inicial de orçamentos em aberto.
+  Future<void> inicializarTempoReal() async {
+    await carregarOrcamentosAbertos();
+    _conectarSSE();
+  }
+
+  void _pararTempoReal() {
+    _sseSub?.cancel();
+    _sseSub = null;
+    _orcamentosAbertos = [];
+  }
 
   int _abaAtiva = 0;
   int get abaAtiva => _abaAtiva;
@@ -290,19 +727,47 @@ class OrcamentoProvider extends ChangeNotifier {
   bool _carregado = false;
   bool get carregado => _carregado;
 
+  // ─── Abertura pendente vinda de um encaminhamento no chat ─────────────────
+  /// Guardado quando o usuário toca no card de um orçamento encaminhado no
+  /// chat — ver EncaminhamentoChatCard._abrirOrigem. A OrcamentoPage, assim
+  /// que ficar visível, consome este id e abre o orçamento no editor
+  /// automaticamente (mesmo fluxo de _reabrirOrcamento).
+  int? _orcamentoParaAbrirPendente;
+  int? get orcamentoParaAbrirPendente => _orcamentoParaAbrirPendente;
+
+  void solicitarAberturaOrcamento(int orcamentoId) {
+    _orcamentoParaAbrirPendente = orcamentoId;
+    notifyListeners();
+  }
+
+  void consumirOrcamentoParaAbrirPendente() {
+    _orcamentoParaAbrirPendente = null;
+  }
+
   OrcamentoProvider();
 
   // ── Chamado pelo main.dart ao logar/deslogar ──────────────────────────────
-  Future<void> trocarUsuario(int? userId) async {
-    if (_userId == userId) return; // mesmo usuário, não recarrega
+  // [userNome] é opcional para não quebrar chamadas existentes de
+  // trocarUsuario(userId) já espalhadas pelo app; quando informado, permite
+  // que a UI mostre o próprio nome do usuário logado em vez de um fallback
+  // genérico como "Usuário #<id>" nos cards de "Orçamentos em Aberto" (ver
+  // usuarioAtualNome / orcamento_page.dart).
+  Future<void> trocarUsuario(int? userId, [String? userNome]) async {
+    if (_userId == userId) {
+      if (userNome != null && userNome.trim().isNotEmpty) _userNome = userNome.trim();
+      return;
+    }
     _userId = userId;
+    _userNome = (userNome != null && userNome.trim().isNotEmpty) ? userNome.trim() : null;
     _abas.clear();
     _abaAtiva = 0;
     _carregado = false;
+    _pararTempoReal();
     notifyListeners();
 
     if (userId != null) {
       await _carregar();
+      await inicializarTempoReal();
     } else {
       // Deslogou: sem abas, painel de aprovação é a tela base
       _carregado = true;
@@ -349,6 +814,16 @@ class OrcamentoProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Wrapper público de `_salvarAbas`, usado pelo editor após o auto-save
+  /// silencioso (ver `_salvarSilenciosamenteAoSair`) para persistir no
+  /// SharedPreferences o `servidorId`/`criadorId` recém-atribuídos à aba,
+  /// além de disparar `notifyListeners()` para refletir o estado em telas
+  /// que observam o provider (ex.: seção "Orçamentos em Aberto").
+  Future<void> salvarAbasAgora() async {
+    await _salvarAbas();
+    notifyListeners();
+  }
+
   Future<void> _salvarAbas() async {
     if (_userId == null) return; // sem usuário, não persiste
     try {
@@ -383,17 +858,113 @@ class OrcamentoProvider extends ChangeNotifier {
   }
   // ── Abas ──────────────────────────────────────
 
+  /// Cria a aba local E, em paralelo, já cria o orçamento no servidor (POST
+  /// /orcamentos) — exceto para a aba fictícia do tour do robô assistente,
+  /// que nunca deve tocar o backend. Isso é o que faz o orçamento aparecer
+  /// na seção "Orçamentos em Aberto" (e para outros usuários, em tempo
+  /// real via SSE) desde o momento em que a guia é aberta, e não só quando
+  /// o usuário clica em "Salvar" — antes disso ele existia só localmente
+  /// (SharedPreferences), invisível para o backend e para outros usuários.
   void _novaAba({bool notificar = true, bool criadaPeloTour = false}) {
     final idx = _abas.length + 1;
-    _abas.add(OrcamentoTab(
+    final tab = OrcamentoTab(
       id: _uuid.v4(),
       titulo: 'Orçamento $idx',
       criadaPeloTour: criadaPeloTour,
-    ));
+    );
+    _abas.add(tab);
     _abaAtiva = _abas.length - 1;
     if (notificar) {
       _salvarAbas();
       notifyListeners();
+    }
+
+    if (!criadaPeloTour) {
+      _criarOrcamentoNoServidor(tab);
+    }
+  }
+
+  /// Futures de criação em andamento no servidor, uma por aba (chave =
+  /// OrcamentoTab.id local). Permite que quem for salvar/enviar manualmente
+  /// espere o POST inicial (disparado por _novaAba) terminar antes de
+  /// decidir se deve criar ou atualizar — sem isso, um clique muito rápido
+  /// em "Salvar" logo após abrir a aba poderia disparar um SEGUNDO POST
+  /// /orcamentos (servidorId ainda nulo nesse instante) e duplicar o
+  /// orçamento no servidor.
+  final Map<String, Future<void>> _criacoesEmAndamento = {};
+
+  /// Espera a criação inicial no servidor terminar, se houver uma em
+  /// andamento para a aba ativa. Chamado pelo editor antes de salvar/
+  /// enviar para aprovação/gerar OC, para nunca correr com _novaAba.
+  Future<void> aguardarCriacaoInicial() async {
+    if (tabAtual == null) return;
+    final future = _criacoesEmAndamento[tabAtual!.id];
+    if (future != null) await future;
+  }
+
+  /// Notificado após o orçamento ser criado no servidor E travado com
+  /// sucesso para o próprio criador (ver _criarOrcamentoNoServidorImpl).
+  /// O OrcamentoEditorPage escuta isso para registrar o id em
+  /// `_idsComTravaMinha` mesmo quando a criação aconteceu DEPOIS que o
+  /// editor já estava montado (aba criada pelo botão "Nova guia" dentro do
+  /// próprio editor, por exemplo) — sem isso, o heartbeat/dispose não
+  /// saberiam que devem renovar/liberar essa trava específica.
+  int _servidorIdTravadoTrigger = 0;
+  int? _servidorIdTravadoRecente;
+  int get servidorIdTravadoTrigger => _servidorIdTravadoTrigger;
+  int? get servidorIdTravadoRecente => _servidorIdTravadoRecente;
+
+  /// Cria o orçamento vazio no servidor para uma aba recém-aberta, preenche
+  /// `servidorId` assim que a resposta chega e já trava a edição para o
+  /// próprio criador (afinal, é ele quem está com a aba aberta agora).
+  /// Falha aqui não bloqueia o usuário — ele continua podendo editar
+  /// localmente e o orçamento é criado de verdade no primeiro "Salvar"/
+  /// "Enviar para aprovação" manual, como já acontecia antes desta mudança
+  /// (fallback via `aguardarCriacaoInicial` + branch `servidorId == null`
+  /// no editor).
+  Future<void> _criarOrcamentoNoServidor(OrcamentoTab tab) async {
+    final future = _criarOrcamentoNoServidorImpl(tab);
+    _criacoesEmAndamento[tab.id] = future;
+    await future;
+    _criacoesEmAndamento.remove(tab.id);
+  }
+
+  Future<void> _criarOrcamentoNoServidorImpl(OrcamentoTab tab) async {
+    try {
+      final criado = await _repo.criar(tab.titulo);
+      final id = criado['id'] as int;
+      // A aba pode ter sido fechada/renomeada/removida enquanto o POST
+      // estava em andamento — só aplica o servidorId se ela ainda existir.
+      final aindaExiste = _abas.any((a) => a.id == tab.id);
+      if (!aindaExiste) {
+        // Aba fechada antes do POST retornar: cancela o orçamento recém
+        // criado no servidor para não deixar um "Em Aberto" fantasma sem
+        // dono visível na UI.
+        try {
+          await _repo.cancelar(id);
+        } catch (_) {}
+        return;
+      }
+      tab.servidorId = id;
+      tab.criadorId = _userId; // quem cria é sempre o dono
+      _salvarAbas();
+      notifyListeners();
+
+      // Trava a edição para o próprio criador. Normalmente não deveria
+      // falhar (o orçamento acabou de ser criado, ninguém mais pode ter a
+      // trava ainda), mas se falhar por qualquer motivo o usuário
+      // simplesmente segue editando localmente sem trava — o heartbeat do
+      // editor tentará de novo no próximo ciclo de 30s.
+      try {
+        await _repo.travar(id);
+        _servidorIdTravadoRecente = id;
+        _servidorIdTravadoTrigger++;
+        notifyListeners();
+      } catch (e) {
+        debugPrint('OrcamentoProvider._criarOrcamentoNoServidor: falha ao travar orcamentoId=$id: $e');
+      }
+    } catch (e) {
+      debugPrint('OrcamentoProvider._criarOrcamentoNoServidor erro: $e');
     }
   }
 
@@ -455,12 +1026,14 @@ class OrcamentoProvider extends ChangeNotifier {
     bool? jaFinalizado,
     bool? modoGerarOC,
     bool? modoEdicao,
+    bool? somenteLeitura,
   }) {
     if (tabAtual == null) return;
     if (aguardandoAprovacao != null) tabAtual!.aguardandoAprovacao = aguardandoAprovacao;
     if (jaFinalizado != null) tabAtual!.jaFinalizado = jaFinalizado;
     if (modoGerarOC != null) tabAtual!.modoGerarOC = modoGerarOC;
     if (modoEdicao != null) tabAtual!.modoEdicao = modoEdicao;
+    if (somenteLeitura != null) tabAtual!.somenteLeitura = somenteLeitura;
     _salvarAbas();
     notifyListeners();
   }
@@ -481,11 +1054,27 @@ class OrcamentoProvider extends ChangeNotifier {
     if (idx >= 0) {
       tabAtual!.itens[idx] = item;
       _salvarAbas();
+      _sinalizarEdicaoLocal();
       notifyListeners();
       return;
     }
 
     tabAtual!.itens.add(item);
+    _salvarAbas();
+    _sinalizarEdicaoLocal();
+    notifyListeners();
+  }
+
+  /// Substitui TODOS os itens da aba ativa pelos [itens] informados,
+  /// preservando o restante do estado da aba (servidorId, título, flags).
+  /// Usado quando outro usuário altera o mesmo orçamento em tempo real
+  /// (ver OrcamentoEditorPage._recarregarItensDoServidor via evento SSE) —
+  /// diferente de [adicionarItensEmLote], que cria uma aba nova.
+  void substituirItensTab(List<ItemOrcamentoData> itens) {
+    if (tabAtual == null) return;
+    tabAtual!.itens
+      ..clear()
+      ..addAll(itens);
     _salvarAbas();
     notifyListeners();
   }
@@ -563,6 +1152,7 @@ class OrcamentoProvider extends ChangeNotifier {
   void removerItem(String itemId) {
     tabAtual?.itens.removeWhere((i) => i.itemId == itemId);
     _salvarAbas();
+    _sinalizarEdicaoLocal();
     notifyListeners();
   }
 
@@ -581,6 +1171,7 @@ class OrcamentoProvider extends ChangeNotifier {
     if (idx >= 0) {
       tabAtual!.itens[idx] = dados;
       _salvarAbas();
+      _sinalizarEdicaoLocal();
       notifyListeners();
     }
   }
@@ -596,6 +1187,37 @@ class OrcamentoProvider extends ChangeNotifier {
     final idx = tabAtual!.itens.indexWhere((i) => i.itemId == itemId);
     if (idx < 0) return;
     final old = tabAtual!.itens[idx];
+
+    // Quando qtdUnidade muda (ex.: usuário editou "Quantidade por Unidade"
+    // na tabela) e o item ainda não recebeu um novo mapa de `precos`
+    // explícito, a área m² por unidade muda junto — e qualquer preço
+    // unitário que havia sido calculado a partir de um preço m² salvo fica
+    // desatualizado em relação à nova área. Recalculamos aqui o `preco` de
+    // cada fornecedor a partir do `precoMetroQuadrado` já salvo (que
+    // continua sendo o valor "fonte da verdade" nesse fluxo) x a nova
+    // área, para que preço e preço/m² nunca fiquem inconsistentes entre si
+    // mesmo quando a mudança não veio do diálogo "Editar Material".
+    var precosFinal = precos ?? old.precos;
+    if (precos == null && qtdUnidade != null && old.precisaQtdUnidade) {
+      final novaArea = (old.materialLargura != null && old.materialLargura! > 0 && qtdUnidade > 0)
+          ? old.materialLargura! * qtdUnidade
+          : null;
+      if (novaArea != null) {
+        precosFinal = old.precos.map((fId, pf) {
+          if (pf.precoMetroQuadrado == null) return MapEntry(fId, pf);
+          return MapEntry(
+            fId,
+            PrecoFornecedorData(
+              fornecedorNome: pf.fornecedorNome,
+              preco: pf.precoMetroQuadrado! * novaArea,
+              precoMetroQuadrado: pf.precoMetroQuadrado,
+              observacao: pf.observacao,
+            ),
+          );
+        });
+      }
+    }
+
     tabAtual!.itens[idx] = ItemOrcamentoData(
       itemId: old.itemId,
       materialId: old.materialId,
@@ -611,12 +1233,13 @@ class OrcamentoProvider extends ChangeNotifier {
       estoqueMinimo: old.estoqueMinimo,
       quantidade: quantidade ?? old.quantidade,
       qtdUnidade: qtdUnidade ?? old.qtdUnidade,
-      precos: precos ?? old.precos,
+      precos: precosFinal,
       fornecedorSelecionado: clearFornecedor
           ? null
           : (fornecedorSelecionado ?? old.fornecedorSelecionado),
     );
     _salvarAbas();
+    _sinalizarEdicaoLocal();
     notifyListeners();
   }
 
@@ -647,6 +1270,52 @@ class OrcamentoProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Define o id do usuário que criou a aba ativa (vindo do servidor ao
+  /// carregar/reabrir um orçamento existente). Usado para decidir se o
+  /// usuário logado pode excluir o orçamento — ver `souCriadorDaAbaAtiva`.
+  void setCriadorIdTab(int? criadorId) {
+    if (tabAtual == null) return;
+    tabAtual!.criadorId = criadorId;
+    _salvarAbas();
+    notifyListeners();
+  }
+
+  /// true se o usuário logado é o criador do orçamento na aba ativa —
+  /// controla se a opção de excluir aparece ao fechar a guia ou pela
+  /// seção "Orçamentos em Aberto". Antes do servidor confirmar quem é o
+  /// criador (`criadorId` ainda null, ex: rascunho local nunca salvo),
+  /// consideramos que é o próprio usuário — afinal, só ele pode estar
+  /// vendo/editando um rascunho que não existe no backend ainda.
+  bool get souCriadorDaAbaAtiva {
+    if (tabAtual == null) return false;
+    if (tabAtual!.criadorId == null) return true;
+    return tabAtual!.criadorId == _userId;
+  }
+
+  /// Registra o conteúdo atual da aba ativa como "salvo" — chamar logo após
+  /// hidratar a aba a partir do servidor (abertura/reabertura do editor) ou
+  /// logo após uma persistência bem-sucedida (salvar/auto-save). A partir
+  /// daqui, `houveAlteracaoNaAbaAtiva` volta a `false` até o usuário mexer em
+  /// algo. Ver `OrcamentoTab.marcarComoSalvo`.
+  void marcarAbaAtivaComoSalva() {
+    tabAtual?.marcarComoSalvo();
+  }
+
+  /// true se a aba ativa tem alterações locais ainda não persistidas desde
+  /// a última chamada a [marcarAbaAtivaComoSalva]. Usado para decidir se o
+  /// editor deve perguntar "salvar alterações?" ao fechar — em especial
+  /// quando quem está editando não é o criador do orçamento (ver
+  /// `OrcamentoEditorPage`, botão "Voltar").
+  bool get houveAlteracaoNaAbaAtiva => tabAtual?.houveAlteracao ?? false;
+
+  /// Mesma lógica de [souCriadorDaAbaAtiva], mas para qualquer [criadorId]
+  /// informado diretamente (ex: um item de [OrcamentoAbertoInfo] da lista
+  /// "Em Aberto", sem precisar ter uma aba local aberta para ele).
+  bool souCriadorDe(int? criadorId) {
+    if (criadorId == null) return false; // sem dono identificável, não arrisca
+    return criadorId == _userId;
+  }
+
   /// Verifica se já existe uma aba aberta com o [servidorId] informado.
   /// Se sim, ativa essa aba e retorna seu índice.
   /// Se não, retorna -1 (chamador deve criar a aba normalmente).
@@ -658,6 +1327,25 @@ class OrcamentoProvider extends ChangeNotifier {
       notifyListeners();
     }
     return idx;
+  }
+
+  /// Mesmo comportamento de [ativarAbaExistente], mas espera primeiro
+  /// qualquer criação de orçamento em andamento (`_criacoesEmAndamento`)
+  /// terminar. Existe para fechar uma corrida: ao clicar em "Novo
+  /// Orçamento", a aba local é criada na hora mas o `servidorId` só chega
+  /// de forma assíncrona (POST /orcamentos). Se, nesse intervalo, o mesmo
+  /// orçamento já aparecer na seção "Orçamentos em Aberto" (via SSE
+  /// 'orcamento_criado', que é emitido pelo backend antes da resposta do
+  /// POST retornar ao próprio criador) e o usuário clicar nele, uma
+  /// checagem síncrona não encontraria a aba ainda sem servidorId e abriria
+  /// uma SEGUNDA guia para o mesmo orçamento. Aguardando as criações
+  /// pendentes antes de checar, garantimos que `servidorId` já esteja
+  /// preenchido quando a comparação acontece.
+  Future<int> ativarAbaExistenteAsync(int servidorId) async {
+    if (_criacoesEmAndamento.isNotEmpty) {
+      await Future.wait(_criacoesEmAndamento.values.toList());
+    }
+    return ativarAbaExistente(servidorId);
   }
 
   /// Inicia uma nova aba de edição SEM criar nada no servidor ainda.
@@ -722,5 +1410,11 @@ class OrcamentoProvider extends ChangeNotifier {
     return fornecedores.isNotEmpty &&
         tabAtual!.itens.every((i) =>
             i.fornecedorSelecionado != null && !ocultos.contains(i.fornecedorSelecionado));
+  }
+
+  @override
+  void dispose() {
+    _sseSub?.cancel();
+    super.dispose();
   }
 }

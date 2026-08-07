@@ -12,6 +12,7 @@ import '../providers/orcamento_provider.dart';
 import '../providers/robo_helper_provider.dart';
 import '../repositories/orcamento_repository.dart';
 import '../theme/app_theme.dart';
+import '../utils/api_client.dart' show OrcamentoTravadoException;
 import 'orcamento_historico_page.dart';
 import 'orcamento_editor_page.dart';
 
@@ -80,6 +81,16 @@ bool _isErroDeStatusDesatualizado(Object e) {
       raw.contains('Apenas orçamentos aguardando aprovação podem ser rejeitados') ||
       raw.contains('Apenas orçamentos aprovados');
 }
+
+// Detecta um 404 do servidor para este orçamento — normalmente significa
+// que ele já foi excluído (por outra guia, outro usuário, ou é resíduo de
+// dados locais/lista desatualizada de antes desta correção). Ver uso em
+// _excluirOrcamentoEmAberto: nesse caso tratamos como sucesso e apenas
+// atualizamos a lista, em vez de mostrar um erro sem saída para o usuário.
+bool _isErroOrcamentoNaoEncontrado(Object e) {
+  final raw = e.toString();
+  return raw.contains('Orçamento não encontrado');
+}
 // ─── Formatters ───────────────────────────────
 
 /// Bloqueia a digitação de vírgula em campos de texto livre (busca, título, descrição, etc.)
@@ -134,6 +145,11 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   bool _carregandoAprovacao = false;
   String? _erroAprovacao;
 
+  // ── Seção "Orçamentos em Aberto" ───────────────────────────────────────────
+  // Null = mostrando os cards de usuário; não-null = mostrando a lista de
+  // orçamentos em aberto daquele usuário (drill-down dentro da própria aba).
+  int? _usuarioSelecionadoEmAberto;
+
   bool _salvandoPreco = false;
   // (flags de edição foram movidos para OrcamentoTab no provider)
 
@@ -151,19 +167,86 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   // quando o tour chega nessa parada.
   final _tourKeyNovoOrcamento = GlobalKey();
 
+  // Referência ao provider (não o BuildContext) para poder remover o
+  // listener com segurança em dispose() — mesmo motivo/padrão explicado em
+  // SolicitacoesMaterialPage._solicitacaoProviderRef.
+  OrcamentoProvider? _orcamentoProviderRef;
+
   @override
   void initState() {
     super.initState();
     _logOrc('initState');
-    _mainTabController = TabController(length: 3, vsync: this);
+    _mainTabController = TabController(length: 4, vsync: this);
     _mainTabController.addListener(() {
       if (_mainTabController.indexIsChanging) return;
+      if (_mainTabController.index != 0) {
+        // Saiu da aba "Em Aberto" — reseta o drill-down por usuário para a
+        // próxima vez que a aba for reaberta começar sempre pelos cards.
+        setState(() => _usuarioSelecionadoEmAberto = null);
+      }
       _carregarOrcamentosServidor(origem: 'trocaDeTabPrincipal');
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FornecedorProvider>().carregar();
       _carregarOrcamentosServidor(origem: 'initState');
+      // A lista de "Orçamentos em Aberto" já foi carregada pelo provider em
+      // trocarUsuario() -> inicializarTempoReal() no login; aqui só
+      // garantimos que está atualizada ao reabrir esta página.
+      context.read<OrcamentoProvider>().carregarOrcamentosAbertos();
       context.read<RoboHelperProvider>().notificarRota('/orcamento');
+    });
+
+    // Escuta o provider diretamente para reagir imediatamente a uma
+    // abertura pendente vinda de um encaminhamento no chat (ver
+    // OrcamentoProvider.solicitarAberturaOrcamento e o mesmo padrão em
+    // SolicitacoesMaterialPage._onProviderChanged).
+    context.read<OrcamentoProvider>().addListener(_onOrcamentoProviderChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _orcamentoProviderRef = context.read<OrcamentoProvider>();
+  }
+
+  void _onOrcamentoProviderChanged() {
+    _tentarAbrirOrcamentoPendente();
+  }
+
+  bool _abrindoOrcamentoPendente = false;
+
+  /// Consome `orcamentoParaAbrirPendente` (se houver) e abre o orçamento no
+  /// editor, reutilizando o mesmo fluxo de `_reabrirOrcamento`. Chamado
+  /// tanto pelo listener direto do provider quanto, redundantemente, pelo
+  /// build() — a flag `_abrindoOrcamentoPendente` evita disparo duplicado.
+  void _tentarAbrirOrcamentoPendente() {
+    if (!mounted) return;
+    final provider = context.read<OrcamentoProvider>();
+    final orcamentoPendenteId = provider.orcamentoParaAbrirPendente;
+    if (orcamentoPendenteId == null || _abrindoOrcamentoPendente) return;
+
+    _abrindoOrcamentoPendente = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      provider.consumirOrcamentoParaAbrirPendente();
+      try {
+        final orcamentoCompleto = await OrcamentoRepository().buscarPorId(orcamentoPendenteId);
+        if (!mounted) return;
+        await _reabrirOrcamento({
+          'id': orcamentoCompleto['id'],
+          'status': orcamentoCompleto['status'],
+        });
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_mensagemErro(e, acao: 'abrir orçamento encaminhado')),
+              backgroundColor: AppTheme.error,
+            ),
+          );
+        }
+      } finally {
+        _abrindoOrcamentoPendente = false;
+      }
     });
   }
 
@@ -171,6 +254,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   void dispose() {
     _logOrc('dispose');
     _mainTabController.dispose();
+    try {
+      _orcamentoProviderRef?.removeListener(_onOrcamentoProviderChanged);
+    } catch (_) {}
     try {
       context.read<RoboHelperProvider>().encerrarTour();
       context.read<RoboHelperProvider>().limparOpcoes('/orcamento');
@@ -350,14 +436,17 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     if (!mounted) return;
     int? abaAlvo;
     if (resultado == 'enviadoParaAprovacao') {
-      abaAlvo = 0;
+      abaAlvo = 1; // "Aguardando Aprovação" (deslocada por causa de "Em Aberto" na posição 0)
     } else if (resultado == 'aprovado') {
-      abaAlvo = 1;
+      abaAlvo = 2; // "Aprovados"
     }
     if (abaAlvo != null && _mainTabController.index != abaAlvo) {
       _mainTabController.animateTo(abaAlvo);
     }
     await _carregarOrcamentosServidor(origem: 'voltaDoEditor');
+    if (mounted) {
+      await context.read<OrcamentoProvider>().carregarOrcamentosAbertos();
+    }
   }
 
   // ── Carregar orçamentos do servidor ──────────────────────────────────────────
@@ -571,9 +660,11 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     final provider = context.read<OrcamentoProvider>();
     final orcId = orc['id'] as int;
 
-    // Se já existe uma aba aberta com esse servidorId, apenas navega para ela
-    final abaExistente = provider.ativarAbaExistente(orcId);
+    // Se já existe uma aba aberta com esse servidorId, sincroniza com o
+    // servidor (ver _sincronizarAbaExistenteComServidor) e navega para ela.
+    final abaExistente = await provider.ativarAbaExistenteAsync(orcId);
     if (abaExistente >= 0) {
+      await _sincronizarAbaExistenteComServidor(orcId);
       if (mounted) {
         final resultado = await Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
@@ -635,6 +726,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       );
 
       provider.setServidorIdTab(orcId);
+      provider.setCriadorIdTab(
+        orcamentoCompleto['criadorId'] as int? ??
+            (orcamentoCompleto['criador'] as Map?)?['id'] as int?,
+      );
       provider.setFornecedoresOcultosTab(
         (orcamentoCompleto['fornecedoresOcultos'] as List? ?? []).map((e) => e as int).toList(),
       );
@@ -669,15 +764,105 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     }
   }
 
+  // ── Sincronizar aba local já existente com o servidor ────────────────────
+  //
+  // Quando o usuário já tinha uma aba local para este orçamento (ex: abriu
+  // antes só para visualizar enquanto outra pessoa editava), `ativarAbaExistente`
+  // apenas reaproveita essa aba em cache — ela NUNCA é recarregada do
+  // servidor nesse caminho. Enquanto essa aba não estava com o
+  // OrcamentoEditorPage montado, os eventos SSE de item alterado só
+  // atualizavam o card da lista "Em Aberto" (`_atualizarUmOrcamentoAberto`),
+  // não o conteúdo da aba em si. Resultado: ao reabrir e virar editor (por
+  // exemplo, depois que o editor anterior clicou em "Voltar" e a trava foi
+  // liberada), o usuário via os itens antigos, de antes da edição alheia —
+  // e se salvasse nesse estado, apagava silenciosamente as mudanças do
+  // outro usuário.
+  //
+  // Por isso, toda vez que reaproveitamos uma aba existente, buscamos o
+  // estado atual no servidor e sobrescrevemos a aba local ANTES de entrar
+  // no editor — a menos que o próprio usuário já tenha alterações locais
+  // não salvas nessa aba, caso em que preferimos preservar o rascunho dele
+  // (mesmo critério usado em OrcamentoEditorPage._recarregarItensDoServidor
+  // para o pull via SSE em tempo real).
+  Future<void> _sincronizarAbaExistenteComServidor(int orcId) async {
+    final provider = context.read<OrcamentoProvider>();
+    if (provider.houveAlteracaoNaAbaAtiva) return;
+
+    try {
+      final orcamentoCompleto = await OrcamentoRepository().buscarPorId(orcId);
+      if (!mounted) return;
+      if (provider.tabAtual?.servidorId != orcId) return;
+
+      final itensRemotos = (orcamentoCompleto['itens'] as List? ?? []);
+      final Map<int, ItemOrcamentoData> itensPorChave = {};
+      for (final item in itensRemotos) {
+        final materialId = item['materialId'] as int;
+        final materialData = item['material'] as Map<String, dynamic>?;
+        final fornecedorId = item['fornecedorId'] as int?;
+        final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
+
+        if (!itensPorChave.containsKey(materialId)) {
+          itensPorChave[materialId] = ItemOrcamentoData(
+            materialId: materialId,
+            materialNome: materialData?['nome'] as String? ?? '',
+            materialUnidade: materialData?['unidade'] as String?,
+            materialMedida: materialData?['medida'] as String?,
+            materialEspessura: materialData?['espessura'] as String?,
+            materialIdentificador: materialData?['identificador'] as String?,
+            materialCategoria: materialData?['categoria'] as String?,
+            quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
+            qtdUnidade: item['qtdUnidade'] != null ? double.tryParse(item['qtdUnidade'].toString()) : null,
+            precos: {},
+          );
+        }
+        if (fornecedorId != null && fornecedorData != null) {
+          itensPorChave[materialId]!.precos[fornecedorId] = PrecoFornecedorData(
+            fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
+            preco: item['precoUnitario'] != null ? double.tryParse(item['precoUnitario'].toString()) : null,
+            observacao: item['observacao'] as String?,
+          );
+          if (item['selecionado'] as bool? ?? false) {
+            itensPorChave[materialId]!.fornecedorSelecionado = fornecedorId;
+          }
+        }
+      }
+
+      provider.substituirItensTab(itensPorChave.values.toList());
+      provider.setFornecedoresOcultosTab(
+        (orcamentoCompleto['fornecedoresOcultos'] as List? ?? []).map((e) => e as int).toList(),
+      );
+
+      final tituloRemoto = orcamentoCompleto['titulo'] as String?;
+      final abaIndex = provider.abas.indexWhere((a) => a.servidorId == orcId);
+      if (tituloRemoto != null &&
+          tituloRemoto.isNotEmpty &&
+          abaIndex != -1 &&
+          provider.abas[abaIndex].titulo != tituloRemoto) {
+        provider.renomearAba(abaIndex, tituloRemoto);
+      }
+
+      // Conteúdo local acabou de ser substituído pelo do servidor: não há
+      // mais "alteração não salva" em relação a esse novo baseline.
+      provider.marcarAbaAtivaComoSalva();
+    } catch (e) {
+      debugPrint('_sincronizarAbaExistenteComServidor: erro ao sincronizar orcamentoId=$orcId: $e');
+      // Falha silenciosa: pior caso, o usuário ainda vê o estado antigo em
+      // cache (mesmo comportamento de antes desta correção) até o próximo
+      // auto-sync de 30s dentro do editor.
+    }
+  }
+
   // ── Reabrir orçamento ─────────────────────────────────────────────────────────
 
-  Future<void> _reabrirOrcamento(Map<String, dynamic> orc) async {
+  Future<void> _reabrirOrcamento(Map<String, dynamic> orc, {bool somenteLeitura = false}) async {
     final provider = context.read<OrcamentoProvider>();
     final orcId = orc['id'] as int;
 
-    // Se já existe uma aba aberta com esse servidorId, apenas navega para ela
-    final abaExistente = provider.ativarAbaExistente(orcId);
+    // Se já existe uma aba aberta com esse servidorId, sincroniza com o
+    // servidor (ver _sincronizarAbaExistenteComServidor) e navega para ela.
+    final abaExistente = await provider.ativarAbaExistenteAsync(orcId);
     if (abaExistente >= 0) {
+      await _sincronizarAbaExistenteComServidor(orcId);
       if (mounted) {
         final resultado = await Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
@@ -743,16 +928,27 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       );
 
       provider.setServidorIdTab(orcId);
+      provider.setCriadorIdTab(
+        orcamentoCompleto['criadorId'] as int? ??
+            (orcamentoCompleto['criador'] as Map?)?['id'] as int?,
+      );
       provider.setFornecedoresOcultosTab(
         (orcamentoCompleto['fornecedoresOcultos'] as List? ?? []).map((e) => e as int).toList(),
       );
       provider.definirModoPrecificacao(orcamentoCompleto['modoPrecificacao'] as String? ?? 'UNIDADE');
+
+      // Registra este estado (recém-vindo do servidor) como o "salvo": a
+      // partir daqui, qualquer edição do usuário faz `houveAlteracaoNaAbaAtiva`
+      // virar true, usado pelo editor para decidir se pergunta "salvar
+      // alterações?" ao fechar (ver OrcamentoEditorPage, botão "Voltar").
+      provider.marcarAbaAtivaComoSalva();
 
       final statusReaberto = orc['status'] as String? ?? '';
       provider.atualizarFlagsTab(
         aguardandoAprovacao: statusReaberto == 'AGUARDANDO_APROVACAO',
         jaFinalizado: statusReaberto == 'APROVADO' || statusReaberto == 'NAO_APROVADO',
         modoGerarOC: statusReaberto == 'APROVADO',
+        somenteLeitura: somenteLeitura,
       );
 
       if (!mounted) return;
@@ -894,6 +1090,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _registrarAjudaRobo();
     });
+    _tentarAbrirOrcamentoPendente();
     return Consumer<OrcamentoProvider>(
       builder: (context, provider, _) {
         if (!provider.carregado) {
@@ -943,6 +1140,397 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   // ── Guias de orçamentos ──────────────────────────────────────────────────────
 
 
+  // ── Painel "Orçamentos em Aberto" (compartilhados entre usuários) ────────────
+
+  Widget _buildPainelEmAberto() {
+    return Consumer<OrcamentoProvider>(
+      builder: (context, provider, _) {
+        if (provider.carregandoOrcamentosAbertos && provider.orcamentosAbertos.isEmpty) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (provider.erroOrcamentosAbertos != null && provider.orcamentosAbertos.isEmpty) {
+          return _buildErroCarregamento(
+            provider.erroOrcamentosAbertos!,
+            onRetry: () => provider.carregarOrcamentosAbertos(),
+          );
+        }
+
+        final porUsuario = provider.orcamentosAbertosPorUsuario;
+
+        if (porUsuario.isEmpty) {
+          return _buildEstadoVazio(
+            icon: Icons.folder_open_outlined,
+            statusColor: AppTheme.primary,
+            emptyMessage: 'Nenhum orçamento em aberto no momento',
+            onRetry: () => provider.carregarOrcamentosAbertos(),
+          );
+        }
+
+        // Se o usuário selecionado não tem mais orçamentos em aberto (ex:
+        // o último foi enviado para aprovação por outra pessoa em tempo
+        // real), volta para a grade de cards sozinho.
+        final selecionadoAindaValido = _usuarioSelecionadoEmAberto != null &&
+            porUsuario.any((e) => e.key == _usuarioSelecionadoEmAberto);
+        if (_usuarioSelecionadoEmAberto != null && !selecionadoAindaValido) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _usuarioSelecionadoEmAberto = null);
+          });
+        }
+
+        if (_usuarioSelecionadoEmAberto != null && selecionadoAindaValido) {
+          final entrada = porUsuario.firstWhere((e) => e.key == _usuarioSelecionadoEmAberto);
+          return _buildListaOrcamentosDoUsuario(entrada.value);
+        }
+
+        return _buildGradeUsuariosEmAberto(porUsuario);
+      },
+    );
+  }
+
+  Widget _buildGradeUsuariosEmAberto(List<MapEntry<int, List<OrcamentoAbertoInfo>>> porUsuario) {
+    return GridView.builder(
+      padding: const EdgeInsets.only(bottom: 16),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 220,
+        mainAxisExtent: 116,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+      ),
+      itemCount: porUsuario.length,
+      itemBuilder: (ctx, i) {
+        final entrada = porUsuario[i];
+        final orcamentos = entrada.value;
+        final provider = context.read<OrcamentoProvider>();
+        final ehEuMesmo = entrada.key == provider.usuarioAtualId;
+        // Se o card é do próprio usuário logado, prefere o nome que já
+        // temos localmente (da sessão) em vez de um fallback numérico —
+        // cobre o instante em que `criadorNome` ainda não chegou do
+        // servidor logo após criar o orçamento.
+        final nome = orcamentos.first.criadorNome ??
+            (ehEuMesmo ? provider.usuarioAtualNome : null) ??
+            'Usuário #${entrada.key}';
+        final emEdicaoAgora = orcamentos.any((o) => o.emEdicaoPorAlguem);
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => setState(() => _usuarioSelecionadoEmAberto = entrada.key),
+          mouseCursor: SystemMouseCursors.click,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
+                      child: Text(
+                        nome.isNotEmpty ? nome[0].toUpperCase() : '?',
+                        style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primary),
+                      ),
+                    ),
+                    const Spacer(),
+                    if (emEdicaoAgora)
+                      Tooltip(
+                        message: 'Há um orçamento sendo editado agora',
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(color: AppTheme.success, shape: BoxShape.circle),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  nome,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${orcamentos.length} ${orcamentos.length == 1 ? 'orçamento' : 'orçamentos'}',
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildListaOrcamentosDoUsuario(List<OrcamentoAbertoInfo> orcamentos) {
+    final provider = context.read<OrcamentoProvider>();
+    final ehEuMesmo = orcamentos.isNotEmpty && orcamentos.first.criadorId == provider.usuarioAtualId;
+    final nome = orcamentos.first.criadorNome ??
+        (ehEuMesmo ? provider.usuarioAtualNome : null) ??
+        'Usuário';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextButton.icon(
+          onPressed: () => setState(() => _usuarioSelecionadoEmAberto = null),
+          icon: const Icon(Icons.arrow_back, size: 16),
+          label: Text('Todos os usuários', style: const TextStyle(fontSize: 13)),
+          style: TextButton.styleFrom(foregroundColor: AppTheme.primary)
+              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Orçamentos em aberto de $nome',
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: ListView.separated(
+            itemCount: orcamentos.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (ctx, i) {
+              final orc = orcamentos[i];
+              final souCriador = context.read<OrcamentoProvider>().souCriadorDe(orc.criadorId);
+              return _OrcamentoEmAbertoCard(
+                info: orc,
+                onTap: () => _abrirOrcamentoEmAberto(orc),
+                // Exclusão só é oferecida ao criador do orçamento — quem
+                // apenas abriu a guia de outra pessoa (ex: para visualizar
+                // ou continuar uma aprovação) não deve conseguir apagá-lo.
+                onExcluir: souCriador ? () => _excluirOrcamentoEmAberto(orc) : null,
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEstadoVazio({
+    required IconData icon,
+    required Color statusColor,
+    required String emptyMessage,
+    required VoidCallback onRetry,
+  }) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Icon(icon, size: 36, color: statusColor),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            emptyMessage,
+            style: Theme.of(context)
+                .textTheme
+                .headlineSmall
+                ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+          ),
+          const SizedBox(height: 8),
+          Tooltip(
+            message: 'Atualizar lista',
+            child: TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh, size: 15),
+              label: const Text('Atualizar'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primary)
+                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErroCarregamento(String erro, {required VoidCallback onRetry}) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline, size: 36, color: AppTheme.error),
+          const SizedBox(height: 16),
+          Text(erro, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh, size: 15),
+            label: const Text('Tentar novamente'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Abre um orçamento da seção "Em Aberto" no editor. Diferente de
+  /// [_reabrirOrcamento] (usado nas abas Aguardando/Aprovados/Não
+  /// Aprovados), aqui o orçamento pode pertencer a OUTRO usuário — então
+  /// antes de abrir tentamos travar a edição no servidor (POST /travar).
+  /// Se já estiver travado por outro usuário agora, mostramos aviso e
+  /// abrimos mesmo assim em modo somente-leitura.
+  Future<void> _abrirOrcamentoEmAberto(OrcamentoAbertoInfo info) async {
+    final provider = context.read<OrcamentoProvider>();
+
+    // Já existe uma aba local para esse orçamento (ex: eu mesmo abri antes,
+    // possivelmente só para visualizar enquanto outra pessoa editava) — não
+    // precisamos travar de novo (heartbeat do editor já renova a trava que
+    // eu já possuo), mas PRECISAMOS sincronizar com o servidor antes de
+    // entrar: essa aba pode conter itens desatualizados, de antes da edição
+    // alheia (ver _sincronizarAbaExistenteComServidor).
+    final abaExistente = await provider.ativarAbaExistenteAsync(info.id);
+    if (abaExistente >= 0) {
+      await _sincronizarAbaExistenteComServidor(info.id);
+      if (mounted) {
+        final resultado = await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+        );
+        await _aoVoltarDoEditor(resultado);
+      }
+      return;
+    }
+
+    bool somenteLeitura = false;
+    try {
+      await OrcamentoRepository().travar(info.id);
+    } on OrcamentoTravadoException catch (e) {
+      if (!mounted) return;
+      final continuar = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Orçamento em edição',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          content: Text(
+            '${e.travaUsuarioNome ?? 'Outro usuário'} está editando este orçamento agora.\n\n'
+            'Você pode abrir para visualizar, mas não poderá editar até que a pessoa termine.',
+            style: const TextStyle(fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Abrir para visualizar'),
+            ),
+          ],
+        ),
+      );
+      if (continuar != true) return;
+      somenteLeitura = true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_mensagemErro(e, acao: 'abrir orçamento')),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Reaproveita o mesmo fluxo de carregamento de _reabrirOrcamento, só
+    // que aqui o status é sempre ABERTO (é o que garante aparecer nesta
+    // seção) e propagamos a flag de somente-leitura para o editor.
+    await _reabrirOrcamento({'id': info.id, 'status': 'ABERTO'}, somenteLeitura: somenteLeitura);
+  }
+
+  // ── Excluir orçamento diretamente pela seção "Em Aberto" ──────────────────
+  // O backend só permite excluir (DELETE /orcamentos/:id) orçamentos com
+  // status CANCELADO, NAO_APROVADO ou CONVERTIDO — nunca ABERTO (ver
+  // orcamento.service.js:excluir). Por isso aqui cancelamos primeiro e, se
+  // o cancelamento for bem-sucedido, excluímos em seguida. Do ponto de
+  // vista do usuário isso é só "excluir o orçamento": ele some da lista
+  // "Em Aberto" (evento SSE 'orcamento_saiu_de_aberto', cuidado do
+  // cancelamento) e não fica nem no histórico como cancelado.
+  Future<void> _excluirOrcamentoEmAberto(OrcamentoAbertoInfo info) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir Orçamento',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        content: Text(
+          'Tem certeza que deseja excluir o orçamento "${info.titulo}"?\n\n'
+          'Essa ação não pode ser desfeita.',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+
+    final provider = context.read<OrcamentoProvider>();
+    try {
+      final repo = OrcamentoRepository();
+      await repo.cancelar(info.id);
+      await repo.excluir(info.id);
+
+      // Se por acaso este orçamento também estiver aberto como aba local
+      // (o próprio usuário que está excluindo), fecha a aba para não
+      // deixar o editor apontando para um orçamento que não existe mais.
+      final idx = provider.ativarAbaExistente(info.id);
+      if (idx >= 0) provider.fecharAba(idx);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Orçamento "${info.titulo}" excluído.'),
+          backgroundColor: AppTheme.success,
+        ),
+      );
+      await provider.carregarOrcamentosAbertos();
+    } catch (e) {
+      if (_isErroOrcamentoNaoEncontrado(e)) {
+        // Já não existe — provavelmente resíduo da lista local (SSE
+        // desatualizado, ou outra guia/usuário já excluiu). O resultado
+        // desejado já é verdade: trata como sucesso, só atualiza a lista.
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Este orçamento já havia sido excluído.'),
+            backgroundColor: AppTheme.warning,
+          ),
+        );
+        await provider.carregarOrcamentosAbertos();
+        return;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_mensagemErro(e, acao: 'excluir orçamento')),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
   // ── Painel de aprovação (exibido quando a aba ativa está vazia) ──────────────
 
   Widget _buildPainelAprovacao() {
@@ -961,6 +1549,19 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             indicatorWeight: 2,
             labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             tabs: [
+              Tab(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Em Aberto'),
+                    const SizedBox(width: 6),
+                    Consumer<OrcamentoProvider>(
+                      builder: (context, provider, _) =>
+                          _badgeContagem(provider.orcamentosAbertos.length),
+                    ),
+                  ],
+                ),
+              ),
               Tab(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1000,6 +1601,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             controller: _mainTabController,
             physics: const NeverScrollableScrollPhysics(),
             children: [
+              _buildPainelEmAberto(),
               _buildListaAprovacao(
                 lista: _aguardandoAprovacao,
                 emptyMessage: 'Nenhum orçamento aguardando aprovação',
@@ -2276,6 +2878,135 @@ class _DialogOpcaoOC extends StatelessWidget {
           child: const Text('Criar nova OC'),
         ),
       ],
+    );
+  }
+}
+
+// ─── Card de item na lista "Orçamentos em Aberto" de um usuário ─────────────
+// Mostra o título, quantidade de itens e — se alguém estiver com o
+// orçamento aberto no editor agora — um indicativo "Em edição por Fulano"
+// (atualizado em tempo real via SSE, ver OrcamentoProvider._atualizarTravaLocal).
+class _OrcamentoEmAbertoCard extends StatefulWidget {
+  final OrcamentoAbertoInfo info;
+  final VoidCallback onTap;
+  /// Chamado quando o usuário confirma a exclusão pelo botão de lixeira do
+  /// card. Null desabilita a exclusão a partir daqui (ex: se no futuro
+  /// quisermos restringir por permissão).
+  final VoidCallback? onExcluir;
+
+  const _OrcamentoEmAbertoCard({
+    required this.info,
+    required this.onTap,
+    this.onExcluir,
+  });
+
+  @override
+  State<_OrcamentoEmAbertoCard> createState() => _OrcamentoEmAbertoCardState();
+}
+
+class _OrcamentoEmAbertoCardState extends State<_OrcamentoEmAbertoCard> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final info = widget.info;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: _hovered
+                ? AppTheme.primary.withValues(alpha: 0.05)
+                : Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      info.titulo,
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${info.quantidadeItens} ${info.quantidadeItens == 1 ? 'item' : 'itens'}'
+                      ' · #${info.id}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (info.emEdicaoPorAlguem)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppTheme.success.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: const BoxDecoration(color: AppTheme.success, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Em edição por ${info.travaUsuarioNome ?? '...'}',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.success),
+                      ),
+                    ],
+                  ),
+                )
+              else ...[
+                Icon(Icons.chevron_right, size: 18, color: Theme.of(context).colorScheme.outline),
+              ],
+              // Exclusão só é oferecida quando ninguém está editando agora —
+              // excluir um orçamento que outra pessoa tem aberto no editor
+              // deixaria a guia dela apontando para um orçamento inexistente.
+              if (widget.onExcluir != null && !info.emEdicaoPorAlguem) ...[
+                const SizedBox(width: 4),
+                Tooltip(
+                  message: 'Excluir orçamento',
+                  child: IconButton(
+                    onPressed: widget.onExcluir,
+                    icon: Icon(Icons.delete_outline, size: 18, color: AppTheme.error),
+                    visualDensity: VisualDensity.compact,
+                    splashRadius: 18,
+                    style: IconButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

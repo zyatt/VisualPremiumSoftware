@@ -195,6 +195,14 @@ class _AppShellState extends State<AppShell> {
     // Conecta (ou reconecta) ao stream SSE de atualizações de materiais
     context.read<MaterialProvider>().conectarNotificacoes();
 
+    // Carrega o contador de materiais pendentes de confirmação (transferência
+    // p/ produção) já na inicialização do shell, e não só quando o usuário
+    // abre a página de Controle de Estoque — é esse contador que alimenta o
+    // badge do item "Controle Estoque" no menu lateral, então sem esta
+    // chamada o badge ficava zerado até a página ser visitada ao menos uma
+    // vez na sessão.
+    context.read<EstoqueProducaoProvider>().carregarContadorPendentes();
+
     // Trocar de usuário não deve deixar a conversa do usuário anterior
     // aberta na tela: recolhe o mini-chat flutuante (se estiver expandido)
     // antes de inicializar o chat do novo usuário.

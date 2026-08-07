@@ -705,7 +705,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
           RoboTourStop(
             key: () => _vincularPorMaterialTourKeys.valores,
             texto: 'Para cada fornecedor adicionado, informe o valor do '
-                'material e/ou o valor por m² cobrado por ele.',
+                'material, o valor por m² e/ou o valor por unidade (m/l, g, ml) cobrado por ele.',
           ),
         ],
       ),
@@ -3421,7 +3421,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                 TextFormField(
                   controller: _precoUnidadeMedidaCtrl,
                   decoration: InputDecoration(
-                    labelText: '${_labelPrecoUnidade(_unidadeSelecionada)}',
+                    labelText: _labelPrecoUnidade(_unidadeSelecionada),
                     prefixText: 'R\$ ',
                     isDense: true,
                   ),
@@ -3557,8 +3557,8 @@ class _VincularPorMaterialDialogState
       widget.emSimulacao && _materialIdSelecionado == null;
 
   static const _fornecedoresSimulados = [
-    {'nome': 'FORNECEDOR A', 'valor': '50.00', 'valorM2': '0.03'},
-    {'nome': 'FORNECEDOR B', 'valor': '800.00', 'valorM2': '0.63'},
+    {'nome': 'FORNECEDOR A', 'valor': '50.00', 'valorM2': '0.03', 'valorUnidade': '2.50'},
+    {'nome': 'FORNECEDOR B', 'valor': '800.00', 'valorM2': '0.63', 'valorUnidade': '40.00'},
   ];
 
   // Fecha este dialog sozinho quando o tour do robô assistente termina
@@ -4523,7 +4523,7 @@ class _VincularPorMaterialDialogState
                                       color: Theme.of(context).colorScheme.outline),
                                   const SizedBox(width: 6),
                                   Text(
-                                    'Exemplo com o material "MATERIAL"',
+                                    'Exemplo com o material "MATERIAL" (m/l, g, m, etc)',
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontStyle: FontStyle.italic,
@@ -4541,6 +4541,7 @@ class _VincularPorMaterialDialogState
                                 nome: f['nome']!,
                                 valor: f['valor']!,
                                 valorM2: f['valorM2']!,
+                                valorUnidade: f['valorUnidade']!,
                               ),
                               const SizedBox(height: 6),
                             ],
@@ -4819,12 +4820,14 @@ class _FornecedorVinculoTileSimulado extends StatelessWidget {
   final String nome;
   final String valor;
   final String valorM2;
+  final String valorUnidade;
 
   const _FornecedorVinculoTileSimulado({
     super.key,
     required this.nome,
     required this.valor,
     required this.valorM2,
+    required this.valorUnidade,
   });
 
   @override
@@ -4876,6 +4879,21 @@ class _FornecedorVinculoTileSimulado extends StatelessWidget {
                 controller: TextEditingController(text: valorM2),
                 decoration: const InputDecoration(
                   labelText: 'Preço m²',
+                  prefixText: 'R\$ ',
+                  isDense: true,
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 110,
+              child: TextField(
+                enabled: false,
+                controller: TextEditingController(text: valorUnidade),
+                decoration: const InputDecoration(
+                  labelText: 'Preço (m/l, g, ml)',
                   prefixText: 'R\$ ',
                   isDense: true,
                   contentPadding:

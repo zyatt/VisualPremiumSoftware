@@ -3,6 +3,20 @@ import 'dart:typed_data';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
+/// Exceção específica para 409 (conflito) em rotas de trava de edição de
+/// orçamento — carrega quem está com a trava, além da mensagem, para a UI
+/// poder mostrar "Fulano está editando" sem precisar re-parsear o texto.
+class OrcamentoTravadoException implements Exception {
+  final String message;
+  final int? travaUsuarioId;
+  final String? travaUsuarioNome;
+
+  OrcamentoTravadoException(this.message, {this.travaUsuarioId, this.travaUsuarioNome});
+
+  @override
+  String toString() => message;
+}
+
 class ApiClient {
   /// Timeout aplicado a toda requisição. Sem isso, uma chamada que nunca
   /// recebe resposta (ex: túnel reconectando, backend reiniciando no meio
@@ -111,10 +125,19 @@ class ApiClient {
   static void _check(http.Response res) {
     if (res.statusCode < 200 || res.statusCode >= 300) {
       String msg = 'Erro ${res.statusCode}';
+      Map<String, dynamic>? body;
       try {
-        final body = jsonDecode(res.body);
+        body = jsonDecode(res.body) as Map<String, dynamic>;
         msg = body['message'] ?? body['error'] ?? msg;
       } catch (_) {}
+
+      if (res.statusCode == 409 && body != null && body.containsKey('travaUsuarioNome')) {
+        throw OrcamentoTravadoException(
+          msg,
+          travaUsuarioId: body['travaUsuarioId'] as int?,
+          travaUsuarioNome: body['travaUsuarioNome'] as String?,
+        );
+      }
       throw Exception(msg);
     }
   }

@@ -217,7 +217,7 @@ String _nomeMaterialLog(Map material) {
   final medida = material['materialMedida']?.toString().trim();
   if (medida != null && medida.isNotEmpty) detalhes.add(medida);
   final espessura = material['materialEspessura']?.toString().trim();
-  if (espessura != null && espessura.isNotEmpty) detalhes.add(espessura);
+  if (espessura != null && espessura.isNotEmpty) detalhes.add('${espessura}mm');
   if (detalhes.isEmpty) return nome;
   return '$nome (${detalhes.join(' · ')})';
 }
@@ -295,6 +295,11 @@ class _ItemHistorico {
   final String? compradoPorNome;
   final DateTime? estoqueEm;
   final String? estoquePorNome;
+  // Quem originou este material especificamente: para item original, o
+  // criador da solicitação (todos os itens originais nascem junto com ela);
+  // para adicional, quem de fato adicionou aquele material — nunca o
+  // criador da solicitação, que pode ser outra pessoa.
+  final String? criadoPorNome;
   final DateTime dataReferencia; // data usada para ordenar/agrupar
 
   _ItemHistorico({
@@ -310,6 +315,7 @@ class _ItemHistorico {
     this.compradoPorNome,
     this.estoqueEm,
     this.estoquePorNome,
+    this.criadoPorNome,
     required this.dataReferencia,
   });
 
@@ -327,6 +333,10 @@ class _ItemHistorico {
       compradoPorNome: i.compradoPorNome,
       estoqueEm: i.estoqueEm,
       estoquePorNome: i.estoquePorNome,
+      // Item original: editadoPorNome (se já foi editado) tem prioridade
+      // por ser a informação mais recente sobre "quem mexeu nisso"; senão,
+      // cai para o criador da própria solicitação.
+      criadoPorNome: i.editadoPorNome ?? sol.usuarioNome,
       dataReferencia: i.estoqueEm ?? i.compradoEm ?? i.criadoEm,
     );
   }
@@ -345,6 +355,10 @@ class _ItemHistorico {
       compradoPorNome: a.compradoPorNome,
       estoqueEm: a.estoqueEm,
       estoquePorNome: a.estoquePorNome,
+      // Adicional: quem editou por último (se já foi editado) ou, senão,
+      // quem de fato o adicionou — nunca o criador da solicitação
+      // original, que é quem estava (incorretamente) sendo usado antes.
+      criadoPorNome: a.editadoPorNome ?? a.adicionadoPorNome,
       dataReferencia: a.estoqueEm ?? a.compradoEm ?? a.adicionadoEm,
     );
   }
@@ -463,6 +477,15 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
         if (_filtroStatus == _FiltroStatus.pendente && item.statusCompra != 'PENDENTE') continue;
         if (_filtroStatus == _FiltroStatus.comprado && item.statusCompra != 'COMPRADO') continue;
         if (_filtroStatus == _FiltroStatus.estoque && item.statusCompra != 'ESTOQUE') continue;
+
+        // Um material ainda PENDENTE (nunca comprado nem colocado em
+        // estoque) não é um evento à parte: sua criação/adição já aparece
+        // via log (_EventoEdicao) logo abaixo. Sem esse corte, o mesmo
+        // acontecimento aparecia duas vezes — "ADICIONAR" (log) e
+        // "PENDENTE" (estado atual). Só mostramos aqui quando algum
+        // filtro de status obriga a exibição (aba "Pendentes" etc).
+        if (!statusAtivo && item.statusCompra == 'PENDENTE') continue;
+
         if (!_passaFiltroMaterial(material, item.materialNome)) continue;
         if (_dataInicio != null && item.dataReferencia.isBefore(_dataInicio!)) continue;
         if (_dataFim != null) {
@@ -826,6 +849,10 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
             ),
             const SizedBox(height: 16),
 
+            // ── Cabeçalho fixo da tabela ───────────────────────────────────
+            const _CabecalhoTabela(),
+            const SizedBox(height: 4),
+
             // ── Lista ──────────────────────────────────────────────────────
             Expanded(
               child: carregandoTudo && eventos.isEmpty
@@ -920,6 +947,7 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
 
 const double _colSolicitacaoW = 170;
 const double _colAcaoW = 118;
+const double _colCampoW = 120;
 const double _colUsuarioW = 130;
 const double _colHoraW = 50;
 
@@ -1026,6 +1054,30 @@ Widget _celulaHora(DateTime dt, ColorScheme scheme) {
   );
 }
 
+/// Chip compacto para valores de "antes"/"depois", no mesmo padrão visual
+/// usado no histórico de materiais (fundo levemente colorido + texto na cor
+/// da ação: vermelho para "antes", verde para "depois").
+Widget _valorChip(String valor, Color cor) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: cor.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      valor,
+      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: cor),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    ),
+  );
+}
+
+/// Texto "—" para quando não há valor de antes/depois.
+Widget _valorVazio(ColorScheme scheme) {
+  return Text('—', style: TextStyle(fontSize: 12, color: scheme.outline));
+}
+
 /// Cabeçalho fixo da tabela, alinhado com as mesmas larguras de coluna
 /// usadas nas linhas de material e de edição.
 class _CabecalhoTabela extends StatelessWidget {
@@ -1044,11 +1096,18 @@ class _CabecalhoTabela extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(
         children: [
-          SizedBox(width: _colSolicitacaoW, child: Text('SOLICITAÇÃO', style: estilo)),
           SizedBox(width: _colAcaoW, child: Text('AÇÃO', style: estilo)),
+          const SizedBox(width: 10),
+          SizedBox(width: _colSolicitacaoW, child: Text('SOLICITAÇÃO', style: estilo)),
+          const SizedBox(width: 10),
           Expanded(flex: 3, child: Text('MATERIAL', style: estilo)),
           const SizedBox(width: 10),
-          Expanded(flex: 3, child: Text('ANTES / DEPOIS', style: estilo)),
+          SizedBox(width: _colCampoW, child: Text('CAMPO', style: estilo)),
+          const SizedBox(width: 10),
+          Expanded(flex: 2, child: Text('ANTES', style: estilo)),
+          const SizedBox(width: 10),
+          Expanded(flex: 2, child: Text('DEPOIS', style: estilo)),
+          const SizedBox(width: 10),
           SizedBox(width: _colUsuarioW, child: Text('USUÁRIO', style: estilo)),
           SizedBox(width: _colHoraW, child: Text('', style: estilo)),
         ],
@@ -1087,7 +1146,11 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
     } else if (item.statusCompra == 'COMPRADO') {
       responsavel = item.compradoPorNome;
     } else {
-      responsavel = sol.usuarioNome;
+      // PENDENTE: quem originou este material específico (criador da
+      // solicitação para item original, ou quem adicionou no caso de
+      // adicional) — não sol.usuarioNome direto, que sempre aponta para
+      // o criador da OS mesmo quando outra pessoa adicionou o material.
+      responsavel = item.criadoPorNome ?? sol.usuarioNome;
     }
 
     final bgColor = _hovered
@@ -1116,12 +1179,12 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── 1. Solicitação ───────────────────────────────────
-                    _celulaSolicitacao(sol, scheme, hovered: _hovered),
+                    // ── 1. Ação (status do material) ─────────────────────
+                    _badgeTabela(statusInfo.label, statusInfo.cor),
                     const SizedBox(width: 10),
 
-                    // ── 2. Ação (status do material) ─────────────────────
-                    _badgeTabela(statusInfo.label, statusInfo.cor),
+                    // ── 2. Solicitação ───────────────────────────────────
+                    _celulaSolicitacao(sol, scheme, hovered: _hovered),
                     const SizedBox(width: 10),
 
                     // ── 3. Material + quantidade ─────────────────────────
@@ -1156,9 +1219,26 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
                     ),
                     const SizedBox(width: 10),
 
-                    // ── 4. Antes/depois (observação, quando houver) ──────
+                    // ── 4. Campo / Antes / Depois ────────────────────────
+                    SizedBox(
+                      width: _colCampoW,
+                      child: item.observacao != null && item.observacao!.trim().isNotEmpty
+                          ? Text(
+                              'Observação',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontStyle: FontStyle.italic,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(flex: 2, child: _valorVazio(scheme)),
+                    const SizedBox(width: 10),
                     Expanded(
-                      flex: 3,
+                      flex: 2,
                       child: item.observacao != null && item.observacao!.trim().isNotEmpty
                           ? Text(
                               item.observacao!,
@@ -1170,7 +1250,7 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             )
-                          : const SizedBox.shrink(),
+                          : _valorVazio(scheme),
                     ),
                     const SizedBox(width: 10),
 
@@ -1280,40 +1360,58 @@ class _LinhaEdicaoState extends State<_LinhaEdicao> {
       );
     }
 
-    // ── Conteúdo da coluna "Antes / Depois" ───────────────────────────────
-    Widget colunaAntesDepois;
+    // ── Conteúdo das colunas "Campo" / "Antes" / "Depois" ──────────────────
+    // Quando há múltiplos campos alterados no mesmo log, empilha uma linha
+    // por campo (mesmo padrão do histórico de materiais).
+    Widget colunaCampo;
+    Widget colunaAntes;
+    Widget colunaDepois;
     if (campos.isNotEmpty) {
-      colunaAntesDepois = Wrap(
-        spacing: 12,
-        runSpacing: 4,
-        children: campos.map((campo) {
-          final label = _camposLabel[campo] ?? campo;
-          final antes = _fmtValorLog(log.antes[campo]);
-          final depois = _fmtValorLog(log.depois[campo]);
-          return RichText(
-            overflow: TextOverflow.ellipsis,
-            text: TextSpan(
-              style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
-              children: [
-                TextSpan(
-                  text: '$label: ',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+      colunaCampo = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final campo in campos)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                _camposLabel[campo] ?? campo,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                  color: scheme.onSurfaceVariant,
                 ),
-                const TextSpan(
-                    text: 'antes ',
-                    style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.error)),
-                TextSpan(text: '$antes  '),
-                const TextSpan(
-                    text: 'depois ',
-                    style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.success)),
-                TextSpan(text: depois),
-              ],
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          );
-        }).toList(),
+        ],
+      );
+      colunaAntes = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final campo in campos)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: _valorChip(_fmtValorLog(log.antes[campo]), AppTheme.error),
+            ),
+        ],
+      );
+      colunaDepois = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final campo in campos)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: _valorChip(_fmtValorLog(log.depois[campo]), AppTheme.success),
+            ),
+        ],
       );
     } else {
-      colunaAntesDepois = const SizedBox.shrink();
+      colunaCampo = const SizedBox.shrink();
+      colunaAntes = _valorVazio(scheme);
+      colunaDepois = _valorVazio(scheme);
     }
 
     return MouseRegion(
@@ -1338,20 +1436,24 @@ class _LinhaEdicaoState extends State<_LinhaEdicao> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── 1. Solicitação ───────────────────────────────────
-                    _celulaSolicitacao(sol, scheme, hovered: _hovered),
+                    // ── 1. Ação ───────────────────────────────────────────
+                    _badgeTabela(acaoLabel, cor),
                     const SizedBox(width: 10),
 
-                    // ── 2. Ação ───────────────────────────────────────────
-                    _badgeTabela(acaoLabel, cor),
+                    // ── 2. Solicitação ───────────────────────────────────
+                    _celulaSolicitacao(sol, scheme, hovered: _hovered),
                     const SizedBox(width: 10),
 
                     // ── 3. Material + quantidade ─────────────────────────
                     Expanded(flex: 3, child: colunaMaterial),
                     const SizedBox(width: 10),
 
-                    // ── 4. Antes / depois ─────────────────────────────────
-                    Expanded(flex: 3, child: colunaAntesDepois),
+                    // ── 4. Campo / Antes / Depois ─────────────────────────
+                    SizedBox(width: _colCampoW, child: colunaCampo),
+                    const SizedBox(width: 10),
+                    Expanded(flex: 2, child: colunaAntes),
+                    const SizedBox(width: 10),
+                    Expanded(flex: 2, child: colunaDepois),
                     const SizedBox(width: 10),
 
                     // ── 5. Usuário ────────────────────────────────────────

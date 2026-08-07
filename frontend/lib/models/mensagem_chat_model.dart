@@ -16,6 +16,9 @@ String resumoConteudoParaPreview(String conteudo) {
       case 'material':
         final nome = (dados?['materialNome'] as String?)?.trim();
         return nome != null && nome.isNotEmpty ? nome : 'Material encaminhado';
+      case 'orcamento':
+        final titulo = (dados?['titulo'] as String?)?.trim();
+        return titulo != null && titulo.isNotEmpty ? titulo : 'Orçamento encaminhado';
       default:
         return 'Encaminhamento';
     }

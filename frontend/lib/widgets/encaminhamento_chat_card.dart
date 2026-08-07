@@ -14,6 +14,7 @@ import '../models/mensagem_chat_model.dart';
 import '../models/material_model.dart';
 import '../providers/material_provider.dart';
 import '../providers/solicitacao_material_provider.dart';
+import '../providers/orcamento_provider.dart';
 
 /// Formata a unidade para exibição (o valor salvo/transmitido permanece em
 /// maiúsculo). Ex.: 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²'/'M2' → 'm²'; 'KG' →
@@ -70,10 +71,19 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
   // a solicitação já é buscada fresca ao abrir, então não precisa disso.
   Future<MaterialModel?>? _materialAtualFuture;
 
+  // Idem para orçamentos: o payload guarda o status no momento em que o
+  // "Encaminhar" foi clicado (ver orcamento_editor_page._encaminharOrcamento),
+  // então aprovar/rejeitar/reabrir o orçamento DEPOIS de encaminhado não
+  // atualizava esse card — ele ficava com o status antigo para sempre.
+  // Buscamos o orçamento atual do servidor aqui pelo mesmo motivo do
+  // material acima.
+  Future<Map<String, dynamic>?>? _orcamentoAtualFuture;
+
   @override
   void initState() {
     super.initState();
     _iniciarBuscaMaterialAtual();
+    _iniciarBuscaOrcamentoAtual();
   }
 
   @override
@@ -81,6 +91,7 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.mensagem.id != widget.mensagem.id) {
       _iniciarBuscaMaterialAtual();
+      _iniciarBuscaOrcamentoAtual();
     }
   }
 
@@ -97,6 +108,53 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
     }
   }
 
+  void _iniciarBuscaOrcamentoAtual() {
+    final dados = widget.mensagem.dadosEncaminhados;
+    final tipo  = widget.mensagem.tipoEncaminhamento;
+    final orcamentoId = dados?['orcamentoId'] as int?;
+
+    if (tipo == 'orcamento' && orcamentoId != null) {
+      _orcamentoAtualFuture = context.read<OrcamentoProvider>().buscarPorId(orcamentoId);
+    } else {
+      _orcamentoAtualFuture = null;
+    }
+  }
+
+  String _statusLabelDoStatus(String? status) {
+    switch (status) {
+      case 'ABERTO':
+        return 'Aberto';
+      case 'AGUARDANDO_APROVACAO':
+        return 'Aguardando Aprovação';
+      case 'APROVADO':
+        return 'Aprovado';
+      case 'NAO_APROVADO':
+        return 'Não Aprovado';
+      case 'CONVERTIDO':
+        return 'Convertido em OC';
+      case 'CANCELADO':
+        return 'Cancelado';
+      default:
+        return 'Aberto';
+    }
+  }
+
+  /// Sobrepõe no retrato original o status e o título atuais do orçamento,
+  /// mantendo o restante do payload intacto.
+  Map<String, dynamic> _mesclarComOrcamentoAtual(
+    Map<String, dynamic> original,
+    Map<String, dynamic> atual,
+  ) {
+    return {
+      ...original,
+      'titulo': atual['titulo'] ?? original['titulo'],
+      'status': atual['status'],
+      'statusLabel': _statusLabelDoStatus(atual['status'] as String?),
+      'quantidadeMateriais': (atual['itens'] as List?)?.length ??
+          original['quantidadeMateriais'],
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final dados = widget.mensagem.dadosEncaminhados;
@@ -107,6 +165,22 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
       return Text(
         widget.mensagem.conteudo,
         style: TextStyle(fontSize: widget.compacta ? 12.5 : 13, color: corTexto),
+      );
+    }
+
+    if (_orcamentoAtualFuture != null) {
+      // Enquanto a busca não termina (ou se falhar), mostra o retrato salvo
+      // na própria mensagem — assim que o status atual chegar, o card é
+      // reconstruído já refletindo aprovação/rejeição/reabertura feitas
+      // depois do encaminhamento.
+      return FutureBuilder<Map<String, dynamic>?>(
+        future: _orcamentoAtualFuture,
+        builder: (context, snapshot) {
+          final atual = snapshot.data;
+          final dadosParaExibir =
+              atual != null ? _mesclarComOrcamentoAtual(dados, atual) : dados;
+          return _conteudoCard(context, dadosParaExibir);
+        },
       );
     }
 
@@ -186,6 +260,20 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
       if (espessura != null && espessura.isNotEmpty) {
         linhas.add('Espessura: ${espessura}mm');
       }
+    } else if (tipo == 'orcamento') {
+      final tituloOrc = (dados['titulo'] as String?)?.trim();
+      titulo = tituloOrc != null && tituloOrc.isNotEmpty
+          ? tituloOrc
+          : 'Orçamento #${dados['orcamentoId'] ?? '-'}';
+
+      final statusLabel = (dados['statusLabel'] as String?)?.trim();
+      if (statusLabel != null && statusLabel.isNotEmpty) {
+        linhas.add('Status: $statusLabel');
+      }
+      final qtdMateriais = dados['quantidadeMateriais'];
+      if (qtdMateriais != null) {
+        linhas.add('$qtdMateriais ${qtdMateriais == 1 ? 'material' : 'materiais'}');
+      }
     } else {
       // tipo == 'solicitacao'
       titulo = 'OS ${dados['numeroOS'] ?? '-'}';
@@ -264,6 +352,14 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
     Map<String, dynamic> dados,
   ) {
     final solicitacaoId = dados['solicitacaoId'] as int?;
+
+    if (tipo == 'orcamento') {
+      final orcamentoId = dados['orcamentoId'] as int?;
+      if (orcamentoId == null) return;
+      context.read<OrcamentoProvider>().solicitarAberturaOrcamento(orcamentoId);
+      context.go('/orcamento');
+      return;
+    }
 
     if (tipo == 'solicitacao' || solicitacaoId != null) {
       if (solicitacaoId == null) return;

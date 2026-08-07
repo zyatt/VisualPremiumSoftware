@@ -180,6 +180,15 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
       _tourExibirCardFicticio ? _tourKeyCardSolicitacaoFicticio : _tourKeyCardSolicitacaoReal;
   final _tourKeyAdicionarMateriaisExistente = GlobalKey();
   bool _tourExibirCardFicticio = false;
+
+  // ── Robô assistente: tour "Como atender uma solicitação" ────────────────
+  // Keys do primeiro card COMPRADO/ESTOQUE (dentro do dialog de
+  // visualização) e do dropdown de andamento (na tabela) — só fazem
+  // sentido no primeiro item/linha, igual ao padrão de
+  // _tourKeyCardSolicitacao acima.
+  final _tourKeyComprado = GlobalKey();
+  final _tourKeyEstoque = GlobalKey();
+  final _tourKeyAndamento = GlobalKey<_StatusBadgeEditavelState>();
   // Solicitação simulada em memória (nunca enviada ao backend) usada como
   // substituta de uma solicitação real quando a lista "Em Andamento" está
   // vazia — apenas para o tour "Como adicionar materiais a uma solicitação
@@ -190,6 +199,15 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
   // Controla o scroll da aba "Em Andamento" — usado pelo tour pra sempre
   // voltar ao topo da lista antes de dar highlight na primeira linha.
   final _scrollEmAndamento = ScrollController();
+
+  // ── Robô assistente: tour "Como orçar materiais solicitados" ────────────
+  // Keys da aba "Materiais Solicitados": o seletor "Agrupar por", o
+  // primeiro material listado (sempre o primeiro item do primeiro grupo,
+  // independente do modo de agrupamento ativo) e o botão "Orçar
+  // selecionados".
+  final _tourKeyAgruparPorMateriaisSolicitados = GlobalKey();
+  final _tourKeyPrimeiroMaterialSolicitado = GlobalKey();
+  final _tourKeyOrcarSelecionadosMateriaisSolicitados = GlobalKey();
 
   // ── Paginação (independente por aba) ─────────────────────────────────────
   static const int _itensPorPagina = 50;
@@ -659,6 +677,8 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
       builder: (_) => _VisualizarSolicitacaoDialog(
         solicitacao: solicitacaoParaAbrir,
         tourKeyAdicionarMateriais: _tourKeyAdicionarMateriaisExistente,
+        tourKeyComprado: _tourKeyComprado,
+        tourKeyEstoque: _tourKeyEstoque,
       ),
     ).then((salvou) {
       if (mounted) _dialogVisualizarTourAberto = false;
@@ -817,6 +837,130 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
             texto: 'Toque aqui para adicionar mais materiais a esta '
                 'solicitação.',
             aoEntrar: _abrirDialogVisualizarTour,
+          ),
+        ],
+      ),
+      RoboHelpOption(
+        titulo: 'Como atender uma solicitação',
+        paradas: [
+          RoboTourStop(
+            // Mesmo motivo do comentário na parada equivalente do tour
+            // "Como adicionar materiais a uma solicitação existente": a key
+            // precisa ser passada como GETTER, pois _tourKeyCardSolicitacao
+            // só resolve pra o card fictício/real corretamente depois que
+            // o aoEntrar abaixo roda.
+            key: () => _tourKeyCardSolicitacao,
+            texto: 'Selecione uma solicitação para abrir e atendê-la.',
+            aoEntrar: () async {
+              await _fecharDialogVisualizarTourSeAberto();
+              // Esse tour só faz sentido na aba "Em Andamento" — se o
+              // usuário estiver em "Finalizadas", troca automaticamente.
+              if (_tabController.index != 0) {
+                _tabController.animateTo(0);
+              }
+              // Sempre volta pra primeira página e pro topo da lista, pra
+              // garantir que a primeira solicitação (a que vai receber o
+              // highlight) esteja visível.
+              setState(() => _paginaEmAndamento = 0);
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (_scrollEmAndamento.hasClients) {
+                  _scrollEmAndamento.jumpTo(0);
+                }
+              });
+              // Se não existir nenhuma solicitação em andamento, cria uma
+              // fictícia (só em memória) pra o tour poder abrir o dialog
+              // real no passo seguinte.
+              await _garantirSolicitacaoTourExistente();
+              final temSolicitacaoEmAndamento = mounted &&
+                  context
+                      .read<SolicitacaoMaterialProvider>()
+                      .solicitacoes
+                      .any((s) => s.andamento != 'FINALIZADO');
+              if (!temSolicitacaoEmAndamento && mounted) {
+                setState(() => _tourExibirCardFicticio = true);
+              }
+            },
+          ),
+          RoboTourStop(
+            key: () => _tourKeyComprado,
+            texto: 'Assim que o material chegar, toque em "Comprado" para '
+                'confirmar a compra — ou em "Estoque" se ele já estiver '
+                'disponível no seu estoque.',
+            aoEntrar: _abrirDialogVisualizarTour,
+          ),
+          RoboTourStop(
+            key: () => _tourKeyAndamento,
+            texto: 'Depois de marcar os materiais, use o menu de '
+                'andamento da solicitação para indicar em que etapa ela '
+                'está.',
+            aoEntrar: () async {
+              // Fecha o dialog de visualização (aberto na parada anterior)
+              // para revelar a linha da solicitação na tabela por trás dele
+              // — é nela que o botão de andamento em destaque vive.
+              await _fecharDialogVisualizarTourSeAberto();
+              // Aguarda o dialog terminar de fechar e a tabela assentar
+              // antes de seguir, senão o highlight pode medir a posição do
+              // botão still-transitioning.
+              await Future<void>.delayed(const Duration(milliseconds: 120));
+            },
+          ),
+          RoboTourStop(
+            key: () => _tourKeyAndamento,
+            texto: 'Toque para abrir as opções e escolha: mantenha em '
+                '"EM ANDAMENTO" enquanto ainda está providenciando os '
+                'materiais, ou mude para "EM NEGOCIAÇÃO" se estiver '
+                'negociando prazo ou valores com o fornecedor.',
+            aoEntrar: () async {
+              // Espera o frame atual terminar de assentar (a linha da
+              // tabela precisa estar remontada após o passo anterior
+              // fechar o dialog) e só então chama showButtonMenu() —
+              // chamar isso com o State ainda não montado faz
+              // currentState vir null e o menu simplesmente não abre,
+              // sem erro nenhum.
+              await Future<void>.delayed(const Duration(milliseconds: 200));
+              if (!mounted) return;
+              await WidgetsBinding.instance.endOfFrame;
+              if (!mounted) return;
+              final estado = _tourKeyAndamento.currentState;
+              if (estado == null) {
+                // Ainda não montou — tenta mais uma vez após outro frame
+                // em vez de desistir silenciosamente.
+                await Future<void>.delayed(const Duration(milliseconds: 200));
+                if (!mounted) return;
+              }
+              _tourKeyAndamento.currentState?.abrirMenuTour();
+            },
+          ),
+        ],
+      ),
+      RoboHelpOption(
+        titulo: 'Como orçar materiais solicitados',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyAgruparPorMateriaisSolicitados,
+            texto: 'Aqui você pode agrupar os materiais solicitados por '
+                'categoria, OS, necessidade ou status — escolha a forma '
+                'que for mais fácil de visualizar.',
+            aoEntrar: () async {
+              // Esse tour só faz sentido na aba "Materiais Solicitados" —
+              // troca automaticamente pra ela.
+              if (_tabController.index != 2) {
+                _tabController.animateTo(2);
+              }
+              // Aguarda a troca de aba (e a TabBarView) assentarem antes
+              // de medir a posição do seletor "Agrupar por".
+              await Future<void>.delayed(const Duration(milliseconds: 150));
+            },
+          ),
+          RoboTourStop(
+            key: () => _tourKeyPrimeiroMaterialSolicitado,
+            texto: 'Selecione os materiais que deseja orçar marcando a '
+                'caixinha ao lado de cada um.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeyOrcarSelecionadosMateriaisSolicitados,
+            texto: 'Depois de selecionar os materiais desejados, toque '
+                'aqui para gerar um orçamento com eles.',
           ),
         ],
       ),
@@ -1084,7 +1228,12 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                     children: [
                       _buildLista(emAndamento, 'Nenhuma solicitação em andamento', _Aba.emAndamento),
                       _buildLista(finalizadas, 'Nenhuma solicitação finalizada', _Aba.finalizadas),
-                      MateriaisSolicitadosView(solicitacoes: emAndamento),
+                      MateriaisSolicitadosView(
+                        solicitacoes: emAndamento,
+                        tourKeyAgruparPor: _tourKeyAgruparPorMateriaisSolicitados,
+                        tourKeyPrimeiroMaterial: _tourKeyPrimeiroMaterialSolicitado,
+                        tourKeyOrcarSelecionados: _tourKeyOrcarSelecionadosMateriaisSolicitados,
+                      ),
                     ],
                   );
                 },
@@ -1122,6 +1271,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
             solicitacoes: [_solicitacaoTourFake!],
             onAbrir: (_) => _abrirDialogVisualizarTour(),
             tourKeyPrimeiraLinha: _tourKeyCardSolicitacaoFicticio,
+            tourKeyAndamentoPrimeiraLinha: _tourKeyAndamento,
           ),
         ),
       );
@@ -1165,6 +1315,8 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                 onAbrir: _abrirFormSolicitacao,
                 tourKeyPrimeiraLinha:
                     aba == _Aba.emAndamento ? _tourKeyCardSolicitacaoReal : null,
+                tourKeyAndamentoPrimeiraLinha:
+                    aba == _Aba.emAndamento ? _tourKeyAndamento : null,
               ),
             ),
           ),
@@ -1471,11 +1623,16 @@ class _TabelaSolicitacoes extends StatelessWidget {
   /// Usado apenas pelo tour do robô assistente: dá highlight na primeira
   /// linha da tabela (a solicitação que o tour vai abrir em seguida).
   final GlobalKey? tourKeyPrimeiraLinha;
+  /// Usado apenas pelo tour "Como atender uma solicitação": dá highlight
+  /// no dropdown de andamento da primeira linha e permite abri-lo
+  /// programaticamente.
+  final GlobalKey<_StatusBadgeEditavelState>? tourKeyAndamentoPrimeiraLinha;
 
   const _TabelaSolicitacoes({
     required this.solicitacoes,
     required this.onAbrir,
     this.tourKeyPrimeiraLinha,
+    this.tourKeyAndamentoPrimeiraLinha,
   });
 
   @override
@@ -1508,6 +1665,7 @@ class _TabelaSolicitacoes extends StatelessWidget {
             solicitacao: solicitacoes[i],
             onAbrir: onAbrir,
             tourKey: i == 0 ? tourKeyPrimeiraLinha : null,
+            tourKeyAndamento: i == 0 ? tourKeyAndamentoPrimeiraLinha : null,
           ),
         ],
       ],
@@ -1532,11 +1690,16 @@ class _LinhaSolicitacao extends StatefulWidget {
   final SolicitacaoMaterialModel solicitacao;
   final void Function(SolicitacaoMaterialModel) onAbrir;
   final GlobalKey? tourKey;
+  /// Key aplicada ao badge/dropdown de andamento desta linha — usada apenas
+  /// pelo tour "Como atender uma solicitação" para dar highlight nele e
+  /// abrir o menu programaticamente.
+  final GlobalKey<_StatusBadgeEditavelState>? tourKeyAndamento;
 
   const _LinhaSolicitacao({
     required this.solicitacao,
     required this.onAbrir,
     this.tourKey,
+    this.tourKeyAndamento,
   });
 
   @override
@@ -1633,7 +1796,10 @@ class _LinhaSolicitacaoState extends State<_LinhaSolicitacao> {
                 Expanded(
                   flex: 1,
                   child: Center(
-                    child: _StatusBadgeEditavel(solicitacao: sol),
+                    child: _StatusBadgeEditavel(
+                      key: widget.tourKeyAndamento,
+                      solicitacao: sol,
+                    ),
                   ),
                 ),
               ],
@@ -1698,7 +1864,7 @@ class _CardSolicitacaoFicticio extends StatelessWidget {
 
 class _StatusBadgeEditavel extends StatefulWidget {
   final SolicitacaoMaterialModel solicitacao;
-  const _StatusBadgeEditavel({required this.solicitacao});
+  const _StatusBadgeEditavel({super.key, required this.solicitacao});
 
   @override
   State<_StatusBadgeEditavel> createState() => _StatusBadgeEditavelState();
@@ -1706,6 +1872,27 @@ class _StatusBadgeEditavel extends StatefulWidget {
 
 class _StatusBadgeEditavelState extends State<_StatusBadgeEditavel> {
   bool _salvando = false;
+  // Key interna do PopupMenuButton — usada apenas pelo tour do robô
+  // assistente para localizar o BuildContext do botão e abrir o menu
+  // programaticamente (simulando o clique do usuário), sem precisar de
+  // showMenu manual com posição calculada à mão.
+  final _popupKey = GlobalKey<PopupMenuButtonState<String>>();
+
+  /// NOTA: este badge NÃO abre mais o dropdown de verdade durante o tour
+  /// (via showButtonMenu()/showMenu()). O balão e o overlay escurecido do
+  /// tour são promovidos para o Overlay RAIZ (ver
+  /// `RoboHelperWidget._sincronizarOverlay`), e uma rota de PopupMenu
+  /// aberta a partir do `context` deste botão pode acabar entrando num
+  /// Overlay/Navigator "de baixo" — o menu fica logicamente aberto mas
+  /// visualmente atrás do tour. Em vez disso, o passo do tour usa
+  /// `RoboTourStop.opcoesMenu` para desenhar um mini-menu ILUSTRATIVO na
+  /// mesma camada do robô (ver `_MiniMenuDica` em robo_helper_widget.dart)
+  /// — visualmente idêntico ao dropdown real, sempre visível, sem
+  /// depender de qual Navigator um showMenu() escolheria.
+  ///
+  /// Mantido como no-op (em vez de removido) para não quebrar chamadas
+  /// antigas por engano; o tour não chama mais isto.
+  void abrirMenuTour() {}
 
   ({Color bg, Color fg, String label}) _estilo(String status) {
     switch (status) {
@@ -1785,6 +1972,7 @@ class _StatusBadgeEditavelState extends State<_StatusBadgeEditavel> {
     }
 
     return PopupMenuButton<String>(
+      key: _popupKey,
       tooltip: 'Alterar andamento',
       offset: const Offset(0, 32),
       onSelected: _alterarStatus,
@@ -2702,10 +2890,16 @@ class _VisualizarSolicitacaoDialog extends StatefulWidget {
   /// Usado apenas pelo tour do robô assistente para dar highlight no botão
   /// "Adicionar Materiais" depois que este dialog abre.
   final GlobalKey? tourKeyAdicionarMateriais;
+  /// Usadas apenas pelo tour "Como atender uma solicitação" para dar
+  /// highlight nos botões COMPRADO/ESTOQUE do primeiro material da lista.
+  final GlobalKey? tourKeyComprado;
+  final GlobalKey? tourKeyEstoque;
 
   const _VisualizarSolicitacaoDialog({
     required this.solicitacao,
     this.tourKeyAdicionarMateriais,
+    this.tourKeyComprado,
+    this.tourKeyEstoque,
   });
 
   @override
@@ -3384,6 +3578,8 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
                     onEditarMaterial: _editarMaterial,
                     onExcluirMaterial: _excluirMaterial,
                     onEncaminharMaterial: _encaminharMaterial,
+                    tourKeyComprado: widget.tourKeyComprado,
+                    tourKeyEstoque: widget.tourKeyEstoque,
                   ),
                   // Aba Dados
                   _AbaDadosSolicitacao(
@@ -3496,6 +3692,10 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
   final Future<void> Function(String tipo, int id, double quantidadeAtual, String? observacaoAtual) onEditarMaterial;
   final Future<void> Function(String tipo, int id, String materialNome) onExcluirMaterial;
   final Future<void> Function(String tipo, int id) onEncaminharMaterial;
+  /// Usadas apenas pelo tour "Como atender uma solicitação" para dar
+  /// highlight nos botões COMPRADO/ESTOQUE do primeiro material listado.
+  final GlobalKey? tourKeyComprado;
+  final GlobalKey? tourKeyEstoque;
 
   const _AbaMateriaisSolicitacao({
     required this.solicitacao,
@@ -3506,6 +3706,8 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
     required this.onEditarMaterial,
     required this.onExcluirMaterial,
     required this.onEncaminharMaterial,
+    this.tourKeyComprado,
+    this.tourKeyEstoque,
   });
 
   @override
@@ -3536,11 +3738,16 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-          ...itensOriginais.map((item) {
+          ...itensOriginais.asMap().entries.map((entry) {
+            final index = entry.key;
+            final item = entry.value;
+            final ehPrimeiroDaLista = index == 0;
             final chave = 'item:${item.id}';
             final pendente = statusPendentes.containsKey(chave);
             final statusEfetivo = statusPendentes[chave] ?? item.statusCompra;
             return _MaterialCard(
+              tourKeyComprado: ehPrimeiroDaLista ? tourKeyComprado : null,
+              tourKeyEstoque: ehPrimeiroDaLista ? tourKeyEstoque : null,
               tipo: 'item',
               id: item.id,
               materialNome: item.materialNome,
@@ -3581,11 +3788,19 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-          ...adicionais.map((ad) {
+          ...adicionais.asMap().entries.map((entry) {
+            final index = entry.key;
+            final ad = entry.value;
+            // Só é o "primeiro material da lista" se não houver nenhum
+            // item original antes dele (senão o highlight já foi aplicado
+            // ao primeiro item original acima).
+            final ehPrimeiroDaLista = index == 0 && itensOriginais.isEmpty;
             final chave = 'adicional:${ad.id}';
             final pendente = statusPendentes.containsKey(chave);
             final statusEfetivo = statusPendentes[chave] ?? ad.statusCompra;
             return _MaterialCard(
+              tourKeyComprado: ehPrimeiroDaLista ? tourKeyComprado : null,
+              tourKeyEstoque: ehPrimeiroDaLista ? tourKeyEstoque : null,
               tipo: 'adicional',
               id: ad.id,
               materialNome: ad.materialNome,
@@ -3658,6 +3873,10 @@ class _MaterialCard extends StatelessWidget {
   final VoidCallback onEditar;
   final VoidCallback onExcluir;
   final VoidCallback onEncaminhar;
+  /// Usadas apenas pelo tour "Como atender uma solicitação" para dar
+  /// highlight nos botões COMPRADO/ESTOQUE deste card.
+  final GlobalKey? tourKeyComprado;
+  final GlobalKey? tourKeyEstoque;
 
   /// Rótulo de medida/dimensão a ser exibido ao lado do nome.
   /// Se houver medida cadastrada, mostra só a medida (evita repetir com
@@ -3729,6 +3948,8 @@ class _MaterialCard extends StatelessWidget {
     required this.onEditar,
     required this.onExcluir,
     required this.onEncaminhar,
+    this.tourKeyComprado,
+    this.tourKeyEstoque,
   });
 
   // Mostra o aviso de solicitação finalizada (com opção de reabrir para ADMIN)
@@ -3980,24 +4201,35 @@ class _MaterialCard extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    _StatusToggle(
-                      ativo: status == 'COMPRADO',
-                      pendente: pendente && status == 'COMPRADO',
-                      label: 'COMPRADO',
-                      iconeAtivo: Icons.check_circle,
-                      iconeInativo: Icons.radio_button_unchecked,
-                      cor: AppTheme.success,
-                      onTap: () => _handleSelecionarStatus(context, 'COMPRADO'),
-                    ),
-                    const SizedBox(height: 6),
-                    _StatusToggle(
-                      ativo: status == 'ESTOQUE',
-                      pendente: pendente && status == 'ESTOQUE',
-                      label: 'ESTOQUE',
-                      iconeAtivo: Icons.inventory_2,
-                      iconeInativo: Icons.inventory_2_outlined,
-                      cor: const Color(0xFF7C3AED),
-                      onTap: () => _handleSelecionarStatus(context, 'ESTOQUE'),
+                    // Agrupa COMPRADO + ESTOQUE numa única key para que o tour
+                    // "Como atender uma solicitação" dê highlight nos dois
+                    // botões juntos (ambos resolvem a mesma solicitação, o
+                    // usuário escolhe qual usar conforme o caso).
+                    Column(
+                      key: tourKeyComprado,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _StatusToggle(
+                          ativo: status == 'COMPRADO',
+                          pendente: pendente && status == 'COMPRADO',
+                          label: 'COMPRADO',
+                          iconeAtivo: Icons.check_circle,
+                          iconeInativo: Icons.radio_button_unchecked,
+                          cor: AppTheme.success,
+                          onTap: () => _handleSelecionarStatus(context, 'COMPRADO'),
+                        ),
+                        const SizedBox(height: 6),
+                        _StatusToggle(
+                          key: tourKeyEstoque,
+                          ativo: status == 'ESTOQUE',
+                          pendente: pendente && status == 'ESTOQUE',
+                          label: 'ESTOQUE',
+                          iconeAtivo: Icons.inventory_2,
+                          iconeInativo: Icons.inventory_2_outlined,
+                          cor: const Color(0xFF7C3AED),
+                          onTap: () => _handleSelecionarStatus(context, 'ESTOQUE'),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -4125,6 +4357,7 @@ class _StatusToggle extends StatefulWidget {
   final VoidCallback onTap;
 
   const _StatusToggle({
+    super.key,
     required this.ativo,
     required this.label,
     required this.iconeAtivo,
@@ -6159,6 +6392,7 @@ class MaterialAchatadoSolicitado {
   final String? categoria;
   final String? identificador;
   final String? medidaOuDimensao;
+  final String? espessura;
   final String? unidade;
   final double quantidade;
   final bool resolvido; // comprado || estoque
@@ -6166,6 +6400,7 @@ class MaterialAchatadoSolicitado {
   final int solicitacaoId;
   final String numeroOS;
   final String nomeCliente;
+  final String solicitanteNome;
   final DateTime dataSolicitacao;
   final DateTime dataNecessidade;
 
@@ -6175,6 +6410,7 @@ class MaterialAchatadoSolicitado {
     required this.categoria,
     required this.identificador,
     required this.medidaOuDimensao,
+    this.espessura,
     required this.unidade,
     required this.quantidade,
     required this.resolvido,
@@ -6182,6 +6418,7 @@ class MaterialAchatadoSolicitado {
     required this.solicitacaoId,
     required this.numeroOS,
     required this.nomeCliente,
+    required this.solicitanteNome,
     required this.dataSolicitacao,
     required this.dataNecessidade,
   });
@@ -6346,6 +6583,7 @@ List<MaterialAchatadoSolicitado> _achatarMateriais(
             : item.materialCategoria!.trim(),
         identificador: item.materialIdentificador,
         medidaOuDimensao: item.medidaOuDimensao,
+        espessura: item.materialEspessura,
         unidade: item.materialUnidade,
         quantidade: item.quantidade,
         resolvido: item.resolvido,
@@ -6353,6 +6591,7 @@ List<MaterialAchatadoSolicitado> _achatarMateriais(
         solicitacaoId: s.id,
         numeroOS: s.numeroOS,
         nomeCliente: s.nomeCliente,
+        solicitanteNome: s.usuarioNome,
         dataSolicitacao: item.criadoEm,
         dataNecessidade: s.dataNecessidade,
       ));
@@ -6366,6 +6605,7 @@ List<MaterialAchatadoSolicitado> _achatarMateriais(
             : ad.materialCategoria!.trim(),
         identificador: ad.materialIdentificador,
         medidaOuDimensao: ad.medidaOuDimensao,
+        espessura: ad.materialEspessura,
         unidade: ad.materialUnidade,
         quantidade: ad.quantidade,
         resolvido: ad.resolvido,
@@ -6373,6 +6613,7 @@ List<MaterialAchatadoSolicitado> _achatarMateriais(
         solicitacaoId: s.id,
         numeroOS: s.numeroOS,
         nomeCliente: s.nomeCliente,
+        solicitanteNome: s.usuarioNome,
         dataSolicitacao: ad.adicionadoEm,
         dataNecessidade: s.dataNecessidade,
       ));
@@ -6620,8 +6861,20 @@ List<_GrupoGenerico> _agruparPorModo(
 
 class MateriaisSolicitadosView extends StatefulWidget {
   final List<SolicitacaoMaterialModel> solicitacoes;
+  /// Usadas apenas pelo tour "Como orçar materiais solicitados" para dar
+  /// highlight no seletor "Agrupar por", no primeiro material listado e
+  /// no botão "Orçar selecionados".
+  final GlobalKey? tourKeyAgruparPor;
+  final GlobalKey? tourKeyPrimeiroMaterial;
+  final GlobalKey? tourKeyOrcarSelecionados;
 
-  const MateriaisSolicitadosView({super.key, required this.solicitacoes});
+  const MateriaisSolicitadosView({
+    super.key,
+    required this.solicitacoes,
+    this.tourKeyAgruparPor,
+    this.tourKeyPrimeiroMaterial,
+    this.tourKeyOrcarSelecionados,
+  });
 
   @override
   State<MateriaisSolicitadosView> createState() => _MateriaisSolicitadosViewState();
@@ -6860,9 +7113,12 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
           child: Row(
             children: [
               Expanded(
-                child: _SeletorAgrupamento(
-                  modoAtivo: _modoAgrupamento,
-                  onSelecionar: (modo) => setState(() => _modoAgrupamento = modo),
+                child: KeyedSubtree(
+                  key: widget.tourKeyAgruparPor,
+                  child: _SeletorAgrupamento(
+                    modoAtivo: _modoAgrupamento,
+                    onSelecionar: (modo) => setState(() => _modoAgrupamento = modo),
+                  ),
                 ),
               ),
               if (totalMateriais > 0) ...[
@@ -6882,27 +7138,30 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
                   ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                 ),
                 const SizedBox(width: 4),
-                OutlinedButton.icon(
-                  onPressed: (_selecionados.isEmpty || _orcandoSelecionados)
-                      ? null
-                      : _orcarSelecionados,
-                  icon: _orcandoSelecionados
-                      ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: AppTheme.primary),
-                        )
-                      : const Icon(Icons.request_quote, size: 16),
-                  label: Text(_selecionados.isEmpty
-                      ? 'Orçar selecionados'
-                      : 'Orçar selecionados (${_selecionados.length})'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.primary,
-                    side: const BorderSide(color: AppTheme.primary),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    visualDensity: VisualDensity.compact,
-                  ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                KeyedSubtree(
+                  key: widget.tourKeyOrcarSelecionados,
+                  child: OutlinedButton.icon(
+                    onPressed: (_selecionados.isEmpty || _orcandoSelecionados)
+                        ? null
+                        : _orcarSelecionados,
+                    icon: _orcandoSelecionados
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: AppTheme.primary),
+                          )
+                        : const Icon(Icons.request_quote, size: 16),
+                    label: Text(_selecionados.isEmpty
+                        ? 'Orçar selecionados'
+                        : 'Orçar selecionados (${_selecionados.length})'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primary,
+                      side: const BorderSide(color: AppTheme.primary),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      visualDensity: VisualDensity.compact,
+                    ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                  ),
                 ),
               ],
             ],
@@ -6959,6 +7218,13 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
                             onOrdenar: _alternarOrdenacao,
                             selecionados: _selecionados,
                             onToggleSelecao: _toggleSelecao,
+                            // Só o primeiro material do primeiro grupo
+                            // recebe a key do tour "Como orçar materiais
+                            // solicitados" — é sempre o primeiro item
+                            // visível na lista, independente do modo de
+                            // agrupamento ativo.
+                            tourKeyPrimeiraLinha:
+                                index == 0 ? widget.tourKeyPrimeiroMaterial : null,
                           ),
                         ],
                       ),
@@ -7095,6 +7361,10 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
   final void Function(_ColunaOrdenavel) onOrdenar;
   final Set<MaterialAchatadoSolicitado> selecionados;
   final void Function(MaterialAchatadoSolicitado) onToggleSelecao;
+  /// Usada apenas pelo tour "Como orçar materiais solicitados" para dar
+  /// highlight na primeira linha desta tabela (só é passada pra tabela do
+  /// primeiro grupo — ver `MateriaisSolicitadosView`).
+  final GlobalKey? tourKeyPrimeiraLinha;
 
   const _TabelaMateriaisCategoria({
     required this.materiais,
@@ -7103,6 +7373,7 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
     required this.onOrdenar,
     required this.selecionados,
     required this.onToggleSelecao,
+    this.tourKeyPrimeiraLinha,
   });
 
   @override
@@ -7130,7 +7401,7 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
             child: Row(
               children: [
                 const SizedBox(width: 32),
-                const Expanded(flex: 4, child: _CelulaCabecalho('MATERIAL')),
+                const Expanded(flex: 3, child: _CelulaCabecalho('MATERIAL')),
                 Expanded(
                   flex: 3,
                   child: _CelulaCabecalho(
@@ -7141,6 +7412,7 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
                     onTap: onOrdenar,
                   ),
                 ),
+                const Expanded(flex: 2, child: _CelulaCabecalho('SOLICITANTE')),
                 const Expanded(flex: 2, child: _CelulaCabecalho('QTD. SOLICITADA')),
                 Expanded(
                   flex: 2,
@@ -7184,11 +7456,16 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
               if (m.identificador != null && m.identificador!.trim().isNotEmpty)
                 m.identificador!.trim(),
               if (m.medidaOuDimensao != null) m.medidaOuDimensao!,
+              if (formatarEspessuraComSufixo(m.espessura) != null)
+                formatarEspessuraComSufixo(m.espessura)!,
             ].join(' · ');
 
             final selecionado = selecionados.contains(m);
+            final primeira = entry.key == 0;
 
-            return InkWell(
+            return KeyedSubtree(
+              key: primeira ? tourKeyPrimeiraLinha : null,
+              child: InkWell(
               mouseCursor: SystemMouseCursors.click,
               onTap: () => onToggleSelecao(m),
               child: Container(
@@ -7209,7 +7486,7 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
                     ),
                   ),
                   Expanded(
-                    flex: 4,
+                    flex: 3,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -7238,6 +7515,15 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
                                 fontSize: 11,
                                 color: Theme.of(context).colorScheme.onSurfaceVariant)),
                       ],
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      m.solicitanteNome,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                   Expanded(
@@ -7289,6 +7575,7 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
               ),
               ),
             );

@@ -31,6 +31,31 @@ class OrcamentoRepository {
     return ApiClient.get('/orcamentos/$id');
   }
 
+  /// Todos os orçamentos com status ABERTO (para a seção "Orçamentos em
+  /// Aberto", agrupados por usuário criador na UI).
+  Future<List<dynamic>> listarAbertos() async {
+    return ApiClient.getList('/orcamentos/abertos');
+  }
+
+  // ── Trava de edição colaborativa ──────────────────────────────────────────
+  // Ver comentários em orcamento.service.js (backend) para o funcionamento
+  // completo. Fluxo: travar() ao abrir o editor; heartbeat() periódico
+  // enquanto o editor está aberto; destravar() ao sair.
+
+  /// Tenta assumir a edição do orçamento. Lança exceção com status 409
+  /// (ver ApiClient._check) se outro usuário já estiver editando.
+  Future<Map<String, dynamic>> travar(int id) async {
+    return ApiClient.post('/orcamentos/$id/travar', {});
+  }
+
+  Future<void> heartbeatTrava(int id) async {
+    await ApiClient.post('/orcamentos/$id/travar/heartbeat', {});
+  }
+
+  Future<void> destravar(int id) async {
+    await ApiClient.post('/orcamentos/$id/destravar', {});
+  }
+
   Future<Map<String, dynamic>> criar(String titulo) async {
     return ApiClient.post('/orcamentos', {'titulo': titulo});
   }
@@ -54,6 +79,22 @@ class OrcamentoRepository {
 
   Future<void> limparItens(int orcamentoId) async {
     await ApiClient.delete('/orcamentos/$orcamentoId/itens');
+  }
+
+  // ── Substituir todos os itens (operação atômica, 1 evento SSE só) ────────────
+  // Usado pelo auto-save ao fechar o editor (ver
+  // OrcamentoEditorPage._persistirItensDaAba), no lugar do antigo
+  // limparItens() + N x adicionarItem(). Esse padrão antigo gerava N+1
+  // eventos SSE, cada um com um estado intermediário do orçamento (às vezes
+  // momentaneamente vazio, logo após o limpar e antes do primeiro item
+  // voltar) — quem estivesse só visualizando o mesmo orçamento em outra
+  // sessão via esses estados transitórios em vez do resultado final,
+  // fazendo a tela "piscar" ou ficar dessincronizada. Com PUT único, o
+  // backend faz tudo em uma transação e emite um evento só, já com o
+  // resultado final.
+  Future<List<dynamic>> substituirItens(
+      int orcamentoId, List<Map<String, dynamic>> itens) async {
+    return ApiClient.putList('/orcamentos/$orcamentoId/itens', {'itens': itens});
   }
 
   // ── Atualizar item ────────────────────────────────────────────────────────────

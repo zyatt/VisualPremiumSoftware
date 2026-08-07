@@ -17,6 +17,7 @@ model Usuario {
   atualizadoEm             DateTime              @updatedAt
   orcamentosAprovados      Orcamento[]           @relation("AprovadorOrcamento")
   orcamentosCriados        Orcamento[]           @relation("OrcamentoCriador")
+  orcamentosTravados       Orcamento[]           @relation("OrcamentoTrava")
   ordens_compra            OrdemCompra[]
   solicitacoesProducao     SolicitacaoProducao[]
   orcamentosVendaCriados   OrcamentoVenda[]      @relation("OrcamentoVendaCriador")
@@ -176,9 +177,19 @@ model Orcamento {
   /// (preço já é por m/l — multiplica também pela Quantidade por Unidade de
   /// cada item). Definido pelo botão "Orçar por" no editor.
   modoPrecificacao    String          @default("UNIDADE")
+  /// Id do usuário que está com este orçamento aberto no editor agora
+  /// (trava de edição colaborativa). Null = ninguém editando no momento.
+  /// Expira sozinha (ver `travaExpiraEm`) se o cliente sumir sem liberar.
+  travaUsuarioId      Int?
+  /// Momento a partir do qual a trava acima é considerada expirada (renovada
+  /// por heartbeat enquanto o editor estiver aberto — ver orcamento.service.js).
+  /// Evita que um orçamento fique travado para sempre se o app fechar/cair
+  /// sem chamar o destravamento.
+  travaExpiraEm       DateTime?
   itens               OrcamentoItem[]
   aprovador           Usuario?        @relation("AprovadorOrcamento", fields: [aprovadorId], references: [id])
   criador             Usuario?        @relation("OrcamentoCriador", fields: [criadorId], references: [id])
+  travaUsuario        Usuario?        @relation("OrcamentoTrava", fields: [travaUsuarioId], references: [id])
   ordens              OrdemCompra[]
 
   @@map("orcamentos")

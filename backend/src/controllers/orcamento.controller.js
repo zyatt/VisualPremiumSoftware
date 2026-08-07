@@ -9,6 +9,16 @@ const listar = async (req, res, next) => {
   }
 };
 
+/// GET /orcamentos/abertos — usado pela seção "Orçamentos em Aberto" da
+/// página de Orçamento, para montar os cards agrupados por usuário criador.
+const listarAbertos = async (req, res, next) => {
+  try {
+    res.json(await svc.listarAbertos());
+  } catch (e) {
+    next(e);
+  }
+};
+
 const atualizar = async (req, res, next) => {
   try {
     res.json(await svc.atualizar(+req.params.id, req.body));
@@ -37,7 +47,12 @@ const criar = async (req, res, next) => {
 
 const cancelar = async (req, res, next) => {
   try {
-    res.json(await svc.cancelar(+req.params.id));
+    // Passa o usuário atual para o service validar propriedade: apenas o
+    // criador pode cancelar um orçamento ainda ABERTO (ver comentário em
+    // orcamento.service.js:cancelar). ADMIN/GERENTE continuam liberados —
+    // ver checagem de role no próprio service futuramente, se necessário;
+    // por ora a regra pedida é "só o criador".
+    res.json(await svc.cancelar(+req.params.id, req.usuario.id));
   } catch (e) {
     next(e);
   }
@@ -59,7 +74,7 @@ const adicionarItem = async (req, res, next) => {
     res.status(201).json(
       await svc.adicionarItem(
         +req.params.id, materialId, fornecedorId, quantidade, precoUnitario,
-        { selecionado, descricaoItem, observacao, qtdUnidade }
+        { selecionado, descricaoItem, observacao, qtdUnidade, origemUsuarioId: req.usuario.id }
       )
     );
   } catch (e) {
@@ -69,7 +84,7 @@ const adicionarItem = async (req, res, next) => {
 
 const removerItem = async (req, res, next) => {
   try {
-    await svc.removerItem(+req.params.id, +req.params.itemId);
+    await svc.removerItem(+req.params.id, +req.params.itemId, req.usuario.id);
     res.status(204).send();
   } catch (e) {
     next(e);
@@ -78,8 +93,28 @@ const removerItem = async (req, res, next) => {
 
 const limparItens = async (req, res, next) => {
   try {
-    await svc.limparItens(+req.params.id);
+    await svc.limparItens(+req.params.id, req.usuario.id);
     res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+};
+
+/// PUT /orcamentos/:id/itens — substitui todos os itens em uma operação
+/// atômica (1 evento SSE só). Usado pelo auto-save do editor ao fechar a
+/// guia, no lugar do antigo limparItens + N adicionarItem, que gerava uma
+/// rajada de eventos com estados intermediários (orçamento momentaneamente
+/// vazio) para quem estivesse só visualizando o mesmo orçamento.
+const substituirItens = async (req, res, next) => {
+  try {
+    const { itens } = req.body;
+    if (!Array.isArray(itens)) {
+      return res.status(400).json({ message: 'Campo "itens" deve ser um array.' });
+    }
+    // Repassa quem fez a chamada para o evento SSE (ver comentário em
+    // orcamento.service.js:substituirItens) — permite o próprio cliente
+    // que originou a mudança ignorar o eco do seu próprio auto-save.
+    res.json(await svc.substituirItens(+req.params.id, itens, req.usuario.id));
   } catch (e) {
     next(e);
   }
@@ -87,7 +122,7 @@ const limparItens = async (req, res, next) => {
 
 const atualizarItem = async (req, res, next) => {
   try {
-    res.json(await svc.atualizarItem(+req.params.itemId, req.body));
+    res.json(await svc.atualizarItem(+req.params.itemId, req.body, req.usuario.id));
   } catch (e) {
     next(e);
   }
@@ -221,7 +256,7 @@ const gerarOrdemCompra = async (req, res, next) => {
 
 const excluir = async (req, res, next) => {
   try {
-    await svc.excluir(+req.params.id);
+    await svc.excluir(+req.params.id, req.usuario.id);
     res.status(204).send();
   } catch (e) {
     next(e);
@@ -248,8 +283,86 @@ const definirFornecedorOculto = async (req, res, next) => {
   }
 };
 
+// ─── Trava de edição colaborativa ──────────────────────────────────────────
+
+const travarEdicao = async (req, res, next) => {
+  try {
+    const orcamento = await svc.travarEdicao(+req.params.id, req.usuario.id);
+    res.json(orcamento);
+  } catch (e) {
+    // 409 (travado por outro usuário) precisa chegar ao Flutter com o corpo
+    // de erro completo (travaUsuarioNome), não só uma mensagem genérica —
+    // o next(e) padrão do errorHandler global já repassa e.message, então
+    // aqui só garantimos que os campos extras também vão no corpo da resposta.
+    if (e && e.status === 409) {
+      return res.status(409).json({
+        message: e.message,
+        travaUsuarioId: e.travaUsuarioId,
+        travaUsuarioNome: e.travaUsuarioNome,
+      });
+    }
+    next(e);
+  }
+};
+
+const renovarTravaEdicao = async (req, res, next) => {
+  try {
+    res.json(await svc.renovarTravaEdicao(+req.params.id, req.usuario.id));
+  } catch (e) {
+    next(e);
+  }
+};
+
+const destravarEdicao = async (req, res, next) => {
+  try {
+    res.json(await svc.destravarEdicao(+req.params.id, req.usuario.id));
+  } catch (e) {
+    next(e);
+  }
+};
+
+// ─── SSE ─────────────────────────────────────────────────────────────────
+// Mesmo padrão do módulo de chat: mantém a conexão HTTP aberta e escreve um
+// evento `data: {...}\n\n` a cada mudança relevante em orçamentos ABERTO
+// (criação, edição de item, trava/destrava, saída do pool "aberto"). O
+// cliente Flutter (OrcamentoProvider._conectarSSE) consome isso para manter
+// a seção "Orçamentos em Aberto" e o editor sincronizados sem polling.
+const streamSSE = async (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write('\n');
+
+  const enviar = (evento) => {
+    try {
+      res.write(`data: ${JSON.stringify(evento)}\n\n`);
+    } catch (_) {
+      // conexão pode já ter caído; o listener 'close' abaixo cuida da limpeza
+    }
+  };
+
+  const listener = (evento) => enviar(evento);
+  svc.orcamentoEvents.on('evento', listener);
+
+  // Ping periódico para manter a conexão viva atrás de proxies/túneis que
+  // fecham streams ociosos (mesmo padrão do heartbeat de conexão do chat).
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch (_) {}
+  }, 20000);
+
+  req.on('close', () => {
+    clearInterval(keepAlive);
+    svc.orcamentoEvents.removeListener('evento', listener);
+  });
+};
+
 module.exports = {
   listar,
+  listarAbertos,
   buscarPorId,
   criar,
   atualizar,
@@ -257,6 +370,7 @@ module.exports = {
   adicionarItem,
   removerItem,
   limparItens,
+  substituirItens,
   atualizarItem,
   enviarParaAprovacao,
   aprovar,
@@ -265,4 +379,8 @@ module.exports = {
   reabrir,
   excluir,
   definirFornecedorOculto,
+  travarEdicao,
+  renovarTravaEdicao,
+  destravarEdicao,
+  streamSSE,
 };

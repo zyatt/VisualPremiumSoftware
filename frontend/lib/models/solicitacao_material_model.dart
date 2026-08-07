@@ -140,7 +140,7 @@ class ItemSolicitacaoModel {
     if (temDimensoes) {
       final l = _formatarNumero(materialComprimento!);
       final c = _formatarNumero(materialLargura!);
-      return '${l}X${c}M';
+      return '${l}x${c}m';
     }
     return null;
   }
@@ -330,7 +330,7 @@ class AdicionalSolicitacaoModel {
     if (temDimensoes) {
       final l = _formatarNumero(materialComprimento!);
       final c = _formatarNumero(materialLargura!);
-      return '${l}X${c}M';
+      return '${l}x${c}m';
     }
     return null;
   }

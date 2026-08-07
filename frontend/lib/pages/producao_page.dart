@@ -254,10 +254,7 @@ class ProducaoPage extends StatefulWidget {
   State<ProducaoPage> createState() => _ProducaoPageState();
 }
 
-class _ProducaoPageState extends State<ProducaoPage>
-    with TickerProviderStateMixin {
-  late TabController _tabController;
-
+class _ProducaoPageState extends State<ProducaoPage> {
   // Guarda de qual usuário/role a linha de produção foi definida por
   // último, para detectar troca de usuário (login diferente) mesmo que
   // esta página não seja remontada — StatefulShellRoute preserva o estado
@@ -267,32 +264,11 @@ class _ProducaoPageState extends State<ProducaoPage>
 
   // Guarda se o usuário logado enxerga as duas linhas combinadas em uma só
   // lista (ADMIN/GERENTE/COMPRAS) ou apenas a própria linha (PRODUCAO1/
-  // PRODUCAO2). Em ambos os casos a TabBar sempre tem 2 abas — Estoque
-  // (Produção) e Histórico — a diferença é só o conteúdo da 1ª aba: para
-  // duas linhas, mostra a lista combinada com uma coluna extra indicando de
-  // qual linha (1 ou 2) cada material é; para uma linha, mostra só o que
+  // PRODUCAO2). A diferença é só o conteúdo da lista de estoque: para duas
+  // linhas, mostra a lista combinada com uma coluna extra indicando de qual
+  // linha (1 ou 2) cada material é; para uma linha, mostra só o que
   // pertence à linha do usuário.
   bool? _duasLinhasAtual;
-
-  void _configurarTabController(bool duasLinhas) {
-    _tabController.dispose();
-    // Sempre 2 abas: [Estoque (Produção), Histórico].
-    _tabController = TabController(length: 2, vsync: this);
-    _duasLinhasAtual = duasLinhas;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    // Tamanho inicial (2 abas) — igual para os dois modos, então não
-    // precisa ser recriado quando _definirProducaoDoUsuario rodar,
-    // exceto para atualizar a flag _duasLinhasAtual.
-    _tabController = TabController(length: 2, vsync: this);
-    // Não é preciso agendar _definirProducaoDoUsuario aqui: o Flutter chama
-    // didChangeDependencies logo após initState (antes do primeiro frame),
-    // e didChangeDependencies já agenda essa chamada via
-    // addPostFrameCallback.
-  }
 
   @override
   void didChangeDependencies() {
@@ -366,32 +342,20 @@ class _ProducaoPageState extends State<ProducaoPage>
     }
     estoqueProvider.carregarHistorico();
 
-    // Atualiza a flag (usada para trocar o conteúdo da 1ª aba entre "lista
-    // combinada com coluna Produção" e "lista da própria linha"). O
-    // TabController em si não precisa ser recriado — sempre tem 2 abas —,
-    // mas passamos por _configurarTabController na primeira vez (quando
-    // ainda é null) e sempre que o modo mudar, por clareza.
+    // Atualiza a flag (usada para trocar o conteúdo da lista de estoque
+    // entre "lista combinada com coluna Produção" e "lista da própria
+    // linha").
     if (_duasLinhasAtual != duasLinhas) {
-      setState(() => _configurarTabController(duasLinhas));
+      setState(() => _duasLinhasAtual = duasLinhas);
     }
   }
 
-  // Não há mais listener de troca de aba recarregando estoque/histórico:
-  // os dados das duas linhas e do histórico já são carregados por completo
-  // assim que a tela abre (em _definirProducaoDoUsuario) e também pelo
-  // botão de atualizar manual. O listener antigo (_onTabChanged), registrado
-  // com `_tabController.addListener`, disparava a cada tick da ANIMAÇÃO de
-  // troca de aba — não só quando o índice mudava de fato — então cada troca
-  // (ou até o gesto de arrastar entre abas) dispirava vários recarregamentos
-  // em sequência. Cada um marcava "carregando = true" por um instante,
-  // trocando a lista pelo spinner e de volta, várias vezes por segundo: daí
-  // o piscar ao trocar de aba/abrir a tela, e também o motivo de não dar
-  // pra clicar no histórico — a lista era reconstruída no meio do toque e o
-  // gesto era cancelado antes do botão "excluir" registrar o clique.
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+  /// Abre o histórico de movimentações de produção como uma página própria,
+  /// no mesmo padrão do botão "Histórico" em Controle de Estoque.
+  Future<void> _abrirHistorico() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const _HistoricoProducaoPage()),
+    );
   }
 
   @override
@@ -443,6 +407,22 @@ class _ProducaoPageState extends State<ProducaoPage>
                   ],
                 ),
                 const Spacer(),
+                Tooltip(
+                  message: 'Ver histórico de movimentações de produção',
+                  child: OutlinedButton.icon(
+                    onPressed: _abrirHistorico,
+                    icon: const Icon(Icons.history, size: 18),
+                    label: const Text('Histórico'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.onSurface,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    ).copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
                 IconButton(
                   onPressed: () {
                     final provider = context.read<EstoqueProducaoProvider>();
@@ -467,40 +447,69 @@ class _ProducaoPageState extends State<ProducaoPage>
             ),
             SizedBox(height: 20),
 
-            Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                border: Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
-              ),
-              child: TabBar(
-                controller: _tabController,
-                labelColor: AppTheme.primary,
-                unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                indicatorColor: AppTheme.primary,
-                indicatorWeight: 2,
-                labelStyle: const TextStyle(
-                    fontWeight: FontWeight.w600, fontSize: 13),
-                tabs: const [
-                  Tab(text: 'Estoque'),
-                  Tab(text: 'Histórico'),
-                ],
-              ),
-            ),
-
             Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  // combinada=true (ADMIN/GERENTE/COMPRAS): uma única lista
-                  // com as duas linhas juntas, cada material com uma coluna
-                  // "Produção" indicando de qual linha ele é. combinada=false
-                  // (PRODUCAO1/PRODUCAO2): só a própria linha, sem essa
-                  // coluna extra (redundante, já que é sempre a mesma linha).
-                  _EstoqueProducaoTab(combinada: _duasLinhasAtual == true),
-                  const _HistoricoTab(),
-                ],
-              ),
+              // combinada=true (ADMIN/GERENTE/COMPRAS): uma única lista com
+              // as duas linhas juntas, cada material com uma coluna
+              // "Produção" indicando de qual linha ele é. combinada=false
+              // (PRODUCAO1/PRODUCAO2): só a própria linha, sem essa coluna
+              // extra (redundante, já que é sempre a mesma linha).
+              child: _EstoqueProducaoTab(combinada: _duasLinhasAtual == true),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Página de histórico de movimentações de produção, aberta a partir do
+/// botão "Histórico" no topo de Produção — mesmo padrão do histórico de
+/// Controle de Estoque.
+class _HistoricoProducaoPage extends StatelessWidget {
+  const _HistoricoProducaoPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Cabeçalho ──────────────────────────────────────────────────
+            Row(
+              children: [
+                _BotaoVoltar(
+                  label: 'Voltar',
+                  tooltip: 'Voltar para a produção',
+                  onTap: () => Navigator.of(context).pop(),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Histórico de Produção',
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineMedium
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Todas as movimentações de estoque da produção, em ordem cronológica',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            const Expanded(child: _HistoricoTab()),
           ],
         ),
       ),
@@ -795,7 +804,6 @@ class _HistoricoTabState extends State<_HistoricoTab> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        SizedBox(height: 16),
         TextField(
           controller: _buscaCtrl,
           decoration: InputDecoration(

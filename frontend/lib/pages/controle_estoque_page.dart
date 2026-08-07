@@ -6018,8 +6018,43 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     setState(() => _verificandoDuplicata = true);
 
     final provider = context.read<MaterialProvider>();
-    final candidatos = await provider.buscarSugestoes(_nome.text.trim(), limite: 30);
+
+    // O backend faz busca por AND entre as palavras digitadas (todas as
+    // palavras precisam estar contidas no nome). Isso significa que buscar
+    // pela frase inteira falha em achar duplicatas quando o nome digitado
+    // tem uma palavra a mais/a menos/diferente do material já cadastrado,
+    // ou as palavras estão em ordem diferente. Por isso buscamos por cada
+    // palavra do nome separadamente (OR) e unificamos os resultados — a
+    // similaridade real é decidida depois, então um candidato a mais aqui
+    // não causa falso-positivo, só amplia a chance de achar o material
+    // realmente parecido. Mesma estratégia usada em estoque_page.dart.
+    final tokensUnicos = _nome.text
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((t) => t.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort((a, b) => b.length.compareTo(a.length)); // palavras mais longas (mais distintivas) primeiro
+
+    // Limita a 5 palavras para não disparar buscas demais em nomes longos;
+    // ignora tokens de 1 char (pouco distintivos, geram excesso de ruído).
+    final termosBusca = tokensUnicos.where((t) => t.length >= 2).take(5).toList();
+    if (termosBusca.isEmpty && _nome.text.trim().isNotEmpty) {
+      termosBusca.add(_nome.text.trim());
+    }
+
+    final resultadosPorToken = await Future.wait(
+      termosBusca.map((t) => provider.buscarSugestoes(t, limite: 30)),
+    );
     if (!mounted) return;
+
+    final candidatosMap = <int, MaterialModel>{};
+    for (final lista in resultadosPorToken) {
+      for (final m in lista) {
+        candidatosMap[m.id] = m;
+      }
+    }
+    final candidatos = candidatosMap.values.toList();
 
     final identificadorNorm = _normalizarTextoComparacaoCE(_identificador.text);
     final medidaNorm        = _normalizarTextoComparacaoCE(_medida.text);
@@ -6083,6 +6118,13 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
           espessuraBate;
 
       final similaridadeNome = _similaridadeTextoCE(nomeNorm, mNomeNorm);
+      // Similaridade que ignora a ordem das palavras (ex.: "TINTA DUPLA
+      // FUNCAO PRETO FOSCO" vs "TINTA PRETO FOSCO DUPLA FUNCAO"), pra pegar
+      // casos em que o texto inteiro mudou de posição mas as palavras são
+      // as mesmas. Usa o maior dos dois scores como similaridade "efetiva".
+      final similaridadePalavras = _similaridadePalavrasCE(nomeNorm, mNomeNorm);
+      final similaridadeEfetiva =
+          similaridadeNome > similaridadePalavras ? similaridadeNome : similaridadePalavras;
       final mesmoIdentificador =
           identificadorNorm.isNotEmpty && identificadorNorm == mIdentificadorNorm;
 
@@ -6098,20 +6140,43 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
       final longo = nomeNorm.length <= mNomeNorm.length ? mNomeNorm : nomeNorm;
       final contido = curto.length >= 4 && curto.isNotEmpty && longo.contains(curto);
 
-      // "Similar": nome muito parecido (>=72%), mesmo identificador com
+      // Quantas palavras (>=2 chars, pra ignorar conectivos irrelevantes)
+      // coincidem exatamente entre os dois nomes, não importa a ordem. Serve
+      // como sinal adicional e explícito: "se 1, 2, 3 palavras coincidirem,
+      // já vai acusando" — quanto mais palavras em comum, mais forte o
+      // indício de duplicidade, mesmo com nome final bem diferente.
+      final palavrasDigitadas = nomeNorm.split(RegExp(r'\s+')).where((t) => t.length >= 2).toSet();
+      final palavrasCadastro  = mNomeNorm.split(RegExp(r'\s+')).where((t) => t.length >= 2).toSet();
+      final palavrasComuns = palavrasDigitadas.intersection(palavrasCadastro).length;
+      // Exige pelo menos 2 palavras em comum (1 palavra só é fraco demais e
+      // gera excesso de falso-positivo com termos genéricos), e que essas
+      // palavras comuns cubram uma fração razoável do nome mais curto — pra
+      // não acusar "TINTA PRETO" (2 palavras) contra "TINTA VERMELHA PRETO
+      // FOSCO BRILHANTE ACETINADA" (5 palavras) só porque 2 bateram.
+      final menorQtdPalavras =
+          palavrasDigitadas.length < palavrasCadastro.length ? palavrasDigitadas.length : palavrasCadastro.length;
+      final cobreParcialPalavras = palavrasComuns >= 2 &&
+          menorQtdPalavras > 0 &&
+          (palavrasComuns / menorQtdPalavras) >= 0.6;
+
+      // "Similar": nome muito parecido em sequência (>=72%), muito parecido
+      // ignorando a ordem das palavras (>=72%), mesmo identificador com
       // alguma semelhança (evita falso-positivo de identificadores genéricos
-      // reutilizados em materiais bem diferentes), ou um nome é prefixo/
-      // trecho do outro (digitação em andamento).
+      // reutilizados em materiais bem diferentes), um nome é prefixo/trecho
+      // do outro (digitação em andamento), ou várias palavras batem
+      // independente da ordem (>=2 palavras cobrindo >=60% do nome menor).
       final similar = !exata &&
           (similaridadeNome >= 0.72 ||
+              similaridadePalavras >= 0.72 ||
               (mesmoIdentificador && similaridadeNome >= 0.4) ||
-              contido);
+              contido ||
+              cobreParcialPalavras);
 
       if (exata || similar) {
         encontrados.add(_PossivelDuplicataCE(
           material: m,
           exata: exata,
-          similaridade: similaridadeNome,
+          similaridade: similaridadeEfetiva,
           contido: contido,
         ));
       }
@@ -8497,12 +8562,79 @@ int _levenshteinDistanceCE(String a, String b) {
 
 /// Similaridade entre 0 (totalmente diferentes) e 1 (idênticos), baseada na
 /// distância de Levenshtein normalizada pelo tamanho do maior texto.
+///
+/// Sensível à ORDEM das palavras: "TINTA PRETO FOSCO" x "PRETO FOSCO TINTA"
+/// tem similaridade baixa aqui, mesmo contendo as mesmas palavras.
 double _similaridadeTextoCE(String a, String b) {
   if (a.isEmpty && b.isEmpty) return 1;
   if (a.isEmpty || b.isEmpty) return 0;
   final distancia    = _levenshteinDistanceCE(a, b);
   final maiorTamanho = a.length > b.length ? a.length : b.length;
   return 1 - (distancia / maiorTamanho);
+}
+
+/// Similaridade por CONJUNTO DE PALAVRAS, ignorando a ordem em que aparecem.
+///
+/// Resolve o caso de nomes com as mesmas palavras escritas em ordem
+/// diferente (ex.: "TINTA DUPLA FUNCAO PRETO FOSCO" vs "TINTA PRETO FOSCO
+/// DUPLA FUNCAO"), que teriam distância de Levenshtein alta (o texto inteiro
+/// muda de posição) apesar de serem, na prática, o mesmo material.
+///
+/// Cada palavra do texto mais curto é casada com a melhor correspondente
+/// ainda não usada no texto mais longo (permitindo pequenas diferenças de
+/// grafia por palavra, via Levenshtein por palavra), e o resultado é a
+/// fração de palavras casadas ponderada pelo tamanho combinado dos dois
+/// textos — combinação equivalente a um Jaccard/overlap tolerante a erros
+/// de digitação em cada palavra individual.
+double _similaridadePalavrasCE(String a, String b) {
+  final palavrasA = a.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+  final palavrasB = b.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+  if (palavrasA.isEmpty && palavrasB.isEmpty) return 1;
+  if (palavrasA.isEmpty || palavrasB.isEmpty) return 0;
+
+  // Garante que iteramos sobre a lista menor (menos comparações) e usa a
+  // maior como "disponível" para casar.
+  final menor = palavrasA.length <= palavrasB.length ? palavrasA : palavrasB;
+  final maior = palavrasA.length <= palavrasB.length ? palavrasB : palavrasA;
+  final usados = List<bool>.filled(maior.length, false);
+
+  var pesoCasado = 0.0;
+  for (final palavra in menor) {
+    var melhorIdx = -1;
+    var melhorScore = 0.0;
+    for (var i = 0; i < maior.length; i++) {
+      if (usados[i]) continue;
+      if (palavra == maior[i]) {
+        // Palavra idêntica: casamento perfeito, não precisa procurar mais.
+        melhorIdx = i;
+        melhorScore = 1.0;
+        break;
+      }
+      // Palavras de 1-2 letras são pouco distintivas (ex.: "DE", "M2"):
+      // só aceita casamento parcial entre elas se muito parecidas, pra não
+      // gerar falso-positivo (ex.: "DE" casando com "SE").
+      final tamMin = palavra.length < maior[i].length ? palavra.length : maior[i].length;
+      if (tamMin <= 2 && palavra != maior[i]) continue;
+      final score = _similaridadeTextoCE(palavra, maior[i]);
+      // Só considera casamento parcial (palavra diferente, mas parecida —
+      // ex.: singular/plural, erro de digitação) acima de um limiar alto.
+      if (score >= 0.75 && score > melhorScore) {
+        melhorScore = score;
+        melhorIdx = i;
+      }
+    }
+    if (melhorIdx != -1) {
+      usados[melhorIdx] = true;
+      pesoCasado += melhorScore * palavra.length;
+    }
+  }
+
+  final pesoTotal = (palavrasA + palavrasB).fold<int>(0, (soma, p) => soma + p.length);
+  if (pesoTotal == 0) return 0;
+  // Multiplica por 2 porque cada palavra casada contribui peso de um lado
+  // só (pesoCasado é somado a partir da lista "menor"), mas representa a
+  // correspondência dos dois lados ao mesmo tempo.
+  return (pesoCasado * 2) / pesoTotal;
 }
 
 /// Resultado de uma possível duplicata encontrada ao comparar os campos do

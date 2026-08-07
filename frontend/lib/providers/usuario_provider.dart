@@ -79,7 +79,7 @@ class UsuarioProvider extends ChangeNotifier {
           _usuarioLogado = sessao.usuario;
           ApiClient.setToken(novoToken);
           await _repo.salvarSessao(novoToken, sessao.usuario);
-          await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
+          await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id, _usuarioLogado!.nome);
           await _chatProvider?.inicializar(_usuarioLogado!.id, novoToken);
         } catch (_) {
           // Token rejeitado pelo servidor — limpa e vai para login
@@ -121,7 +121,7 @@ class UsuarioProvider extends ChangeNotifier {
       ApiClient.setToken(_token);
       await _repo.adicionarUsuarioSalvo(result.usuario);
       await _refreshUsuariosSalvos();
-      await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
+      await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id, _usuarioLogado!.nome);
       await _chatProvider?.inicializar(_usuarioLogado!.id, _token!);
       return true;
     } catch (e) {
@@ -173,7 +173,7 @@ class UsuarioProvider extends ChangeNotifier {
       await _repo.salvarSessao(token, usuario);
       await _repo.adicionarUsuarioSalvo(usuario);
       await _refreshUsuariosSalvos();
-      await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id);
+      await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id, _usuarioLogado!.nome);
       await _chatProvider?.inicializar(_usuarioLogado!.id, token);
       return true;
     } catch (e) {

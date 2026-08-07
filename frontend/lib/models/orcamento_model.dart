@@ -69,17 +69,27 @@ class OrcamentoModel {
 
   final List<int> fornecedoresOcultos;
 
+  /// Id do usuário que está com este orçamento aberto no editor agora
+  /// (null = ninguém editando). Usado pela seção "Orçamentos em Aberto"
+  /// e pelo editor para saber se deve entrar em modo somente-leitura.
+  final int? travaUsuarioId;
+  final String? travaUsuarioNome;
+  final int? criadorId;
+
   OrcamentoModel({
     required this.id,
     required this.titulo,
     required this.status,
     required this.itens,
     this.criadorNome,
+    this.criadorId,
     this.aprovadorNome,
     this.aprovadoEm,
     this.motivoRejeicao,
     required this.criadoEm,
     this.fornecedoresOcultos = const [],
+    this.travaUsuarioId,
+    this.travaUsuarioNome,
   });
 
   factory OrcamentoModel.fromJson(Map<String, dynamic> json) =>
@@ -91,6 +101,7 @@ class OrcamentoModel {
             .map((i) => OrcamentoItemModel.fromJson(i))
             .toList(),
         criadorNome: json['criador']?['nome'],
+        criadorId: json['criadorId'] ?? json['criador']?['id'],
         aprovadorNome: json['aprovador']?['nome'],
         aprovadoEm: json['aprovadoEm'] != null
             ? DateTime.tryParse(json['aprovadoEm'])
@@ -102,6 +113,8 @@ class OrcamentoModel {
         fornecedoresOcultos: (json['fornecedoresOcultos'] as List? ?? [])
             .map((e) => e as int)
             .toList(),
+        travaUsuarioId: json['travaUsuarioId'] ?? json['travaUsuario']?['id'],
+        travaUsuarioNome: json['travaUsuario']?['nome'],
       );
 
   String get statusLabel {

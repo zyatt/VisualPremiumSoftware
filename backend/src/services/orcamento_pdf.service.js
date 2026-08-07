@@ -394,6 +394,28 @@ function drawFooter(doc, pageNum, empresaNome = 'Visual Premium') {
      .text(`Página ${pageNum}`, MARGIN, y, { width: CONTENT_W, align: 'right' });
 }
 
+/**
+ * Formata a unidade de medida do material para exibição, no mesmo padrão
+ * usado no editor Flutter (ver `_formatarUnidadeExibicao`): minúsculo para
+ * as abreviações de medida (m/l, m, ml, m²), com "Unidade" e "Kg" mantendo
+ * a inicial maiúscula.
+ */
+function formatarUnidadeExibicao(unidade) {
+  if (!unidade || !unidade.trim()) return '';
+  const u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'UNIDADE': return 'Unidade';
+    case 'M/L':     return 'm/l';
+    case 'M':       return 'm';
+    case 'ML':      return 'ml';
+    case 'M²':
+    case 'M2':      return 'm²';
+    case 'KG':      return 'Kg';
+    case 'G':       return 'g';
+    default:        return unidade;
+  }
+}
+
 function coletarFornecedores(itens) {
   const map = new Map();
   itens.forEach((item) => {
@@ -407,6 +429,49 @@ function coletarFornecedores(itens) {
 function precoEfetivo(pf) {
   if (!pf) return null;
   return pf.preco ?? null;
+}
+
+/**
+ * Área (m²) de uma unidade do material, mesma lógica do getter
+ * `areaM2PorUnidade` no editor Flutter:
+ * - Para materiais em "UNIDADE" (ex.: chapas): largura x comprimento.
+ * - Para os demais (M/L, M², KG etc.): largura x qtdUnidade — a largura é
+ *   fixa do material e o "comprimento" de cada unidade/rolo vendido é o
+ *   que foi informado em qtdUnidade (campo "Qtd por Unidade").
+ * Retorna null quando não há dados suficientes para calcular.
+ */
+function areaM2PorUnidade(item) {
+  const l = item.materialLargura != null ? Number(item.materialLargura) : null;
+  if (!l || l <= 0) return null;
+
+  const unidade = (item.materialUnidade || '').toUpperCase().trim();
+  const precisaQtdUnidade = unidade !== '' && unidade !== 'UNIDADE';
+
+  if (!precisaQtdUnidade) {
+    const c = item.materialComprimento != null ? Number(item.materialComprimento) : null;
+    if (!c || c <= 0) return null;
+    return l * c;
+  }
+
+  const q = item.qtdUnidade != null ? Number(item.qtdUnidade) : null;
+  if (!q || q <= 0) return null;
+  return l * q;
+}
+
+/**
+ * Preço por m² efetivo de um vínculo fornecedor x material, para exibição
+ * no PDF: usa o valor salvo (`pf.precoMetroQuadrado`) quando presente, e
+ * senão deriva do preço unitário e da área por unidade (mesmo fallback do
+ * editor Flutter, ver célula de preço na tabela de comparativo).
+ */
+function precoMetroQuadradoEfetivo(pf, item) {
+  if (!pf) return null;
+  if (pf.precoMetroQuadrado != null) return pf.precoMetroQuadrado;
+  const preco = precoEfetivo(pf);
+  if (preco == null) return null;
+  const area = areaM2PorUnidade(item);
+  if (!area) return null;
+  return preco / area;
 }
 
 function aplicarFornecedoresOcultos(itens, fornecedoresOcultos) {
@@ -607,7 +672,7 @@ async function gerarPdfDeItens(dados) {
     const xForn   = (i) => xQtdUn + COL_QTDUN + i * COL_FORN;
     const xMelhor = xQtdUn + COL_QTDUN + nForn * COL_FORN;
 
-    const ROW_H      = 42;
+    const ROW_H      = 50;
     const HDR_H      = 30;
     const TOTAL_H    = 26;
     const SUGEST_H   = 28;
@@ -787,7 +852,7 @@ async function gerarPdfDeItens(dados) {
         const subparts = [item.materialCategoria, dimensao, formatEspessura(item.materialEspessura), item.materialIdentificador]
           .filter(Boolean).join(' · ');
         if (subparts) {
-          doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
+          doc.font('Helvetica').fontSize(5.5).fillColor(C.black)
              .text(subparts, xMat + 4, tyTop + nomeH + 1, { width: COL_MAT - 8, lineBreak: false });
         }
         if (item.descricao?.trim()) {
@@ -795,7 +860,7 @@ async function gerarPdfDeItens(dados) {
              .text(item.descricao.trim(), xMat + 4, tyTop + nomeH + (subparts ? 7 : 1), { width: COL_MAT - 8, lineBreak: false });
         }
 
-        const unidLabel = item.materialUnidade || '';
+        const unidLabel = formatarUnidadeExibicao(item.materialUnidade);
         doc.font('Helvetica').fontSize(6.5).fillColor(C.black)
            .text(formatNumberSmart(qtd), xQtd + 2, tyCtr, { width: COL_QTD - 4, align: 'center', lineBreak: false });
 
@@ -828,6 +893,7 @@ async function gerarPdfDeItens(dados) {
 
           const preco  = precoEfetivo(pf);
           const total  = preco != null ? preco * qtdTotal : null;
+          const precoM2 = precoMetroQuadradoEfetivo(pf, item);
           const isMen  = menor != null && preco != null && preco === menor;
 
           if (isMen) {
@@ -847,17 +913,25 @@ async function gerarPdfDeItens(dados) {
                .fillColor(isMen ? C.statusOk : C.black)
                .text(formatCurrency(preco), x + 4, precoY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
+            let proximaY = precoY + 9;
+            if (precoM2 != null) {
+              doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 1))
+                 .fillColor(isMen ? '#15803D' : C.gray)
+                 .text(`${formatCurrency(precoM2)}/m²`, x + 4, proximaY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+              proximaY += 8;
+            }
+
             if (total != null) {
               doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 1))
                  .fillColor(isMen ? '#15803D' : C.gray)
-                 .text(formatCurrency(total), x + 4, precoY + 9, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+                 .text(formatCurrency(total), x + 4, proximaY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+              proximaY += 9;
             }
 
             if (pf.observacao) {
-              const obsY = precoY + 18;
               doc.font('Helvetica').fontSize(Math.max(4, fornFontSz - 1.5))
                  .fillColor(C.statusWarn)
-                 .text(pf.observacao, x + 4, obsY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+                 .text(pf.observacao, x + 4, proximaY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
             }
           } else {
             doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 0.5)).fillColor(C.lightGray)
