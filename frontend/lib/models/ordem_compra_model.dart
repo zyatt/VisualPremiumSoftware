@@ -2,7 +2,6 @@ class OrdemCompraItemModel {
   final int? id;
   final int? materialId;
   final String materialNome;
-  /// Unidade de medida do material no estoque (ex: "UNIDADE", "ML", "M/L", "KG").
   final String? materialUnidade;
   final String? materialMedida;
   final String? materialEspessura;
@@ -11,11 +10,7 @@ class OrdemCompraItemModel {
   final double? materialComprimento;
   final String? descricaoItem;
   final String numeroOS;
-  /// Quantidade de embalagens/peças compradas (o que o usuário digita como "qtd").
   final double quantidade;
-  /// Quantidade da unidade de medida por embalagem/peça
-  /// (ex: 50 M/L por lona, 18000 ML por lata de thinner).
-  /// Quando não nulo e > 0, o estoque recebe quantidade × qtdUnidade.
   final double? qtdUnidade;
   final double precoUnitario;
   final double? precoMetroQuadrado;
@@ -42,11 +37,6 @@ class OrdemCompraItemModel {
     this.usarM2 = false,
   });
 
-  /// Quantidade real que entra no estoque ao finalizar a OC.
-  ///
-  /// Se [qtdUnidade] foi informado na OC, usa quantidade × qtdUnidade.
-  /// Exemplo: 2 lonas × 50 M/L cada → 100 M/L no estoque.
-  /// Caso contrário, retorna [quantidade] diretamente.
   double get quantidadeEstoque {
     if (usarM2) return quantidade;
     if (qtdUnidade != null && qtdUnidade! > 0) return quantidade * qtdUnidade!;

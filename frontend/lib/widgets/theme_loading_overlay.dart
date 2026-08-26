@@ -20,9 +20,6 @@ class _ThemeLoadingOverlayState extends State<ThemeLoadingOverlay>
   AnimationController? _iconController;
   Animation<double>? _iconRotation;
 
-  /// Mantém o overlay montado durante o fade-out (200ms). Sem isso, o
-  /// `if (widget.isVisible)` no build tirava o widget da árvore na hora,
-  /// e o AnimatedOpacity nunca chegava a animar até 0.
   bool _shouldBuild = false;
 
   @override
@@ -65,7 +62,6 @@ class _ThemeLoadingOverlayState extends State<ThemeLoadingOverlay>
         _iconController!.repeat();
       } else {
         _iconController!.stop();
-        // Só desmonta depois que o fade-out (200ms) termina de verdade.
         Future.delayed(const Duration(milliseconds: 200), () {
           if (mounted && !widget.isVisible) {
             setState(() => _shouldBuild = false);
@@ -114,8 +110,6 @@ class _ThemeLoadingOverlayState extends State<ThemeLoadingOverlay>
   }
 
   Widget _buildThemeIcon(ThemeData theme) {
-    // Cor do círculo = oposta ao fundo, para dar contraste com a logo:
-    // fundo escuro (dark) -> círculo claro; fundo claro (light) -> círculo escuro.
     final circleColor = theme.brightness == Brightness.dark
         ? Colors.white
         : theme.colorScheme.onSurface;

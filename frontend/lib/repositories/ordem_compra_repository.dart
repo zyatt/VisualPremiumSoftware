@@ -1,8 +1,58 @@
 import '../utils/api_client.dart';
 
+class OrdensCompraPaginadasResult {
+  final List<dynamic> itens;
+  final int total;
+  const OrdensCompraPaginadasResult({required this.itens, required this.total});
+}
+
 class OrdemCompraRepository {
   Future<List<dynamic>> listar() async {
     return await ApiClient.getList('/ordens-compra');
+  }
+
+  Future<OrdensCompraPaginadasResult> listarPagina({
+    String? status,
+    String? numero,
+    String? material,
+    String? identificador,
+    String? medida,
+    String? comprimento,
+    String? largura,
+    String? espessura,
+    required int pagina,
+    int porPagina = 50,
+  }) async {
+    final params = <String, String>{
+      'pagina':    pagina.toString(),
+      'porPagina': porPagina.toString(),
+    };
+    if (status != null && status.isNotEmpty)               params['status']        = status;
+    if (numero != null && numero.isNotEmpty)                params['numero']        = numero;
+    if (material != null && material.isNotEmpty)           params['material']      = material;
+    if (identificador != null && identificador.isNotEmpty) params['identificador'] = identificador;
+    if (medida != null && medida.isNotEmpty)               params['medida']        = medida;
+    if (comprimento != null && comprimento.isNotEmpty)     params['comprimento']   = comprimento;
+    if (largura != null && largura.isNotEmpty)             params['largura']       = largura;
+    if (espessura != null && espessura.isNotEmpty)         params['espessura']     = espessura;
+
+    final query = params.entries
+        .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+    final data = await ApiClient.get('/ordens-compra/pagina?$query');
+
+    final itens = (data['data'] as List? ?? []);
+    final total = (data['total'] as num?)?.toInt() ?? itens.length;
+    return OrdensCompraPaginadasResult(itens: itens, total: total);
+  }
+
+  Future<Map<String, int>> contarPorStatus() async {
+    final data = await ApiClient.get('/ordens-compra/contagem-status');
+    return {
+      'EM_ANDAMENTO': (data['EM_ANDAMENTO'] as num?)?.toInt() ?? 0,
+      'FINALIZADO':   (data['FINALIZADO']   as num?)?.toInt() ?? 0,
+      'CANCELADO':    (data['CANCELADO']    as num?)?.toInt() ?? 0,
+    };
   }
 
   Future<Map<String, dynamic>> buscarPorId(int id) async {
@@ -39,7 +89,6 @@ class OrdemCompraRepository {
     await ApiClient.delete('/ordens-compra/$id');
   }
 
-  /// Baixa o PDF da OC e retorna os bytes prontos para exibição.
   Future<List<int>> baixarPdf(int id) async {
     return ApiClient.getBytes('/ordens-compra/$id/pdf');
   }

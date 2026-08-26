@@ -246,7 +246,16 @@ async function atualizar(id, data, editorId, editorNome, editorRole) {
 
   const ehAdmin   = editorRole === 'ADMIN' || editorRole === 'GERENTE';
   const ehCriador = sol.usuarioId === editorId;
-  if (!ehAdmin && !ehCriador) {
+  const ehCompras = editorRole === 'COMPRAS';
+  const camposEnviados = Object.keys(data).filter((k) => data[k] !== undefined);
+  const apenasAndamento =
+    camposEnviados.length === 1 && camposEnviados[0] === 'andamento';
+
+  if (apenasAndamento) {
+    if (!ehAdmin && !ehCriador && !ehCompras) {
+      throw { status: 403, message: 'Você não tem permissão para alterar o andamento desta solicitação.' };
+    }
+  } else if (!ehAdmin && !ehCriador) {
     throw { status: 403, message: 'Apenas o criador da solicitação, um gerente ou um administrador pode editar os dados.' };
   }
 

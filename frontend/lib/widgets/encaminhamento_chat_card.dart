@@ -1,11 +1,3 @@
-// lib/widgets/encaminhamento_chat_card.dart
-//
-// Card compacto exibido dentro da bolha de chat quando a mensagem é um
-// encaminhamento de solicitação de material ou de um material específico
-// (ver MensagemChat.ehEncaminhamento). Usado tanto pelo chat_page.dart
-// (versão normal) quanto pelo chat_floating_widget.dart (versão compacta,
-// via o parâmetro `compacta`).
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -16,9 +8,6 @@ import '../providers/material_provider.dart';
 import '../providers/solicitacao_material_provider.dart';
 import '../providers/orcamento_provider.dart';
 
-/// Formata a unidade para exibição (o valor salvo/transmitido permanece em
-/// maiúsculo). Ex.: 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²'/'M2' → 'm²'; 'KG' →
-/// 'Kg'; 'G' → 'g'. Espelha `formatarUnidadeExibicao` usada em estoque_page.
 String _formatarUnidadeExibicao(String? unidade) {
   if (unidade == null || unidade.trim().isEmpty) return '';
   final u = unidade.trim().toUpperCase();
@@ -60,23 +49,7 @@ class EncaminhamentoChatCard extends StatefulWidget {
 }
 
 class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
-  // Quando o encaminhamento é de um material "solto" do estoque (não
-  // pertencente a uma solicitação) e a mensagem guarda o materialId (ver
-  // MaterialProvider.solicitarNavegacaoParaMaterialChat), buscamos os dados
-  // ATUAIS do material aqui — o card não deve mostrar um retrato congelado
-  // de quando foi encaminhado, e sim refletir alterações feitas depois no
-  // estoque (nome, identificador, medida, espessura, quantidade, unidade).
-  // Sem materialId (mensagens antigas, de antes dessa correção) ou quando o
-  // encaminhamento pertence a uma solicitação, mantém o retrato original —
-  // a solicitação já é buscada fresca ao abrir, então não precisa disso.
   Future<MaterialModel?>? _materialAtualFuture;
-
-  // Idem para orçamentos: o payload guarda o status no momento em que o
-  // "Encaminhar" foi clicado (ver orcamento_editor_page._encaminharOrcamento),
-  // então aprovar/rejeitar/reabrir o orçamento DEPOIS de encaminhado não
-  // atualizava esse card — ele ficava com o status antigo para sempre.
-  // Buscamos o orçamento atual do servidor aqui pelo mesmo motivo do
-  // material acima.
   Future<Map<String, dynamic>?>? _orcamentoAtualFuture;
 
   @override
@@ -139,8 +112,6 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
     }
   }
 
-  /// Sobrepõe no retrato original o status e o título atuais do orçamento,
-  /// mantendo o restante do payload intacto.
   Map<String, dynamic> _mesclarComOrcamentoAtual(
     Map<String, dynamic> original,
     Map<String, dynamic> atual,
@@ -160,7 +131,6 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
     final dados = widget.mensagem.dadosEncaminhados;
 
     if (dados == null) {
-      // Payload corrompido/ilegível: mostra o texto cru como fallback.
       final corTexto = widget.isMinha ? Colors.white : Theme.of(context).colorScheme.onSurface;
       return Text(
         widget.mensagem.conteudo,
@@ -169,10 +139,6 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
     }
 
     if (_orcamentoAtualFuture != null) {
-      // Enquanto a busca não termina (ou se falhar), mostra o retrato salvo
-      // na própria mensagem — assim que o status atual chegar, o card é
-      // reconstruído já refletindo aprovação/rejeição/reabertura feitas
-      // depois do encaminhamento.
       return FutureBuilder<Map<String, dynamic>?>(
         future: _orcamentoAtualFuture,
         builder: (context, snapshot) {
@@ -188,9 +154,6 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
       return _conteudoCard(context, dados);
     }
 
-    // Enquanto a busca não termina (ou se falhar), mostra o retrato salvo na
-    // própria mensagem — assim que os dados atuais chegarem, o card é
-    // reconstruído já refletindo qualquer alteração feita no estoque.
     return FutureBuilder<MaterialModel?>(
       future: _materialAtualFuture,
       builder: (context, snapshot) {
@@ -201,8 +164,6 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
     );
   }
 
-  /// Sobrepõe no retrato original os campos que podem ter mudado desde o
-  /// encaminhamento, mantendo o restante do payload (ex.: numeroOS) intacto.
   Map<String, dynamic> _mesclarComMaterialAtual(
     Map<String, dynamic> original,
     MaterialModel atual,
@@ -275,7 +236,6 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
         linhas.add('$qtdMateriais ${qtdMateriais == 1 ? 'material' : 'materiais'}');
       }
     } else {
-      // tipo == 'solicitacao'
       titulo = 'OS ${dados['numeroOS'] ?? '-'}';
       linhas.add('Cliente: ${dados['nomeCliente'] ?? '-'}');
       final dataStr = dados['dataNecessidade'] as String?;
@@ -293,10 +253,6 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
-        // Toque simples no card = navega até a origem do encaminhamento
-        // (estoque filtrado ou a solicitação em si). Usa GestureDetector
-        // (não InkWell/Material) para não brigar com o toque longo do menu
-        // de reação/responder que a bolha de mensagem já captura por cima.
         onTap: () => _abrirOrigem(context, tipo, dados),
         child: Container(
           constraints: BoxConstraints(maxWidth: compacta ? 200 : 260),
@@ -342,10 +298,6 @@ class _EncaminhamentoChatCardState extends State<EncaminhamentoChatCard> {
     );
   }
 
-  /// Navega até a origem do encaminhamento:
-  /// - 'solicitacao'                     -> abre a solicitação (aba Solicitações)
-  /// - 'material' com solicitacaoId      -> idem (material pertence a uma solicitação)
-  /// - 'material' sem solicitacaoId      -> abre o Estoque já filtrado por esse material
   void _abrirOrigem(
     BuildContext context,
     String? tipo,

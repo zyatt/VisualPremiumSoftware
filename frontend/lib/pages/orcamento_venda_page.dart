@@ -11,10 +11,17 @@ import '../models/material_model.dart';
 import '../providers/material_provider.dart';
 import '../providers/produto_provider.dart';
 import '../providers/usuario_provider.dart';
+import '../models/fornecedor_model.dart';
+import '../providers/fornecedor_provider.dart';
 import '../repositories/configuracao_repository.dart';
 import '../theme/app_theme.dart';
+import '../pages/controle_estoque_page.dart' show formatarEspessuraComSufixo;
 
-// ─── Página principal ─────────────────────────────────────────────────────────
+String _formatarUnidade(String unidade) {
+  final trimmed = unidade.trim();
+  if (trimmed.toLowerCase() == 'unidade') return 'Unidade';
+  return trimmed.toLowerCase();
+}
 
 class OrcamentoVendaPage extends StatefulWidget {
   const OrcamentoVendaPage({super.key});
@@ -65,12 +72,14 @@ class _OrcamentoVendaPageState extends State<OrcamentoVendaPage>
   Future<void> _abrirEditor(OrcamentoVendaModel? inicial) async {
     final prov    = context.read<OrcamentoVendaProvider>();
     final prodProv = context.read<ProdutoProvider>();
+    final fornecedorProv = context.read<FornecedorProvider>();
     final resultado = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => MultiProvider(
           providers: [
             ChangeNotifierProvider.value(value: prov),
             ChangeNotifierProvider.value(value: prodProv),
+            ChangeNotifierProvider.value(value: fornecedorProv),
           ],
           child: OrcamentoVendaEditorPage(inicial: inicial),
         ),
@@ -171,7 +180,7 @@ class _OrcamentoVendaPageState extends State<OrcamentoVendaPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
+
             Row(
               children: [
                 Column(
@@ -199,16 +208,19 @@ class _OrcamentoVendaPageState extends State<OrcamentoVendaPage>
                 ),
                 const Spacer(),
                 if (_podeEscrever)
-                  FilledButton.icon(
-                    onPressed: () => _abrirEditor(null),
-                    icon: const Icon(Icons.add, size: 18),
-                    label: Text(isMobile ? 'Novo' : 'Novo Orçamento',
-                        style: GoogleFonts.nunito(fontWeight: FontWeight.w600)),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 12),
+                  Tooltip(
+                    message: 'Criar um novo orçamento de venda',
+                    child: FilledButton.icon(
+                      onPressed: () => _abrirEditor(null),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: Text(isMobile ? 'Novo' : 'Novo Orçamento',
+                          style: GoogleFonts.nunito(fontWeight: FontWeight.w600)),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ),
                 const SizedBox(width: 12),
@@ -223,18 +235,17 @@ class _OrcamentoVendaPageState extends State<OrcamentoVendaPage>
                           borderRadius: BorderRadius.circular(8)),
                       side: BorderSide(
                           color: theme.colorScheme.outlineVariant),
-                    ),
+                    ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 20),
 
-            // ── Busca ──────────────────────────────────────────────────────
             TextField(
               controller: _buscaCtrl,
               decoration: InputDecoration(
-                hintText: 'Buscar por número ou cliente...',
+                hintText: 'Buscar por número ou cliente',
                 prefixIcon: Icon(Icons.search,
                     color: theme.colorScheme.outline, size: 18),
                 isDense: true,
@@ -272,7 +283,6 @@ class _OrcamentoVendaPageState extends State<OrcamentoVendaPage>
             ),
             const SizedBox(height: 16),
 
-            // ── Abas ───────────────────────────────────────────────────────
             Container(
               decoration: BoxDecoration(
                 color: theme.colorScheme.surface,
@@ -296,7 +306,6 @@ class _OrcamentoVendaPageState extends State<OrcamentoVendaPage>
               ),
             ),
 
-            // ── Listas ─────────────────────────────────────────────────────
             Expanded(
               child: Consumer<OrcamentoVendaProvider>(
                 builder: (context, prov, _) {
@@ -395,8 +404,6 @@ class _OrcamentoVendaPageState extends State<OrcamentoVendaPage>
   }
 }
 
-// ─── Lista de orçamentos por aba ──────────────────────────────────────────────
-
 class _OrcamentoList extends StatelessWidget {
   final List<OrcamentoVendaModel> orcamentos;
   final String emptyMessage;
@@ -463,8 +470,6 @@ class _OrcamentoList extends StatelessWidget {
   }
 }
 
-// ─── Card de orçamento ────────────────────────────────────────────────────────
-
 class _OrcamentoCard extends StatelessWidget {
   final OrcamentoVendaModel orcamento;
   final bool podeEscrever;
@@ -494,6 +499,7 @@ class _OrcamentoCard extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
+      mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -581,18 +587,6 @@ class _OrcamentoCard extends StatelessWidget {
   }
 }
 
-// ─── Página de editor ─────────────────────────────────────────────────────────
-//
-// Layout em duas colunas:
-//   Esquerda  (280 px) → painel de produtos com busca e clique para selecionar
-//   Direita   (flex)   → formulário (número*, cliente*, observação, materiais, total)
-//
-// Correções aplicadas:
-//   1. clienteId é enviado no payload (não apenas clienteNome) para que o
-//      backend conecte corretamente a relação Cliente no Prisma.
-//   2. Campo "Nº do Orçamento" é editável e obrigatório (sem auto-geração).
-//   3. Produtos ficam na coluna esquerda – busca + clique para selecionar.
-
 class OrcamentoVendaEditorPage extends StatefulWidget {
   final OrcamentoVendaModel? inicial;
 
@@ -604,16 +598,13 @@ class OrcamentoVendaEditorPage extends StatefulWidget {
 }
 
 class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
-  // ── Controladores do formulário ────────────────────────────────────────────
+
   final _numeroCtrl  = TextEditingController();
   final _obsCtrl     = TextEditingController();
 
-  // ── Estado do cliente selecionado ──────────────────────────────────────────
-  // Armazenamos tanto o id quanto o nome para exibição e envio ao backend.
   int?   _clienteId;
   String _clienteNome = '';
 
-  // ── Busca de clientes (autocomplete) ──────────────────────────────────────
   final _clienteBuscaCtrl = TextEditingController();
   List<Map<String, dynamic>> _clientesSugeridos = [];
   bool _buscandoClientes = false;
@@ -621,11 +612,9 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
   final _clienteLayerLink = LayerLink();
   OverlayEntry? _clienteOverlay;
 
-  // ── Produto selecionado ────────────────────────────────────────────────────
   _ItemRascunho? _item;
   bool _salvando = false;
 
-  // ── Markup: faixas carregadas da API ──────────────────────────────────────
   List<MarkupFaixa> _faixasMarkup = [];
   double? get _percentualMarkupAtual {
     if (_faixasMarkup.isEmpty) return null;
@@ -645,13 +634,10 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
     return custo * (1 + pct / 100);
   }
 
-  // ── Busca de produtos (painel esquerdo) ───────────────────────────────────
   final _produtoBuscaCtrl = TextEditingController();
   String _produtoBusca    = '';
 
   bool get _isEdit => widget.inicial != null;
-
-  // ── Ciclo de vida ──────────────────────────────────────────────────────────
 
   @override
   void initState() {
@@ -662,8 +648,6 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
       _obsCtrl.text    = ov.observacao ?? '';
       _clienteNome     = ov.clienteNome ?? '';
       _clienteBuscaCtrl.text = _clienteNome;
-      // clienteId não está exposto no model atual; será enviado null na edição
-      // (o backend não altera o cliente na rota PUT conforme service.js)
 
       if (ov.itens.isNotEmpty) {
         final item = ov.itens.first;
@@ -678,9 +662,9 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
             medida:          m.material.medida,
             espessura:       m.material.espessura,
             identificador:   m.material.identificador,
-            custoUnitario:   m.material.ultimoValorPago
-                ?? m.material.precoMedio
-                ?? m.precoMedio,
+            custoUnitario:   m.material.precoMedio ?? m.precoMedio,
+            precoM2:         m.material.precoMedioM2,
+            precoUnidadeMedida: m.material.precoUnidadeMedidaMediano,
             qtdCtrl:         TextEditingController(text: _fmtQtd(m.quantidade)),
             refLargura:      m.material.largura,
             refComprimento:  m.material.comprimento,
@@ -691,7 +675,7 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
             comprimentoCtrl: m.comprimento != null
                 ? TextEditingController(text: _fmtQtd(m.comprimento!))
                 : null,
-          )).toList(),
+          )..precoManualSelecionado = m.precoUnitario).toList(),
         );
       }
     }
@@ -700,13 +684,12 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
       setState(() => _produtoBusca = _produtoBuscaCtrl.text);
     });
 
-    // Carrega produtos na abertura da página
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final prodProv = context.read<ProdutoProvider>();
       if (prodProv.produtos.isEmpty) {
         await prodProv.carregar(ativo: true);
       }
-      // Carrega faixas de markup para exibição em tempo real
+
       try {
         final faixas = await ConfiguracaoRepository().listarFaixas();
         if (mounted) setState(() => _faixasMarkup = faixas);
@@ -726,10 +709,8 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
     super.dispose();
   }
 
-  // ── Autocomplete de cliente ────────────────────────────────────────────────
-
   void _onClienteChanged(String valor) {
-    // Ao digitar, limpa a seleção confirmada
+
     setState(() {
       _clienteId   = null;
       _clienteNome = valor.trim();
@@ -810,8 +791,6 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
     _clienteOverlay = null;
   }
 
-  // ── Produto ────────────────────────────────────────────────────────────────
-
   List<_MaterialRascunho> _materiaisDeProducto(ProdutoModel produto) {
     return produto.materiais.map((pm) => _MaterialRascunho(
           materialId:     pm.materialId,
@@ -820,11 +799,19 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
           medida:         pm.material.medida,
           espessura:      pm.material.espessura,
           identificador:  pm.material.identificador,
-          custoUnitario:  pm.material.ultimoValorPago ?? pm.material.precoMedio,
+          custoUnitario:  pm.material.precoMedio,
+          precoM2:        pm.material.precoMedioM2,
+          precoUnidadeMedida: pm.material.precoUnidadeMedidaMediano,
           qtdCtrl:        TextEditingController(),
           refLargura:     pm.material.largura,
           refComprimento: pm.material.comprimento,
           ultimoValorPago: pm.material.ultimoValorPago,
+          larguraCtrl:     (pm.material.largura != null && pm.material.largura! > 0)
+              ? TextEditingController(text: _fmtQtd(pm.material.largura!))
+              : null,
+          comprimentoCtrl: (pm.material.comprimento != null && pm.material.comprimento! > 0)
+              ? TextEditingController(text: _fmtQtd(pm.material.comprimento!))
+              : null,
         )).toList();
   }
 
@@ -851,43 +838,55 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
     if (_item == null) return;
     final todosIds = _item!.materiais.map((m) => m.materialId).toSet();
 
-    // Usa MaterialProvider para buscar TODOS os materiais do estoque
-    final matProv = context.read<MaterialProvider>();
-    if (matProv.materiais.isEmpty) {
-      await matProv.carregar(ativo: true);
-    }
-    if (!mounted) return;
-
-    final disponiveis = matProv.materiais
-        .where((m) => m.ativo && !todosIds.contains(m.id))
-        .toList();
-
-    if (disponiveis.isEmpty) return;
-
     final selecionado = await showDialog<MaterialModel>(
       context: context,
-      builder: (_) => _SelecionarMaterialDialog(materiais: disponiveis),
+      builder: (_) => _SelecionarMaterialDialog(idsExcluidos: todosIds),
     );
     if (selecionado == null || !mounted) return;
 
-    setState(() {
-      _item!.materiais.add(_MaterialRascunho(
-        materialId:      selecionado.id,
-        nome:            selecionado.nome,
-        unidade:         selecionado.unidade,
-        medida:          selecionado.medida,
-        espessura:       selecionado.espessura,
-        identificador:   selecionado.identificador,
-        custoUnitario:   selecionado.ultimoValorPago ?? selecionado.precoMediano,
-        qtdCtrl:         TextEditingController(),
-        refLargura:      selecionado.largura,
-        refComprimento:  selecionado.comprimento,
-        ultimoValorPago: selecionado.ultimoValorPago,
-      ));
-    });
-  }
+    final novoMaterial = _MaterialRascunho(
+      materialId:      selecionado.id,
+      nome:            selecionado.nome,
+      unidade:         selecionado.unidade,
+      medida:          selecionado.medida,
+      espessura:       selecionado.espessura,
+      identificador:   selecionado.identificador,
+      custoUnitario:   selecionado.precoMediano,
+      precoM2:         selecionado.precoM2Mediano,
+      precoUnidadeMedida: selecionado.precoRefUnidadeMedida,
+      qtdCtrl:         TextEditingController(),
+      refLargura:      selecionado.largura,
+      refComprimento:  selecionado.comprimento,
+      ultimoValorPago: selecionado.ultimoValorPago,
+      larguraCtrl:     (selecionado.largura != null && selecionado.largura! > 0)
+          ? TextEditingController(text: _fmtQtd(selecionado.largura!))
+          : null,
+      comprimentoCtrl: (selecionado.comprimento != null && selecionado.comprimento! > 0)
+          ? TextEditingController(text: _fmtQtd(selecionado.comprimento!))
+          : null,
+    );
 
-  // ── Validação e salvamento ─────────────────────────────────────────────────
+    setState(() {
+      _item!.materiais.add(novoMaterial);
+    });
+
+    // Materiais adicionados avulsamente (sem vínculo original com o
+    // produto) podem não trazer preço médio pré-calculado do backend.
+    // Busca a média de preços dos fornecedores para os 3 campos (base,
+    // m² e unidade de medida) e preenche automaticamente, para que o
+    // material extra entre com o mesmo padrão dos demais — preenchendo
+    // os campos "padrão" (não os *ManualSelecionado*), para que o texto
+    // não fique destacado em laranja como se tivesse sido escolhido
+    // manualmente. O destaque só deve aparecer se o usuário de fato
+    // trocar o preço depois, clicando e selecionando outro fornecedor.
+    if (!mounted) return;
+    await _preencherPrecoPadraoMaterialExtra(
+      context: context,
+      mat: novoMaterial,
+    );
+    if (!mounted) return;
+    setState(() {});
+  }
 
   bool _validar() {
     if (_numeroCtrl.text.trim().isEmpty) {
@@ -898,7 +897,7 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
       _snack('Informe o nome do cliente.');
       return false;
     }
-    
+
     if (_item == null) {
       _snack('Adicione um produto ao orçamento.');
       return false;
@@ -929,11 +928,6 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
     if (!_validar()) return;
     setState(() => _salvando = true);
 
-    // ── Payload correto:
-    //    • numero     → obrigatório, digitado pelo usuário
-    //    • clienteId  → FK para a tabela Cliente (corrige o salvamento)
-    //    • observacao → opcional
-    //    • itens      → lista de produtos com materiais
     final payload = <String, dynamic>{
       'numero': _numeroCtrl.text.trim(),
       'clienteNome': _clienteNome.trim(),
@@ -948,10 +942,10 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
           'materiais': _item!.materiais.map((m) => {
             'materialId':    m.materialId,
             'quantidade':    m.quantidade,
-            // precoUnitario = custo da peça com dimensões informadas (ou custo bruto)
+
             'precoUnitario': m.precoUnitarioCalculado,
-            // precoMedio = custo bruto da unidade (fallback no backend para _decomporCustos)
-            'precoMedio':    m.custoUnitario,
+
+            'precoMedio':    m.precoExibido,
             'largura':       m._largura,
             'comprimento':   m._comprimento,
           }).toList(),
@@ -961,7 +955,7 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
     final prov = context.read<OrcamentoVendaProvider>();
 
     if (_isEdit) {
-      // Na edição não reenvia numero/clienteId (backend ignora, mas não quebra)
+
       final editPayload = {
         'observacao': payload['observacao'],
         'itens':      payload['itens'],
@@ -988,8 +982,6 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
     }
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final theme    = Theme.of(context);
@@ -1001,10 +993,21 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
       appBar: AppBar(
         backgroundColor: cs.surface,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          tooltip: 'Voltar',
-          onPressed: () => Navigator.pop(context),
+        leadingWidth: 100,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _BotaoVoltarOrcamento(
+              onTap: () {
+                if (!isMobile && _item != null) {
+                  _removerItem();
+                } else {
+                  Navigator.pop(context);
+                }
+              },
+            ),
+          ),
         ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1033,80 +1036,94 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: FilledButton(
-              onPressed: _salvando ? null : _salvar,
-              style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primary),
-              child: _salvando
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : Text(
-                      _isEdit ? 'Salvar' : 'Criar Orçamento',
-                      style: GoogleFonts.nunito(
-                          fontWeight: FontWeight.w700)),
+            child: Tooltip(
+              message: _isEdit ? 'Salvar alterações do orçamento' : 'Criar novo orçamento de venda',
+              child: FilledButton(
+                onPressed: _salvando ? null : _salvar,
+                style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary)
+                    .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                child: _salvando
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : Text(
+                        _isEdit ? 'Salvar' : 'Criar Orçamento',
+                        style: GoogleFonts.nunito(
+                            fontWeight: FontWeight.w700)),
+              ),
             ),
           ),
         ],
       ),
 
-      // ── Corpo: coluna esquerda (produtos) + coluna direita (formulário) ───
       body: isMobile
           ? _buildFormulario(cs, isMobile: true)
-          : Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ── Painel esquerdo: catálogo de produtos ──────────────────
-                _PainelProdutos(
-                  buscaCtrl:         _produtoBuscaCtrl,
-                  busca:             _produtoBusca,
-                  produtoSelecionado: _item?.produtoId,
-                  onSelecionar:      _selecionarProduto,
-                ),
+          : (_item == null
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
 
-                // Divisor vertical
-                VerticalDivider(
-                    width: 1,
-                    color: cs.outline.withValues(alpha: 0.15)),
+                    _PainelProdutos(
+                      buscaCtrl:         _produtoBuscaCtrl,
+                      busca:             _produtoBusca,
+                      produtoSelecionado: _item?.produtoId,
+                      onSelecionar:      _selecionarProduto,
+                    ),
 
-                // ── Formulário à direita ───────────────────────────────────
-                Expanded(
-                  child: _buildFormulario(cs, isMobile: false),
-                ),
-              ],
-            ),
+                    VerticalDivider(
+                        width: 1,
+                        color: cs.outline.withValues(alpha: 0.15)),
+
+                    Expanded(
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.inventory_2_outlined,
+                                size: 40,
+                                color: cs.onSurfaceVariant.withValues(alpha: 0.4)),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Selecione um produto para começar',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 13, color: cs.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : _buildFormulario(cs, isMobile: false)),
     );
   }
-
-  // ── Formulário (coluna direita / tela inteira no mobile) ──────────────────
 
   Widget _buildFormulario(ColorScheme cs, {required bool isMobile}) {
     return ListView(
       padding: EdgeInsets.all(isMobile ? 16 : 28),
       children: [
-        // ── Dados básicos ──────────────────────────────────────────────────
+
         _SectionLabel('Dados do orçamento'),
         const SizedBox(height: 10),
 
-        // Linha 1: Nº orçamento (obrigatório, editável) + Cliente
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Número — obrigatório, preenchido pelo usuário
+
             SizedBox(
               width: 160,
               child: _Campo(
-                label:    'Nº do Orçamento *',
+                label:    'Nº do Orçamento',
                 ctrl:     _numeroCtrl,
-                hint:     'Nº do Orçamento...',
-                enabled:  !_isEdit, // número não pode ser alterado na edição
+                hint:     'Nº do Orçamento',
+                enabled:  !_isEdit,
               ),
             ),
             const SizedBox(width: 12),
 
-            // Cliente com autocomplete
             Expanded(
               child: _CampoClienteAutocomplete(
                 buscaCtrl:        _clienteBuscaCtrl,
@@ -1124,13 +1141,12 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
         _Campo(
           label:    'Observação',
           ctrl:     _obsCtrl,
-          hint:     'Anotações opcionais...',
+          hint:     'Anotações opcionais',
           maxLines: 2,
         ),
 
         const SizedBox(height: 28),
 
-        // ── Produto selecionado (no mobile mostra o botão de selecionar) ───
         if (isMobile) ...[
           Row(
             children: [
@@ -1172,7 +1188,6 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
           const SizedBox(height: 10),
         ],
 
-        // Card do produto / placeholder
         if (_item == null)
           Container(
             padding: const EdgeInsets.all(24),
@@ -1203,14 +1218,11 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
 
         const SizedBox(height: 28),
 
-        // ── Total ──────────────────────────────────────────────────────────
         Builder(builder: (context) {
           final subtotalLocal  = _item?.subtotal ?? 0;
           final markupPct      = _percentualMarkupAtual;
           final totalComMarkup = _totalComMarkup;
 
-          // Em edição sem mudanças locais ainda exibimos o valorTotal do servidor,
-          // mas assim que o usuário alterar qualquer campo passamos a calcular local.
           final valorExibido = totalComMarkup;
 
           return Container(
@@ -1261,8 +1273,6 @@ class _OrcamentoVendaEditorPageState extends State<OrcamentoVendaEditorPage> {
   }
 }
 
-// ─── Painel esquerdo: catálogo de produtos ────────────────────────────────────
-
 class _PainelProdutos extends StatelessWidget {
   final TextEditingController buscaCtrl;
   final String busca;
@@ -1284,7 +1294,7 @@ class _PainelProdutos extends StatelessWidget {
       width: 280,
       child: Column(
         children: [
-          // Cabeçalho do painel
+
           Container(
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
             color: cs.surfaceContainerLow,
@@ -1297,12 +1307,12 @@ class _PainelProdutos extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: cs.onSurface)),
                 const SizedBox(height: 8),
-                // Campo de busca
+
                 TextField(
                   controller: buscaCtrl,
                   style: GoogleFonts.nunito(fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: 'Buscar produto...',
+                    hintText: 'Buscar produto',
                     hintStyle: GoogleFonts.nunito(
                         fontSize: 12, color: cs.onSurfaceVariant),
                     prefixIcon: Icon(Icons.search,
@@ -1343,7 +1353,6 @@ class _PainelProdutos extends StatelessWidget {
 
           const Divider(height: 1),
 
-          // Lista de produtos
           Expanded(
             child: Consumer<ProdutoProvider>(
               builder: (_, prodProv, __) {
@@ -1386,6 +1395,7 @@ class _PainelProdutos extends StatelessWidget {
 
                     return InkWell(
                       onTap: () => onSelecionar(p),
+                      mouseCursor: SystemMouseCursors.click,
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 150),
                         margin: const EdgeInsets.symmetric(
@@ -1465,8 +1475,6 @@ class _PainelProdutos extends StatelessWidget {
   }
 }
 
-// ─── Campo de autocomplete de cliente ────────────────────────────────────────
-
 class _CampoClienteAutocomplete extends StatelessWidget {
   final TextEditingController buscaCtrl;
   final int? clienteId;
@@ -1493,13 +1501,13 @@ class _CampoClienteAutocomplete extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text('Cliente *',
+            Text('Cliente',
                 style: GoogleFonts.nunito(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                     color: cs.onSurfaceVariant)),
             const SizedBox(width: 6),
-            // Indicador visual de cliente confirmado
+
             if (clienteId != null)
               Container(
                 padding:
@@ -1543,7 +1551,7 @@ class _CampoClienteAutocomplete extends StatelessWidget {
               onChanged: onChanged,
               style: GoogleFonts.nunito(fontSize: 13, color: cs.onSurface),
               decoration: InputDecoration(
-                hintText: 'Digitar nome do cliente...',
+                hintText: 'Digitar nome do cliente',
                 hintStyle: GoogleFonts.nunito(
                     fontSize: 12, color: cs.onSurfaceVariant),
                 prefixIcon: const Icon(Icons.person_search_outlined,
@@ -1587,8 +1595,6 @@ class _CampoClienteAutocomplete extends StatelessWidget {
   }
 }
 
-// ─── Card de item no editor ───────────────────────────────────────────────────
-
 class _ItemRascunhoCard extends StatelessWidget {
   final _ItemRascunho item;
   final VoidCallback onRemover;
@@ -1615,7 +1621,7 @@ class _ItemRascunhoCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Cabeçalho
+
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
             child: Row(
@@ -1644,11 +1650,16 @@ class _ItemRascunhoCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(Icons.close_rounded, size: 16),
-                  color: cs.onSurfaceVariant,
-                  visualDensity: VisualDensity.compact,
-                  onPressed: onRemover,
+                Tooltip(
+                  message: 'Remover produto',
+                  child: IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    color: cs.onSurfaceVariant,
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onRemover,
+                    style: IconButton.styleFrom()
+                        .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                  ),
                 ),
               ],
             ),
@@ -1656,98 +1667,172 @@ class _ItemRascunhoCard extends StatelessWidget {
 
           const Divider(height: 1),
 
-          // Cabeçalho de colunas
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Text('Material',
-                      style: GoogleFonts.nunito(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: cs.onSurfaceVariant)),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const larguraColunasFixas = 100 + 
+                  14 +                          
+                  100 +                         
+                  4 +                           
+                  100 +                         
+                  44 +                          
+                  80 +                          
+                  8 +                           
+                  80 +                          
+                  8 +                           
+                  120 +                         
+                  8 +                           
+                  100;                          
+              const paddingHorizontal = 24.0;
+              const larguraMinimaMaterial = 220.0;
+
+              final larguraMaterial = (constraints.maxWidth -
+                      paddingHorizontal -
+                      larguraColunasFixas)
+                  .clamp(larguraMinimaMaterial, double.infinity);
+
+              final precisaScroll = larguraMaterial == larguraMinimaMaterial &&
+                  (constraints.maxWidth - paddingHorizontal - larguraColunasFixas) <
+                      larguraMinimaMaterial;
+
+              final tabela = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: larguraMaterial,
+                          child: Text('Material',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurfaceVariant)),
+                        ),
+
+                        SizedBox(
+                          width: 100,
+                          child: Text('Comprimento',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.nunito(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurfaceVariant)),
+                        ),
+
+                        const SizedBox(width: 14),
+
+                        SizedBox(
+                          width: 100,
+                          child: Text('Largura',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.nunito(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurfaceVariant)),
+                        ),
+                        const SizedBox(width: 4),
+
+                        SizedBox(
+                          width: 100,
+                          child: Text('Quantidade',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.nunito(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurfaceVariant)),
+                        ),
+
+                        const SizedBox(width: 44),
+
+                        SizedBox(
+                          width: 80,
+                          child: Text('Preço',
+                              textAlign: TextAlign.right,
+                              style: GoogleFonts.nunito(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurfaceVariant)),
+                        ),
+                        const SizedBox(width: 8),
+
+                        SizedBox(
+                          width: 80,
+                          child: Text('Preço m²',
+                              textAlign: TextAlign.right,
+                              style: GoogleFonts.nunito(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurfaceVariant)),
+                        ),
+                        const SizedBox(width: 8),
+
+                        SizedBox(
+                          width: 120,
+                          child: Text('Preço (m/l, ml, g)',
+                              textAlign: TextAlign.right,
+                              style: GoogleFonts.nunito(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurfaceVariant)),
+                        ),
+                        const SizedBox(width: 8),
+
+                        SizedBox(
+                          width: 100,
+                          child: Text('Subtotal',
+                              textAlign: TextAlign.right,
+                              style: GoogleFonts.nunito(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurfaceVariant)),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  for (final m in item.materiais)
+                    _MaterialLinhaRascunho(
+                      mat: m,
+                      onQtdChanged: onQtdChanged,
+                      larguraMaterial: larguraMaterial,
+                    ),
+                ],
+              );
+
+              if (!precisaScroll) return tabela;
+
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minWidth: larguraMinimaMaterial +
+                        larguraColunasFixas +
+                        paddingHorizontal,
+                  ),
+                  child: tabela,
                 ),
-                // Larg. — mesma largura do campoNumerico (72) + padding (4 cada lado)
-                SizedBox(
-                  width: 80,
-                  child: Text('Larg.',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.nunito(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: cs.onSurfaceVariant)),
-                ),
-                // Separador ×
-                const SizedBox(width: 14),
-                // Comp. — mesma largura do campoNumerico (72) + padding (4 cada lado)
-                SizedBox(
-                  width: 80,
-                  child: Text('Comp.',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.nunito(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: cs.onSurfaceVariant)),
-                ),
-                const SizedBox(width: 4),
-                // Qtd. — mesma largura do campoNumerico (72) + padding (4 cada lado)
-                SizedBox(
-                  width: 80,
-                  child: Text('Qtd.',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.nunito(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: cs.onSurfaceVariant)),
-                ),
-                // Espaço da unidade
-                const SizedBox(width: 34),
-                // Custo unit.
-                SizedBox(
-                  width: 90,
-                  child: Text('Custo unit.',
-                      textAlign: TextAlign.right,
-                      style: GoogleFonts.nunito(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: cs.onSurfaceVariant)),
-                ),
-                const SizedBox(width: 8),
-                // Subtotal
-                SizedBox(
-                  width: 100,
-                  child: Text('Subtotal',
-                      textAlign: TextAlign.right,
-                      style: GoogleFonts.nunito(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: cs.onSurfaceVariant)),
-                ),
-              ],
-            ),
+              );
+            },
           ),
 
-          // Linhas de materiais
-          for (final m in item.materiais)
-            _MaterialLinhaRascunho(mat: m, onQtdChanged: onQtdChanged),
-
-          // Botão material extra
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: onAddMaterial,
-                icon: const Icon(Icons.add_rounded, size: 14),
-                label: Text('Adicionar material',
-                    style: GoogleFonts.nunito(fontSize: 12)),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primary,
-                  visualDensity: VisualDensity.compact,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Tooltip(
+                message: 'Adicionar outro material a este produto',
+                child: TextButton.icon(
+                  onPressed: onAddMaterial,
+                  icon: const Icon(Icons.add_rounded, size: 14),
+                  label: Text('Adicionar material',
+                      style: GoogleFonts.nunito(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primary,
+                    visualDensity: VisualDensity.compact,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                 ),
               ),
             ),
@@ -1758,15 +1843,15 @@ class _ItemRascunhoCard extends StatelessWidget {
   }
 }
 
-// ─── Linha de material (campos de dimensão + quantidade) ──────────────────────
-
 class _MaterialLinhaRascunho extends StatelessWidget {
   final _MaterialRascunho mat;
   final VoidCallback onQtdChanged;
+  final double larguraMaterial;
 
   const _MaterialLinhaRascunho({
     required this.mat,
     required this.onQtdChanged,
+    this.larguraMaterial = 220,
   });
 
   @override
@@ -1829,102 +1914,295 @@ class _MaterialLinhaRascunho extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
       child: Row(
         children: [
-          // Nome + detalhes do material
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  mat.nome,
-                  style: GoogleFonts.nunito(fontSize: 12, color: cs.onSurface),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if ([mat.identificador, mat.medida, mat.espessura]
-                    .any((v) => v != null && v.isNotEmpty))
+
+          SizedBox(
+            width: larguraMaterial,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    [
-                      if (mat.identificador != null && mat.identificador!.isNotEmpty)
-                        mat.identificador!,
-                      if (mat.medida != null && mat.medida!.isNotEmpty)
-                        mat.medida!,
-                      if (mat.espessura != null && mat.espessura!.isNotEmpty)
-                        mat.espessura!,
-                    ].join(' · '),
-                    style: GoogleFonts.nunito(
-                        fontSize: 10, color: cs.onSurfaceVariant),
+                    mat.nome,
+                    style: GoogleFonts.nunito(fontSize: 12, color: cs.onSurface),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-              ],
-            ),
-          ),
-
-          // Campos de dimensão — sempre exibidos; cálculo por m² só é aplicado
-          // quando o material tem dimensões de referência cadastradas.
-          campoNumerico(
-            ctrl: mat.larguraCtrl,
-            hint: 'Larg.',
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: Text('×',
-                style: GoogleFonts.nunito(
-                    fontSize: 11, color: cs.onSurfaceVariant)),
-          ),
-          campoNumerico(
-            ctrl: mat.comprimentoCtrl,
-            hint: 'Comp.',
-          ),
-          const SizedBox(width: 4),
-
-          // Campo quantidade
-          campoNumerico(
-            ctrl: mat.qtdCtrl,
-            hint: 'Qtd.',
-          ),
-
-          // Unidade — largura fixa para não deslocar colunas seguintes
-          SizedBox(
-            width: 34,
-            child: mat.unidade != null
-                ? Padding(
-                    padding: const EdgeInsets.only(left: 4),
-                    child: Text(
-                      mat.unidade!,
+                  if ([
+                        mat.identificador,
+                        (mat.medida != null && mat.medida!.isNotEmpty)
+                            ? mat.medida
+                            : _medidaFromDimensoes(mat.refComprimento, mat.refLargura),
+                        mat.espessura,
+                      ].any((v) => v != null && v.isNotEmpty))
+                    Text(
+                      [
+                        if (mat.identificador != null && mat.identificador!.isNotEmpty)
+                          mat.identificador!,
+                        if (mat.medida != null && mat.medida!.isNotEmpty)
+                          mat.medida!
+                        else if (_medidaFromDimensoes(mat.refComprimento, mat.refLargura) != null)
+                          _medidaFromDimensoes(mat.refComprimento, mat.refLargura)!,
+                        if (formatarEspessuraComSufixo(mat.espessura) != null)
+                          formatarEspessuraComSufixo(mat.espessura)!,
+                      ].join(' · '),
                       style: GoogleFonts.nunito(
                           fontSize: 10, color: cs.onSurfaceVariant),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                ],
+              ),
+            ),
+          ),
+
+          SizedBox(
+            width: 100,
+            child: mat.temDimensoes
+                ? campoNumerico(
+                    ctrl: mat.comprimentoCtrl,
+                    hint: 'Comprimento',
+                    width: 100,
                   )
                 : null,
           ),
 
-          // Custo unitário (custo bruto da unidade/chapa)
           SizedBox(
-            width: 90,
-            child: Text(
-              mat.custoUnitario != null
-                  ? _fmtBrl(mat.custoUnitario!)
-                  : '—',
-              textAlign: TextAlign.right,
-              style: GoogleFonts.nunito(
-                fontSize: 11,
-                color: cs.onSurfaceVariant,
+            width: 14,
+            child: mat.temDimensoes
+                ? Center(
+                    child: Text('×',
+                        style: GoogleFonts.nunito(
+                            fontSize: 11, color: cs.onSurfaceVariant)),
+                  )
+                : null,
+          ),
+
+          SizedBox(
+            width: 100,
+            child: mat.temDimensoes
+                ? campoNumerico(
+                    ctrl: mat.larguraCtrl,
+                    hint: 'Largura',
+                    width: 100,
+                  )
+                : null,
+          ),
+          const SizedBox(width: 4),
+
+          SizedBox(
+            width: 100,
+            child: campoNumerico(
+              ctrl: mat.qtdCtrl,
+              hint: 'Quantidade',
+              width: 100,
+            ),
+          ),
+
+          SizedBox(
+            width: 44,
+            child: mat.unidade != null && mat.unidade!.isNotEmpty
+                ? Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Text(
+                      _formatarUnidade(mat.unidade!),
+                      style: GoogleFonts.nunito(
+                          fontSize: 10, color: cs.onSurfaceVariant),
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.visible,
+                    ),
+                  )
+                : null,
+          ),
+
+          SizedBox(
+            width: 80,
+            child: InkWell(
+              mouseCursor: SystemMouseCursors.click,
+              borderRadius: BorderRadius.circular(6),
+              onTap: () async {
+                final resultado = await showDialog<_PrecoFornecedorSelecionado>(
+                  context: context,
+                  builder: (_) => _PrecosFornecedoresDialog(materialId: mat.materialId),
+                );
+                if (resultado != null) {
+                  mat.precoManualSelecionado = resultado.preco;
+                  mat.origemPrecoManual = resultado.origem;
+                  if (!context.mounted) return;
+                  if (resultado.fornecedorId != null) {
+                    await _sincronizarPrecosFornecedor(
+                      context: context,
+                      mat: mat,
+                      fornecedorId: resultado.fornecedorId!,
+                      origem: resultado.origem,
+                      campoOrigem: _CampoPreco.base,
+                    );
+                  } else if (resultado.origem == 'Média' ||
+                      resultado.origem == 'Mediana') {
+                    await _sincronizarPrecosEstatistica(
+                      context: context,
+                      mat: mat,
+                      estatistica: resultado.origem,
+                      campoOrigem: _CampoPreco.base,
+                    );
+                  }
+                  onQtdChanged();
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  mat.precoExibido != null
+                      ? _fmtBrl(mat.precoExibido!)
+                      : '—',
+                  textAlign: TextAlign.right,
+                  style: GoogleFonts.nunito(
+                    fontSize: 11,
+                    fontWeight: mat.precoManualSelecionado != null
+                        ? FontWeight.w700
+                        : FontWeight.w400,
+                    color: mat.precoManualSelecionado != null
+                        ? AppTheme.primary
+                        : cs.onSurfaceVariant,
+                  ),
+                ),
               ),
             ),
           ),
 
           const SizedBox(width: 8),
 
-          // Subtotal
+          SizedBox(
+            width: 80,
+            child: InkWell(
+              mouseCursor: SystemMouseCursors.click,
+              borderRadius: BorderRadius.circular(6),
+              onTap: () async {
+                final resultado = await showDialog<_PrecoFornecedorSelecionado>(
+                  context: context,
+                  builder: (_) => _PrecosFornecedoresDialog(
+                    materialId: mat.materialId,
+                    campo: _CampoPreco.m2,
+                    titulo: 'Preços por m² dos Fornecedores',
+                    comprimentoReferencia: mat.refComprimento,
+                    larguraReferencia: mat.refLargura,
+                  ),
+                );
+                if (resultado != null) {
+                  mat.precoM2ManualSelecionado = resultado.preco;
+                  mat.origemPrecoM2Manual = resultado.origem;
+                  if (!context.mounted) return;
+                  if (resultado.fornecedorId != null) {
+                    await _sincronizarPrecosFornecedor(
+                      context: context,
+                      mat: mat,
+                      fornecedorId: resultado.fornecedorId!,
+                      origem: resultado.origem,
+                      campoOrigem: _CampoPreco.m2,
+                    );
+                  } else if (resultado.origem == 'Média' ||
+                      resultado.origem == 'Mediana') {
+                    await _sincronizarPrecosEstatistica(
+                      context: context,
+                      mat: mat,
+                      estatistica: resultado.origem,
+                      campoOrigem: _CampoPreco.m2,
+                    );
+                  }
+                  onQtdChanged();
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  mat.precoM2Exibido != null
+                      ? _fmtBrl(mat.precoM2Exibido!)
+                      : '—',
+                  textAlign: TextAlign.right,
+                  style: GoogleFonts.nunito(
+                    fontSize: 11,
+                    fontWeight: mat.precoM2ManualSelecionado != null
+                        ? FontWeight.w700
+                        : FontWeight.w400,
+                    color: mat.precoM2ManualSelecionado != null
+                        ? AppTheme.primary
+                        : cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 8),
+
+          SizedBox(
+            width: 120,
+            child: InkWell(
+              mouseCursor: SystemMouseCursors.click,
+              borderRadius: BorderRadius.circular(6),
+              onTap: () async {
+                final resultado = await showDialog<_PrecoFornecedorSelecionado>(
+                  context: context,
+                  builder: (_) => _PrecosFornecedoresDialog(
+                    materialId: mat.materialId,
+                    campo: _CampoPreco.unidadeMedida,
+                    titulo: 'Preços por Unidade de Medida dos Fornecedores',
+                    comprimentoReferencia: mat.refComprimento,
+                  ),
+                );
+                if (resultado != null) {
+                  mat.precoUnidadeMedidaManualSelecionado = resultado.preco;
+                  mat.origemPrecoUnidadeMedidaManual = resultado.origem;
+                  if (!context.mounted) return;
+                  if (resultado.fornecedorId != null) {
+                    await _sincronizarPrecosFornecedor(
+                      context: context,
+                      mat: mat,
+                      fornecedorId: resultado.fornecedorId!,
+                      origem: resultado.origem,
+                      campoOrigem: _CampoPreco.unidadeMedida,
+                    );
+                  } else if (resultado.origem == 'Média' ||
+                      resultado.origem == 'Mediana') {
+                    await _sincronizarPrecosEstatistica(
+                      context: context,
+                      mat: mat,
+                      estatistica: resultado.origem,
+                      campoOrigem: _CampoPreco.unidadeMedida,
+                    );
+                  }
+                  onQtdChanged();
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  mat.precoUnidadeMedidaExibido != null
+                      ? _fmtBrl(mat.precoUnidadeMedidaExibido!)
+                      : '—',
+                  textAlign: TextAlign.right,
+                  style: GoogleFonts.nunito(
+                    fontSize: 11,
+                    fontWeight: mat.precoUnidadeMedidaManualSelecionado != null
+                        ? FontWeight.w700
+                        : FontWeight.w400,
+                    color: mat.precoUnidadeMedidaManualSelecionado != null
+                        ? AppTheme.primary
+                        : cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 8),
+
           SizedBox(
             width: 100,
             child: Text(
-              mat.custoUnitario != null && mat.qtdCtrl.text.isNotEmpty
+              mat.precoUnitarioCalculado != null && mat.qtdCtrl.text.isNotEmpty
                   ? _fmtBrl(mat.subtotal)
                   : '—',
               textAlign: TextAlign.right,
@@ -1941,7 +2219,6 @@ class _MaterialLinhaRascunho extends StatelessWidget {
       ),
         ),
 
-        // ── Linha de sobra ────────────────────────────────────────────────
         if (mat.areaSobraM2 != null && mat.custoSobra != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
@@ -1953,11 +2230,12 @@ class _MaterialLinhaRascunho extends StatelessWidget {
               ),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.content_cut_rounded,
                       size: 12, color: Color(0xFF92400E)),
                   const SizedBox(width: 6),
-                  Expanded(
+                  Flexible(
                     child: Text(
                       'Sobra: ${_fmtM2(mat.areaSobraM2!)} m² '
                       '(${_fmtQtd(mat.refLargura!)} × ${_fmtQtd(mat.refComprimento!)} '
@@ -1965,6 +2243,7 @@ class _MaterialLinhaRascunho extends StatelessWidget {
                       style: GoogleFonts.nunito(
                           fontSize: 10,
                           color: const Color(0xFF92400E)),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -1984,7 +2263,674 @@ class _MaterialLinhaRascunho extends StatelessWidget {
   }
 }
 
-// ─── Dialog selecionar produto (fallback mobile) ──────────────────────────────
+Future<void> _sincronizarPrecosFornecedor({
+  required BuildContext context,
+  required _MaterialRascunho mat,
+  required int fornecedorId,
+  required String origem,
+  required _CampoPreco campoOrigem,
+}) async {
+  try {
+    final prov = context.read<FornecedorProvider>();
+    final lista = await prov.listarPorMaterial(mat.materialId);
+    FornecedorMaterialVinculoModel? vinculo;
+    for (final f in lista) {
+      if (f.id != fornecedorId) continue;
+      for (final m in f.materiais) {
+        if (m.materialId == mat.materialId) {
+          vinculo = m;
+          break;
+        }
+      }
+      break;
+    }
+    if (vinculo == null) return;
+
+    double? comprimentoRef() {
+      if (vinculo!.materialComprimento != null &&
+          vinculo.materialComprimento! > 0) {
+        return vinculo.materialComprimento;
+      }
+      return mat.refComprimento;
+    }
+
+    double? larguraRef() {
+      if (vinculo!.materialLargura != null && vinculo.materialLargura! > 0) {
+        return vinculo.materialLargura;
+      }
+      return mat.refLargura;
+    }
+
+    double? area() {
+      final c = comprimentoRef();
+      final l = larguraRef();
+      if (c == null || c <= 0 || l == null || l <= 0) return null;
+      return c * l;
+    }
+
+    if (campoOrigem != _CampoPreco.base) {
+      double? precoBase;
+      if (vinculo.preco > 0) precoBase = vinculo.preco;
+      if (precoBase != null && precoBase > 0) {
+        mat.precoManualSelecionado = precoBase;
+        mat.origemPrecoManual = origem;
+      }
+    }
+
+    if (campoOrigem != _CampoPreco.m2) {
+      double? precoM2;
+      if (vinculo.precoMetroQuadrado > 0) {
+        precoM2 = vinculo.precoMetroQuadrado;
+      } else {
+        final a = area();
+        if (vinculo.preco > 0 && a != null && a > 0) {
+          precoM2 = vinculo.preco / a;
+        }
+      }
+      if (precoM2 != null && precoM2 > 0) {
+        mat.precoM2ManualSelecionado = precoM2;
+        mat.origemPrecoM2Manual = origem;
+      }
+    }
+
+    if (campoOrigem != _CampoPreco.unidadeMedida) {
+      double? precoUnidade;
+      if (vinculo.precoUnidadeMedida > 0) {
+        precoUnidade = vinculo.precoUnidadeMedida;
+      } else {
+        final c = comprimentoRef();
+        if (vinculo.preco > 0 && c != null && c > 0) {
+          precoUnidade = vinculo.preco / c;
+        }
+      }
+      if (precoUnidade != null && precoUnidade > 0) {
+        mat.precoUnidadeMedidaManualSelecionado = precoUnidade;
+        mat.origemPrecoUnidadeMedidaManual = origem;
+      }
+    }
+  } catch (_) {
+  }
+}
+
+// Preenche os campos de preço "padrão" (custoUnitario, precoM2,
+// precoUnidadeMedida) de um material extra recém-adicionado, usando a
+// média de preços dos fornecedores. Diferente de
+// _sincronizarPrecosEstatistica, NÃO grava em *ManualSelecionado*, para
+// que o valor apareça com o texto normal (não laranja) — o destaque
+// laranja deve ficar reservado apenas para quando o usuário escolhe
+// manualmente um preço através do diálogo de fornecedores.
+Future<void> _preencherPrecoPadraoMaterialExtra({
+  required BuildContext context,
+  required _MaterialRascunho mat,
+}) async {
+  try {
+    final prov = context.read<FornecedorProvider>();
+    final lista = await prov.listarPorMaterial(mat.materialId);
+
+    final vinculos = lista
+        .expand((f) => f.materiais.where((m) => m.materialId == mat.materialId))
+        .toList();
+    if (vinculos.isEmpty) return;
+
+    double? comprimentoRef(FornecedorMaterialVinculoModel v) {
+      if (v.materialComprimento != null && v.materialComprimento! > 0) {
+        return v.materialComprimento;
+      }
+      return mat.refComprimento;
+    }
+
+    double? larguraRef(FornecedorMaterialVinculoModel v) {
+      if (v.materialLargura != null && v.materialLargura! > 0) {
+        return v.materialLargura;
+      }
+      return mat.refLargura;
+    }
+
+    double? area(FornecedorMaterialVinculoModel v) {
+      final c = comprimentoRef(v);
+      final l = larguraRef(v);
+      if (c == null || c <= 0 || l == null || l <= 0) return null;
+      return c * l;
+    }
+
+    double? calcularMedia(_CampoPreco campo) {
+      final precos = vinculos.map((v) {
+        switch (campo) {
+          case _CampoPreco.base:
+            return v.preco > 0 ? v.preco : 0.0;
+          case _CampoPreco.m2:
+            if (v.precoMetroQuadrado > 0) return v.precoMetroQuadrado;
+            final a = area(v);
+            if (v.preco > 0 && a != null && a > 0) return v.preco / a;
+            return 0.0;
+          case _CampoPreco.unidadeMedida:
+            if (v.precoUnidadeMedida > 0) return v.precoUnidadeMedida;
+            final c = comprimentoRef(v);
+            if (v.preco > 0 && c != null && c > 0) return v.preco / c;
+            return 0.0;
+        }
+      }).where((p) => p > 0).toList();
+
+      if (precos.isEmpty) return null;
+      return precos.reduce((a, b) => a + b) / precos.length;
+    }
+
+    if (mat.custoUnitario == null || mat.custoUnitario! <= 0) {
+      final v = calcularMedia(_CampoPreco.base);
+      if (v != null) mat.custoUnitario = v;
+    }
+    if (mat.precoM2 == null || mat.precoM2! <= 0) {
+      final v = calcularMedia(_CampoPreco.m2);
+      if (v != null) mat.precoM2 = v;
+    }
+    if (mat.precoUnidadeMedida == null || mat.precoUnidadeMedida! <= 0) {
+      final v = calcularMedia(_CampoPreco.unidadeMedida);
+      if (v != null) mat.precoUnidadeMedida = v;
+    }
+  } catch (_) {
+  }
+}
+
+Future<void> _sincronizarPrecosEstatistica({
+  required BuildContext context,
+  required _MaterialRascunho mat,
+  required String estatistica,
+  required _CampoPreco campoOrigem,
+}) async {
+  try {
+    final prov = context.read<FornecedorProvider>();
+    final lista = await prov.listarPorMaterial(mat.materialId);
+
+    final vinculos = lista
+        .expand((f) => f.materiais.where((m) => m.materialId == mat.materialId))
+        .toList();
+    if (vinculos.isEmpty) return;
+
+    double? comprimentoRef(FornecedorMaterialVinculoModel v) {
+      if (v.materialComprimento != null && v.materialComprimento! > 0) {
+        return v.materialComprimento;
+      }
+      return mat.refComprimento;
+    }
+
+    double? larguraRef(FornecedorMaterialVinculoModel v) {
+      if (v.materialLargura != null && v.materialLargura! > 0) {
+        return v.materialLargura;
+      }
+      return mat.refLargura;
+    }
+
+    double? area(FornecedorMaterialVinculoModel v) {
+      final c = comprimentoRef(v);
+      final l = larguraRef(v);
+      if (c == null || c <= 0 || l == null || l <= 0) return null;
+      return c * l;
+    }
+
+    double? calcular(_CampoPreco campo) {
+      final precos = vinculos.map((v) {
+        switch (campo) {
+          case _CampoPreco.base:
+            return v.preco > 0 ? v.preco : 0.0;
+          case _CampoPreco.m2:
+            if (v.precoMetroQuadrado > 0) return v.precoMetroQuadrado;
+            final a = area(v);
+            if (v.preco > 0 && a != null && a > 0) return v.preco / a;
+            return 0.0;
+          case _CampoPreco.unidadeMedida:
+            if (v.precoUnidadeMedida > 0) return v.precoUnidadeMedida;
+            final c = comprimentoRef(v);
+            if (v.preco > 0 && c != null && c > 0) return v.preco / c;
+            return 0.0;
+        }
+      }).where((p) => p > 0).toList();
+
+      if (precos.isEmpty) return null;
+      if (estatistica == 'Mediana') {
+        precos.sort();
+        final n = precos.length;
+        return n.isOdd
+            ? precos[n ~/ 2]
+            : (precos[n ~/ 2 - 1] + precos[n ~/ 2]) / 2;
+      }
+      return precos.reduce((a, b) => a + b) / precos.length;
+    }
+
+    if (campoOrigem != _CampoPreco.base) {
+      final v = calcular(_CampoPreco.base);
+      if (v != null) {
+        mat.precoManualSelecionado = v;
+        mat.origemPrecoManual = estatistica;
+      }
+    }
+    if (campoOrigem != _CampoPreco.m2) {
+      final v = calcular(_CampoPreco.m2);
+      if (v != null) {
+        mat.precoM2ManualSelecionado = v;
+        mat.origemPrecoM2Manual = estatistica;
+      }
+    }
+    if (campoOrigem != _CampoPreco.unidadeMedida) {
+      final v = calcular(_CampoPreco.unidadeMedida);
+      if (v != null) {
+        mat.precoUnidadeMedidaManualSelecionado = v;
+        mat.origemPrecoUnidadeMedidaManual = estatistica;
+      }
+    }
+  } catch (_) {
+  }
+}
+
+class _PrecoFornecedorSelecionado {
+  final double preco;
+  final String origem;
+  final int? fornecedorId;
+  const _PrecoFornecedorSelecionado({
+    required this.preco,
+    required this.origem,
+    this.fornecedorId,
+  });
+}
+
+enum _CampoPreco { base, m2, unidadeMedida }
+
+class _PrecosFornecedoresDialog extends StatefulWidget {
+  final int materialId;
+  final _CampoPreco campo;
+  final String titulo;
+  final double? comprimentoReferencia;
+  final double? larguraReferencia;
+
+  const _PrecosFornecedoresDialog({
+    required this.materialId,
+    this.campo = _CampoPreco.base,
+    this.titulo = 'Preços dos Fornecedores',
+    this.comprimentoReferencia,
+    this.larguraReferencia,
+  });
+
+  @override
+  State<_PrecosFornecedoresDialog> createState() =>
+      _PrecosFornecedoresDialogState();
+}
+
+class _PrecosFornecedoresDialogState extends State<_PrecosFornecedoresDialog> {
+  bool _carregando = true;
+  String? _erro;
+  List<FornecedorModel> _fornecedores = [];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _carregar());
+  }
+
+  Future<void> _carregar() async {
+    setState(() {
+      _carregando = true;
+      _erro = null;
+    });
+    try {
+      final prov = context.read<FornecedorProvider>();
+      final lista = await prov.listarPorMaterial(widget.materialId);
+      if (!mounted) return;
+      setState(() {
+        _fornecedores = lista;
+        _carregando = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _erro = 'Erro ao carregar preços dos fornecedores.';
+        _carregando = false;
+      });
+    }
+  }
+
+  double? _comprimentoParaCalculo(FornecedorMaterialVinculoModel m) {
+    if (m.materialComprimento != null && m.materialComprimento! > 0) {
+      return m.materialComprimento;
+    }
+    return widget.comprimentoReferencia;
+  }
+
+  double? _larguraParaCalculo(FornecedorMaterialVinculoModel m) {
+    if (m.materialLargura != null && m.materialLargura! > 0) {
+      return m.materialLargura;
+    }
+    return widget.larguraReferencia;
+  }
+
+  double? _areaParaCalculo(FornecedorMaterialVinculoModel m) {
+    final comp = _comprimentoParaCalculo(m);
+    final larg = _larguraParaCalculo(m);
+    if (comp == null || comp <= 0 || larg == null || larg <= 0) return null;
+    return comp * larg;
+  }
+
+  double _precoDoVinculo(FornecedorMaterialVinculoModel m) {
+    switch (widget.campo) {
+      case _CampoPreco.m2:
+        if (m.precoMetroQuadrado > 0) return m.precoMetroQuadrado;
+        final area = _areaParaCalculo(m);
+        if (m.preco > 0 && area != null && area > 0) {
+          return m.preco / area;
+        }
+        return 0;
+      case _CampoPreco.unidadeMedida:
+        if (m.precoUnidadeMedida > 0) return m.precoUnidadeMedida;
+        final comp = _comprimentoParaCalculo(m);
+        if (m.preco > 0 && comp != null && comp > 0) {
+          return m.preco / comp;
+        }
+        return 0;
+      case _CampoPreco.base:
+        return m.preco;
+    }
+  }
+
+  bool _isPrecoCalculado(FornecedorMaterialVinculoModel m) {
+    switch (widget.campo) {
+      case _CampoPreco.m2:
+        if (m.precoMetroQuadrado > 0) return false;
+        final area = _areaParaCalculo(m);
+        return m.preco > 0 && area != null && area > 0;
+      case _CampoPreco.unidadeMedida:
+        if (m.precoUnidadeMedida > 0) return false;
+        final comp = _comprimentoParaCalculo(m);
+        return m.preco > 0 && comp != null && comp > 0;
+      case _CampoPreco.base:
+        return false;
+    }
+  }
+
+  List<double> get _precosValidos => _fornecedores
+      .expand((f) => f.materiais.where((m) => m.materialId == widget.materialId))
+      .map(_precoDoVinculo)
+      .where((p) => p > 0)
+      .toList();
+
+  double? get _media {
+    final precos = _precosValidos;
+    if (precos.isEmpty) return null;
+    return precos.reduce((a, b) => a + b) / precos.length;
+  }
+
+  double? get _mediana {
+    final precos = List<double>.from(_precosValidos)..sort();
+    if (precos.isEmpty) return null;
+    final n = precos.length;
+    if (n.isOdd) return precos[n ~/ 2];
+    return (precos[n ~/ 2 - 1] + precos[n ~/ 2]) / 2;
+  }
+
+  void _selecionar(double preco, String origem, {int? fornecedorId}) {
+    Navigator.pop(
+      context,
+      _PrecoFornecedorSelecionado(
+        preco: preco,
+        origem: origem,
+        fornecedorId: fornecedorId,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Dialog(
+      backgroundColor: cs.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 560),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _DialogHeader(
+              titulo: widget.titulo,
+              icon: Icons.storefront_rounded,
+              onClose: () => Navigator.pop(context),
+            ),
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: _carregando
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 40),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    : _erro != null
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 24),
+                            child: Text(_erro!,
+                                style: GoogleFonts.nunito(
+                                    fontSize: 13, color: AppTheme.error)),
+                          )
+                        : _precosValidos.isEmpty
+                            ? Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 24),
+                                child: Text(
+                                  'Nenhum fornecedor com preço cadastrado para este material.',
+                                  style: GoogleFonts.nunito(
+                                      fontSize: 13, color: cs.onSurfaceVariant),
+                                ),
+                              )
+                            : SingleChildScrollView(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const _SectionLabel('Estatísticas'),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: _EstatisticaCard(
+                                            label: 'Média',
+                                            valor: _media,
+                                            icon: Icons.stacked_line_chart_rounded,
+                                            onTap: _media != null
+                                                ? () => _selecionar(_media!, 'Média')
+                                                : null,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: _EstatisticaCard(
+                                            label: 'Mediana',
+                                            valor: _mediana,
+                                            icon: Icons.horizontal_rule_rounded,
+                                            onTap: _mediana != null
+                                                ? () => _selecionar(_mediana!, 'Mediana')
+                                                : null,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 18),
+                                    const _SectionLabel('Fornecedores'),
+                                    const SizedBox(height: 8),
+                                    for (final f in _fornecedores)
+                                      for (final m in f.materiais.where((m) =>
+                                          m.materialId == widget.materialId &&
+                                          _precoDoVinculo(m) > 0))
+                                        _FornecedorPrecoLinha(
+                                          fornecedor: f,
+                                          vinculo: m,
+                                          precoExibido: _precoDoVinculo(m),
+                                          calculado: _isPrecoCalculado(m),
+                                          campo: widget.campo,
+                                          onSelecionar: () => _selecionar(
+                                              _precoDoVinculo(m), f.nomeFantasia,
+                                              fornecedorId: f.id),
+                                        ),
+                                  ],
+                                ),
+                              ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EstatisticaCard extends StatelessWidget {
+  final String label;
+  final double? valor;
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  const _EstatisticaCard({
+    required this.label,
+    required this.valor,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: 'Usar este valor no orçamento',
+      child: InkWell(
+        onTap: onTap,
+        mouseCursor: SystemMouseCursors.click,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 16, color: AppTheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        style: GoogleFonts.nunito(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: cs.onSurfaceVariant)),
+                    Text(
+                      valor != null ? _fmtBrl(valor!) : '—',
+                      style: GoogleFonts.nunito(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.primary),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FornecedorPrecoLinha extends StatelessWidget {
+  final FornecedorModel fornecedor;
+  final FornecedorMaterialVinculoModel vinculo;
+  final double precoExibido;
+  final bool calculado;
+  final _CampoPreco campo;
+  final VoidCallback onSelecionar;
+
+  const _FornecedorPrecoLinha({
+    required this.fornecedor,
+    required this.vinculo,
+    required this.precoExibido,
+    this.calculado = false,
+    this.campo = _CampoPreco.base,
+    required this.onSelecionar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onSelecionar,
+      mouseCursor: SystemMouseCursors.click,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: cs.outline.withValues(alpha: 0.15)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 26, height: 26,
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.storefront_rounded,
+                  size: 13, color: AppTheme.primary),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(fornecedor.nomeFantasia,
+                      style: GoogleFonts.nunito(
+                          fontSize: 12, fontWeight: FontWeight.w700),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  if (fornecedor.tipoFornecedor != null &&
+                      fornecedor.tipoFornecedor!.isNotEmpty)
+                    Text(fornecedor.tipoFornecedor!,
+                        style: GoogleFonts.nunito(
+                            fontSize: 10, color: cs.onSurfaceVariant)),
+                  if (calculado)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.calculate_outlined,
+                            size: 11,
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.8)),
+                        const SizedBox(width: 3),
+                        Text(
+                            campo == _CampoPreco.m2
+                                ? 'calculado (preço ÷ área)'
+                                : 'calculado (preço ÷ comprimento)',
+                            style: GoogleFonts.nunito(
+                                fontSize: 9,
+                                fontStyle: FontStyle.italic,
+                                color: cs.onSurfaceVariant.withValues(alpha: 0.8))),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+            Text(
+              _fmtBrl(precoExibido),
+              style: GoogleFonts.nunito(
+                  fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.chevron_right_rounded,
+                size: 16, color: cs.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _SelecionarProdutoDialog extends StatefulWidget {
   final List<ProdutoModel> produtos;
@@ -2049,7 +2995,7 @@ class _SelecionarProdutoDialogState extends State<_SelecionarProdutoDialog> {
                 autofocus: true,
                 style: GoogleFonts.nunito(fontSize: 13),
                 decoration: InputDecoration(
-                  hintText: 'Buscar produto...',
+                  hintText: 'Buscar produto',
                   hintStyle: GoogleFonts.nunito(
                       fontSize: 13, color: cs.onSurfaceVariant),
                   prefixIcon: Icon(Icons.search,
@@ -2117,12 +3063,10 @@ class _SelecionarProdutoDialogState extends State<_SelecionarProdutoDialog> {
   }
 }
 
-// ─── Dialog selecionar material extra ────────────────────────────────────────
-
 class _SelecionarMaterialDialog extends StatefulWidget {
-  final List<MaterialModel> materiais;
+  final Set<int> idsExcluidos;
 
-  const _SelecionarMaterialDialog({required this.materiais});
+  const _SelecionarMaterialDialog({this.idsExcluidos = const {}});
 
   @override
   State<_SelecionarMaterialDialog> createState() =>
@@ -2131,34 +3075,92 @@ class _SelecionarMaterialDialog extends StatefulWidget {
 
 class _SelecionarMaterialDialogState
     extends State<_SelecionarMaterialDialog> {
-  late List<MaterialModel> _filtrados;
-  final _buscaCtrl = TextEditingController();
+  final _buscaCtrl         = TextEditingController();
+  final _identificadorCtrl = TextEditingController();
+  final _medidaCtrl        = TextEditingController();
+  final _comprimentoCtrl   = TextEditingController();
+  final _larguraCtrl       = TextEditingController();
+  final _espessuraCtrl     = TextEditingController();
+
+  Timer? _debounceTimer;
+  bool _carregando = false;
+  List<MaterialModel> _resultados = [];
 
   @override
   void initState() {
     super.initState();
-    _filtrados = widget.materiais;
-    _buscaCtrl.addListener(_filtrar);
-  }
-
-  void _filtrar() {
-    final q = _buscaCtrl.text.toLowerCase();
-    setState(() {
-      _filtrados = q.isEmpty
-          ? widget.materiais
-          : widget.materiais.where((m) {
-              return m.nome.toLowerCase().contains(q) ||
-                  (m.identificador?.toLowerCase().contains(q) ?? false) ||
-                  (m.medida?.toLowerCase().contains(q) ?? false) ||
-                  (m.categoria?.toLowerCase().contains(q) ?? false);
-            }).toList();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _buscar());
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _buscaCtrl.dispose();
+    _identificadorCtrl.dispose();
+    _medidaCtrl.dispose();
+    _comprimentoCtrl.dispose();
+    _larguraCtrl.dispose();
+    _espessuraCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _buscar() async {
+    setState(() => _carregando = true);
+    final prov = context.read<MaterialProvider>();
+    await prov.carregar(
+      busca:         _buscaCtrl.text.trim(),
+      identificador: _identificadorCtrl.text.trim(),
+      medida:        _medidaCtrl.text.trim(),
+      comprimento:   _comprimentoCtrl.text.trim(),
+      largura:       _larguraCtrl.text.trim(),
+      espessura:     _espessuraCtrl.text.trim(),
+      ativo:         true,
+    );
+    if (mounted) {
+      setState(() {
+        _resultados = prov.materiais
+            .where((m) => !widget.idsExcluidos.contains(m.id))
+            .toList();
+        _carregando = false;
+      });
+    }
+  }
+
+  void _agendarBusca() {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 350), _buscar);
+  }
+
+  bool get _temFiltro =>
+      _buscaCtrl.text.isNotEmpty ||
+      _identificadorCtrl.text.isNotEmpty ||
+      _medidaCtrl.text.isNotEmpty ||
+      _comprimentoCtrl.text.isNotEmpty ||
+      _larguraCtrl.text.isNotEmpty ||
+      _espessuraCtrl.text.isNotEmpty;
+
+  void _limparFiltros() {
+    _buscaCtrl.clear();
+    _identificadorCtrl.clear();
+    _medidaCtrl.clear();
+    _comprimentoCtrl.clear();
+    _larguraCtrl.clear();
+    _espessuraCtrl.clear();
+    _buscar();
+  }
+
+  InputDecoration _decor(BuildContext context, {
+    required String hint,
+    required IconData icon,
+    String? sufixo,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return InputDecoration(
+      hintText: hint,
+      suffixText: sufixo,
+      prefixIcon: Icon(icon, size: 18, color: cs.outline),
+      isDense: true,
+    );
   }
 
   @override
@@ -2167,94 +3169,250 @@ class _SelecionarMaterialDialogState
 
     return Dialog(
       backgroundColor: cs.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420, maxHeight: 520),
+        constraints: BoxConstraints(
+          maxWidth: 640,
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             _DialogHeader(
               titulo:  'Selecionar Material',
               icon:    Icons.inventory_2_outlined,
               onClose: () => Navigator.pop(context),
             ),
+            const Divider(height: 0),
+
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: TextField(
-                controller: _buscaCtrl,
-                autofocus: true,
-                style: GoogleFonts.nunito(fontSize: 13),
-                decoration: InputDecoration(
-                  hintText: 'Buscar por nome, código ou medida...',
-                  hintStyle: GoogleFonts.nunito(
-                      fontSize: 13, color: cs.onSurfaceVariant),
-                  prefixIcon: Icon(Icons.search,
-                      size: 18, color: cs.onSurfaceVariant),
-                  isDense: true,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        BorderSide(color: cs.outline.withValues(alpha: 0.4)),
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _buscaCtrl,
+                    autofocus: true,
+                    inputFormatters: [_UpperCaseFormatter()],
+                    style: TextStyle(fontSize: 13),
+                    decoration: _decor(context,
+                        hint: 'Nome do material',
+                        icon: Icons.search_rounded),
+                    onChanged: (_) => _agendarBusca(),
                   ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        BorderSide(color: cs.outline.withValues(alpha: 0.4)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _identificadorCtrl,
+                          inputFormatters: [_UpperCaseFormatter()],
+                          style: TextStyle(fontSize: 13),
+                          decoration: _decor(context,
+                              hint: 'Identificador',
+                              icon: Icons.qr_code_rounded),
+                          onChanged: (_) => _agendarBusca(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _medidaCtrl,
+                          inputFormatters: [_MedidaEspessuraFormatter()],
+                          style: TextStyle(fontSize: 13),
+                          decoration: _decor(context,
+                              hint: 'Medida', icon: Icons.straighten_rounded),
+                          onChanged: (_) => _agendarBusca(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.outlined(
+                        tooltip: 'Limpar filtros',
+                        icon: Icon(Icons.filter_alt_off, color: cs.onSurfaceVariant),
+                        onPressed: _temFiltro ? _limparFiltros : null,
+                        style: IconButton.styleFrom(
+                          side: BorderSide(color: cs.outline),
+                        ).copyWith(
+                          mouseCursor: WidgetStateProperty.resolveWith((states) {
+                            if (states.contains(WidgetState.disabled)) {
+                              return SystemMouseCursors.basic;
+                            }
+                            return SystemMouseCursors.click;
+                          }),
+                        ),
+                      ),
+                    ],
                   ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        const BorderSide(color: AppTheme.primary, width: 1.5),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _comprimentoCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          inputFormatters: [_EspessuraFormatter()],
+                          style: TextStyle(fontSize: 13),
+                          decoration: _decor(context,
+                              hint: 'Comprimento',
+                              icon: Icons.height_rounded,
+                              sufixo: 'm'),
+                          onChanged: (_) => _agendarBusca(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _larguraCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          inputFormatters: [_EspessuraFormatter()],
+                          style: TextStyle(fontSize: 13),
+                          decoration: _decor(context,
+                              hint: 'Largura',
+                              icon: Icons.width_normal_rounded,
+                              sufixo: 'm'),
+                          onChanged: (_) => _agendarBusca(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _espessuraCtrl,
+                          inputFormatters: [_EspessuraFormatter()],
+                          style: TextStyle(fontSize: 13),
+                          decoration: _decor(context,
+                              hint: 'Espessura',
+                              icon: Icons.layers_rounded,
+                              sufixo: 'mm'),
+                          onChanged: (_) => _agendarBusca(),
+                        ),
+                      ),
+                    ],
                   ),
-                  filled: true,
-                  fillColor: cs.surfaceContainerLow,
-                ),
+                ],
               ),
             ),
+            const Divider(height: 0),
+
             Expanded(
-              child: _filtrados.isEmpty
-                  ? Center(
-                      child: Text('Nenhum material encontrado',
-                          style: GoogleFonts.nunito(
-                              fontSize: 13, color: cs.onSurfaceVariant)),
-                    )
-                  : ListView.builder(
-                      itemCount: _filtrados.length,
-                      itemBuilder: (_, i) {
-                        final m = _filtrados[i];
-                        final detalhes = [
-                          if (m.identificador != null && m.identificador!.isNotEmpty)
-                            m.identificador!,
-                          if (m.medida != null && m.medida!.isNotEmpty) m.medida!,
-                          if (m.espessura != null && m.espessura!.isNotEmpty)
-                            m.espessura!,
-                          if (m.unidade != null && m.unidade!.isNotEmpty) m.unidade!,
-                        ].join(' · ');
-                        final custoUnitario =
-                            m.ultimoValorPago ?? m.precoMediano;
-                        return ListTile(
-                          dense: true,
-                          title: Text(m.nome,
-                              style: GoogleFonts.nunito(fontSize: 13)),
-                          subtitle: detalhes.isNotEmpty
-                              ? Text(detalhes,
-                                  style: GoogleFonts.nunito(
-                                      fontSize: 11,
-                                      color: cs.onSurfaceVariant))
-                              : null,
-                          trailing: custoUnitario != null
-                              ? Text(
-                                  _fmtBrl(custoUnitario),
-                                  style: GoogleFonts.nunito(
-                                      fontSize: 11,
-                                      color: cs.onSurfaceVariant),
-                                )
-                              : null,
-                          onTap: () => Navigator.pop(context, m),
-                        );
-                      },
-                    ),
+              child: _carregando
+                  ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
+                  : _resultados.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.inventory_2_outlined,
+                                  size: 40, color: cs.outline),
+                              const SizedBox(height: 10),
+                              Text('Nenhum material encontrado',
+                                  style: TextStyle(
+                                      color: cs.onSurfaceVariant,
+                                      fontSize: 13)),
+                            ],
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                          itemCount: _resultados.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 6),
+                          itemBuilder: (_, i) {
+                            final m = _resultados[i];
+                            final identificador =
+                                (m.identificador != null &&
+                                        m.identificador!.trim().isNotEmpty)
+                                    ? m.identificador!.trim()
+                                    : null;
+                            final detalhes = [
+                              if (m.medida != null && m.medida!.trim().isNotEmpty)
+                                m.medida!.trim()
+                              else if (_medidaFromDimensoes(m.comprimento, m.largura) != null)
+                                _medidaFromDimensoes(m.comprimento, m.largura)!,
+                              if (formatarEspessuraComSufixo(m.espessura) != null)
+                                formatarEspessuraComSufixo(m.espessura)!,
+                              if (m.unidade != null && m.unidade!.trim().isNotEmpty)
+                                _formatarUnidade(m.unidade!.trim()),
+                            ].join(' · ');
+                            final custoUnitario = m.precoMediano;
+
+                            return Material(
+                              color: cs.surfaceContainerHighest
+                                  .withValues(alpha: 0.4),
+                              borderRadius: BorderRadius.circular(10),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(10),
+                                onTap: () => Navigator.pop(context, m),
+                                mouseCursor: SystemMouseCursors.click,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: cs.outlineVariant),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 32,
+                                        height: 32,
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.primary
+                                              .withValues(alpha: 0.12),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(
+                                            Icons.inventory_2_rounded,
+                                            size: 16,
+                                            color: AppTheme.primary),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text.rich(
+                                          TextSpan(
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 13,
+                                                color: cs.onSurface),
+                                            children: [
+                                              if (identificador != null)
+                                                TextSpan(
+                                                    text: '$identificador · '),
+                                              TextSpan(text: m.nome),
+                                              if (detalhes.isNotEmpty)
+                                                TextSpan(
+                                                  text: ' · $detalhes',
+                                                  style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w400,
+                                                      color: cs
+                                                          .onSurfaceVariant),
+                                                ),
+                                            ],
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      if (custoUnitario != null)
+                                        Text(
+                                          _fmtBrl(custoUnitario),
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              color: cs.onSurfaceVariant),
+                                        ),
+                                      const SizedBox(width: 6),
+                                      Icon(Icons.chevron_right_rounded,
+                                          size: 18, color: cs.outline),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
             ),
           ],
         ),
@@ -2263,7 +3421,144 @@ class _SelecionarMaterialDialogState
   }
 }
 
-// ─── Rascunhos internos ───────────────────────────────────────────────────────
+class _BotaoVoltarOrcamento extends StatefulWidget {
+  final VoidCallback onTap;
+
+  const _BotaoVoltarOrcamento({required this.onTap});
+
+  @override
+  State<_BotaoVoltarOrcamento> createState() => _BotaoVoltarOrcamentoState();
+}
+
+class _BotaoVoltarOrcamentoState extends State<_BotaoVoltarOrcamento> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        message: 'Voltar',
+        child: InkWell(
+          onTap: widget.onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? AppTheme.primary.withValues(alpha: 0.15)
+                  : AppTheme.primary.withValues(alpha: 0.08),
+              border: Border.all(
+                color: AppTheme.primary.withValues(alpha: _hovered ? 0.9 : 0.5),
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: AppTheme.primary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Voltar',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UpperCaseFormatter extends TextInputFormatter {
+  static final _acentos = {
+    'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A',
+    'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a',
+    'È': 'E', 'É': 'E', 'Ê': 'E', 'Ë': 'E',
+    'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
+    'Ì': 'I', 'Í': 'I', 'Î': 'I', 'Ï': 'I',
+    'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
+    'Ò': 'O', 'Ó': 'O', 'Ô': 'O', 'Õ': 'O', 'Ö': 'O',
+    'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
+    'Ù': 'U', 'Ú': 'U', 'Û': 'U', 'Ü': 'U',
+    'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
+    'Ç': 'C', 'ç': 'c',
+    'Ñ': 'N', 'ñ': 'n',
+  };
+
+  static String _removerAcentos(String s) =>
+      s.split('').map((c) => _acentos[c] ?? c).join();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final semVirgula = newValue.text.replaceAll(',', '');
+    final texto = _removerAcentos(semVirgula).toUpperCase();
+    final sel = newValue.selection.copyWith(
+      baseOffset:  newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
+class _MedidaEspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text.replaceAll(',', '.');
+    texto = _UpperCaseFormatter._removerAcentos(texto).toLowerCase();
+    texto = texto.replaceAllMapped(RegExp(r'[\d.]+'), (m) {
+      final partes = m.group(0)!.split('.');
+      if (partes.length > 2) {
+        return '${partes[0]}.${partes.sublist(1).join('')}';
+      }
+      return m.group(0)!;
+    });
+    final sel = newValue.selection.copyWith(
+      baseOffset:  newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
+
+class _EspessuraFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var texto = newValue.text.replaceAll(',', '.');
+    texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
+    final partes = texto.split('.');
+    if (partes.length > 2) {
+      texto = '${partes[0]}.${partes.sublist(1).join('')}';
+    }
+    final sel = newValue.selection.copyWith(
+      baseOffset: newValue.selection.baseOffset.clamp(0, texto.length),
+      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
+    );
+    return newValue.copyWith(text: texto, selection: sel);
+  }
+}
 
 class _MaterialRascunho {
   final int materialId;
@@ -2272,17 +3567,24 @@ class _MaterialRascunho {
   final String? medida;
   final String? espessura;
   final String? identificador;
-  /// Custo bruto da unidade/chapa (nunca o precoUnitario calculado).
-  final double? custoUnitario;
+  double? custoUnitario;
+  double? precoM2;
+  double? precoUnidadeMedida;
+
+  double? precoManualSelecionado;
+  String? origemPrecoManual;
+  double? precoM2ManualSelecionado;
+  String? origemPrecoM2Manual;
+  double? precoUnidadeMedidaManualSelecionado;
+  String? origemPrecoUnidadeMedidaManual;
+
   final TextEditingController qtdCtrl;
 
-  // Dimensões de referência da chapa (do cadastro do material)
   final double? refLargura;
   final double? refComprimento;
-  // Custo da chapa inteira (último valor pago)
+
   final double? ultimoValorPago;
 
-  // Campos de dimensão preenchidos pelo usuário no orçamento
   final TextEditingController larguraCtrl;
   final TextEditingController comprimentoCtrl;
 
@@ -2294,6 +3596,8 @@ class _MaterialRascunho {
     this.espessura,
     this.identificador,
     this.custoUnitario,
+    this.precoM2,
+    this.precoUnidadeMedida,
     required this.qtdCtrl,
     this.refLargura,
     this.refComprimento,
@@ -2303,8 +3607,6 @@ class _MaterialRascunho {
   })  : larguraCtrl  = larguraCtrl  ?? TextEditingController(),
         comprimentoCtrl = comprimentoCtrl ?? TextEditingController();
 
-  /// True quando o material tem dimensões de referência cadastradas —
-  /// ativa os campos de largura/comprimento no orçamento.
   bool get temDimensoes =>
       refLargura != null && refLargura! > 0 &&
       refComprimento != null && refComprimento! > 0;
@@ -2317,35 +3619,81 @@ class _MaterialRascunho {
   double? get _comprimento =>
       double.tryParse(comprimentoCtrl.text.replaceAll(',', '.'));
 
-  /// Públicos para uso no widget de exibição de sobra.
   double? get larguraDigitada  => _largura;
   double? get comprimentoDigitado => _comprimento;
 
-  /// Custo por m² calculado a partir das dimensões de referência e último custo.
   double? get custoPorM2 {
     if (!temDimensoes) return null;
-    final custo = ultimoValorPago ?? custoUnitario;
+    if (precoM2ManualSelecionado != null && precoM2ManualSelecionado! > 0) {
+      return precoM2ManualSelecionado;
+    }
+    if (precoM2 != null && precoM2! > 0) return precoM2;
+    final custo = _custoUnitarioEfetivo;
     if (custo == null || custo <= 0) return null;
     return custo / (refLargura! * refComprimento!);
   }
 
-  /// Preço unitário de 1 peça com as dimensões informadas pelo usuário.
-  /// Se o usuário não preencheu as dimensões, usa custoUnitario diretamente.
+  double? get _precoUnidadeMedidaEfetivo {
+    if (precoUnidadeMedidaManualSelecionado != null &&
+        precoUnidadeMedidaManualSelecionado! > 0) {
+      return precoUnidadeMedidaManualSelecionado;
+    }
+    return precoUnidadeMedida;
+  }
+  
+  bool get _vendidoPorUnidadeMedida =>
+      unidade != null && unidade!.trim().toLowerCase() != 'unidade';
+
+  double? get _custoUnitarioEfetivo {
+    if (custoUnitario != null && custoUnitario! > 0) return custoUnitario;
+    if (ultimoValorPago != null && ultimoValorPago! > 0) return ultimoValorPago;
+    return null;
+  }
+
   double? get precoUnitarioCalculado {
+    if (_vendidoPorUnidadeMedida) {
+      // Materiais vendidos por unidade de medida (m/l, ml, g) SEMPRE usam
+      // o preço por unidade de medida para compor o subtotal. Mesmo que
+      // esse preço ainda não esteja definido (ex: material adicionado
+      // avulso ao orçamento, sem vínculo original com o produto), não se
+      // deve cair para o "Preço" simples/custo unitário como fallback:
+      // isso fazia o subtotal ser calculado com um preço diferente do
+      // exibido na coluna "Preço (m/l, ml, g)", que ficava vazia.
+      return _precoUnidadeMedidaEfetivo;
+    }
     final l = _largura;
     final c = _comprimento;
     if (temDimensoes && l != null && l > 0 && c != null && c > 0) {
       final cpm2 = custoPorM2;
       if (cpm2 != null) return cpm2 * l * c;
     }
-    return custoUnitario;
+    if (precoManualSelecionado != null && precoManualSelecionado! > 0) {
+      return precoManualSelecionado;
+    }
+    return _custoUnitarioEfetivo;
   }
+
+  double? get precoExibido =>
+      (precoManualSelecionado != null && precoManualSelecionado! > 0)
+          ? precoManualSelecionado
+          : _custoUnitarioEfetivo;
+
+  double? get precoM2Exibido {
+    if (precoM2ManualSelecionado != null && precoM2ManualSelecionado! > 0) {
+      return precoM2ManualSelecionado;
+    }
+    if (precoM2 != null && precoM2! > 0) return precoM2;
+    return custoPorM2;
+  }
+
+  double? get precoUnidadeMedidaExibido =>
+      (precoUnidadeMedidaManualSelecionado != null &&
+              precoUnidadeMedidaManualSelecionado! > 0)
+          ? precoUnidadeMedidaManualSelecionado
+          : precoUnidadeMedida;
 
   double get subtotal => quantidade * (precoUnitarioCalculado ?? 0);
 
-  /// Área da sobra em m²: (área da chapa de referência) − (área cortada pelo usuário).
-  /// Só existe quando o material tem dimensões de referência E o usuário preencheu
-  /// as dimensões da peça desejada.
   double? get areaSobraM2 {
     if (!temDimensoes) return null;
     final l = _largura;
@@ -2353,17 +3701,16 @@ class _MaterialRascunho {
     if (l == null || l <= 0 || c == null || c <= 0) return null;
     final areaRef    = refLargura! * refComprimento!;
     final areaCortada = l * c;
-    if (areaCortada >= areaRef) return null; // sem sobra
+    if (areaCortada >= areaRef) return null;
     return areaRef - areaCortada;
   }
 
-  /// Custo monetário da sobra (parte que vai para o lixo).
   double? get custoSobra {
     final sobra = areaSobraM2;
     if (sobra == null) return null;
     final cpm2 = custoPorM2;
     if (cpm2 == null || cpm2 <= 0) return null;
-    return sobra * cpm2 * quantidade;
+    return sobra * cpm2;
   }
 
   void dispose() {
@@ -2394,8 +3741,6 @@ class _ItemRascunho {
     }
   }
 }
-
-// ─── Widgets de apoio ─────────────────────────────────────────────────────────
 
 class _StatusBadge extends StatelessWidget {
   final String status;
@@ -2471,11 +3816,15 @@ class _DialogHeader extends StatelessWidget {
               ],
             ),
           ),
-          IconButton(
-            icon: Icon(Icons.close_rounded,
-                size: 17, color: cs.onSurfaceVariant),
-            onPressed: onClose,
-            visualDensity: VisualDensity.compact,
+          Tooltip(
+            message: 'Fechar',
+            child: IconButton(
+              icon: Icon(Icons.close_rounded,
+                  size: 20, color: cs.onSurfaceVariant),
+              onPressed: onClose,
+              style: IconButton.styleFrom()
+                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            ),
           ),
         ],
       ),
@@ -2590,6 +3939,7 @@ class _IconBtn extends StatelessWidget {
       message: tooltip,
       child: InkWell(
         onTap: onTap,
+        mouseCursor: SystemMouseCursors.click,
         borderRadius: BorderRadius.circular(6),
         child: Padding(
           padding: const EdgeInsets.all(5),
@@ -2600,15 +3950,10 @@ class _IconBtn extends StatelessWidget {
   }
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 String _fmtBrl(double v) {
-  // Usa até 5 casas decimais, remove zeros à direita, mantém mínimo 2
-  String dec = v.toStringAsFixed(5).split('.')[1];
-  while (dec.length > 2 && dec.endsWith('0')) {
-    dec = dec.substring(0, dec.length - 1);
-  }
-  // ✅ CORREÇÃO: truncate() garante que a parte inteira nunca é arredondada
-  final intPart = v.truncate().toString();
+  final dec = v.toStringAsFixed(2).split('.')[1];
+
+  final intPart = v.truncate().abs().toString();
   final buf = StringBuffer();
   int cnt = 0;
   for (int i = intPart.length - 1; i >= 0; i--) {
@@ -2616,17 +3961,20 @@ String _fmtBrl(double v) {
     buf.write(intPart[i]);
     cnt++;
   }
-  return 'R\$ ${buf.toString().split('').reversed.join('')},$dec';
+  final sinal = v < 0 ? '-' : '';
+  return '${sinal}R\$ ${buf.toString().split('').reversed.join('')},$dec';
 }
 
 String _fmtQtd(double v) =>
     v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
 
+String? _medidaFromDimensoes(double? comprimento, double? largura) {
+  if (comprimento == null || largura == null) return null;
+  if (comprimento <= 0 || largura <= 0) return null;
+  return '${_fmtQtd(comprimento)}x${_fmtQtd(largura)}m';
+}
+
 String _fmtM2(double v) {
-  // Exibe até 4 casas, remove zeros à direita, mantém mínimo 2
-  String dec = v.toStringAsFixed(4).split('.')[1];
-  while (dec.length > 2 && dec.endsWith('0')) {
-    dec = dec.substring(0, dec.length - 1);
-  }
+  final dec = v.toStringAsFixed(2).split('.')[1];
   return '${v.truncate()},$dec';
 }

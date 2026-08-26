@@ -17,19 +17,14 @@ class AlertasEstoqueProvider extends ChangeNotifier {
 
   Timer? _pollingTimer;
 
-  /// Evita iniciar múltiplos pollings em paralelo caso este método
-  /// seja chamado mais de uma vez (ex.: rebuilds da AppShell).
   bool _pollingAtivo = false;
 
-  /// Inicia o polling automático a cada [intervalo].
-  /// Chame em initState da AppShell ou no login do usuário.
   void iniciarPolling({Duration intervalo = const Duration(minutes: 5)}) {
-    // Já está rodando: não recria o timer nem duplica as chamadas.
     if (_pollingAtivo) return;
     _pollingAtivo = true;
 
     _pollingTimer?.cancel();
-    carregar(); // carrega imediatamente
+    carregar();
     _pollingTimer = Timer.periodic(intervalo, (_) => carregar());
   }
 
@@ -40,7 +35,6 @@ class AlertasEstoqueProvider extends ChangeNotifier {
   }
 
   Future<void> carregar() async {
-    // Não mostra loading no polling silencioso (só na primeira vez)
     if (_alertas.isEmpty) {
       _carregando = true;
       notifyListeners();
@@ -55,8 +49,6 @@ class AlertasEstoqueProvider extends ChangeNotifier {
       final raw = e.toString();
       _erro = raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
 
-      // Sessão expirada/sem permissão: não adianta continuar batendo
-      // na API em loop, então paramos o polling automático.
       final erroLower = raw.toLowerCase();
       if (erroLower.contains('401') || erroLower.contains('403')) {
         pararPolling();

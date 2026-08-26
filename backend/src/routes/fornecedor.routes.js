@@ -7,6 +7,9 @@ const ESCRITA = ['ADMIN', 'GERENTE', 'COMPRAS'];
 const ADMIN   = ['ADMIN', 'GERENTE'];
 
 router.get('/',                        authMiddleware, roleMiddleware(LEITURA), ctrl.listar);
+router.get('/paginado',                authMiddleware, roleMiddleware(LEITURA), ctrl.listarPaginado);
+router.get('/tipos',                   authMiddleware, roleMiddleware(LEITURA), ctrl.listarTipos);
+router.get('/verificar-semelhantes',   authMiddleware, roleMiddleware(LEITURA), ctrl.verificarSemelhantes);
 router.get('/buscar',                  authMiddleware, roleMiddleware(LEITURA), ctrl.buscarParaVinculo);
 router.get('/material/:materialId',    authMiddleware, roleMiddleware(LEITURA), ctrl.listarPorMaterial);
 router.get('/:id',                     authMiddleware, roleMiddleware(LEITURA), ctrl.buscarPorId);

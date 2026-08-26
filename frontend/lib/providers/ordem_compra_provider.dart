@@ -2,10 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import '../repositories/ordem_compra_repository.dart';
 
-/// Remove prefixos como "Exception:", "HttpException:" que o Dart adiciona
-/// automaticamente ao fazer e.toString() em exceções. Quando o erro é de
-/// conexão (sem internet / servidor fora do ar), retorna uma mensagem
-/// amigável contextualizada com a ação que estava sendo feita.
 String mensagemErro(Object e, {required String acao}) {
   final raw = e.toString();
   if (raw.contains('SocketException') ||
@@ -22,16 +18,101 @@ String mensagemErro(Object e, {required String acao}) {
   return 'Erro ao $acao: $msg';
 }
 
+/// Filtros de busca usados pela tela de listagem (compartilhados entre as
+/// 3 abas: Em Andamento, Finalizadas, Canceladas).
+class OrdemCompraFiltros {
+  final String? numero;
+  final String? material;
+  final String? identificador;
+  final String? medida;
+  final String? comprimento;
+  final String? largura;
+  final String? espessura;
+
+  const OrdemCompraFiltros({
+    this.numero,
+    this.material,
+    this.identificador,
+    this.medida,
+    this.comprimento,
+    this.largura,
+    this.espessura,
+  });
+
+  bool get vazio =>
+      (numero == null || numero!.isEmpty) &&
+      (material == null || material!.isEmpty) &&
+      (identificador == null || identificador!.isEmpty) &&
+      (medida == null || medida!.isEmpty) &&
+      (comprimento == null || comprimento!.isEmpty) &&
+      (largura == null || largura!.isEmpty) &&
+      (espessura == null || espessura!.isEmpty);
+
+  @override
+  bool operator ==(Object other) =>
+      other is OrdemCompraFiltros &&
+      numero == other.numero &&
+      material == other.material &&
+      identificador == other.identificador &&
+      medida == other.medida &&
+      comprimento == other.comprimento &&
+      largura == other.largura &&
+      espessura == other.espessura;
+
+  @override
+  int get hashCode => Object.hash(
+      numero, material, identificador, medida, comprimento, largura, espessura);
+}
+
 class OrdemCompraProvider extends ChangeNotifier {
   final OrdemCompraRepository _repo = OrdemCompraRepository();
 
-  List<dynamic> _emAndamento = [];
-  List<dynamic> _finalizadas = [];
-  List<dynamic> _canceladas  = [];
+  static const _statusPorAba = ['EM_ANDAMENTO', 'FINALIZADO', 'CANCELADO'];
+  static const int porPagina = 50;
 
-  List<dynamic> get emAndamento => _emAndamento;
-  List<dynamic> get finalizadas => _finalizadas;
-  List<dynamic> get canceladas  => _canceladas;
+  final Map<String, List<dynamic>> _itensPorStatus = {
+    'EM_ANDAMENTO': [],
+    'FINALIZADO': [],
+    'CANCELADO': [],
+  };
+  final Map<String, int> _totalPorStatus = {
+    'EM_ANDAMENTO': 0,
+    'FINALIZADO': 0,
+    'CANCELADO': 0,
+  };
+  final Map<String, int> _paginaAtualPorStatus = {
+    'EM_ANDAMENTO': 1,
+    'FINALIZADO': 1,
+    'CANCELADO': 1,
+  };
+  final Map<String, bool> _carregandoPaginaPorStatus = {
+    'EM_ANDAMENTO': false,
+    'FINALIZADO': false,
+    'CANCELADO': false,
+  };
+
+  OrdemCompraFiltros _filtros = const OrdemCompraFiltros();
+  OrdemCompraFiltros get filtros => _filtros;
+
+  List<dynamic> get emAndamento => _itensPorStatus['EM_ANDAMENTO']!;
+  List<dynamic> get finalizadas => _itensPorStatus['FINALIZADO']!;
+  List<dynamic> get canceladas  => _itensPorStatus['CANCELADO']!;
+
+  int get totalEmAndamento => _totalPorStatus['EM_ANDAMENTO']!;
+  int get totalFinalizadas => _totalPorStatus['FINALIZADO']!;
+  int get totalCanceladas  => _totalPorStatus['CANCELADO']!;
+
+  /// Página atual (1-based) de cada aba.
+  int paginaAtual(String status) => _paginaAtualPorStatus[status] ?? 1;
+
+  /// Total de páginas de cada aba, com base no total de itens e no
+  /// tamanho de página fixo [porPagina].
+  int totalPaginas(String status) {
+    final total = _totalPorStatus[status] ?? 0;
+    return (total / porPagina).ceil().clamp(1, 999999999);
+  }
+
+  bool carregandoPagina(String status) => _carregandoPaginaPorStatus[status] ?? false;
 
   bool _carregando = false;
   bool get carregando => _carregando;
@@ -39,40 +120,101 @@ class OrdemCompraProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
-  /// ID da OC que deve ser aberta automaticamente ao entrar na página de OC.
-  /// Setado pelo orçamento ao gerar uma OC; consumido pela página de OC
-  /// imediatamente após abrir os detalhes, evitando re-abertura.
   int? _ocPendente;
   int? get ocPendente => _ocPendente;
 
-  /// Sinaliza que a página de OC deve abrir automaticamente a OC [id]
-  /// assim que estiver montada e com os dados carregados.
   void sinalizarOcParaAbrir(int id) {
     _ocPendente = id;
-    // Não notifica listeners aqui: a página vai consumir no próximo frame
-    // após o carregar() que ela mesma dispara no initState / didChangeDependencies.
   }
 
-  /// Consome e retorna o ID pendente, limpando-o para evitar re-abertura.
   int? consumirOcPendente() {
     final id = _ocPendente;
     _ocPendente = null;
     return id;
   }
 
+  /// Atualiza os filtros de busca e recarrega a primeira página de todas
+  /// as abas. Não recarrega se os filtros forem idênticos aos atuais.
+  Future<void> aplicarFiltros(OrdemCompraFiltros filtros) async {
+    if (filtros == _filtros) return;
+    _filtros = filtros;
+    await carregar();
+  }
+
+  /// Carrega (ou recarrega) a primeira página das 3 abas em paralelo.
+  /// Chamado ao entrar na tela e sempre que o usuário volta pra ela.
   Future<void> carregar() async {
     _carregando = true;
     _erro = null;
     notifyListeners();
     try {
-      final todas = await _repo.listar();
-      _emAndamento = todas.where((o) => o['status'] == 'EM_ANDAMENTO').toList();
-      _finalizadas = todas.where((o) => o['status'] == 'FINALIZADO').toList();
-      _canceladas  = todas.where((o) => o['status'] == 'CANCELADO').toList();
+      final resultados = await Future.wait(
+        _statusPorAba.map((status) => _repo.listarPagina(
+              status: status,
+              numero: _filtros.numero,
+              material: _filtros.material,
+              identificador: _filtros.identificador,
+              medida: _filtros.medida,
+              comprimento: _filtros.comprimento,
+              largura: _filtros.largura,
+              espessura: _filtros.espessura,
+              pagina: 1,
+              porPagina: porPagina,
+            )),
+      );
+      for (var i = 0; i < _statusPorAba.length; i++) {
+        final status = _statusPorAba[i];
+        _itensPorStatus[status]     = resultados[i].itens;
+        _totalPorStatus[status]     = resultados[i].total;
+        _paginaAtualPorStatus[status] = 1;
+      }
     } catch (e) {
       _erro = mensagemErro(e, acao: 'carregar ordens de compra');
     } finally {
       _carregando = false;
+      notifyListeners();
+    }
+  }
+
+  /// Vai para uma página específica (1-based) de uma aba, substituindo os
+  /// itens atualmente exibidos (paginação numerada, igual à tela de
+  /// Estoque). Se a página pedida ficar vazia (ex.: item da última página
+  /// foi excluído), recua automaticamente para a página anterior.
+  Future<void> irParaPagina(String status, int pagina) async {
+    if (_carregandoPaginaPorStatus[status] == true) return;
+    if (!_itensPorStatus.containsKey(status)) return;
+    if (pagina < 1) pagina = 1;
+
+    _carregandoPaginaPorStatus[status] = true;
+    notifyListeners();
+    try {
+      final resultado = await _repo.listarPagina(
+        status: status,
+        numero: _filtros.numero,
+        material: _filtros.material,
+        identificador: _filtros.identificador,
+        medida: _filtros.medida,
+        comprimento: _filtros.comprimento,
+        largura: _filtros.largura,
+        espessura: _filtros.espessura,
+        pagina: pagina,
+        porPagina: porPagina,
+      );
+
+      _totalPorStatus[status] = resultado.total;
+
+      if (resultado.itens.isEmpty && resultado.total > 0 && pagina > 1) {
+        _carregandoPaginaPorStatus[status] = false;
+        await irParaPagina(status, pagina - 1);
+        return;
+      }
+
+      _itensPorStatus[status] = resultado.itens;
+      _paginaAtualPorStatus[status] = pagina;
+    } catch (e) {
+      _erro = mensagemErro(e, acao: 'carregar ordens de compra');
+    } finally {
+      _carregandoPaginaPorStatus[status] = false;
       notifyListeners();
     }
   }

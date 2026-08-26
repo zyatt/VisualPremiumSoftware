@@ -36,7 +36,6 @@ class RelatorioOSProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
-  // ── Filtros ativos ────────────────────────────────────────────────────────
   String? _buscaAtiva;
   String? _clienteAtivo;
   String? _materialIdAtivo;
@@ -107,7 +106,6 @@ class RelatorioOSProvider extends ChangeNotifier {
     }
   }
 
-  /// Recarrega preservando todos os filtros ativos.
   Future<void> recarregar() => carregar(
         busca:                 _buscaAtiva,
         cliente:               _clienteAtivo,

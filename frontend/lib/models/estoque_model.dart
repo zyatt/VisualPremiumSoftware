@@ -109,6 +109,45 @@ class MovimentacaoModel {
       );
 }
 
+class RelacoesOSPaginadasModel {
+  final List<RelacaoOSModel> itens;
+  final int total;
+  const RelacoesOSPaginadasModel({required this.itens, required this.total});
+}
+
+class MovimentacaoComOSModel {
+  final MovimentacaoModel movimentacao;
+  final int relacaoOSId;
+  final String numeroOS;
+  final String? cliente;
+  final String relacaoOSStatus;
+
+  MovimentacaoComOSModel({
+    required this.movimentacao,
+    required this.relacaoOSId,
+    required this.numeroOS,
+    this.cliente,
+    required this.relacaoOSStatus,
+  });
+
+  factory MovimentacaoComOSModel.fromJson(Map<String, dynamic> json) {
+    final relacao = json['relacaoOS'] as Map<String, dynamic>? ?? const {};
+    return MovimentacaoComOSModel(
+      movimentacao:    MovimentacaoModel.fromJson(json),
+      relacaoOSId:     (relacao['id'] as num?)?.toInt() ?? 0,
+      numeroOS:        relacao['numeroOS']?.toString() ?? json['numeroOS']?.toString() ?? '',
+      cliente:         relacao['cliente'],
+      relacaoOSStatus: relacao['status']?.toString() ?? 'EM_ANDAMENTO',
+    );
+  }
+}
+
+class MovimentacoesPaginadasModel {
+  final List<MovimentacaoComOSModel> itens;
+  final int total;
+  const MovimentacoesPaginadasModel({required this.itens, required this.total});
+}
+
 class RelacaoOSModel {
   final int id;
   final String numeroOS;
@@ -117,8 +156,6 @@ class RelacaoOSModel {
   final String status;
   final DateTime? criadoEm;
   final DateTime? atualizadoEm;
-  /// Nome do usuário que fechou esta OS (snapshot no momento do fechamento).
-  /// Null enquanto a OS está em andamento, ou após ser revertida.
   final String? fechadoPorNome;
   final List<MovimentacaoModel> movimentacoes;
 

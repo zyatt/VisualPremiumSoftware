@@ -1,3 +1,44 @@
+class FornecedorSemelhanteModel {
+  final int id;
+  final String nomeFantasia;
+  final String? tipoFornecedor;
+  final String? nomeVendedor;
+  final String? cnpj;
+  final bool exata;
+  final double similaridade;
+  final bool contido;
+
+  FornecedorSemelhanteModel({
+    required this.id,
+    required this.nomeFantasia,
+    this.tipoFornecedor,
+    this.nomeVendedor,
+    this.cnpj,
+    required this.exata,
+    required this.similaridade,
+    this.contido = false,
+  });
+
+  factory FornecedorSemelhanteModel.fromJson(Map<String, dynamic> json) =>
+      FornecedorSemelhanteModel(
+        id:             json['id'],
+        nomeFantasia:   json['nomeFantasia'],
+        tipoFornecedor: json['tipoFornecedor'],
+        nomeVendedor:   json['nomeVendedor'],
+        cnpj:           json['cnpj'],
+        exata:          json['exata'] ?? false,
+        similaridade:   (json['similaridade'] as num?)?.toDouble() ?? 0,
+        contido:        json['contido'] ?? false,
+      );
+}
+
+class FornecedoresPaginadosModel {
+  final List<FornecedorModel> itens;
+  final int total;
+
+  const FornecedoresPaginadosModel({required this.itens, required this.total});
+}
+
 class FornecedorMaterialVinculoModel {
   final int id;
   final int fornecedorId;

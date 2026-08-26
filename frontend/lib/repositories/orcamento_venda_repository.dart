@@ -2,8 +2,6 @@ import '../models/orcamento_venda_model.dart';
 import '../utils/api_client.dart';
 
 class OrcamentoVendaRepository {
-  // ── Orçamentos ──────────────────────────────────────────────────────────────
-
   Future<List<OrcamentoVendaModel>> listar({
     String? status,
     String? busca,
@@ -51,8 +49,6 @@ class OrcamentoVendaRepository {
     await ApiClient.patch('/orcamentos-venda/$id/reprovar', {});
   }
 
-  // ── Itens ───────────────────────────────────────────────────────────────────
-
   Future<OrcamentoVendaItemModel> adicionarItem(
       int orcamentoId, Map<String, dynamic> dados) async {
     final data =
@@ -70,8 +66,6 @@ class OrcamentoVendaRepository {
   Future<void> removerItem(int orcamentoId, int itemId) async {
     await ApiClient.delete('/orcamentos-venda/$orcamentoId/itens/$itemId');
   }
-
-  // ── Clientes (lookup) ────────────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listarClientes({String? busca}) async {
     final path = busca != null && busca.isNotEmpty

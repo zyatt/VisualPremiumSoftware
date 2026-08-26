@@ -1,16 +1,8 @@
-// lib/widgets/chat_floating_widget.dart
-//
-// Bolha de chat flutuante (estilo Messenger/Intercom): fica por cima do
-// conteúdo da página atual, pode ser arrastada para qualquer lugar da tela
-// e, ao ser tocada (sem arrastar), expande num mini-chat com lista de
-// usuários e conversa. Ela é renderizada pelo AppShell, então fica visível
-// em qualquer página do app (exceto na própria página /chat, pra não
-// duplicar a UI).
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers/chat_provider.dart';
 import '../models/mensagem_chat_model.dart';
@@ -62,16 +54,20 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
   static const double _bolhaTamanho = 56;
   static const double _painelLargura = 320;
   static const double _painelAltura = 440;
+  static const double _larguraSeta = 28;
 
-  double? _cx;
-  double? _cy;
+  double? _margemDireita;
+  double? _margemBaixo;
   Size? _telaAnterior;
 
   bool _expandido = false;
+  bool _oculto = false;
   bool _arrastando = false;
   Offset _inicioArrastoGlobal = Offset.zero;
-  double _cxAoIniciar = 0;
-  double _cyAoIniciar = 0;
+  double _margemDireitaAoIniciar = 0;
+  double _margemBaixoAoIniciar = 0;
+
+  static const _chavePrefsOculto = 'chat_flutuante_oculto';
 
   int? _ultimoMinimizarTrigger;
   int? _ultimoAbrirConversaTrigger;
@@ -79,12 +75,26 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
   @override
   void initState() {
     super.initState();
+    _carregarEstadoOculto();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _ultimoMinimizarTrigger = context.read<ChatProvider>().minimizarTrigger;
         _ultimoAbrirConversaTrigger = context.read<ChatProvider>().abrirConversaTrigger;
       }
     });
+  }
+
+  Future<void> _carregarEstadoOculto() async {
+    final prefs = await SharedPreferences.getInstance();
+    final oculto = prefs.getBool(_chavePrefsOculto) ?? false;
+    if (mounted && oculto) {
+      setState(() => _oculto = oculto);
+    }
+  }
+
+  Future<void> _salvarEstadoOculto(bool oculto) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_chavePrefsOculto, oculto);
   }
 
   @override
@@ -103,6 +113,20 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
   void _fechar(BuildContext context) {
     setState(() => _expandido = false);
     context.read<ChatProvider>().definirWidgetFlutuanteVisivel(false);
+  }
+
+  void _ocultar(BuildContext context) {
+    setState(() {
+      _expandido = false;
+      _oculto = true;
+    });
+    _salvarEstadoOculto(true);
+    context.read<ChatProvider>().definirWidgetFlutuanteVisivel(false);
+  }
+
+  void _mostrarNovamente() {
+    setState(() => _oculto = false);
+    _salvarEstadoOculto(false);
   }
 
   @override
@@ -132,36 +156,41 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
     }
     _ultimoAbrirConversaTrigger = abrirConversaTrigger;
 
-    if (_cx == null || _cy == null) {
-      _cx = tela.width  - 16 - _bolhaTamanho / 2;
-      _cy = tela.height - 16 - _bolhaTamanho / 2;
+    if (_margemDireita == null || _margemBaixo == null) {
+      _margemDireita = 16 + _bolhaTamanho / 2;
+      _margemBaixo   = 16 + _bolhaTamanho / 2;
     } else if (_telaAnterior != null &&
         (_telaAnterior!.width != tela.width ||
          _telaAnterior!.height != tela.height)) {
-      _cx = _cx! * (tela.width  / _telaAnterior!.width);
-      _cy = _cy! * (tela.height / _telaAnterior!.height);
-      _cx = _cx!.clamp(_bolhaTamanho / 2, tela.width  - _bolhaTamanho / 2);
-      _cy = _cy!.clamp(_bolhaTamanho / 2, tela.height - _bolhaTamanho / 2);
+      _margemDireita = _margemDireita!.clamp(
+          _bolhaTamanho / 2, tela.width  - _bolhaTamanho / 2);
+      _margemBaixo = _margemBaixo!.clamp(
+          _bolhaTamanho / 2, tela.height - _bolhaTamanho / 2);
     }
     _telaAnterior = tela;
 
-    final largura = _expandido ? _painelLargura : _bolhaTamanho;
-    final altura  = _expandido ? _painelAltura  : _bolhaTamanho;
+    final cx = tela.width  - _margemDireita!;
+    final cy = tela.height - _margemBaixo!;
 
-    // Calcula left e top, garantindo que o painel expandido sempre fique
-    // completamente visível na tela. Quando expandido, ajusta o centro
-    // (_cx, _cy) se necessário para que o painel não ultrapasse os limites.
+    final largura = _oculto
+        ? _larguraSeta
+        : (_expandido ? _painelLargura : _bolhaTamanho);
+    final altura  = _oculto
+        ? _bolhaTamanho
+        : (_expandido ? _painelAltura  : _bolhaTamanho);
+
     double left, top;
-    if (_expandido) {
-      // Ao expandir, ajusta o centro para garantir que o painel fique visível
-      final cxAjustado = _cx!.clamp(largura / 2, tela.width - largura / 2);
-      final cyAjustado = _cy!.clamp(altura / 2, tela.height - altura / 2);
+    if (_oculto) {
+      left = tela.width - _larguraSeta;
+      top = (cy - altura / 2).clamp(0.0, tela.height - altura);
+    } else if (_expandido) {
+      final cxAjustado = cx.clamp(largura / 2, tela.width - largura / 2);
+      final cyAjustado = cy.clamp(altura / 2, tela.height - altura / 2);
       left = (cxAjustado - largura / 2).clamp(0.0, tela.width - largura);
       top = (cyAjustado - altura / 2).clamp(0.0, tela.height - altura);
     } else {
-      // Bolha minimizada usa o centro original
-      left = (_cx! - largura / 2).clamp(0.0, tela.width - largura);
-      top = (_cy! - altura / 2).clamp(0.0, tela.height - altura);
+      left = (cx - largura / 2).clamp(0.0, tela.width - largura);
+      top = (cy - altura / 2).clamp(0.0, tela.height - altura);
     }
 
     return AnimatedPositioned(
@@ -173,12 +202,14 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
       top:  top,
       width:  largura,
       height: altura,
-      child: GestureDetector(
+      child: _oculto
+          ? _SetaOcultaChat(onTap: _mostrarNovamente)
+          : GestureDetector(
         onPanStart: (details) {
           _arrastando = false;
           _inicioArrastoGlobal = details.globalPosition;
-          _cxAoIniciar = _cx!;
-          _cyAoIniciar = _cy!;
+          _margemDireitaAoIniciar = _margemDireita!;
+          _margemBaixoAoIniciar = _margemBaixo!;
         },
         onPanUpdate: (details) {
           final delta = details.globalPosition - _inicioArrastoGlobal;
@@ -186,9 +217,9 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
           setState(() {
             final larguraAtual = _expandido ? _painelLargura : _bolhaTamanho;
             final alturaAtual  = _expandido ? _painelAltura  : _bolhaTamanho;
-            _cx = (_cxAoIniciar + delta.dx)
+            _margemDireita = (_margemDireitaAoIniciar - delta.dx)
                 .clamp(larguraAtual / 2, tela.width  - larguraAtual / 2);
-            _cy = (_cyAoIniciar + delta.dy)
+            _margemBaixo = (_margemBaixoAoIniciar - delta.dy)
                 .clamp(alturaAtual  / 2, tela.height - alturaAtual  / 2);
           });
         },
@@ -231,11 +262,50 @@ class _ChatFloatingWidgetState extends State<ChatFloatingWidget> {
                           key: const ValueKey('painel'),
                           onFechar: () => _fechar(context),
                           onMinimizar: () => _alternarExpandido(context),
+                          onOcultar: () => _ocultar(context),
                         )
                       : const _BolhaIcone(key: ValueKey('bolha')),
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SetaOcultaChat extends StatelessWidget {
+  final VoidCallback onTap;
+  const _SetaOcultaChat({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius:
+              const BorderRadius.horizontal(left: Radius.circular(14)),
+          child: Container(
+            decoration: BoxDecoration(
+              color: cs.primary,
+              borderRadius:
+                  const BorderRadius.horizontal(left: Radius.circular(14)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  blurRadius: 6,
+                  offset: const Offset(-1, 2),
+                ),
+              ],
+            ),
+            child: Icon(Icons.chevron_left_rounded,
+                color: cs.onPrimary, size: 20),
           ),
         ),
       ),
@@ -331,7 +401,13 @@ class _BolhaIcone extends StatelessWidget {
 class _MiniChatPainel extends StatefulWidget {
   final VoidCallback onFechar;
   final VoidCallback onMinimizar;
-  const _MiniChatPainel({super.key, required this.onFechar, required this.onMinimizar});
+  final VoidCallback onOcultar;
+  const _MiniChatPainel({
+    super.key,
+    required this.onFechar,
+    required this.onMinimizar,
+    required this.onOcultar,
+  });
 
   @override
   State<_MiniChatPainel> createState() => _MiniChatPainelState();
@@ -523,6 +599,16 @@ class _MiniChatPainelState extends State<_MiniChatPainel> {
                 icon: Icon(Icons.remove_rounded, color: cs.onPrimary, size: 18),
                 onPressed: widget.onMinimizar,
                 tooltip: 'Minimizar',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                style: IconButton.styleFrom().copyWith(
+                    mouseCursor: WidgetStateProperty.all(
+                        SystemMouseCursors.click)),
+              ),
+              IconButton(
+                icon: Icon(Icons.visibility_off_rounded, color: cs.onPrimary, size: 17),
+                onPressed: widget.onOcultar,
+                tooltip: 'Ocultar chat',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 style: IconButton.styleFrom().copyWith(

@@ -31,6 +31,8 @@ class OrcamentoVendaItemMaterialModel {
     return precoMedio ?? material.precoRef;
   }
 
+  double? get precoRefUnidadeMedida => material.precoRefUnidadeMedida;
+
   double get subtotal => quantidade * (precoRef ?? 0);
 
   factory OrcamentoVendaItemMaterialModel.fromJson(Map<String, dynamic> json) {

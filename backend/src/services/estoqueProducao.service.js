@@ -11,8 +11,6 @@ function _calcularStatus(quantidade, estoqueMinimo, ativo) {
 }
 
 function _formatarMedidaRetalho(areaM2) {
-  // Não arredonda para um número fixo de casas — só limpa ruído de ponto
-  // flutuante (ex.: 1.9999999999998) mantendo a precisão real da área.
   const arredondado = Math.round(Number(areaM2) * 10000) / 10000;
   return `${arredondado}m²`;
 }
@@ -119,14 +117,6 @@ async function transferirParaProducao({
   return resultado;
 }
 
-/**
- * Devolve material do estoque de produção de volta para o estoque padrão.
- * NÃO incrementa mais o Material diretamente: a quantidade sai do saldo
- * disponível da produção na hora (decrement em `quantidade`) mas fica
- * "no limbo" em `quantidadePendente`, e uma EntradaPendente (tipo
- * DEVOLUCAO) é criada. Só ao ser confirmada em Controle de Estoque é que
- * o Material do estoque padrão é de fato incrementado.
- */
 async function devolverAoEstoquePadrao({
   materialId,
   quantidade,
@@ -273,9 +263,6 @@ async function listarEstoque({ producao, busca, categoria, identificador, medida
   if (identificador) materialWhere.identificador = { contains: identificador, mode: 'insensitive' };
   if (medida)        materialWhere.medida        = { contains: medida,        mode: 'insensitive' };
   if (espessura)     materialWhere.espessura     = { contains: espessura,     mode: 'insensitive' };
-  // comprimento/largura são numéricos no banco — o filtro digitado (texto)
-  // é convertido para número antes de comparar. Valores não numéricos são
-  // ignorados (não filtram nada).
   if (comprimento) {
     const compNum = Number(String(comprimento).replace(',', '.'));
     if (Number.isFinite(compNum)) materialWhere.comprimento = compNum;
@@ -318,14 +305,6 @@ async function listarEstoque({ producao, busca, categoria, identificador, medida
   }));
 }
 
-/**
- * Em vez de criar/incrementar o Material de retalho diretamente, registra
- * uma EntradaPendente (tipo RETALHO). O retalho só é de fato criado ou
- * incrementado no estoque padrão quando essa pendência for confirmada em
- * Controle de Estoque (ver confirmarEntradaPendente). Nenhum Material é
- * tocado aqui — o material original que gerou o retalho já teve sua baixa
- * registrada antes desta função ser chamada.
- */
 async function _gerarOuIncrementarRetalhoEstoquePadrao(tx, {
   material, larguraUsada, comprimentoUsado, precoM2Final, precoUnitarioFinal,
   producao, numeroOS, relacaoOSId, usuarioNome,
@@ -366,12 +345,6 @@ async function _gerarOuIncrementarRetalhoEstoquePadrao(tx, {
   });
 }
 
-/**
- * Executa de fato a criação/incremento do Material de retalho no estoque
- * padrão, a partir dos dados de uma EntradaPendente do tipo RETALHO já
- * confirmada. Espelha a lógica que antes rodava direto em
- * _gerarOuIncrementarRetalhoEstoquePadrao.
- */
 async function _efetivarRetalho(tx, pendencia) {
   const material = await tx.material.findUnique({ where: { id: pendencia.materialId } });
   if (!material) throw { status: 404, message: 'Material de origem do retalho não encontrado' };
@@ -578,9 +551,9 @@ async function darBaixa({
     if (larg > 0 && comp > 0 && largTotal > 0 && compTotal > 0) {
       const areaUsada = larg * comp;
       const areaTotal = largTotal * compTotal;
-      const custoM2 = precoM2Dimensional != null
-        ? precoM2Dimensional
-        : (precoUnitarioFinal != null && areaTotal > 0 ? precoUnitarioFinal / areaTotal : null);
+      const custoM2 = precoUnitarioFinal != null && areaTotal > 0
+        ? precoUnitarioFinal / areaTotal
+        : precoM2Dimensional;
       if (custoM2 != null) {
         precoM2Dimensional = Math.round(custoM2 * areaUsada * 1000000) / 1000000;
       }
@@ -696,13 +669,6 @@ async function darBaixa({
   return movimentacao;
 }
 
-/**
- * Histórico de movimentações do estoque de produção (transferências + baixas).
- * Compartilhado entre as duas linhas de produção — cada registro carrega o
- * campo [producao] para identificar de qual linha veio. [producao] aqui é
- * um filtro OPCIONAL: quando informado, restringe a apenas uma linha;
- * quando omitido, retorna o histórico das duas.
- */
 async function listarHistorico({ producao, busca, numeroOS } = {}) {
   const where = {};
   if (producao) where.producao = _normalizarProducao(producao);
@@ -729,13 +695,6 @@ async function listarHistorico({ producao, busca, numeroOS } = {}) {
   });
 }
 
-/**
- * Exclui um registro do histórico do estoque de produção (transferência ou
- * baixa). Apenas remove o registro da MovimentacaoProducao — não altera o
- * saldo do EstoqueProducao nem gera qualquer estorno, diferente de uma
- * remoção feita a partir do Controle de Estoque (que reverte a
- * transferência). Aqui a exclusão é puramente de histórico.
- */
 async function excluirHistorico(movimentacaoId) {
   const mov = await prisma.movimentacaoProducao.findUnique({
     where: { id: movimentacaoId },
@@ -745,12 +704,6 @@ async function excluirHistorico(movimentacaoId) {
   await prisma.movimentacaoProducao.delete({ where: { id: movimentacaoId } });
 }
 
-/**
- * Lista as pendências (RETALHO e/ou DEVOLUCAO) aguardando confirmação no
- * Controle de Estoque. Por padrão traz todas as linhas de produção e
- * apenas status PENDENTE — o card de "Pendentes" do dialog de Saída p/
- * Produção mostra todas, independente da linha.
- */
 async function listarPendentes({ producao, tipo, status } = {}) {
   const where = { status: status ?? 'PENDENTE' };
   if (producao) where.producao = _normalizarProducao(producao);
@@ -770,12 +723,6 @@ async function listarPendentes({ producao, tipo, status } = {}) {
     orderBy: { criadoEm: 'desc' },
   });
 
-  // Para RETALHO, o `material` incluído é o material de ORIGEM (que gerou
-  // a sobra) — sua unidade/medida/dimensões não são as do retalho em si.
-  // O retalho é sempre M², com medida calculada a partir da área sobrante,
-  // sem largura/comprimento próprios (é uma peça irregular). Sobrescreve
-  // esses campos para refletir o retalho, mantendo nome/categoria/
-  // espessura do material de origem (o retalho herda esses atributos).
   return registros.map((r) => {
     if (r.tipo === 'RETALHO') {
       const areaRetalho = Number(r.quantidade);
@@ -792,11 +739,6 @@ async function listarPendentes({ producao, tipo, status } = {}) {
       };
     }
 
-    // DEVOLUCAO de um material RETALHO cuja quantidade devolvida diverge da
-    // medida do retalho original: ao confirmar, será criado (ou somado) um
-    // retalho NOVO do tamanho devolvido (ver confirmarEntradaPendente). Aqui
-    // é só exibição — mostra essa medida nova em vez da medida do material
-    // de origem, pra refletir o que realmente vai ser criado.
     if (r.tipo === 'DEVOLUCAO' && r.material?.identificador === 'RETALHO') {
       const qtd = Number(r.quantidade);
       const medidaOrigemNum = parseFloat(
@@ -820,18 +762,10 @@ async function listarPendentes({ producao, tipo, status } = {}) {
   });
 }
 
-/** Conta quantas pendências existem, para o badge do botão. */
 async function contarPendentes() {
   return prisma.entradaPendente.count({ where: { status: 'PENDENTE' } });
 }
 
-/**
- * Confirma uma EntradaPendente: efetiva o impacto real no estoque padrão.
- * - RETALHO: cria/incrementa o Material de retalho (lógica que antes
- *   rodava direto em darBaixa).
- * - DEVOLUCAO: incrementa o Material do estoque padrão e zera a
- *   quantidadePendente correspondente em EstoqueProducao.
- */
 async function confirmarEntradaPendente({ id, usuarioNome }) {
   const pendencia = await prisma.entradaPendente.findUnique({ where: { id: Number(id) } });
   if (!pendencia) throw { status: 404, message: 'Pendência não encontrada' };
@@ -860,13 +794,6 @@ async function confirmarEntradaPendente({ id, usuarioNome }) {
       const materialOrigem = await tx.material.findUnique({ where: { id: pendencia.materialId } });
       if (!materialOrigem) throw { status: 404, message: 'Material da devolução não encontrado' };
 
-      // Se o material devolvido é um RETALHO e a quantidade devolvida não bate
-      // com a medida (área) gravada nele, não faz sentido somar direto no
-      // material original — a "medida" de um retalho É o seu tamanho. Ex.: um
-      // retalho de 3.5m² enviado à produção mas devolvido com só 1.5m² (o
-      // resto foi usado/gerou outro retalho lá) deve virar um retalho NOVO,
-      // de 1.5m², e não inflar o registro de 3.5m² com quantidade que na
-      // prática é de outro tamanho.
       const ehRetalho = materialOrigem.identificador === 'RETALHO';
       const medidaOrigemNum = ehRetalho
         ? parseFloat(String(materialOrigem.medida ?? '').replace('m²', '').replace(',', '.').trim())
@@ -999,13 +926,6 @@ async function confirmarEntradaPendente({ id, usuarioNome }) {
   return resultado;
 }
 
-/**
- * Recusa uma EntradaPendente, estornando o que for necessário:
- * - RETALHO: apenas cancela o registro — o retalho nunca saiu de lugar
- *   nenhum, então não há nada a estornar no estoque.
- * - DEVOLUCAO: devolve a quantidade para EstoqueProducao.quantidade
- *   (volta pra produção de origem), tirando de quantidadePendente.
- */
 async function recusarEntradaPendente({ id, usuarioNome }) {
   const pendencia = await prisma.entradaPendente.findUnique({ where: { id: Number(id) } });
   if (!pendencia) throw { status: 404, message: 'Pendência não encontrada' };
@@ -1035,7 +955,6 @@ async function recusarEntradaPendente({ id, usuarioNome }) {
         },
       });
     }
-    // RETALHO: nada a estornar no estoque — só cancela o registro abaixo.
 
     return tx.entradaPendente.update({
       where: { id: pendencia.id },

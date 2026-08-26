@@ -1,5 +1,3 @@
-// audit_log_provider.dart
-
 import 'package:flutter/foundation.dart';
 import '../models/audit_log_model.dart';
 import '../repositories/audit_log_repository.dart';
@@ -21,7 +19,6 @@ class AuditLogProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
-  // Filtros ativos (mantidos para recarregar com os mesmos parâmetros)
   int?      _materialId;
   String?   _acao;
   String?   _busca;

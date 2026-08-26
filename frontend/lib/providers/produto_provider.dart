@@ -33,7 +33,6 @@ class ProdutoProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
-  // Filtros
   String _busca = '';
   String? _categoriaFiltro;
   bool? _ativoFiltro;

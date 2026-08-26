@@ -1,10 +1,3 @@
-// lib/widgets/escolher_usuario_chat_dialog.dart
-//
-// Ponto de entrada único da feature "Enviar para chat": chame
-// `encaminharParaChat(context, tipo: ..., dados: ...)` de qualquer tela.
-// Ele abre o seletor de usuário e, ao escolher um, envia o encaminhamento
-// via ChatProvider.enviarEncaminhamento. Retorna true se enviou com sucesso.
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/chat_provider.dart';
@@ -12,7 +5,7 @@ import '../theme/app_theme.dart';
 
 Future<bool> encaminharParaChat(
   BuildContext context, {
-  required String tipo, // 'solicitacao' ou 'material'
+  required String tipo,
   required Map<String, dynamic> dados,
 }) async {
   final chat = context.read<ChatProvider>();

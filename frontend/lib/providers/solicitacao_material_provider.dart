@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart' as io_client;
 import '../models/solicitacao_material_model.dart';
 import '../repositories/solicitacao_material_repository.dart';
 import '../utils/api_client.dart';
@@ -33,16 +34,8 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   bool _carregando = false;
   bool get carregando => _carregando;
 
-  // Identificador incremental da chamada mais recente de carregar(). Evita
-  // que uma resposta antiga (que demorou mais para voltar) sobrescreva o
-  // resultado de uma chamada mais nova, e evita que _carregando fique
-  // travado em true quando várias chamadas concorrentes se cruzam.
   int _carregarSeq = 0;
 
-  // Debounce para recargas disparadas por eventos SSE: se vários eventos
-  // chegarem em rajada (ex.: múltiplos broadcasts da mesma ação no
-  // backend), agrupa tudo em uma única chamada de carregar() em vez de
-  // disparar um GET por evento.
   Timer? _sseCarregarDebounce;
   void _carregarComDebounce() {
     _sseCarregarDebounce?.cancel();
@@ -72,22 +65,15 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   int _novasSolicitacoes = 0;
   int get novasSolicitacoes => _novasSolicitacoes;
 
-  // ─── Notificação flutuante (uma única exibição por evento) ─────────────────
-  // Guarda o payload da última solicitação recebida via SSE para que a UI
-  // (AppShell) exiba um banner flutuante uma única vez. Depois de exibido,
-  // a UI chama consumirNotificacaoPendente() para limpar o estado.
   NovaSolicitacaoNotificacao? _notificacaoPendente;
   NovaSolicitacaoNotificacao? get notificacaoPendente => _notificacaoPendente;
 
   void consumirNotificacaoPendente() {
     if (_notificacaoPendente == null) return;
     _notificacaoPendente = null;
-    // Sem notifyListeners(): já foi consumida pela UI que a exibiu; não há
-    // necessidade de disparar um novo rebuild só por causa da limpeza.
+
   }
 
-  // Mesmo padrão acima, mas para alterações em solicitações já existentes
-  // (edição de dados, edição/adição/exclusão de material).
   SolicitacaoAlteradaNotificacao? _notificacaoAlteradaPendente;
   SolicitacaoAlteradaNotificacao? get notificacaoAlteradaPendente => _notificacaoAlteradaPendente;
 
@@ -96,12 +82,6 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     _notificacaoAlteradaPendente = null;
   }
 
-  // ─── Abertura pendente vinda de um encaminhamento no chat ─────────────────
-  /// Guardado quando o usuário toca no card de uma solicitação (ou de um
-  /// material pertencente a uma solicitação) encaminhado no chat — ver
-  /// EncaminhamentoChatCard._abrirOrigem. A SolicitacoesMaterialPage, assim
-  /// que ficar visível, consome este id, busca a solicitação completa e abre
-  /// o diálogo de visualização automaticamente.
   int? _solicitacaoParaAbrirPendente;
   int? get solicitacaoParaAbrirPendente => _solicitacaoParaAbrirPendente;
 
@@ -114,9 +94,6 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     _solicitacaoParaAbrirPendente = null;
   }
 
-  /// Busca uma solicitação específica pelo id, sem alterar a lista/estado
-  /// principal do provider. Usado para abrir o diálogo de visualização a
-  /// partir de `_solicitacaoParaAbrirPendente`.
   Future<SolicitacaoMaterialModel?> buscarPorId(int id) async {
     try {
       return await _repo.buscarPorId(id);
@@ -127,11 +104,6 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     }
   }
 
-  /// Busca os logs de edição de uma solicitação específica, sem alterar o
-  /// estado principal do provider (`_logs`/`carregandoLogs`, usados pelo
-  /// diálogo de visualização). Usado pela página de Histórico de
-  /// Solicitações, que precisa buscar os logs de várias solicitações em
-  /// paralelo para montar a linha do tempo geral.
   Future<List<LogEdicaoSolicitacaoModel>> buscarLogsSemAlterarEstado(int solicitacaoId) async {
     try {
       return await _repo.listarLogs(solicitacaoId);
@@ -147,20 +119,24 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   bool get notificacoesConectadas => _notificacoesConectadas;
 
   http.Client? _sseClient;
+  HttpClient? _sseRawClient;
   StreamSubscription<String>? _sseSub;
   Timer? _reconnectTimer;
   Timer? _pollingTimer;
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 5;
-
-  // ─── SSE ──────────────────────────────────
+  int _sseGeracao = 0;
 
   Future<void> conectarNotificacoes() async {
     await _sseSub?.cancel();
     _sseSub = null;
     _reconnectTimer?.cancel();
-    _sseClient?.close();
+    _sseRawClient?.close(force: true);
+    _sseRawClient = null;
     _sseClient = null;
+
+    final meuId = ++_sseGeracao;
+    debugPrint('[FECHAR][Solicitações] ${DateTime.now().toIso8601String()} — abrindo nova conexão SSE, geração $meuId');
 
     try {
       final uri = Uri.parse('${ApiClient.baseUrl}/api/solicitacoes-material/notificacoes');
@@ -169,11 +145,13 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
       final token = ApiClient.token;
       if (token == null) {
         debugPrint('⚠️ [Solicitações] Token não disponível para SSE');
-        _scheduleReconnect();
+        _scheduleReconnect(meuId);
         return;
       }
 
-      _sseClient = http.Client();
+      final rawClient = HttpClient();
+      _sseRawClient = rawClient;
+      _sseClient = io_client.IOClient(rawClient);
 
       final req = http.Request('GET', uri)
         ..headers['Authorization'] = 'Bearer $token'
@@ -183,9 +161,13 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
 
       final streamedResp = await _sseClient!.send(req);
 
+      if (meuId != _sseGeracao) {
+        return;
+      }
+
       if (streamedResp.statusCode != 200) {
         debugPrint('❌ [Solicitações] SSE falhou com status ${streamedResp.statusCode}');
-        _scheduleReconnect();
+        _scheduleReconnect(meuId);
         return;
       }
 
@@ -211,15 +193,17 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
         _processarLinhaSSE,
         onError: (error) {
           debugPrint('❌ [Solicitações] Erro no SSE: $error');
+          if (meuId != _sseGeracao) return;
           _notificacoesConectadas = false;
           notifyListeners();
-          _scheduleReconnect();
+          _scheduleReconnect(meuId);
         },
         onDone: () {
           debugPrint('⚠️ [Solicitações] SSE stream encerrado');
+          if (meuId != _sseGeracao) return;
           _notificacoesConectadas = false;
           notifyListeners();
-          _scheduleReconnect();
+          _scheduleReconnect(meuId);
         },
         cancelOnError: true,
       );
@@ -228,9 +212,10 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
       _pollingTimer = null;
     } catch (e) {
       debugPrint('❌ [Solicitações] Erro ao conectar SSE: $e');
+      if (meuId != _sseGeracao) return;
       _notificacoesConectadas = false;
       notifyListeners();
-      _scheduleReconnect();
+      _scheduleReconnect(meuId);
     }
   }
 
@@ -286,9 +271,6 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   void _aoReceberNovaSolicitacao(Map<String, dynamic> data) {
     debugPrint('🔔 [Solicitações] Nova solicitação recebida: ${data['numeroOS']}');
 
-    // Guarda o payload para o banner flutuante (AppShell decide se e para
-    // qual role exibe). O backend já exclui o próprio autor do broadcast,
-    // então quem criou a solicitação nunca recebe este evento.
     try {
       _notificacaoPendente = NovaSolicitacaoNotificacao.fromJson(data);
     } catch (e) {
@@ -300,12 +282,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
       _carregarComDebounce();
       _persistirVisualizacao();
     } else {
-      // Ressincroniza com o servidor em vez de incrementar localmente: um
-      // contador puramente local (`_novasSolicitacoes++`) acumula para
-      // sempre e nunca se corrige — inclusive contando eventos de
-      // solicitações que já foram excluídas ou visualizadas por outro
-      // caminho. Buscar a contagem real do backend a cada evento evita o
-      // badge "travar" em um número que não bate com a realidade.
+
       _carregarContagemInicial();
       debugPrint('🔔 [Solicitações] Nova solicitação com página fechada — ressincronizando badge');
     }
@@ -315,8 +292,6 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
   void _aoReceberSolicitacaoAtualizada(Map<String, dynamic> data) {
     debugPrint('✏️ [Solicitações] Solicitação alterada: OS=${data['numeroOS']} acao=${data['acao']}');
 
-    // O backend já exclui o próprio autor da alteração do broadcast, então
-    // quem editou nunca recebe seu próprio evento aqui.
     try {
       _notificacaoAlteradaPendente = SolicitacaoAlteradaNotificacao.fromJson(data);
     } catch (e) {
@@ -329,7 +304,8 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _scheduleReconnect() {
+  void _scheduleReconnect(int meuId) {
+    if (meuId != _sseGeracao) return;
     if (_reconnectAttempts >= _maxReconnectAttempts) {
       debugPrint('⚠️ [Solicitações] Máximo de tentativas atingido. Usando polling.');
       _iniciarPolling();
@@ -365,14 +341,6 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     });
   }
 
-  // ─── Controle de página ────────────────────────────────────────────────────
-  // Chamado pelo AppShell (com base na rota atual, via GoRouterState), e não
-  // pelo initState/dispose da própria página. A página vive dentro de um
-  // StatefulShellBranch (IndexedStack), então seu dispose() NÃO é confiável
-  // para detectar "saí da tela" — o widget só fica escondido, nunca é
-  // destruído ao trocar de aba pela sidebar. O AppShell, por outro lado,
-  // reconstrói a cada mudança de rota e sabe com certeza qual tela está
-  // realmente visível (mesmo padrão já usado pro ChatProvider).
   void definirPaginaVisivel(bool visivel) {
     if (visivel == _paginaAberta) return;
     _paginaAberta = visivel;
@@ -380,22 +348,10 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     if (visivel) {
       if (_novasSolicitacoes != 0) {
         _novasSolicitacoes = 0;
-        // definirPaginaVisivel() é chamado de dentro do build() do AppShell
-        // (ver comentário na declaração deste método), então NUNCA podemos
-        // chamar notifyListeners() aqui de forma síncrona — isso dispara
-        // "setState()/markNeedsBuild() called during build", pois o Provider
-        // tentaria reconstruir o próprio InheritedProviderScope no meio da
-        // fase de build em andamento. Adiamos para depois do frame atual.
+
         WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
       }
-      // Persiste no banco só na PRIMEIRA vez que a página fica visível
-      // nesta sessão de app (ex: logo após login). Se o usuário navega
-      // para outra aba e volta para "Solicitações" depois, não repete a
-      // chamada — não há nada de novo pra marcar, já que qualquer
-      // solicitação criada enquanto a página estava aberta já é
-      // persistida pelo próprio handler de evento SSE (ver
-      // _processarLinhaSSE / linhas que chamam _persistirVisualizacao
-      // quando _paginaAberta é true no momento do evento).
+
       if (_visualizacaoPersistedaNaSessao) {
         debugPrint('✅ [Solicitações] Visualizações já persistidas nesta sessão — pulando');
       } else {
@@ -403,9 +359,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
         _persistirVisualizacao();
       }
     }
-    // Note: NÃO resetamos _visualizacaoPersistedaNaSessao ao sair da
-    // página. Ela só volta a false em resetarConexao() (logout/reset de
-    // sessão), que é o momento correto de "esquecer" que já persistiu.
+
   }
 
   Future<void> _persistirVisualizacao() async {
@@ -427,6 +381,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
 
   Future<void> resetarConexao() async {
     debugPrint('🔄 [Solicitações] Resetando conexão e estado do provider');
+    _sseGeracao++;
     _reconnectAttempts = 0;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
@@ -436,7 +391,8 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     _sseCarregarDebounce = null;
     await _sseSub?.cancel();
     _sseSub = null;
-    _sseClient?.close();
+    _sseRawClient?.close(force: true);
+    _sseRawClient = null;
     _sseClient = null;
 
     _notificacoesConectadas = false;
@@ -451,32 +407,32 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  @override
-  void dispose() {
-    debugPrint('🗑️ [Solicitações] Dispose do provider');
+  void encerrarConexaoSSE() {
+    debugPrint('[FECHAR][Solicitações] ${DateTime.now().toIso8601String()} — encerrarConexaoSSE chamado, geração $_sseGeracao -> ${_sseGeracao + 1}');
+    _sseGeracao++;
     _reconnectTimer?.cancel();
     _pollingTimer?.cancel();
     _sseCarregarDebounce?.cancel();
     _sseSub?.cancel();
-    _sseClient?.close();
+    _sseRawClient?.close(force: true);
+    _sseRawClient = null;
+    _sseClient = null;
+  }
+
+  @override
+  void dispose() {
+    debugPrint('🗑️ [Solicitações] Dispose do provider');
+    _sseGeracao++;
+    _reconnectTimer?.cancel();
+    _pollingTimer?.cancel();
+    _sseCarregarDebounce?.cancel();
+    _sseSub?.cancel();
+    _sseRawClient?.close(force: true);
+    _sseRawClient = null;
+    _sseClient = null;
     super.dispose();
   }
 
-  // ─── CRUD ──────────────────────────────────
-
-  // Sequência dedicada às chamadas em PRIMEIRO PLANO (spinner de tela
-  // cheia). É separada de _carregarSeq (que serve só para descartar
-  // resultados de dados desatualizados) porque misturar as duas em uma
-  // única contagem permitia que uma chamada de fundo (SSE) "roubasse" a
-  // sequência mais recente enquanto uma chamada em primeiro plano ainda
-  // estava em voo — quando a chamada em primeiro plano finalmente
-  // terminava, `minhaSeq != _carregarSeq` fazia o `finally` inteiro ser
-  // pulado, e _carregando ficava travado em `true` para sempre (loading
-  // infinito, só resolvido com refresh manual ou reabrindo o app).
-  //
-  // Com _carregandoSeq própria, toda chamada em primeiro plano sempre
-  // desliga o spinner ao terminar, independente de quantos carregar()
-  // de fundo tenham entrado e saído no meio do caminho.
   int _carregandoSeq = 0;
 
   Future<void> carregar({
@@ -486,11 +442,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     String? numeroOS,
     DateTime? dataInicio,
     DateTime? dataFim,
-    // Quando true (recargas disparadas por SSE em segundo plano), não
-    // ativa o estado de loading de tela cheia — mantém a lista atual
-    // visível e só troca quando os novos dados chegarem. Evita o efeito
-    // de "piscar para spinner" a cada evento recebido enquanto a página
-    // já está com dados carregados.
+
     bool emSegundoPlano = false,
   }) async {
     final minhaSeq = ++_carregarSeq;
@@ -519,15 +471,12 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
         dataInicio: dataInicio,
         dataFim: dataFim,
       );
-      // Se outra chamada mais recente já foi disparada enquanto esta estava
-      // em voo, descarta este resultado (está desatualizado) — isso só vale
-      // para os DADOS; o spinner é controlado separadamente abaixo.
+
       if (minhaSeq != _carregarSeq) return;
       _solicitacoes = resultado;
     } catch (e) {
       if (minhaSeq != _carregarSeq) return;
-      // Recarga silenciosa de fundo: não sobrescreve a tela com uma
-      // mensagem de erro por cima de dados que já estavam certos.
+
       if (!emSegundoPlano) {
         _erro = _mensagemErro(e, acao: 'carregar solicitações');
       }
@@ -535,12 +484,7 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
       if (minhaSeq == _carregarSeq) {
         notifyListeners();
       }
-      // Toda chamada em PRIMEIRO PLANO sempre desliga o próprio spinner ao
-      // terminar — não depende de _carregarSeq (compartilhado com as
-      // chamadas de fundo do SSE, que podem ter avançado no meio tempo).
-      // Isso garante que o spinner nunca fica preso mesmo se um evento SSE
-      // disparar carregar(emSegundoPlano:true) enquanto esta chamada ainda
-      // estava em voo.
+
       if (minhaCarregandoSeq != null && minhaCarregandoSeq == _carregandoSeq) {
         _carregando = false;
         notifyListeners();
@@ -615,11 +559,6 @@ class SolicitacaoMaterialProvider extends ChangeNotifier {
     }
   }
 
-  // Encontra a solicitação (na lista local) que contém o item/adicional
-  // informado, para permitir recarregá-la pontualmente do backend logo após
-  // qualquer alteração — evitando que a lista em memória fique com dados
-  // obsoletos (número/quantidade antigos, itens já excluídos etc.) até a
-  // próxima chamada de carregar().
   Future<void> _resincronizarSolicitacaoDoItem({int? itemId, int? adicionalId}) async {
     final idx = _solicitacoes.indexWhere((s) =>
         (itemId != null && s.itens.any((i) => i.id == itemId)) ||

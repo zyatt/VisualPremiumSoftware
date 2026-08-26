@@ -1,8 +1,3 @@
-// solicitacao_material_model.dart
-
-// ─── Notificação em tempo real (payload do SSE 'nova_solicitacao') ───────────
-// Não é o mesmo que SolicitacaoMaterialModel: é só o resumo enviado no evento,
-// usado para exibir o banner flutuante assim que a solicitação é criada.
 class NovaSolicitacaoNotificacao {
   final int id;
   final String numeroOS;
@@ -92,7 +87,6 @@ class SolicitacaoAlteradaNotificacao {
   }
 }
 
-// ─── Item original da solicitação ────────────────────────────────────────────
 class ItemSolicitacaoModel {
   final int id;
   final int solicitacaoId;
@@ -125,10 +119,6 @@ class ItemSolicitacaoModel {
   final DateTime? editadoEm;
   final String? editadoPorNome;
 
-  /// Rótulo de dimensões do material a ser exibido ao lado do nome.
-  /// Regra: se houver [materialMedida] preenchida, mostra apenas a medida
-  /// (mesmo quando também há largura/comprimento, para evitar repetição).
-  /// Caso contrário, se houver largura e comprimento, mostra "LxCM".
   String? get medidaOuDimensao {
     final temMedida = materialMedida != null && materialMedida!.trim().isNotEmpty;
     if (temMedida) return materialMedida!.trim();
@@ -145,15 +135,12 @@ class ItemSolicitacaoModel {
     return null;
   }
 
-  /// Status atual do material: 'PENDENTE', 'COMPRADO' ou 'ESTOQUE'.
   String get statusCompra {
     if (estoque)  return 'ESTOQUE';
     if (comprado) return 'COMPRADO';
     return 'PENDENTE';
   }
 
-  /// true se o material já está resolvido (comprado OU retirado do estoque) —
-  /// usado na regra de "pode finalizar a solicitação".
   bool get resolvido => comprado || estoque;
 
   const ItemSolicitacaoModel({
@@ -270,8 +257,6 @@ class ItemSolicitacaoModel {
   }
 }
 
-/// Formata um número: sem casas decimais se for inteiro, senão até 2 casas
-/// (removendo zeros à direita desnecessários). Ex: 5 -> "5", 1.20 -> "1.2".
 String _formatarNumero(double valor) {
   if (valor % 1 == 0) return valor.toStringAsFixed(0);
   var s = valor.toStringAsFixed(2);
@@ -280,7 +265,6 @@ String _formatarNumero(double valor) {
   return s;
 }
 
-// ─── Adicional ────────────────────────────────────────────────────────────────
 class AdicionalSolicitacaoModel {
   final int id;
   final int solicitacaoId;
@@ -315,10 +299,6 @@ class AdicionalSolicitacaoModel {
   final DateTime? editadoEm;
   final String? editadoPorNome;
 
-  /// Rótulo de dimensões do material a ser exibido ao lado do nome.
-  /// Regra: se houver [materialMedida] preenchida, mostra apenas a medida
-  /// (mesmo quando também há largura/comprimento, para evitar repetição).
-  /// Caso contrário, se houver largura e comprimento, mostra "LxCM".
   String? get medidaOuDimensao {
     final temMedida = materialMedida != null && materialMedida!.trim().isNotEmpty;
     if (temMedida) return materialMedida!.trim();
@@ -335,15 +315,12 @@ class AdicionalSolicitacaoModel {
     return null;
   }
 
-  /// Status atual do material: 'PENDENTE', 'COMPRADO' ou 'ESTOQUE'.
   String get statusCompra {
     if (estoque)  return 'ESTOQUE';
     if (comprado) return 'COMPRADO';
     return 'PENDENTE';
   }
 
-  /// true se o material já está resolvido (comprado OU retirado do estoque) —
-  /// usado na regra de "pode finalizar a solicitação".
   bool get resolvido => comprado || estoque;
 
   const AdicionalSolicitacaoModel({
@@ -466,7 +443,6 @@ class AdicionalSolicitacaoModel {
   }
 }
 
-// ─── Solicitação principal ────────────────────────────────────────────────────
 class SolicitacaoMaterialModel {
   final int id;
   final String numeroOS;
@@ -497,12 +473,8 @@ class SolicitacaoMaterialModel {
     required this.adicionais,
   });
 
-  /// Alias para criadoEm — data em que a solicitação foi aberta.
   DateTime get dataSolicitacao => criadoEm;
 
-  /// Retorna true se todos os materiais (itens + adicionais) já estão
-  /// resolvidos — comprados OU retirados do estoque. É essa a condição usada
-  /// para permitir finalizar a solicitação.
   bool get todosComprados {
     final todos = [...itens, ...adicionais];
     if (todos.isEmpty) return false;
@@ -510,10 +482,8 @@ class SolicitacaoMaterialModel {
         adicionais.every((e) => e.resolvido);
   }
 
-  /// Quantidade total de materiais (itens + adicionais).
   int get totalMateriais => itens.length + adicionais.length;
 
-  /// Quantidade de materiais marcados como comprado (não inclui estoque).
   int get totalComprados {
     int c = 0;
     for (final i in itens)      { if (i.comprado) c++; }
@@ -521,7 +491,6 @@ class SolicitacaoMaterialModel {
     return c;
   }
 
-  /// Quantidade de materiais marcados como retirados do estoque.
   int get totalEstoque {
     int c = 0;
     for (final i in itens)      { if (i.estoque) c++; }
@@ -529,8 +498,9 @@ class SolicitacaoMaterialModel {
     return c;
   }
 
-  /// Quantidade de materiais já resolvidos (comprados + estoque).
   int get totalResolvidos => totalComprados + totalEstoque;
+
+  int get totalPendentes => totalMateriais - totalResolvidos;
 
   factory SolicitacaoMaterialModel.fromJson(Map<String, dynamic> json) {
     return SolicitacaoMaterialModel(
@@ -575,7 +545,6 @@ class SolicitacaoMaterialModel {
   }
 }
 
-// ─── Log de edição ────────────────────────────────────────────────────────────
 class LogEdicaoSolicitacaoModel {
   final int id;
   final int solicitacaoId;
@@ -584,8 +553,6 @@ class LogEdicaoSolicitacaoModel {
   final Map<String, dynamic> antes;
   final Map<String, dynamic> depois;
   final DateTime editadoEm;
-  /// Contexto opcional: nome do material editado, quando o log se refere a
-  /// um item/adicional em vez dos dados do cabeçalho da solicitação.
   final String? item;
 
   const LogEdicaoSolicitacaoModel({

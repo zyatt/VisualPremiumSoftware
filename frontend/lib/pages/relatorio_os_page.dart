@@ -13,9 +13,6 @@ import '../repositories/estoque_repository.dart';
 import '../theme/app_theme.dart';
 import 'controle_estoque_page.dart' show formatarMedidaOuDimensoes, formatarUnidadeExibicao;
 
-/// Envolve `formatarUnidadeExibicao` para pluralizar corretamente quando a
-/// unidade for "Unidade": 1 -> "Unidade", diferente de 1 -> "Unidades".
-/// Demais unidades (m², ml, m, g, etc.) são retornadas como já vêm.
 String formatarUnidadeComPlural(String? unidade, double quantidade) {
   final base = formatarUnidadeExibicao(unidade);
   if (base.trim().toLowerCase() == 'unidade') {
@@ -24,8 +21,6 @@ String formatarUnidadeComPlural(String? unidade, double quantidade) {
   return base;
 }
 
-/// Formata um valor monetário arredondado para 2 casas decimais,
-/// aplicando separador de milhar (ponto) na parte inteira.
 String _brl(double v) {
   if (v == 0) return '—';
   final s2 = v.toStringAsFixed(2);
@@ -43,12 +38,11 @@ String _brl(double v) {
   return 'R\$ ${buffer.toString()},$decFinal';
 }
 
-/// Formata uma quantidade com separador de milhar (ponto) na parte inteira
-/// e vírgula como separador decimal (padrão brasileiro).
-/// Ex.: 1000 → "1.000"; 3.696 → "3,696"; 25 → "25".
 String _formatarQtd(double v) {
   final bool isInteiro = v == v.truncateToDouble();
-  final String bruto = isInteiro ? v.toStringAsFixed(0) : v.toString();
+  final String bruto = isInteiro
+      ? v.toStringAsFixed(0)
+      : v.toStringAsFixed(4).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
 
   final bool negativo = bruto.startsWith('-');
   final String semSinal = negativo ? bruto.substring(1) : bruto;
@@ -78,8 +72,6 @@ String _fmtData(DateTime? dt) {
       '${dt.year}';
 }
 
-/// Remove sufixos internos usados para distinguir OS textuais no banco:
-/// #OC... (ordem de compra), #S... (saída global), #E... (entrada global).
 String _limparNumeroOS(String numeroOS) {
   final match = RegExp(r'#(OC|S|E)\d*').firstMatch(numeroOS);
   if (match != null && match.start > 0) {
@@ -95,79 +87,108 @@ String _tituloOS(String numeroOS) {
 
 const _corFechada = Color(0xFF4CAF50);
 
-/// Calcula o custo líquido de uma OS: saídas - devoluções, agrupado por material.
-/// Usa o preço da saída como referência. Entradas de materiais sem saída são ignoradas.
-/// Processa em ordem cronológica: apenas entradas POSTERIORES à primeira saída
-/// do material são contadas como devolução (evita somar entradas anteriores à saída).
-///
-/// Entradas geradas por Ordem de Compra (observacao ou descricaoItem contendo
-/// "via OC") são reposição de estoque — NÃO são devoluções — e por isso são
-/// ignoradas no cálculo do custo líquido.
-///
-/// Entradas de RETALHO (ehRetalhoDeOrigem) são um caso especial: a sobra de
-/// uma saída é registrada como entrada de OUTRO material (ex.: saiu "CHAPA"
-/// em UNIDADE, voltou "CHAPA - RETALHO" em M²). Como as quantidades estão em
-/// unidades diferentes, o valor (R$) dessa entrada é abatido diretamente do
-/// total do material de origem (materialOrigemId), em vez de comparar
-/// quantidades.
 double _totalLiquido(List<MovimentacaoModel> movimentacoes) {
-  // materialId → { preco, qtdSaida, qtdEntrada, valorRetalho }
-  final porMaterial = <int, Map<String, double>>{};
+  // Agrupa por materialId APENAS (sem distinguir modo un/m2), na MESMA
+  // granularidade usada em relatorioOS.service.js / gastos_categoria_service.js,
+  // para que o netting de devolução/retalho e o total batam com o backend.
+  // (Antes agrupava por '${materialId}::${modo}', separando saídas do mesmo
+  // material em grupos diferentes sempre que uma tinha larguraUsada/
+  // comprimentoUsado preenchidos e outra não — a devolução de um grupo nunca
+  // compensava a saída do outro.)
+  final gruposPorChave = <String, List<MovimentacaoModel>>{};
+  final valorRetalhoPorChave = <String, double>{};
+  final ultimaChavePorMaterial = <int, String>{};
 
-  // Ordena por criadoEm ascendente (mais antiga primeiro)
+  // Regra FINANCEIRA (idêntica ao backend): sempre quantidade bruta ×
+  // (precoUnitario>0 ? precoUnitario : precoM2), nunca área × precoM2,
+  // independentemente de a saída ter dimensões preenchidas ou não.
+  double precoFinanceiro(MovimentacaoModel m) {
+    final pu = m.precoUnitario ?? 0.0;
+    final pm2 = m.precoM2 ?? 0.0;
+    return pu > 0 ? pu : pm2;
+  }
+
   final ordenadas = [...movimentacoes]
-    ..sort((a, b) {
-      return a.criadoEm.compareTo(b.criadoEm);
-    });
+    ..sort((a, b) => a.criadoEm.compareTo(b.criadoEm));
 
   for (final m in ordenadas) {
-    final pu = m.precoUnitario ?? 0.0;
-    final pm = m.precoM2 ?? 0.0;
-    final p  = pu > 0 ? pu : (pm > 0 ? pm : 0.0);
+    final chave = '${m.materialId}';
 
     if (m.tipo == 'SAIDA') {
-      porMaterial.putIfAbsent(
-        m.materialId,
-        () => {'preco': p, 'qtdSaida': 0.0, 'qtdEntrada': 0.0, 'valorRetalho': 0.0},
-      );
-      final entry = porMaterial[m.materialId]!;
-      if (p > entry['preco']!) entry['preco'] = p;
-      entry['qtdSaida'] = entry['qtdSaida']! + m.quantidade;
+      gruposPorChave.putIfAbsent(chave, () => []).add(m);
+      ultimaChavePorMaterial[m.materialId] = chave;
     } else if (m.tipo == 'ENTRADA') {
-      // Entrada de retalho vinculada a um material de origem: abate o VALOR
-      // (não a quantidade, pois unidade/material são diferentes) do total
-      // da saída original, desde que essa saída exista nesta OS.
-      if (m.materialOrigemId != null &&
-          porMaterial.containsKey(m.materialOrigemId)) {
-        final entry = porMaterial[m.materialOrigemId]!;
-        entry['valorRetalho'] = entry['valorRetalho']! + p * m.quantidade;
+      if (m.materialOrigemId != null) {
+        final chaveOrigem = ultimaChavePorMaterial[m.materialOrigemId];
+        if (chaveOrigem != null && gruposPorChave.containsKey(chaveOrigem)) {
+          valorRetalhoPorChave[chaveOrigem] =
+              (valorRetalhoPorChave[chaveOrigem] ?? 0.0) + precoFinanceiro(m) * m.quantidade;
+        }
         continue;
       }
 
-      // Entradas via OC são reposição de estoque, não devoluções — ignorar.
-      final isEntradaOC =
-          (m.observacao?.contains('via OC') ?? false);
+      final isEntradaOC = (m.observacao?.contains('via OC') ?? false);
       if (isEntradaOC) continue;
 
-      // Só conta como devolução se já houve ao menos uma saída deste material
-      if (porMaterial.containsKey(m.materialId)) {
-        porMaterial[m.materialId]!['qtdEntrada'] =
-            porMaterial[m.materialId]!['qtdEntrada']! + m.quantidade;
+      if (gruposPorChave.containsKey(chave)) {
+        gruposPorChave[chave]!.add(m);
       }
     }
   }
 
-  return porMaterial.values.fold(0.0, (acc, e) {
-    final qtdLiquida   = (e['qtdSaida']! - e['qtdEntrada']!).clamp(0.0, double.infinity);
-    final valorBruto   = e['preco']! * qtdLiquida;
-    final valorLiquido = (valorBruto - e['valorRetalho']!).clamp(0.0, double.infinity);
-    return acc + valorLiquido;
-  });
-}
+  double total = 0.0;
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Página principal — lista de OS fechadas
-// ═════════════════════════════════════════════════════════════════════════════
+  for (final entryGrupo in gruposPorChave.entries) {
+    final chave = entryGrupo.key;
+    final movs  = entryGrupo.value;
+
+    // Primeira passagem: soma a devolução total (entradas não-OC, sem
+    // materialOrigemId, ocorridas após a primeira saída) para descontar
+    // das saídas mais recentes primeiro.
+    bool primeiroSaidaVisto = false;
+    double qtdDevolucaoRestante = 0.0;
+    for (final mov in movs) {
+      if (mov.tipo == 'ENTRADA' && primeiroSaidaVisto) {
+        qtdDevolucaoRestante += mov.quantidade;
+      }
+      if (mov.tipo == 'SAIDA') primeiroSaidaVisto = true;
+    }
+
+    // Segunda passagem: valora cada SAÍDA pela regra FINANCEIRA (quantidade
+    // bruta × pu/pm2 — nunca área × precoM2), descontando a devolução da(s)
+    // saída(s) mais recente(s) primeiro.
+    final saidasLiquidas = <double>[];
+    for (final mov in movs) {
+      if (mov.tipo != 'SAIDA') continue;
+      final p = precoFinanceiro(mov);
+      final qtd = mov.quantidade;
+      if (qtd <= 0) continue;
+
+      final devDesc = qtd < qtdDevolucaoRestante ? qtd : qtdDevolucaoRestante;
+      qtdDevolucaoRestante -= devDesc;
+      final qtdLiquida = qtd - devDesc;
+
+      if (qtdLiquida > 0) {
+        saidasLiquidas.add(p * qtdLiquida);
+      }
+    }
+
+    // Desconta o valor do retalho reaproveitado, começando pelas saídas
+    // mais recentes.
+    double valorRetalhoRestante = valorRetalhoPorChave[chave] ?? 0.0;
+    for (int i = saidasLiquidas.length - 1; i >= 0 && valorRetalhoRestante > 0; i--) {
+      final desconto = saidasLiquidas[i] < valorRetalhoRestante
+          ? saidasLiquidas[i]
+          : valorRetalhoRestante;
+      saidasLiquidas[i] -= desconto;
+      valorRetalhoRestante -= desconto;
+    }
+
+    total += saidasLiquidas.fold(0.0, (acc, v) => acc + (v > 0 ? v : 0.0));
+  }
+
+  return total;
+}
 
 class RelatorioOSPage extends StatefulWidget {
   const RelatorioOSPage({super.key});
@@ -176,7 +197,6 @@ class RelatorioOSPage extends StatefulWidget {
   State<RelatorioOSPage> createState() => _RelatorioOSPageState();
 }
 
-// Formatter reutilizado do estoque: maiúsculas sem acentos
 class _UpperCaseFormatter extends TextInputFormatter {
   static final _acentos = {
     'À':'A','Á':'A','Â':'A','Ã':'A','à':'a','á':'a','â':'a','ã':'a',
@@ -201,9 +221,6 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FORMATTER: MEDIDA — vírgula→ponto, sem pontos duplos, resultado em minúsculo
-// ─────────────────────────────────────────────────────────────────────────────
 class _MedidaFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -214,14 +231,11 @@ class _MedidaFormatter extends TextInputFormatter {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FORMATTER: ESPESSURA — só dígitos e ponto, vírgula→ponto, sem pontos duplos
-// ─────────────────────────────────────────────────────────────────────────────
 class _EspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
       TextEditingValue o, TextEditingValue n) {
-    // Remove tudo que não seja dígito ou ponto/vírgula, depois normaliza
+
     var t = n.text.replaceAll(',', '.').replaceAll(RegExp(r'[^0-9.]'), '').replaceAll(RegExp(r'\.{2,}'), '.');
     final offset = n.selection.baseOffset.clamp(0, t.length);
     return n.copyWith(text: t, selection: TextSelection.collapsed(offset: offset));
@@ -229,9 +243,9 @@ class _EspessuraFormatter extends TextInputFormatter {
 }
 
 class _RelatorioOSPageState extends State<RelatorioOSPage> {
-  // ── Controllers ───────────────────────────────────────────────────────────
-  final _buscaOSCtrl       = TextEditingController(); // busca por nº OS
-  final _buscaClienteCtrl  = TextEditingController(); // busca por cliente (local)
+
+  final _buscaOSCtrl       = TextEditingController();
+  final _buscaClienteCtrl  = TextEditingController();
   final _materialNomeCtrl  = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl        = TextEditingController();
@@ -240,7 +254,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   final _espessuraCtrl     = TextEditingController();
   Timer? _debounce;
 
-  // ── Filtro de período ─────────────────────────────────────────────────────
   DateTime? _dataInicio;
   DateTime? _dataFim;
 
@@ -295,7 +308,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   }
 
   void _onChanged(String _) {
-    setState(() {}); // atualiza sufixo "mm" e outros elementos reativos
+    setState(() {});
     _debounce?.cancel();
     _debounce = Timer(
       const Duration(milliseconds: 400),
@@ -304,6 +317,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   }
 
   void _limparFiltrosMaterial() {
+    _buscaOSCtrl.clear();
     _materialNomeCtrl.clear();
     _identificadorCtrl.clear();
     _medidaCtrl.clear();
@@ -331,6 +345,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   }
 
   bool get _temFiltroMaterial =>
+      _buscaOSCtrl.text.isNotEmpty ||
       _materialNomeCtrl.text.isNotEmpty ||
       _identificadorCtrl.text.isNotEmpty ||
       _medidaCtrl.text.isNotEmpty ||
@@ -360,7 +375,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ───────────────────────────────────────────
+
             Row(
               children: [
                 Column(
@@ -399,7 +414,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
               ],
             ),
             const SizedBox(height: 20),
-            // ── Filtro linha 1: busca OS + nome material + botão limpar
+
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -442,7 +457,7 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     onSubmitted: (_) => _aplicarFiltros(),
                     decoration: InputDecoration(
                       hintText: 'Nome do material',
-                      prefixIcon: Icon(Icons.filter_alt_outlined,
+                      prefixIcon: Icon(Icons.inventory_2_outlined,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
                     ),
@@ -469,11 +484,9 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
             ),
             const SizedBox(height: 10),
 
-            // ── Filtro linha 2: identificador + medida + comprimento + largura + espessura
             Row(
               children: [
                 Expanded(
-                  flex: 3,
                   child: TextField(
                     controller: _identificadorCtrl,
                     onChanged: _onChanged,
@@ -490,7 +503,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  flex: 3,
                   child: TextField(
                     controller: _medidaCtrl,
                     onChanged: _onChanged,
@@ -506,7 +518,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  flex: 2,
                   child: TextField(
                     controller: _comprimentoCtrl,
                     onChanged: _onChanged,
@@ -524,7 +535,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  flex: 2,
                   child: TextField(
                     controller: _larguraCtrl,
                     onChanged: _onChanged,
@@ -542,7 +552,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  flex: 2,
                   child: TextField(
                     controller: _espessuraCtrl,
                     onChanged: _onChanged,
@@ -562,7 +571,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
             ),
             const SizedBox(height: 16),
 
-            // ── Filtro linha 3: período de fechamento ────────────────────────
             Row(
               children: [
                 _DatePickerField(
@@ -599,7 +607,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
             ),
             const SizedBox(height: 16),
 
-            // ── Barra de resumo: contagem + total geral filtrado ─────────────
             if (!provider.carregando && provider.erro == null && relatoriosFiltrados.isNotEmpty)
               Builder(
                 builder: (_) {
@@ -652,7 +659,6 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                 },
               ),
 
-            // ── Conteúdo ────────────────────────────────────────────
             Expanded(
               child: provider.carregando
                   ? const Center(
@@ -746,18 +752,177 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
   }
 }
 
-// ─── Helper: verifica se a OS é numérica (mesmo critério do controle) ─────────
-
 bool _osEhNumerica(String numeroOS) => int.tryParse(numeroOS.trim()) != null;
 
-/// Classifica uma OS textual em uma das categorias grandes exibidas dentro
-/// de "Empresa": "EMPRESA-(DATA)" → EMPRESA, "INVESTIMENTO-(DATA)" →
-/// INVESTIMENTO, qualquer outra coisa → OUTROS.
 String _categoriaEmpresa(String numeroOS) {
   final upper = numeroOS.trim().toUpperCase();
   if (upper.startsWith('EMPRESA-') || upper == 'EMPRESA') return 'EMPRESA';
   if (upper.startsWith('INVESTIMENTO-') || upper == 'INVESTIMENTO') return 'INVESTIMENTO';
   return 'OUTROS';
+}
+
+class _BarraPaginacaoOS extends StatelessWidget {
+  final int paginaAtual;
+  final int totalPaginas;
+  final int totalItens;
+  final int itensPorPagina;
+  final void Function(int) onPaginaChanged;
+
+  const _BarraPaginacaoOS({
+    required this.paginaAtual,
+    required this.totalPaginas,
+    required this.totalItens,
+    required this.itensPorPagina,
+    required this.onPaginaChanged,
+  });
+
+  List<int> _paginas() {
+    if (totalPaginas <= 7) return List.generate(totalPaginas, (i) => i);
+    final Set<int> vis = {0, totalPaginas - 1, paginaAtual};
+    if (paginaAtual > 0) vis.add(paginaAtual - 1);
+    if (paginaAtual < totalPaginas - 1) vis.add(paginaAtual + 1);
+    final sorted = vis.toList()..sort();
+    final List<int> result = [];
+    for (int i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.add(-1);
+      result.add(sorted[i]);
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inicio  = paginaAtual * itensPorPagina + 1;
+    final fim     = ((paginaAtual + 1) * itensPorPagina).clamp(0, totalItens);
+    final paginas = _paginas();
+
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'Exibindo $inicio–$fim de $totalItens OS',
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _BotaoPaginaOS(
+                icon: Icons.chevron_left,
+                tooltip: 'Página anterior',
+                enabled: paginaAtual > 0,
+                onTap: () => onPaginaChanged(paginaAtual - 1),
+              ),
+              SizedBox(width: 4),
+              for (final p in paginas) ...[
+                if (p == -1)
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Text('…', style: TextStyle(color: Theme.of(context).colorScheme.outline)),
+                  )
+                else
+                  _BotaoNumeroPaginaOS(
+                    numero: p,
+                    ativa: p == paginaAtual,
+                    onTap: () => onPaginaChanged(p),
+                  ),
+                const SizedBox(width: 4),
+              ],
+              _BotaoPaginaOS(
+                icon: Icons.chevron_right,
+                tooltip: 'Próxima página',
+                enabled: paginaAtual < totalPaginas - 1,
+                onTap: () => onPaginaChanged(paginaAtual + 1),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BotaoPaginaOS extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _BotaoPaginaOS({
+    required this.icon,
+    required this.tooltip,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: enabled ? Theme.of(context).colorScheme.outlineVariant : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
+            ),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BotaoNumeroPaginaOS extends StatelessWidget {
+  final int numero;
+  final bool ativa;
+  final VoidCallback onTap;
+
+  const _BotaoNumeroPaginaOS({
+    required this.numero,
+    required this.ativa,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: ativa ? null : onTap,
+      mouseCursor: ativa ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: ativa ? AppTheme.primary : Colors.transparent,
+          border: Border.all(
+            color: ativa ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '${numero + 1}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
+            color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _CategoriaEmpresaInfo {
@@ -774,8 +939,6 @@ final _categoriasEmpresa = <_CategoriaEmpresaInfo>[
   _CategoriaEmpresaInfo('OUTROS', 'Outros', Icons.category_outlined, const Color(0xFF6D4C41)),
 ];
 
-// ─── Grid de OS (separado em numéricas × descritivas) ────────────────────────
-
 class _RelatorioOSGrid extends StatefulWidget {
   final List<RelacaoOSModel> relatorios;
   final void Function(RelacaoOSModel) onTap;
@@ -790,14 +953,15 @@ class _RelatorioOSGrid extends StatefulWidget {
 }
 
 class _RelatorioOSGridState extends State<_RelatorioOSGrid> {
-  /// Categoria de "Empresa" atualmente aberta (null = mostra os 3 cards grandes).
-  String? _categoriaAberta;
 
-  // Chaves usadas para rolar automaticamente a tela: ao expandir uma
-  // categoria, rola até o conteúdo expandido (mini-cards); ao recolher,
-  // rola de volta até o topo dos 3 cards grandes.
+  static const int _itensPorPagina = 60;
+
+  String? _categoriaAberta;
+  int _paginaAtual = 0;
+
   final GlobalKey _cardsCategoriaKey = GlobalKey();
   final GlobalKey _conteudoExpandidoKey = GlobalKey();
+  final GlobalKey _topoListaKey = GlobalKey();
 
   void _alternarCategoria(String chave, bool estaSelecionada) {
     final abrindo = !estaSelecionada;
@@ -811,6 +975,21 @@ class _RelatorioOSGridState extends State<_RelatorioOSGrid> {
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeInOut,
           alignment: abrindo ? 1.0 : 0.0,
+        );
+      }
+    });
+  }
+
+  void _irParaPagina(int p) {
+    setState(() => _paginaAtual = p);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _topoListaKey.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          alignment: 0.0,
         );
       }
     });
@@ -857,8 +1036,7 @@ class _RelatorioOSGridState extends State<_RelatorioOSGrid> {
   @override
   void didUpdateWidget(covariant _RelatorioOSGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Se a categoria aberta deixou de ter itens nos dados atuais (ex.: a
-    // OS dela foi revertida/excluída), volta para os 3 cards grandes.
+
     if (_categoriaAberta != null) {
       final aindaExiste = widget.relatorios.any((r) =>
           !_osEhNumerica(_limparNumeroOS(r.numeroOS)) &&
@@ -866,6 +1044,12 @@ class _RelatorioOSGridState extends State<_RelatorioOSGrid> {
       if (!aindaExiste) {
         _categoriaAberta = null;
       }
+    }
+
+    final chavesAntigas = oldWidget.relatorios.map((r) => r.numeroOS).join('|');
+    final chavesNovas   = widget.relatorios.map((r) => r.numeroOS).join('|');
+    if (chavesAntigas != chavesNovas) {
+      _paginaAtual = 0;
     }
   }
 
@@ -885,7 +1069,6 @@ class _RelatorioOSGridState extends State<_RelatorioOSGrid> {
       childAspectRatio: 1,
     );
 
-    // Agrupa as OS textuais por categoria (EMPRESA / INVESTIMENTO / OUTROS).
     final porCategoria = <String, List<RelacaoOSModel>>{
       for (final c in _categoriasEmpresa) c.chave: <RelacaoOSModel>[],
     };
@@ -899,109 +1082,131 @@ class _RelatorioOSGridState extends State<_RelatorioOSGrid> {
     final itensCategoria =
         _categoriaAberta == null ? const <RelacaoOSModel>[] : porCategoria[_categoriaAberta]!;
 
-    return CustomScrollView(
-      slivers: [
-        if (numericas.isNotEmpty) ...[
-          _cabecalho(context, 'Ordens de Serviço', numericas.length),
-          SliverGrid(
-            delegate: SliverChildBuilderDelegate(
-              (ctx, i) {
-                final rel = numericas[i];
-                return _RelatorioOSCard(
-                  relatorio: rel,
-                  onTap: () => widget.onTap(rel),
-                );
-              },
-              childCount: numericas.length,
-            ),
-            gridDelegate: gridDelegate,
-          ),
-        ],
-        if (textuais.isNotEmpty) ...[
-          _cabecalho(context, 'Outros', textuais.length),
-          SliverToBoxAdapter(
-            child: LayoutBuilder(
-              builder: (ctx, constraints) {
-                final largura = constraints.maxWidth;
-                final colunas = largura >= 640 ? 3 : (largura >= 420 ? 2 : 1);
-                return Container(
-                  key: _cardsCategoriaKey,
-                  child: GridView.count(
-                    crossAxisCount: colunas,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    childAspectRatio: 1.9,
-                    children: _categoriasEmpresa.map((cat) {
-                      final itens = porCategoria[cat.chave]!;
-                      final selecionado = _categoriaAberta == cat.chave;
-                      return _CategoriaEmpresaCard(
-                        info: cat,
-                        count: itens.length,
-                        selecionado: selecionado,
-                        onTap: itens.isEmpty
-                            ? null
-                            : () => _alternarCategoria(cat.chave, selecionado),
+    final totalPaginas = (numericas.length / _itensPorPagina).ceil().clamp(1, 999999999);
+    final paginaAtual  = _paginaAtual.clamp(0, totalPaginas - 1);
+    final inicioIdx    = paginaAtual * _itensPorPagina;
+    final fimIdx       = (inicioIdx + _itensPorPagina).clamp(0, numericas.length);
+    final numericasPagina = numericas.isEmpty
+        ? const <RelacaoOSModel>[]
+        : numericas.sublist(inicioIdx, fimIdx);
+
+    return Column(
+      children: [
+        Expanded(
+          child: CustomScrollView(
+            slivers: [
+              if (textuais.isNotEmpty) ...[
+                _cabecalho(context, 'Outros', textuais.length),
+                SliverToBoxAdapter(
+                  child: LayoutBuilder(
+                    builder: (ctx, constraints) {
+                      final largura = constraints.maxWidth;
+                      final colunas = largura >= 640 ? 3 : (largura >= 420 ? 2 : 1);
+                      return Container(
+                        key: _cardsCategoriaKey,
+                        child: GridView.count(
+                          crossAxisCount: colunas,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: 1.9,
+                          children: _categoriasEmpresa.map((cat) {
+                            final itens = porCategoria[cat.chave]!;
+                            final selecionado = _categoriaAberta == cat.chave;
+                            return _CategoriaEmpresaCard(
+                              info: cat,
+                              count: itens.length,
+                              selecionado: selecionado,
+                              onTap: itens.isEmpty
+                                  ? null
+                                  : () => _alternarCategoria(cat.chave, selecionado),
+                            );
+                          }).toList(),
+                        ),
                       );
-                    }).toList(),
+                    },
                   ),
-                );
-              },
-            ),
-          ),
-          if (_categoriaAberta != null) ...[
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 16, bottom: 4),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 3,
-                      height: 14,
-                      decoration: BoxDecoration(
-                        color: categoriaInfo!.cor,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'OS em ${categoriaInfo.label}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
                 ),
-              ),
-            ),
-            SliverGrid(
-              delegate: SliverChildBuilderDelegate(
-                (ctx, i) {
-                  final rel = itensCategoria[i];
-                  final card = _RelatorioOSCard(
-                    relatorio: rel,
-                    onTap: () => widget.onTap(rel),
-                  );
-                  // A chave fica no primeiro card da linha para que o auto-scroll
-                  // role até a linha de mini-cards realmente aparecer, não só o rótulo.
-                  return i == 0 ? KeyedSubtree(key: _conteudoExpandidoKey, child: card) : card;
-                },
-                childCount: itensCategoria.length,
-              ),
-              gridDelegate: gridDelegate,
-            ),
-          ],
+                if (_categoriaAberta != null) ...[
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 16, bottom: 4),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 3,
+                            height: 14,
+                            decoration: BoxDecoration(
+                              color: categoriaInfo!.cor,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'OS em ${categoriaInfo.label}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  SliverGrid(
+                    delegate: SliverChildBuilderDelegate(
+                      (ctx, i) {
+                        final rel = itensCategoria[i];
+                        final card = _RelatorioOSCard(
+                          relatorio: rel,
+                          onTap: () => widget.onTap(rel),
+                        );
+
+                        return i == 0 ? KeyedSubtree(key: _conteudoExpandidoKey, child: card) : card;
+                      },
+                      childCount: itensCategoria.length,
+                    ),
+                    gridDelegate: gridDelegate,
+                  ),
+                ],
+              ],
+              if (numericas.isNotEmpty) ...[
+                SliverToBoxAdapter(child: SizedBox(key: _topoListaKey)),
+                _cabecalho(context, 'Ordens de Serviço', numericas.length),
+                SliverGrid(
+                  delegate: SliverChildBuilderDelegate(
+                    (ctx, i) {
+                      final rel = numericasPagina[i];
+                      return _RelatorioOSCard(
+                        relatorio: rel,
+                        onTap: () => widget.onTap(rel),
+                      );
+                    },
+                    childCount: numericasPagina.length,
+                  ),
+                  gridDelegate: gridDelegate,
+                ),
+              ],
+              const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            ],
+          ),
+        ),
+        if (numericas.isNotEmpty && totalPaginas > 1) ...[
+          const SizedBox(height: 12),
+          _BarraPaginacaoOS(
+            paginaAtual:     paginaAtual,
+            totalPaginas:    totalPaginas,
+            totalItens:      numericas.length,
+            itensPorPagina:  _itensPorPagina,
+            onPaginaChanged: _irParaPagina,
+          ),
         ],
-        const SliverToBoxAdapter(child: SizedBox(height: 16)),
       ],
     );
   }
 }
-
-// ─── Card grande de categoria (Empresa / Investimento / Outros) ──────────────
 
 class _CategoriaEmpresaCard extends StatelessWidget {
   final _CategoriaEmpresaInfo info;
@@ -1096,8 +1301,6 @@ class _CategoriaEmpresaCard extends StatelessWidget {
   }
 }
 
-// ─── Card de OS fechada ────────────────────────────────────────────────────────
-
 class _RelatorioOSCard extends StatelessWidget {
   final RelacaoOSModel relatorio;
   final VoidCallback onTap;
@@ -1120,7 +1323,7 @@ class _RelatorioOSCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Ícone + badge FECHADA
+
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1155,7 +1358,7 @@ class _RelatorioOSCard extends StatelessWidget {
                   ),
                 ],
               ),
-              // Info
+
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1200,10 +1403,6 @@ class _RelatorioOSCard extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Tela de detalhe da OS fechada
-// ═════════════════════════════════════════════════════════════════════════════
-
 class _RelatorioDetalhe extends StatefulWidget {
   final String numeroOS;
   const _RelatorioDetalhe({required this.numeroOS});
@@ -1226,7 +1425,6 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
     });
   }
 
-  // ── Reverter OS ──────────────────────────────────────────────────────────
   Future<void> _confirmarReverterOS() async {
   const corReverter = Color(0xFFED6C02);
 
@@ -1328,8 +1526,6 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
   }
 }
 
-  // ── Gera PDF via backend (mesmo esquema do Estoque) ──────────────────────
-
   Future<void> _gerarPDF() async {
     setState(() => _gerandoPdf = true);
 
@@ -1342,11 +1538,10 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
     );
 
     try {
-      // Chama o endpoint /:numeroOS/pdf — retorna os bytes do PDF
+
       final bytes = await EstoqueRepository()
           .baixarRelatorioOSPdf(widget.numeroOS);
 
-      // Valida magic bytes PDF (%PDF)
       if (bytes.length < 4 ||
           bytes[0] != 0x25 ||
           bytes[1] != 0x50 ||
@@ -1356,7 +1551,6 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
             'O servidor não retornou um PDF válido. Verifique o console do backend.');
       }
 
-      // Salva em arquivo temporário
       final numeroLimpo =
           _limparNumeroOS(widget.numeroOS).replaceAll(RegExp(r'\W'), '_');
       final fileName = 'relatorio_os_$numeroLimpo.pdf';
@@ -1364,7 +1558,6 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
       final file     = File('${dir.path}${Platform.pathSeparator}$fileName');
       await file.writeAsBytes(bytes, flush: true);
 
-      // Abre com o programa padrão do SO
       if (Platform.isWindows) {
         await Process.run('cmd', ['/c', 'start', '', file.path]);
       } else if (Platform.isMacOS) {
@@ -1445,7 +1638,7 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
         ),
         actions: [
           if (rel != null) ...[
-            // Botão Reverter OS
+
             _revertendo
                 ? const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -1476,7 +1669,7 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
                     ),
                   ),
             const SizedBox(width: 4),
-            // Botão Gerar PDF
+
             _gerandoPdf
                 ? const Padding(
                     padding:
@@ -1507,7 +1700,7 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
                       ),
                     ),
                   ),
-          ],  // fecha if (rel != null)
+          ],
         ],
       ),
       body: provider.carregandoDetalhe
@@ -1528,8 +1721,6 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
   }
 }
 
-// ─── Body do detalhe ──────────────────────────────────────────────────────────
-
 class _RelatorioDetalheBody extends StatelessWidget {
   final RelacaoOSModel rel;
   const _RelatorioDetalheBody({required this.rel});
@@ -1548,7 +1739,7 @@ class _RelatorioDetalheBody extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Cards de resumo ──────────────────────────────────────
+
           Row(
             children: [
               _SummaryCard(
@@ -1612,7 +1803,6 @@ class _RelatorioDetalheBody extends StatelessWidget {
           ),
           const SizedBox(height: 24),
 
-          // ── Saídas ───────────────────────────────────────────────
           _MovimentacaoSection(
             titulo: 'Saídas de material',
             icone: Icons.output_rounded,
@@ -1621,7 +1811,6 @@ class _RelatorioDetalheBody extends StatelessWidget {
             mostrarPreco: true,
           ),
 
-          // ── Entradas ─────────────────────────────────────────────
           if (entradas.isNotEmpty) ...[
             const SizedBox(height: 16),
             _MovimentacaoSection(
@@ -1637,8 +1826,6 @@ class _RelatorioDetalheBody extends StatelessWidget {
     );
   }
 }
-
-// ─── Card de resumo ────────────────────────────────────────────────────────────
 
 class _SummaryCard extends StatelessWidget {
   final IconData icon;
@@ -1711,8 +1898,6 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
-// ─── Seção de movimentações ───────────────────────────────────────────────────
-
 class _MovimentacaoSection extends StatelessWidget {
   final String titulo;
   final IconData icone;
@@ -1737,7 +1922,7 @@ class _MovimentacaoSection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Cabeçalho da seção
+
             Row(
               children: [
                 Container(
@@ -1768,7 +1953,6 @@ class _MovimentacaoSection extends StatelessWidget {
             ),
             const SizedBox(height: 16),
 
-            // Cabeçalho da tabela
             Padding(
               padding: EdgeInsets.symmetric(horizontal: 8),
               child: Row(
@@ -1839,33 +2023,51 @@ class _MovimentacaoSection extends StatelessWidget {
             ),
             Divider(height: 12, color: Theme.of(context).colorScheme.outlineVariant),
 
-            // Linhas agrupadas por material
             Builder(builder: (context) {
-              // Agrupa movimentações pelo materialId, mantendo ordem de primeira ocorrência
-              final Map<int, List<MovimentacaoModel>> grupos = {};
-              final List<int> ordem = [];
+              final Map<String, List<MovimentacaoModel>> grupos = {};
+              final List<String> ordem = [];
+              final List<List<MovimentacaoModel>> linhasDimensionais = [];
               for (final m in movimentacoes) {
-                if (!grupos.containsKey(m.materialId)) {
-                  grupos[m.materialId] = [];
-                  ordem.add(m.materialId);
+                if (m.usouModoDimensional) {
+                  linhasDimensionais.add([m]);
+                  continue;
                 }
-                grupos[m.materialId]!.add(m);
+                final chave = '${m.materialId}::un';
+                if (!grupos.containsKey(chave)) {
+                  grupos[chave] = [];
+                  ordem.add(chave);
+                }
+                grupos[chave]!.add(m);
               }
 
-              final linhas = ordem.map((matId) => grupos[matId]!).toList();
+              final linhas = [
+                ...ordem.map((chave) => grupos[chave]!),
+                ...linhasDimensionais,
+              ]..sort((a, b) => a.first.criadoEm.compareTo(b.first.criadoEm));
 
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 children: List.generate(linhas.length, (i) {
                   final grupo = linhas[i];
                   final ref   = grupo.first;
+                  final ehDimensional = ref.usouModoDimensional;
+                  final total = grupo.fold(0.0, (acc, m) {
+                    final pu = m.precoUnitario ?? 0.0;
+                    final pm2 = m.precoM2 ?? 0.0;
+                    final p = m.usouModoDimensional
+                        ? (pm2 > 0 ? pm2 : pu)
+                        : (pu > 0 ? pu : pm2);
+                    final qtd = ehDimensional
+                        ? ((m.larguraUsada ?? 0) * (m.comprimentoUsado ?? 0))
+                        : m.quantidade;
+                    return acc + (p * qtd);
+                  });
+                  final qtdTotal = ehDimensional
+                      ? grupo.fold(0.0, (acc, m) =>
+                          acc + ((m.larguraUsada ?? 0) * (m.comprimentoUsado ?? 0)))
+                      : grupo.fold(0.0, (acc, m) => acc + m.quantidade);
 
-                  final pu  = (ref.precoUnitario != null && ref.precoUnitario! > 0) ? ref.precoUnitario! : null;
-                  final pm2 = (ref.precoM2       != null && ref.precoM2!       > 0) ? ref.precoM2!       : null;
-                  final precoEfetivo = pu ?? pm2 ?? 0.0;
-
-                  final qtdTotal = grupo.fold(0.0, (acc, m) => acc + m.quantidade);
-                  final total    = precoEfetivo * qtdTotal;
+                  final precoEfetivo = qtdTotal > 0 ? total / qtdTotal : 0.0;
 
                   final qtdStr = _formatarQtd(qtdTotal);
 
@@ -1873,9 +2075,15 @@ class _MovimentacaoSection extends StatelessWidget {
                     (a, b) => a.isAfter(b) ? a : b,
                   );
 
-                  final unidLabel = (ref.materialUnidade ?? '').isNotEmpty
-                      ? 'por ${formatarUnidadeComPlural(ref.materialUnidade, 1)}'
-                      : null;
+                  final unidadeQtd = ehDimensional
+                      ? (qtdTotal == 1 ? 'm²' : 'm²')
+                      : formatarUnidadeComPlural(ref.materialUnidade, qtdTotal);
+
+                  final unidLabel = ehDimensional
+                      ? 'por m²'
+                      : ((ref.materialUnidade ?? '').isNotEmpty
+                          ? 'por ${formatarUnidadeComPlural(ref.materialUnidade, 1)}'
+                          : null);
 
                   return Column(
                     mainAxisSize: MainAxisSize.min,
@@ -1884,20 +2092,26 @@ class _MovimentacaoSection extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
                         child: Row(
                           children: [
-                            // Material
+
                             Expanded(
                               flex: 3,
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Builder(builder: (_) {
-                                    final medidaOuDimensao = (ref.materialMedida ?? '').isNotEmpty
-                                        ? ref.materialMedida
-                                        : formatarMedidaOuDimensoes(
+                                    final medidaOuDimensao = ehDimensional
+                                        ? formatarMedidaOuDimensoes(
                                             medida:      null,
-                                            largura:     ref.materialLargura,
-                                            comprimento: ref.materialComprimento,
-                                          );
+                                            largura:     ref.larguraUsada,
+                                            comprimento: ref.comprimentoUsado,
+                                          )
+                                        : ((ref.materialMedida ?? '').isNotEmpty
+                                            ? ref.materialMedida
+                                            : formatarMedidaOuDimensoes(
+                                                medida:      null,
+                                                largura:     ref.materialLargura,
+                                                comprimento: ref.materialComprimento,
+                                              ));
                                     final detalhe = [
                                       if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
                                       if ((ref.materialEspessura ?? '').isNotEmpty)
@@ -1927,7 +2141,7 @@ class _MovimentacaoSection extends StatelessWidget {
                                       overflow: TextOverflow.ellipsis,
                                     );
                                   }),
-                                  // Observações únicas do grupo
+
                                   ...grupo
                                       .where((m) => m.observacao != null && m.observacao!.isNotEmpty)
                                       .map((m) => m.ehRetalhoDeOrigem
@@ -1946,18 +2160,18 @@ class _MovimentacaoSection extends StatelessWidget {
                                 ],
                               ),
                             ),
-                            // Quantidade somada
+
                             SizedBox(
                               width: 80,
                               child: Text(
-                                '$qtdStr ${formatarUnidadeComPlural(ref.materialUnidade, qtdTotal)}',
+                                '$qtdStr $unidadeQtd',
                                 textAlign: TextAlign.right,
                                 style: TextStyle(
                                     fontSize: 13,
                                     color: Theme.of(context).colorScheme.onSurface),
                               ),
                             ),
-                            // Preço — coluna única com label da unidade abaixo
+
                             if (mostrarPreco) ...[
                               SizedBox(
                                 width: 110,
@@ -1997,7 +2211,7 @@ class _MovimentacaoSection extends StatelessWidget {
                                 ),
                               ),
                             ],
-                            // Data
+
                             SizedBox(
                               width: 90,
                               child: Text(
@@ -2019,7 +2233,6 @@ class _MovimentacaoSection extends StatelessWidget {
               );
             }),
 
-            // Rodapé com total
             if (mostrarPreco) ...[
               Divider(height: 16, color: Theme.of(context).colorScheme.outlineVariant),
               Padding(
@@ -2037,12 +2250,14 @@ class _MovimentacaoSection extends StatelessWidget {
                     ),
                     const SizedBox(width: 12),
                     Text(
+                      // Soma bruta por linha (sem netting de devolução/retalho),
+                      // igual à listagem do backend — é só apresentação da seção,
+                      // não o total oficial da OS (esse vem de _totalLiquido).
+                      // Usa a regra FINANCEIRA (nunca área × precoM2).
                       _brl(movimentacoes.fold(0.0, (acc, m) {
-                        // rodapé da tabela: soma bruta das linhas exibidas
-                        // (já filtradas por tipo pela chamada — só saídas chegam aqui)
                         final pu = m.precoUnitario ?? 0.0;
                         final pm = m.precoM2 ?? 0.0;
-                        final p  = pu > 0 ? pu : (pm > 0 ? pm : 0.0);
+                        final p  = pu > 0 ? pu : pm;
                         return acc + p * m.quantidade;
                       })),
                       style: const TextStyle(
@@ -2061,10 +2276,6 @@ class _MovimentacaoSection extends StatelessWidget {
     );
   }
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Widget auxiliar — seletor de data com chip clicável
-// ═════════════════════════════════════════════════════════════════════════════
 
 class _DatePickerField extends StatelessWidget {
   final String    label;
@@ -2179,8 +2390,7 @@ class _DatePickerField extends StatelessWidget {
     );
   }
 }
-// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
-// Mesmo padrão usado no cabeçalho das outras páginas do sistema.
+
 class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;

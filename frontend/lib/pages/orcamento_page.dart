@@ -16,10 +16,6 @@ import '../utils/api_client.dart' show OrcamentoTravadoException;
 import 'orcamento_historico_page.dart';
 import 'orcamento_editor_page.dart';
 
-// ─── Log de diagnóstico (rastreável em produção) ─────────────────────────────
-// Mesmo padrão usado em orcamento_editor_page.dart: dev.log() em vez de
-// print() porque fica disponível mesmo em build release e já carrega
-// timestamp. Use grep por "OrcamentoPage" no log do app para filtrar.
 void _logOrc(String mensagem, {Object? erro, StackTrace? stack, int? level}) {
   dev.log(
     mensagem,
@@ -31,8 +27,6 @@ void _logOrc(String mensagem, {Object? erro, StackTrace? stack, int? level}) {
   );
 }
 
-/// Converte um valor vindo de JSON (pode ser String, int, double ou null)
-/// para double de forma segura, sem lançar exceção de cast.
 double? _parseDoubleOrNull(dynamic value) {
   if (value == null) return null;
   if (value is num) return value.toDouble();
@@ -41,9 +35,6 @@ double? _parseDoubleOrNull(dynamic value) {
   return double.tryParse(str);
 }
 
-/// Formata a dimensão (largura x comprimento) de um material como "50x1.27m",
-/// mesma convenção usada em [OrcamentoEditorPage] (comprimento x largura,
-/// minúsculo). Retorna null se largura/comprimento não estiverem cadastrados.
 String? _materialDimensaoFormatada(double? largura, double? comprimento) {
   if (largura == null || comprimento == null || largura <= 0 || comprimento <= 0) return null;
   String fmt(double v) =>
@@ -51,10 +42,6 @@ String? _materialDimensaoFormatada(double? largura, double? comprimento) {
   return '${fmt(comprimento)}x${fmt(largura)}m';
 }
 
-/// Remove prefixos como "Exception:", "HttpException:" que o Dart adiciona
-/// automaticamente ao fazer e.toString() em exceções. Quando o erro é de
-/// conexão (sem internet / servidor fora do ar), retorna uma mensagem
-/// amigável contextualizada com a ação que estava sendo feita.
 String _mensagemErro(Object e, {required String acao}) {
   final raw = e.toString();
   if (raw.contains('SocketException') ||
@@ -71,9 +58,6 @@ String _mensagemErro(Object e, {required String acao}) {
   return 'Erro ao $acao: $msg';
 }
 
-// Detecta se o erro veio de uma validação de status no backend (ex: outro
-// usuário já aprovou/rejeitou/enviou este orçamento antes desta ação ser
-// confirmada). Textos exatos lançados por orcamento.service.js.
 bool _isErroDeStatusDesatualizado(Object e) {
   final raw = e.toString();
   return raw.contains('Apenas orçamentos abertos podem ser enviados') ||
@@ -82,18 +66,11 @@ bool _isErroDeStatusDesatualizado(Object e) {
       raw.contains('Apenas orçamentos aprovados');
 }
 
-// Detecta um 404 do servidor para este orçamento — normalmente significa
-// que ele já foi excluído (por outra guia, outro usuário, ou é resíduo de
-// dados locais/lista desatualizada de antes desta correção). Ver uso em
-// _excluirOrcamentoEmAberto: nesse caso tratamos como sucesso e apenas
-// atualizamos a lista, em vez de mostrar um erro sem saída para o usuário.
 bool _isErroOrcamentoNaoEncontrado(Object e) {
   final raw = e.toString();
   return raw.contains('Orçamento não encontrado');
 }
-// ─── Formatters ───────────────────────────────
 
-/// Bloqueia a digitação de vírgula em campos de texto livre (busca, título, descrição, etc.)
 class _NoCommaFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -138,39 +115,27 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     with SingleTickerProviderStateMixin {
   late TabController _mainTabController;
 
-  // ── Dados server-side ─────────────────────────────────────────────────────
   List<dynamic> _aguardandoAprovacao = [];
   List<dynamic> _aprovados = [];
   List<dynamic> _naoAprovados = [];
   bool _carregandoAprovacao = false;
   String? _erroAprovacao;
 
-  // ── Seção "Orçamentos em Aberto" ───────────────────────────────────────────
-  // Null = mostrando os cards de usuário; não-null = mostrando a lista de
-  // orçamentos em aberto daquele usuário (drill-down dentro da própria aba).
   int? _usuarioSelecionadoEmAberto;
 
   bool _salvandoPreco = false;
-  // (flags de edição foram movidos para OrcamentoTab no provider)
 
-  // Modo de ordenação da tabela de totais por fornecedor
-
-  // _abaVisivel controla a visibilidade do editor inline (quando usado)
-
-  // ── Robô assistente: tour "Como criar um orçamento" ───────────────────────
-  // Este tour é especial: começa aqui (destaque no botão "Novo Orçamento")
-  // mas continua dentro do OrcamentoEditorPage, aberto via Navigator.push
-  // por CIMA desta página (não troca de rota do RoboHelperProvider — ver
-  // comentário em _registrarAjudaRobo). Por isso a tela do editor registra
-  // as próprias paradas na MESMA rota '/orcamento' desta página, e o botão
-  // "Novo Orçamento" abaixo apenas garante que uma aba/editor esteja aberto
-  // quando o tour chega nessa parada.
   final _tourKeyNovoOrcamento = GlobalKey();
+  final _tourKeyAbaAguardandoAprovacao = GlobalKey();
+  final _tourKeyCardAprovarFake = GlobalKey();
+  final _tourKeyAbaAprovados = GlobalKey();
+  final _tourKeyCardGerarOCFake = GlobalKey();
 
-  // Referência ao provider (não o BuildContext) para poder remover o
-  // listener com segurança em dispose() — mesmo motivo/padrão explicado em
-  // SolicitacoesMaterialPage._solicitacaoProviderRef.
+  bool _mostrarCardAprovacaoFakeNoTour = false;
+  bool _mostrarCardGerarOCFakeNoTour = false;
+
   OrcamentoProvider? _orcamentoProviderRef;
+  bool _ajudaRoboJaAgendadaNesteFrame = false;
 
   @override
   void initState() {
@@ -180,8 +145,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     _mainTabController.addListener(() {
       if (_mainTabController.indexIsChanging) return;
       if (_mainTabController.index != 0) {
-        // Saiu da aba "Em Aberto" — reseta o drill-down por usuário para a
-        // próxima vez que a aba for reaberta começar sempre pelos cards.
+
         setState(() => _usuarioSelecionadoEmAberto = null);
       }
       _carregarOrcamentosServidor(origem: 'trocaDeTabPrincipal');
@@ -189,17 +153,11 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FornecedorProvider>().carregar();
       _carregarOrcamentosServidor(origem: 'initState');
-      // A lista de "Orçamentos em Aberto" já foi carregada pelo provider em
-      // trocarUsuario() -> inicializarTempoReal() no login; aqui só
-      // garantimos que está atualizada ao reabrir esta página.
+
       context.read<OrcamentoProvider>().carregarOrcamentosAbertos();
       context.read<RoboHelperProvider>().notificarRota('/orcamento');
     });
 
-    // Escuta o provider diretamente para reagir imediatamente a uma
-    // abertura pendente vinda de um encaminhamento no chat (ver
-    // OrcamentoProvider.solicitarAberturaOrcamento e o mesmo padrão em
-    // SolicitacoesMaterialPage._onProviderChanged).
     context.read<OrcamentoProvider>().addListener(_onOrcamentoProviderChanged);
   }
 
@@ -215,10 +173,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
   bool _abrindoOrcamentoPendente = false;
 
-  /// Consome `orcamentoParaAbrirPendente` (se houver) e abre o orçamento no
-  /// editor, reutilizando o mesmo fluxo de `_reabrirOrcamento`. Chamado
-  /// tanto pelo listener direto do provider quanto, redundantemente, pelo
-  /// build() — a flag `_abrindoOrcamentoPendente` evita disparo duplicado.
   void _tentarAbrirOrcamentoPendente() {
     if (!mounted) return;
     final provider = context.read<OrcamentoProvider>();
@@ -264,54 +218,24 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     super.dispose();
   }
 
-  // Evita empurrar o OrcamentoEditorPage mais de uma vez enquanto o tour
-  // navega rapidamente entre a 1ª e a 2ª parada (ex.: clique duplo em
-  // "Próximo"). Mesmo padrão de guarda usado em fornecedores_page.dart e
-  // solicitacoes_material_page.dart para os dialogs abertos pelo tour.
   bool _editorTourAberto = false;
 
-  /// Abre (ou reaproveita) o OrcamentoEditorPage para o tour continuar lá
-  /// dentro — chamado pelo `aoEntrar` da 2ª parada do tour "Como criar um
-  /// orçamento". Equivalente a tocar no botão "Novo Orçamento", mas
-  /// disparado programaticamente pelo tour (o highlight nunca clica no
-  /// widget de baixo — ver _HighlightOverlay em robo_helper_widget.dart).
-  ///
-  /// IMPORTANTE: este Future NÃO pode esperar o Navigator.push inteiro
-  /// (ou seja, até o editor ser fechado/popado). O RoboHelperProvider
-  /// (proximaParada/paradaAnterior) faz `await parada.aoEntrar?.call()`
-  /// e, enquanto esse await não resolve, mantém `_navegando = true` —
-  /// bloqueando Próximo/Anterior. Como antes aguardávamos o
-  /// Navigator.push inteiro, o tour ficava travado na parada do campo
-  /// Nome pelo tempo inteiro que o editor estivesse aberto — só "Fechar"
-  /// funcionava, porque encerrarTour() não passa por esse guard. Agora
-  /// só aguardamos o suficiente para o editor montar (garantindo que a
-  /// próxima key já exista na árvore) e tratamos o retorno do editor
-  /// (_aoVoltarDoEditor) de forma desacoplada, via .then(), sem bloquear
-  /// o tour.
   Future<void> _abrirEditorTour() async {
     if (_editorTourAberto) return;
     _editorTourAberto = true;
+    tourQueAbriuEditorAtivo = 'Como criar um orçamento';
     final p = context.read<OrcamentoProvider>();
     p.adicionarAba(criadaPeloTour: true);
     final pushFuture = Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
     );
-    // Quando o editor for eventualmente fechado (usuário concluindo o
-    // tour, cancelando, ou saindo antes), trata o retorno normalmente —
-    // mas sem travar o aoEntrar/tour enquanto isso não acontece.
+
     pushFuture.then((resultado) async {
       if (mounted) _editorTourAberto = false;
       if (mounted) await _aoVoltarDoEditor(resultado);
     });
-    // Em vez de um delay fixo (que falhava sempre que a transição de rota
-    // demorasse mais que o esperado — animação de push do MaterialPageRoute
-    // é ~300ms — deixando o overlay escurecer a tela sem achar
-    // criarOrcamentoTourKeyCampoNome, porque tentou medir a key antes do
-    // editor terminar de montar), aguardamos ativamente a key do campo
-    // Nome passar a existir na árvore, checando a cada frame. Isso cobre
-    // tanto o caso rápido (poucos frames) quanto o mais lento (device/
-    // build mais pesado) sem nunca esperar mais que o necessário.
-    const tentativasMax = 30; // ~30 frames (até a transição normal terminar)
+
+    const tentativasMax = 30;
     for (var i = 0; i < tentativasMax; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 16));
       if (criarOrcamentoTourKeyBlocoFiltros.currentContext != null) break;
@@ -321,11 +245,8 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   Future<void> _fecharEditorTourSeAberto() async {
     if (!_editorTourAberto) return;
     _editorTourAberto = false;
-    // Fecha a aba criada pelo tour antes de fechar o editor — mesma
-    // lógica de _onRoboHelperPaginaChanged no editor, mas disparada aqui
-    // quando o Anterior é clicado na 2ª parada (blocoFiltros), que ainda
-    // está nesta página (rota '/orcamento'). Sem isso, o editor fecha mas
-    // a aba criada automaticamente pelo tour fica aberta, vazia.
+    tourQueAbriuEditorAtivo = null;
+
     try {
       context.read<OrcamentoProvider>().fecharAbaAposOperacao();
     } catch (_) {}
@@ -333,61 +254,112 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     await Future<void>.delayed(const Duration(milliseconds: 50));
   }
 
-  /// Registra no RoboHelperProvider a opção de ajuda contextual desta
-  /// página. Chamado a cada build (barato) para garantir que a primeira
-  /// parada sempre aponte para a key correta. As demais paradas (dentro do
-  /// OrcamentoEditorPage) são ANEXADAS a esta mesma opção pelo próprio
-  /// editor, assim que ele é montado — ver `_anexarParadasDoEditorAoTour`
-  /// em orcamento_editor_page.dart. Isso funciona porque o editor é aberto
-  /// via Navigator.push (não troca a rota do RoboHelperProvider, que
-  /// continua '/orcamento' o tempo todo) e o overlay do tour usa
-  /// `isActive` (não `isCurrent`) para decidir se o alvo ainda é válido —
-  /// então o tour sobrevive à navegação para a tela de cima.
+  Future<void> _mostrarCardAprovacaoFakeTour() async {
+    if (mounted) setState(() => _mostrarCardAprovacaoFakeNoTour = true);
+  }
+
+  Future<void> _esconderCardAprovacaoFakeTour() async {
+    if (mounted) setState(() => _mostrarCardAprovacaoFakeNoTour = false);
+  }
+
+  Map<String, dynamic> _itemFakeAprovacaoTour() {
+    return {
+      '_fakeTour': true,
+      'id': -1,
+      'titulo': '#EXEMPLO — orçamento de exemplo',
+      'status': 'AGUARDANDO_APROVACAO',
+      'criadoEm': DateTime.now().toIso8601String(),
+      'criador': {'nome': 'Exemplo'},
+      'itens': const [],
+    };
+  }
+
+  Future<void> _abrirEditorTourAprovacao() async {
+    if (_editorTourAberto) return;
+    _editorTourAberto = true;
+    tourQueAbriuEditorAtivo = 'Como aprovar um orçamento';
+    final p = context.read<OrcamentoProvider>();
+    p.adicionarAba(criadaPeloTour: true);
+    p.atualizarFlagsTab(aguardandoAprovacao: true);
+    final pushFuture = Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+    );
+
+    pushFuture.then((resultado) async {
+      if (mounted) _editorTourAberto = false;
+      if (mounted) await _aoVoltarDoEditor(resultado);
+    });
+
+    const tentativasMax = 30;
+    for (var i = 0; i < tentativasMax; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+      if (editorTourEstaMontado()) break;
+    }
+    await inserirItemFakeParaAprovacaoNoEditorAtivo();
+    for (var i = 0; i < tentativasMax; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+      if (aprovarOrcamentoTourKeyBotaoAprovar.currentContext != null) break;
+    }
+  }
+
+  Future<void> _mostrarCardGerarOCFakeTour() async {
+    if (mounted) setState(() => _mostrarCardGerarOCFakeNoTour = true);
+  }
+
+  Future<void> _esconderCardGerarOCFakeTour() async {
+    if (mounted) setState(() => _mostrarCardGerarOCFakeNoTour = false);
+  }
+
+  Map<String, dynamic> _itemFakeGerarOCTour() {
+    return {
+      '_fakeTour': true,
+      'id': -1,
+      'titulo': '#EXEMPLO — orçamento de exemplo',
+      'status': 'APROVADO',
+      'criadoEm': DateTime.now().toIso8601String(),
+      'criador': {'nome': 'Exemplo'},
+      'itens': const [],
+    };
+  }
+
+  Future<void> _abrirEditorTourGerarOC() async {
+    if (_editorTourAberto) return;
+    _editorTourAberto = true;
+    tourQueAbriuEditorAtivo = 'Como gerar uma Ordem de Compra';
+    final p = context.read<OrcamentoProvider>();
+    p.adicionarAba(criadaPeloTour: true);
+    p.atualizarFlagsTab(jaFinalizado: true, modoGerarOC: true);
+    final pushFuture = Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+    );
+
+    pushFuture.then((resultado) async {
+      if (mounted) _editorTourAberto = false;
+      if (mounted) await _aoVoltarDoEditor(resultado);
+    });
+
+    const tentativasMax = 30;
+    for (var i = 0; i < tentativasMax; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+      if (editorTourEstaMontado()) break;
+    }
+    await inserirItemFakeParaGerarOCNoEditorAtivo();
+    for (var i = 0; i < tentativasMax; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+      if (gerarOCTourKeyBotaoGerarOC.currentContext != null) break;
+    }
+  }
+
   void _registrarAjudaRobo() {
     final rota = ModalRoute.of(context);
     if (rota != null && !rota.isCurrent) return;
 
     final helper = context.read<RoboHelperProvider>();
 
-    // Preserva paradas extras já anexadas por OrcamentoEditorPage
-    // (_anexarParadasDoEditorAoTour). Como o editor é empurrado por CIMA
-    // desta página via Navigator.push, esta página continua montada e seu
-    // build (logo, este postFrameCallback) continua rodando em segundo
-    // plano. Se sempre reescrevêssemos a opção só com as 2 paradas base,
-    // toda vez que esta página rebuildasse depois do editor já ter
-    // anexado o restante, a lista voltaria a ter só 2 paradas — e o tour
-    // ficaria preso na 2ª (campo Nome), sempre mostrando "Concluir" ali,
-    // porque _anexarParadasDoEditorAoTour desiste de reanexar quando
-    // encontra MAIS que as 2 paradas base (evita duplicar/perder o
-    // RoboTourStop em que o usuário estiver no meio do tour) — só que
-    // aqui o problema é o oposto: menos que o esperado, nunca mais.
     final opcoesAtuais = helper.opcoesAtuais;
     final opcaoExistente =
         opcoesAtuais.where((o) => o.titulo == 'Como criar um orçamento').firstOrNull;
 
-    // CRÍTICO: se o editor já anexou as paradas extras (opção com mais de
-    // 2 paradas), esta página NÃO deve reescrever a opção enquanto o tour
-    // estiver ativo E o passo atual já estiver dentro do território do
-    // editor (índice >= 2). Antes desta guarda, este método rodava a cada
-    // build desta página (que continua rebuildando em segundo plano
-    // mesmo com o editor empurrado por cima, ex.: por notificações do
-    // OrcamentoProvider) e SEMPRE chamava helper.registrarOpcoes(...) de
-    // novo, mesmo already-correto. Isso por si não apagava as paradas
-    // extras (paradasExtras as preservava), mas cada chamada é uma
-    // reescrita completa da lista + um notifyListeners() — e se essa
-    // reescrita corresse EXATAMENTE durante a janela em que
-    // RoboHelperProvider.paradaAnterior() está no meio de um `await
-    // aoSair(...)` (lendo `helper.opcoesAtuais` OUTRA vez logo depois,
-    // em `_paradaEm`), a alternância entre "lista antiga" e "lista recém
-    // reconstruída" podia fazer `_paradaEm(novoIndice)` observar um
-    // estado intermediário mais curto que o esperado, levando o provider
-    // a concluir (erroneamente) que a lista "encolheu" e encerrar o tour
-    // (`_encerrarTourInterno()`) — fechando o editor e a aba, exatamente
-    // o bug relatado ao clicar "Anterior" na parada "primeiroFornecedorDialog".
-    // Pular a reescrita aqui enquanto o editor already possui e está
-    // gerenciando as paradas extras elimina essa fonte de corrida: quem
-    // manda na opção nesse momento é só o editor
-    // (_anexarParadasDoEditorAoTour), nunca esta página.
     final editorJaAnexouExtras =
         opcaoExistente != null && opcaoExistente.paradas.length > 2;
     final tourDentroDoEditor = helper.tourAtivo && helper.passoAtual >= 2;
@@ -396,6 +368,27 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     final paradasExtras = editorJaAnexouExtras
         ? opcaoExistente.paradas.sublist(2)
         : const <RoboTourStop>[];
+
+    // Preserva genericamente qualquer opção que a listagem não conhece
+    // (ex.: as registradas pelo editor, como "renomear" e "buscar
+    // material"), em vez de checar título por título — assim, novas
+    // opções que o editor vier a anexar no futuro não somem por a
+    // listagem não ter sido atualizada para reconhecê-las.
+    // IMPORTANTE: exclui também os títulos que a própria listagem recria
+    // logo abaixo ("aprovar" e "gerar OC") — do contrário eles ficam
+    // duplicados a cada chamada, pois entrariam tanto via
+    // opcoesDoEditorPreservadas quanto via sua recriação explícita.
+    const titulosFixosDaListagem = {
+      'Como criar um orçamento',
+      'Como aprovar um orçamento',
+      'Como gerar uma Ordem de Compra',
+    };
+    final opcoesDoEditorPreservadas = opcoesAtuais
+        .where((o) => !titulosFixosDaListagem.contains(o.titulo))
+        .toList();
+
+    _logOrc('_registrarAjudaRobo(listagem): rodando — opcoesDoEditorPreservadas='
+        '${opcoesDoEditorPreservadas.map((o) => o.titulo).toList()}');
 
     helper.registrarOpcoes('/orcamento', [
       RoboHelpOption(
@@ -415,30 +408,90 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           ),
           ...paradasExtras,
         ],
-        // Garante que encerrar o tour (ESC, "Fechar" ou "Concluir") a
-        // partir de QUALQUER parada dentro do editor (3ª em diante — ver
-        // orcamento_editor_page.dart) também feche o editor e devolva o
-        // usuário para esta página. Sem isto, o aoSair de cada parada só
-        // fechava o dialog daquela parada específica (fornecedor ou
-        // preço), deixando o editor inteiro aberto na tela.
+
         aoEncerrar: _fecharEditorTourSeAberto,
+      ),
+      ...opcoesDoEditorPreservadas,
+      RoboHelpOption(
+        titulo: 'Como aprovar um orçamento',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyAbaAguardandoAprovacao,
+            texto: 'Orçamentos enviados para aprovação aparecem aqui, na '
+                'aba "Aguardando Aprovação".',
+            aoEntrar: () async {
+              if (_mainTabController.index != 1) {
+                _mainTabController.animateTo(1);
+                await Future<void>.delayed(const Duration(milliseconds: 300));
+              }
+              await _mostrarCardAprovacaoFakeTour();
+            },
+          ),
+          RoboTourStop(
+            key: () => _tourKeyCardAprovarFake,
+            texto: 'Toque em "Aprovar" para aprovar o orçamento diretamente '
+                'pela lista.',
+            aoSair: _esconderCardAprovacaoFakeTour,
+          ),
+          RoboTourStop(
+            key: () => aprovarOrcamentoTourKeyBotaoAprovar,
+            texto: 'Você também pode abrir o orçamento para conferir os '
+                'materiais e valores antes de tocar em "Aprovar" aqui '
+                'dentro.',
+            aoEntrar: _abrirEditorTourAprovacao,
+            aoSair: _fecharEditorTourSeAberto,
+          ),
+        ],
+        aoEncerrar: () async {
+          await _esconderCardAprovacaoFakeTour();
+          await _fecharEditorTourSeAberto();
+        },
+      ),
+      RoboHelpOption(
+        titulo: 'Como gerar uma Ordem de Compra',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyAbaAprovados,
+            texto: 'Orçamentos aprovados aparecem aqui, na aba '
+                '"Aprovados".',
+            aoEntrar: () async {
+              if (_mainTabController.index != 2) {
+                _mainTabController.animateTo(2);
+                await Future<void>.delayed(const Duration(milliseconds: 300));
+              }
+              await _mostrarCardGerarOCFakeTour();
+            },
+          ),
+          RoboTourStop(
+            key: () => _tourKeyCardGerarOCFake,
+            texto: 'Toque em "Gerar OC" para gerar a Ordem de Compra '
+                'diretamente pela lista.',
+            aoSair: _esconderCardGerarOCFakeTour,
+          ),
+          RoboTourStop(
+            key: () => gerarOCTourKeyBotaoGerarOC,
+            texto: 'Você também pode abrir o orçamento para conferir os '
+                'fornecedores selecionados antes de tocar em "Gerar OC" '
+                'aqui dentro.',
+            aoEntrar: _abrirEditorTourGerarOC,
+            aoSair: _fecharEditorTourSeAberto,
+          ),
+        ],
+        aoEncerrar: () async {
+          await _esconderCardGerarOCFakeTour();
+          await _fecharEditorTourSeAberto();
+        },
       ),
     ]);
   }
 
-  // ── Retorno do editor de orçamento ───────────────────────────────────────────
-  // Chamado sempre que o OrcamentoEditorPage é fechado (Navigator.pop). Se o
-  // orçamento foi enviado para aprovação, foca a aba "Aguardando Aprovação"
-  // (índice 0); se foi aprovado, foca a aba "Aprovados" (índice 1) — sempre
-  // antes de recarregar os dados do servidor, para que o usuário veja
-  // imediatamente o orçamento que acabou de mexer.
   Future<void> _aoVoltarDoEditor(dynamic resultado) async {
     if (!mounted) return;
     int? abaAlvo;
     if (resultado == 'enviadoParaAprovacao') {
-      abaAlvo = 1; // "Aguardando Aprovação" (deslocada por causa de "Em Aberto" na posição 0)
+      abaAlvo = 1;
     } else if (resultado == 'aprovado') {
-      abaAlvo = 2; // "Aprovados"
+      abaAlvo = 2;
     }
     if (abaAlvo != null && _mainTabController.index != abaAlvo) {
       _mainTabController.animateTo(abaAlvo);
@@ -449,15 +502,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     }
   }
 
-  // ── Carregar orçamentos do servidor ──────────────────────────────────────────
-
   Future<void> _carregarOrcamentosServidor({String origem = 'manual'}) async {
     if (!mounted) return;
     if (_carregandoAprovacao) {
-      // Já existe um carregamento em andamento (ex: o listener de troca de
-      // aba do TabController disparou quase ao mesmo tempo que o
-      // postFrameCallback do initState, ou o usuário clicou em "Atualizar"
-      // mais de uma vez seguida). Evita empilhar requisições idênticas.
+
       _logOrc('carregarOrcamentosServidor[$origem]: ignorado (já existe um carregamento em andamento)');
       return;
     }
@@ -493,11 +541,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     }
   }
 
-  // ── Enviar para aprovação ─────────────────────────────────────────────────────
-
-
-  // ── Aprovar orçamento ─────────────────────────────────────────────────────────
-
   Future<void> _aprovarOrcamento(int id, String titulo) async {
     _logOrc('aprovarOrcamento(lista): botão clicado orcamentoId=$id titulo="$titulo"');
     final confirmar = await showDialog<bool>(
@@ -512,10 +555,16 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         ),
         actions: [
           TextButton(
+              style: TextButton.styleFrom().copyWith(
+                  mouseCursor:
+                      WidgetStateProperty.all(SystemMouseCursors.click)),
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.success),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.success)
+                .copyWith(
+                    mouseCursor:
+                        WidgetStateProperty.all(SystemMouseCursors.click)),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Aprovar'),
           ),
@@ -562,18 +611,29 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     }
   }
 
-  // ── Rejeitar orçamento ────────────────────────────────────────────────────────
-
   Future<void> _rejeitarOrcamento(int id, String titulo) async {
     final motivoCtrl = TextEditingController();
     bool mostrarErro = false;
-    
+
     final motivo = await showDialog<String>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) => AlertDialog(
-          title: const Text('Rejeitar Orçamento',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          title: Row(
+            children: [
+              const Expanded(
+                child: Text('Rejeitar Orçamento',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              ),
+              IconButton(
+                onPressed: () => Navigator.pop(ctx),
+                icon: const Icon(Icons.close, size: 20),
+                tooltip: 'Fechar',
+                style: IconButton.styleFrom().copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              ),
+            ],
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -588,7 +648,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                 maxLines: 3,
                 autofocus: true,
                 decoration: InputDecoration(
-                  labelText: 'Motivo *',
+                  labelText: 'Motivo',
                   isDense: true,
                   errorText: mostrarErro && motivoCtrl.text.trim().isEmpty
                       ? 'O motivo é obrigatório'
@@ -604,10 +664,16 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           ),
           actions: [
             TextButton(
+                style: TextButton.styleFrom().copyWith(
+                    mouseCursor:
+                        WidgetStateProperty.all(SystemMouseCursors.click)),
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Cancelar')),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.error)
+                  .copyWith(
+                      mouseCursor:
+                          WidgetStateProperty.all(SystemMouseCursors.click)),
               onPressed: () {
                 if (motivoCtrl.text.trim().isEmpty) {
                   setSt(() => mostrarErro = true);
@@ -652,16 +718,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     }
   }
 
-  // ── Gerar OC a partir de orçamento aprovado ───────────────────────────────────
-  // Abre o orçamento no editor com modoGerarOC=true para que a OC seja gerada
-  // de lá, após o usuário selecionar os fornecedores desejados.
-
   Future<void> _gerarOCDeOrcamentoAprovado(Map<String, dynamic> orc) async {
     final provider = context.read<OrcamentoProvider>();
     final orcId = orc['id'] as int;
 
-    // Se já existe uma aba aberta com esse servidorId, sincroniza com o
-    // servidor (ver _sincronizarAbaExistenteComServidor) e navega para ela.
     final abaExistente = await provider.ativarAbaExistenteAsync(orcId);
     if (abaExistente >= 0) {
       await _sincronizarAbaExistenteComServidor(orcId);
@@ -676,7 +736,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
     setState(() => _salvandoPreco = true);
     try {
-      // Busca o orçamento completo sem alterar o status no servidor
+
       final orcamentoCompleto = await OrcamentoRepository().buscarPorId(orcId);
       final itens = (orcamentoCompleto['itens'] as List? ?? []);
 
@@ -734,8 +794,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         (orcamentoCompleto['fornecedoresOcultos'] as List? ?? []).map((e) => e as int).toList(),
       );
       provider.definirModoPrecificacao(orcamentoCompleto['modoPrecificacao'] as String? ?? 'UNIDADE');
-      // jaFinalizado=true mantém o orçamento somente-leitura, modoGerarOC=true
-      // exibe o botão "Gerar OC" no editor.
+
       provider.atualizarFlagsTab(jaFinalizado: true, modoGerarOC: true);
 
       if (!mounted) return;
@@ -764,26 +823,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     }
   }
 
-  // ── Sincronizar aba local já existente com o servidor ────────────────────
-  //
-  // Quando o usuário já tinha uma aba local para este orçamento (ex: abriu
-  // antes só para visualizar enquanto outra pessoa editava), `ativarAbaExistente`
-  // apenas reaproveita essa aba em cache — ela NUNCA é recarregada do
-  // servidor nesse caminho. Enquanto essa aba não estava com o
-  // OrcamentoEditorPage montado, os eventos SSE de item alterado só
-  // atualizavam o card da lista "Em Aberto" (`_atualizarUmOrcamentoAberto`),
-  // não o conteúdo da aba em si. Resultado: ao reabrir e virar editor (por
-  // exemplo, depois que o editor anterior clicou em "Voltar" e a trava foi
-  // liberada), o usuário via os itens antigos, de antes da edição alheia —
-  // e se salvasse nesse estado, apagava silenciosamente as mudanças do
-  // outro usuário.
-  //
-  // Por isso, toda vez que reaproveitamos uma aba existente, buscamos o
-  // estado atual no servidor e sobrescrevemos a aba local ANTES de entrar
-  // no editor — a menos que o próprio usuário já tenha alterações locais
-  // não salvas nessa aba, caso em que preferimos preservar o rascunho dele
-  // (mesmo critério usado em OrcamentoEditorPage._recarregarItensDoServidor
-  // para o pull via SSE em tempo real).
   Future<void> _sincronizarAbaExistenteComServidor(int orcId) async {
     final provider = context.read<OrcamentoProvider>();
     if (provider.houveAlteracaoNaAbaAtiva) return;
@@ -841,25 +880,17 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         provider.renomearAba(abaIndex, tituloRemoto);
       }
 
-      // Conteúdo local acabou de ser substituído pelo do servidor: não há
-      // mais "alteração não salva" em relação a esse novo baseline.
       provider.marcarAbaAtivaComoSalva();
     } catch (e) {
       debugPrint('_sincronizarAbaExistenteComServidor: erro ao sincronizar orcamentoId=$orcId: $e');
-      // Falha silenciosa: pior caso, o usuário ainda vê o estado antigo em
-      // cache (mesmo comportamento de antes desta correção) até o próximo
-      // auto-sync de 30s dentro do editor.
+
     }
   }
-
-  // ── Reabrir orçamento ─────────────────────────────────────────────────────────
 
   Future<void> _reabrirOrcamento(Map<String, dynamic> orc, {bool somenteLeitura = false}) async {
     final provider = context.read<OrcamentoProvider>();
     final orcId = orc['id'] as int;
 
-    // Se já existe uma aba aberta com esse servidorId, sincroniza com o
-    // servidor (ver _sincronizarAbaExistenteComServidor) e navega para ela.
     final abaExistente = await provider.ativarAbaExistenteAsync(orcId);
     if (abaExistente >= 0) {
       await _sincronizarAbaExistenteComServidor(orcId);
@@ -874,14 +905,12 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
     setState(() => _salvandoPreco = true);
     try {
-      // Busca o orçamento completo SEM alterar o status no servidor
+
       final orcamentoCompleto =
           await OrcamentoRepository().buscarPorId(orcId);
 
       final itens = (orcamentoCompleto['itens'] as List? ?? []);
 
-      // Agrupa por materialId: cada material vira 1 ItemOrcamentoData com N precos
-      // (um por fornecedor).
       final Map<int, ItemOrcamentoData> itensPorChave = {};
 
       for (final item in itens) {
@@ -937,10 +966,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       );
       provider.definirModoPrecificacao(orcamentoCompleto['modoPrecificacao'] as String? ?? 'UNIDADE');
 
-      // Registra este estado (recém-vindo do servidor) como o "salvo": a
-      // partir daqui, qualquer edição do usuário faz `houveAlteracaoNaAbaAtiva`
-      // virar true, usado pelo editor para decidir se pergunta "salvar
-      // alterações?" ao fechar (ver OrcamentoEditorPage, botão "Voltar").
       provider.marcarAbaAtivaComoSalva();
 
       final statusReaberto = orc['status'] as String? ?? '';
@@ -959,7 +984,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         ),
       );
 
-      // Navega para o editor
       final resultado = await Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
       );
@@ -977,10 +1001,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       if (mounted) setState(() => _salvandoPreco = false);
     }
   }
-
-  // ── Baixar PDF do orçamento (sem abrir o editor) ──────────────────────────────
-  // Busca o orçamento completo (mesma lógica de agrupamento de _reabrirOrcamento)
-  // e envia para o serviço de geração de PDF, abrindo o arquivo em seguida.
 
   Future<void> _baixarPdfOrcamento(Map<String, dynamic> orc) async {
     final orcId = orc['id'] as int;
@@ -1037,8 +1057,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
               .toList();
       final ocultosSet = fornecedoresOcultos.toSet();
 
-      // Remove preços de fornecedores ocultos, mesmo tratamento do editor
-      // (_itensParaPdf), para que o PDF reflita o que o usuário está vendo.
       final itensParaPdf = itensPorChave.values.map((item) {
         final json = item.toJson();
         if (ocultosSet.isNotEmpty) {
@@ -1087,9 +1105,31 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _registrarAjudaRobo();
-    });
+    if (!_ajudaRoboJaAgendadaNesteFrame) {
+      _ajudaRoboJaAgendadaNesteFrame = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _ajudaRoboJaAgendadaNesteFrame = false;
+        if (!mounted) return;
+        final rota = ModalRoute.of(context);
+        if (rota == null || !rota.isCurrent) return;
+        // Segunda checagem, um microtask depois: garante que nenhuma rota
+        // nova (ex.: o editor) tenha sido empilhada por cima entre o
+        // agendamento deste callback e sua execução — evita a corrida em
+        // que a listagem sobrescreve as opções do editor (buscar
+        // material) por rodar seu build() logo antes do push terminar.
+        //
+        // Em vez de chamar ModalRoute.of(context) de novo depois do gap
+        // assíncrono (o que exigiria usar `context` após um `await`/
+        // microtask), guardamos a referência à rota já obtida acima e
+        // apenas reconsultamos seu próprio `isCurrent` — isso não requer
+        // `context` nenhum, então não há BuildContext atravessando o gap.
+        Future.microtask(() {
+          if (!mounted) return;
+          if (!rota.isCurrent) return;
+          _registrarAjudaRobo();
+        });
+      });
+    }
     _tentarAbrirOrcamentoPendente();
     return Consumer<OrcamentoProvider>(
       builder: (context, provider, _) {
@@ -1100,11 +1140,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           );
         }
 
-        // ── Abertura automática do editor (orçamento criado pelo Estoque) ──
-        // Se alguém sinalizou abrirEditorAoEntrar (ex.: Estoque acabou de
-        // chamar adicionarItensEmLote e navegou para /orcamento), e já existe
-        // pelo menos uma aba aberta, pula direto para o editor em vez de
-        // mostrar a lista de aprovação.
         if (OrcamentoPage.abrirEditorAoEntrar && provider.abas.isNotEmpty) {
           OrcamentoPage.abrirEditorAoEntrar = false;
           WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -1123,11 +1158,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Cabeçalho global ─────────────────────────────────────
-                _buildHeader(),
-                const SizedBox(height: 12),
 
-                // ── Conteúdo: sempre o painel de aprovação ────────────────
+                _buildHeader(),
+                const SizedBox(height: 16),
+
                 Expanded(child: _buildPainelAprovacao()),
               ],
             ),
@@ -1136,11 +1170,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       },
     );
   }
-
-  // ── Guias de orçamentos ──────────────────────────────────────────────────────
-
-
-  // ── Painel "Orçamentos em Aberto" (compartilhados entre usuários) ────────────
 
   Widget _buildPainelEmAberto() {
     return Consumer<OrcamentoProvider>(
@@ -1167,9 +1196,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           );
         }
 
-        // Se o usuário selecionado não tem mais orçamentos em aberto (ex:
-        // o último foi enviado para aprovação por outra pessoa em tempo
-        // real), volta para a grade de cards sozinho.
         final selecionadoAindaValido = _usuarioSelecionadoEmAberto != null &&
             porUsuario.any((e) => e.key == _usuarioSelecionadoEmAberto);
         if (_usuarioSelecionadoEmAberto != null && !selecionadoAindaValido) {
@@ -1203,14 +1229,11 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         final orcamentos = entrada.value;
         final provider = context.read<OrcamentoProvider>();
         final ehEuMesmo = entrada.key == provider.usuarioAtualId;
-        // Se o card é do próprio usuário logado, prefere o nome que já
-        // temos localmente (da sessão) em vez de um fallback numérico —
-        // cobre o instante em que `criadorNome` ainda não chegou do
-        // servidor logo após criar o orçamento.
+
         final nome = orcamentos.first.criadorNome ??
             (ehEuMesmo ? provider.usuarioAtualNome : null) ??
             'Usuário #${entrada.key}';
-        final emEdicaoAgora = orcamentos.any((o) => o.emEdicaoPorAlguem);
+        final emEdicaoAgora = orcamentos.any((o) => o.emEdicaoPorOutro(provider.usuarioAtualId));
 
         return InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -1301,9 +1324,8 @@ class _OrcamentoPageState extends State<OrcamentoPage>
               return _OrcamentoEmAbertoCard(
                 info: orc,
                 onTap: () => _abrirOrcamentoEmAberto(orc),
-                // Exclusão só é oferecida ao criador do orçamento — quem
-                // apenas abriu a guia de outra pessoa (ex: para visualizar
-                // ou continuar uma aprovação) não deve conseguir apagá-lo.
+                onAbrirPdf: () => _baixarPdfOrcamentoAberto(orc),
+                onEnviarAprovacao: () => _enviarParaAprovacaoEmAberto(orc),
                 onExcluir: souCriador ? () => _excluirOrcamentoEmAberto(orc) : null,
               );
             },
@@ -1374,23 +1396,55 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     );
   }
 
-  /// Abre um orçamento da seção "Em Aberto" no editor. Diferente de
-  /// [_reabrirOrcamento] (usado nas abas Aguardando/Aprovados/Não
-  /// Aprovados), aqui o orçamento pode pertencer a OUTRO usuário — então
-  /// antes de abrir tentamos travar a edição no servidor (POST /travar).
-  /// Se já estiver travado por outro usuário agora, mostramos aviso e
-  /// abrimos mesmo assim em modo somente-leitura.
   Future<void> _abrirOrcamentoEmAberto(OrcamentoAbertoInfo info) async {
     final provider = context.read<OrcamentoProvider>();
 
-    // Já existe uma aba local para esse orçamento (ex: eu mesmo abri antes,
-    // possivelmente só para visualizar enquanto outra pessoa editava) — não
-    // precisamos travar de novo (heartbeat do editor já renova a trava que
-    // eu já possuo), mas PRECISAMOS sincronizar com o servidor antes de
-    // entrar: essa aba pode conter itens desatualizados, de antes da edição
-    // alheia (ver _sincronizarAbaExistenteComServidor).
     final abaExistente = await provider.ativarAbaExistenteAsync(info.id);
     if (abaExistente >= 0) {
+      bool somenteLeituraAbaExistente = false;
+      try {
+        await OrcamentoRepository().travar(info.id);
+      } on OrcamentoTravadoException catch (e) {
+        if (!mounted) return;
+        final continuar = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Orçamento em edição',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            content: Text(
+              '${e.travaUsuarioNome ?? 'Outro usuário'} está editando este orçamento agora.\n\n'
+              'Você pode abrir para visualizar, mas não poderá editar até que a pessoa termine.',
+              style: const TextStyle(fontSize: 13),
+            ),
+            actions: [
+              TextButton(
+                style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Abrir para visualizar'),
+              ),
+            ],
+          ),
+        );
+        if (continuar != true) return;
+        somenteLeituraAbaExistente = true;
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_mensagemErro(e, acao: 'abrir orçamento')),
+              backgroundColor: AppTheme.error,
+            ),
+          );
+        }
+        return;
+      }
+
+      provider.atualizarFlagsTab(somenteLeitura: somenteLeituraAbaExistente);
       await _sincronizarAbaExistenteComServidor(info.id);
       if (mounted) {
         final resultado = await Navigator.of(context).push(
@@ -1444,20 +1498,91 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       return;
     }
 
-    // Reaproveita o mesmo fluxo de carregamento de _reabrirOrcamento, só
-    // que aqui o status é sempre ABERTO (é o que garante aparecer nesta
-    // seção) e propagamos a flag de somente-leitura para o editor.
     await _reabrirOrcamento({'id': info.id, 'status': 'ABERTO'}, somenteLeitura: somenteLeitura);
   }
 
-  // ── Excluir orçamento diretamente pela seção "Em Aberto" ──────────────────
-  // O backend só permite excluir (DELETE /orcamentos/:id) orçamentos com
-  // status CANCELADO, NAO_APROVADO ou CONVERTIDO — nunca ABERTO (ver
-  // orcamento.service.js:excluir). Por isso aqui cancelamos primeiro e, se
-  // o cancelamento for bem-sucedido, excluímos em seguida. Do ponto de
-  // vista do usuário isso é só "excluir o orçamento": ele some da lista
-  // "Em Aberto" (evento SSE 'orcamento_saiu_de_aberto', cuidado do
-  // cancelamento) e não fica nem no histórico como cancelado.
+  Future<void> _baixarPdfOrcamentoAberto(OrcamentoAbertoInfo info) async {
+    try {
+      final orcamentoCompleto = await OrcamentoRepository().buscarPorId(info.id);
+      if (!mounted) return;
+      await _baixarPdfOrcamento(orcamentoCompleto);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_mensagemErro(e, acao: 'gerar PDF do orçamento')),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _enviarParaAprovacaoEmAberto(OrcamentoAbertoInfo info) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enviar para Aprovação',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        content: Text(
+          'Deseja enviar o orçamento "${info.titulo}" para aprovação?',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Enviar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+
+    final provider = context.read<OrcamentoProvider>();
+    try {
+      await OrcamentoRepository().enviarParaAprovacao(info.id);
+
+      final idx = provider.ativarAbaExistente(info.id);
+      if (idx >= 0) provider.fecharAba(idx);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Orçamento "${info.titulo}" enviado para aprovação!'),
+          backgroundColor: AppTheme.success,
+        ),
+      );
+      if (_mainTabController.index != 1) {
+        _mainTabController.animateTo(1);
+      }
+      await provider.carregarOrcamentosAbertos();
+      await _carregarOrcamentosServidor(origem: 'aposEnviarAprovacaoEmAberto');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _isErroDeStatusDesatualizado(e)
+                  ? 'O status deste orçamento mudou (outra pessoa já alterou). A lista foi atualizada.'
+                  : _mensagemErro(e, acao: 'enviar orçamento para aprovação'),
+            ),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+        if (_isErroDeStatusDesatualizado(e)) {
+          await provider.carregarOrcamentosAbertos();
+        }
+      }
+    }
+  }
+
   Future<void> _excluirOrcamentoEmAberto(OrcamentoAbertoInfo info) async {
     final confirmar = await showDialog<bool>(
       context: context,
@@ -1491,9 +1616,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       await repo.cancelar(info.id);
       await repo.excluir(info.id);
 
-      // Se por acaso este orçamento também estiver aberto como aba local
-      // (o próprio usuário que está excluindo), fecha a aba para não
-      // deixar o editor apontando para um orçamento que não existe mais.
       final idx = provider.ativarAbaExistente(info.id);
       if (idx >= 0) provider.fecharAba(idx);
 
@@ -1507,9 +1629,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       await provider.carregarOrcamentosAbertos();
     } catch (e) {
       if (_isErroOrcamentoNaoEncontrado(e)) {
-        // Já não existe — provavelmente resíduo da lista local (SSE
-        // desatualizado, ou outra guia/usuário já excluiu). O resultado
-        // desejado já é verdade: trata como sucesso, só atualiza a lista.
+
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1530,8 +1650,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       }
     }
   }
-
-  // ── Painel de aprovação (exibido quando a aba ativa está vazia) ──────────────
 
   Widget _buildPainelAprovacao() {
     return Column(
@@ -1563,6 +1681,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                 ),
               ),
               Tab(
+                key: _tourKeyAbaAguardandoAprovacao,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1573,6 +1692,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                 ),
               ),
               Tab(
+                key: _tourKeyAbaAprovados,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1603,14 +1723,18 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             children: [
               _buildPainelEmAberto(),
               _buildListaAprovacao(
-                lista: _aguardandoAprovacao,
+                lista: _mostrarCardAprovacaoFakeNoTour
+                    ? [_itemFakeAprovacaoTour(), ..._aguardandoAprovacao]
+                    : _aguardandoAprovacao,
                 emptyMessage: 'Nenhum orçamento aguardando aprovação',
                 emptyIcon: Icons.pending_outlined,
                 statusColor: AppTheme.warning,
                 mostrarAcoes: true,
               ),
               _buildListaAprovacao(
-                lista: _aprovados,
+                lista: _mostrarCardGerarOCFakeNoTour
+                    ? [_itemFakeGerarOCTour(), ..._aprovados]
+                    : _aprovados,
                 emptyMessage: 'Nenhum orçamento aprovado',
                 emptyIcon: Icons.check_circle_outline,
                 statusColor: AppTheme.success,
@@ -1628,10 +1752,8 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     );
   }
 
-
   Widget _buildHeader() {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1643,7 +1765,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                   .headlineMedium
                   ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
             ),
-            SizedBox(height: 2),
+            const SizedBox(height: 2),
             Text(
               'Orçar e comparar valores entre fornecedores',
               style: Theme.of(context)
@@ -1656,7 +1778,37 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
         const Spacer(),
 
-        // Botão Orçamentos em andamento
+        Tooltip(
+          message: 'Ver histórico de orçamentos finalizados',
+          child: OutlinedButton.icon(
+            onPressed: () async {
+              final resultado = await Navigator.of(context).push<dynamic>(
+                MaterialPageRoute(
+                  builder: (_) => const OrcamentoHistoricoPage(),
+                ),
+              );
+
+              if (!mounted) return;
+
+              if (resultado is Map &&
+                  resultado['reabrirServidorId'] != null) {
+
+              }
+            },
+            icon: const Icon(Icons.history, size: 18),
+            label: const Text('Histórico'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.onSurface,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+            ).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+          ),
+        ),
+
+        const SizedBox(width: 10),
+
         Consumer<OrcamentoProvider>(
           builder: (context, provider, _) {
             final temAbas = provider.abas.isNotEmpty;
@@ -1677,7 +1829,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                 icon: Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    const Icon(Icons.edit_note, size: 16),
+                    const Icon(Icons.edit_note, size: 18),
                     if (temAbas)
                       Positioned(
                         right: -4,
@@ -1702,17 +1854,14 @@ class _OrcamentoPageState extends State<OrcamentoPage>
                       ),
                   ],
                 ),
-                label: Text(
-                  'Aberto',
-                  style: TextStyle(fontSize: 13),
-                ),
+                label: const Text('Aberto'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: temAbas ? AppTheme.warning : Theme.of(context).colorScheme.outline,
+                  foregroundColor: temAbas ? AppTheme.warning : Theme.of(context).colorScheme.onSurface,
                   side: BorderSide(
                       color: temAbas ? AppTheme.warning : Theme.of(context).colorScheme.outlineVariant),
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
+                    horizontal: 16,
+                    vertical: 12,
                   ),
                 ).copyWith(
                   mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
@@ -1722,7 +1871,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           },
         ),
 
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
 
         Tooltip(
           key: _tourKeyNovoOrcamento,
@@ -1737,15 +1886,13 @@ class _OrcamentoPageState extends State<OrcamentoPage>
               );
               await _aoVoltarDoEditor(resultado);
             },
-            icon: const Icon(Icons.add, size: 16),
-            label: const Text(
-              'Novo Orçamento',
-              style: TextStyle(fontSize: 13),
-            ),
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Novo Orçamento'),
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(
-                horizontal: 16,
+                horizontal: 20,
                 vertical: 12,
               ),
             ).copyWith(
@@ -1755,43 +1902,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         ),
 
         const SizedBox(width: 12),
-
-        Tooltip(
-          message: 'Ver histórico de orçamentos finalizados',
-          child: OutlinedButton.icon(
-            onPressed: () async {
-              final resultado = await Navigator.of(context).push<dynamic>(
-                MaterialPageRoute(
-                  builder: (_) => const OrcamentoHistoricoPage(),
-                ),
-              );
-
-              if (!mounted) return;
-
-              if (resultado is Map &&
-                  resultado['reabrirServidorId'] != null) {
-                // A reabertura já configura a aba no provider via _reabrirOrcamento
-              }
-            },
-            icon: Icon(Icons.history, size: 16),
-            label: Text(
-              'Histórico',
-              style: TextStyle(fontSize: 13),
-            ),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-              padding: EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 10,
-              ),
-            ).copyWith(
-              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-            ),
-          ),
-        ),
-
-        SizedBox(width: 12),
 
         IconButton(
           onPressed: () => _carregarOrcamentosServidor(origem: 'botaoAtualizarManual'),
@@ -1821,58 +1931,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
               strokeWidth: 2,
               color: AppTheme.primary,
             ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  // ignore: unused_element
-  Widget _buildHeaderEdicao(OrcamentoProvider provider, List<ItemOrcamentoData> itens) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        IconButton(
-          onPressed: () {
-            context.read<OrcamentoProvider>().atualizarFlagsTab(
-              aguardandoAprovacao: false, jaFinalizado: false, modoGerarOC: false);
-            context.read<OrcamentoProvider>().fecharAbaAposOperacao();
-          },
-          icon: Icon(Icons.arrow_back_ios_new, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-          style: IconButton.styleFrom(
-            backgroundColor: Theme.of(context).colorScheme.surface,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-          ),
-        ),
-        SizedBox(width: 16),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              provider.tabAtual?.titulo ?? 'Orçamento',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineMedium
-                  ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
-            ),
-            SizedBox(height: 2),
-            Text(
-              'Orçar e comparar valores entre fornecedores',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-            ),
-          ],
-        ),
-        const Spacer(),
-        if (_salvandoPreco) ...[
-          const SizedBox(width: 12),
-          const SizedBox(
-            width: 18,
-            height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary),
           ),
         ],
       ],
@@ -1977,20 +2035,32 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             separatorBuilder: (_, __) => const SizedBox(height: 12),
             itemBuilder: (ctx, i) {
               final orc = lista[i] as Map<String, dynamic>;
+              final ehCardFakeAprovacao = mostrarAcoes &&
+                  _mostrarCardAprovacaoFakeNoTour &&
+                  i == 0 &&
+                  orc['_fakeTour'] == true;
+              final ehCardFakeGerarOC = _mostrarCardGerarOCFakeNoTour &&
+                  i == 0 &&
+                  orc['_fakeTour'] == true;
+              final ehCardFakeDoTour = ehCardFakeAprovacao || ehCardFakeGerarOC;
               return _OrcamentoAprovacaoCard(
                 orcamento: orc,
                 statusColor: statusColor,
                 mostrarAcoes: mostrarAcoes,
-                onTap: () => _reabrirOrcamento(orc),
-                onAbrirPdf: () => _baixarPdfOrcamento(orc),
-                onAprovar: mostrarAcoes
+                chaveBotaoAprovar: ehCardFakeAprovacao ? _tourKeyCardAprovarFake : null,
+                chaveBotaoGerarOC: ehCardFakeGerarOC ? _tourKeyCardGerarOCFake : null,
+                onTap: ehCardFakeDoTour ? null : () => _reabrirOrcamento(orc),
+                onAbrirPdf: ehCardFakeDoTour ? null : () => _baixarPdfOrcamento(orc),
+                onAprovar: mostrarAcoes && !ehCardFakeDoTour
                     ? () => _aprovarOrcamento(orc['id'] as int, orc['titulo'] as String? ?? '')
-                    : null,
-                onRejeitar: mostrarAcoes
+                    : (ehCardFakeAprovacao ? () {} : null),
+                onRejeitar: mostrarAcoes && !ehCardFakeDoTour
                     ? () => _rejeitarOrcamento(orc['id'] as int, orc['titulo'] as String? ?? '')
                     : null,
-                onReabrir: () => _reabrirOrcamento(orc),
-                onGerarOC: orc['status'] == 'APROVADO' ? () => _gerarOCDeOrcamentoAprovado(orc) : null,
+                onReabrir: ehCardFakeDoTour ? null : () => _reabrirOrcamento(orc),
+                onGerarOC: orc['status'] == 'APROVADO' && !ehCardFakeDoTour
+                    ? () => _gerarOCDeOrcamentoAprovado(orc)
+                    : (ehCardFakeGerarOC ? () {} : null),
               );
             },
           ),
@@ -1999,14 +2069,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     );
   }
 
-
-
-
-
-
 }
-
-// ─── Campo de descrição com controller persistente ───────────────────────────
 
 class _DescricaoField extends StatefulWidget {
   final String? valorInicial;
@@ -2058,8 +2121,6 @@ class _DescricaoFieldState extends State<_DescricaoField> {
   }
 }
 
-// ─── Card de orçamento para aprovação ────────────────────────────────────────
-
 class _OrcamentoAprovacaoCard extends StatefulWidget {
   final Map<String, dynamic> orcamento;
   final Color statusColor;
@@ -2070,6 +2131,8 @@ class _OrcamentoAprovacaoCard extends StatefulWidget {
   final VoidCallback? onRejeitar;
   final VoidCallback? onReabrir;
   final VoidCallback? onGerarOC;
+  final Key? chaveBotaoAprovar;
+  final Key? chaveBotaoGerarOC;
 
   const _OrcamentoAprovacaoCard({
     required this.orcamento,
@@ -2081,6 +2144,8 @@ class _OrcamentoAprovacaoCard extends StatefulWidget {
     this.onRejeitar,
     this.onReabrir,
     this.onGerarOC,
+    this.chaveBotaoAprovar,
+    this.chaveBotaoGerarOC,
   });
 
   @override
@@ -2110,10 +2175,7 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
     final onAbrirPdf = widget.onAbrirPdf;
     final titulo = orcamento['titulo'] as String? ?? 'Orçamento';
     final itens = (orcamento['itens'] as List? ?? []);
-    
-    // Materiais únicos (não duplicados por fornecedor), com descrição para
-    // exibição na lista (nome + medida/espessura/identificador), no mesmo
-    // padrão usado no card de Ordem de Compra.
+
     final Map<int, String> materiaisUnicos = {};
     for (final item in itens) {
       final materialId = item['materialId'] as int?;
@@ -2144,7 +2206,7 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
           ? '$identificador · $nomeComPartes'
           : nomeComPartes;
     }
-    
+
     final criadoEm = orcamento['criadoEm'] != null
         ? DateTime.tryParse(orcamento['criadoEm'] as String)
         : null;
@@ -2174,7 +2236,7 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
           borderRadius: BorderRadius.circular(11),
           child: Stack(
             children: [
-              // Barra colorida lateral esquerda (mesmo padrão do card de OC)
+
               Positioned(
                 left: 0, top: 0, bottom: 0, width: 4,
                 child: ColoredBox(color: statusColor),
@@ -2285,7 +2347,7 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    // Aba "Aguardando Aprovação": PDF + Reabrir + Rejeitar + Aprovar
+
                     if (mostrarAcoes) ...[
                       if (onAbrirPdf != null) ...[
                         Tooltip(
@@ -2344,6 +2406,7 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
                       Tooltip(
                         message: 'Aprovar orçamento',
                         child: FilledButton.icon(
+                          key: widget.chaveBotaoAprovar,
                           onPressed: onAprovar,
                           icon: const Icon(Icons.check, size: 14),
                           label: const Text('Aprovar',
@@ -2359,7 +2422,7 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
                         ),
                       ),
                     ]
-                    // Aba "Aprovados": PDF + Gerar OC
+
                     else if (onGerarOC != null) ...[
                       if (onAbrirPdf != null) ...[
                         Tooltip(
@@ -2383,6 +2446,7 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
                       Tooltip(
                         message: 'Gerar Ordem de Compra a partir deste orçamento',
                         child: FilledButton.icon(
+                          key: widget.chaveBotaoGerarOC,
                           onPressed: onGerarOC,
                           icon: const Icon(Icons.shopping_cart_checkout, size: 14),
                           label: const Text('Gerar OC',
@@ -2398,7 +2462,7 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
                         ),
                       ),
                     ]
-                    // Demais abas (Não Aprovados, etc.): PDF + Reabrir
+
                     else ...[
                       if (onAbrirPdf != null) ...[
                         Tooltip(
@@ -2470,8 +2534,6 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
   String _formatDataCard(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 }
-
-// ─── Sub-widgets (reutilizados) ───────────────────────────────────────────────
 
 class _QuantidadeField extends StatefulWidget {
   final double value;
@@ -2565,8 +2627,21 @@ class _DialogVincularFornecedoresState
             .toList();
 
     return AlertDialog(
-      title: Text('Adicionar Fornecedores — ${widget.materialNome}',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text('Adicionar Fornecedores — ${widget.materialNome}',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
+        ],
+      ),
       content: SizedBox(
         width: 360,
         child: Column(
@@ -2714,9 +2789,22 @@ class _DialogEditarPrecoState extends State<_DialogEditarPreco> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(
-        'Editar Preço — ${widget.fornecedorNome}',
-        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Editar Preço — ${widget.fornecedorNome}',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            ),
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
+        ],
       ),
       content: SizedBox(
         width: 320,
@@ -2786,8 +2874,21 @@ class _DialogDescartarOrcamentoState
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Cancelar Orçamento',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text('Cancelar Orçamento',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          ),
+          IconButton(
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
+        ],
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2802,7 +2903,7 @@ class _DialogDescartarOrcamentoState
             maxLines: 3,
             autofocus: true,
             decoration: InputDecoration(
-              labelText: 'Motivo do cancelamento *',
+              labelText: 'Motivo do cancelamento',
               hintText: 'Explique o motivo pelo qual está cancelando...',
               isDense: true,
               errorText: _vazio ? 'Informe o motivo do cancelamento' : null,
@@ -2835,68 +2936,19 @@ class _DialogDescartarOrcamentoState
   }
 }
 
-// ignore: unused_element
-class _DialogOpcaoOC extends StatelessWidget {
-  final List<ItemOrcamentoData> itens;
-  const _DialogOpcaoOC({required this.itens});
-
-  @override
-  Widget build(BuildContext context) {
-    final fornecedores = itens
-        .where((i) => i.fornecedorSelecionado != null)
-        .map((i) => i.precos[i.fornecedorSelecionado!]?.fornecedorNome ?? '')
-        .toSet();
-
-    return AlertDialog(
-      title: const Text('Gerar Ordem de Compra',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${itens.length} ${itens.length == 1 ? 'material' : 'materiais'} selecionados · '
-            '${fornecedores.length} ${fornecedores.length == 1 ? 'fornecedor' : 'fornecedores'}',
-            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 16),
-          const Text('Como deseja gerar a OC?',
-              style: TextStyle(fontSize: 13)),
-        ],
-      ),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar')),
-        OutlinedButton(
-          onPressed: () => Navigator.pop(context, 'existente'),
-          child: const Text('Adicionar a OC existente'),
-        ),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-          onPressed: () => Navigator.pop(context, 'nova'),
-          child: const Text('Criar nova OC'),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Card de item na lista "Orçamentos em Aberto" de um usuário ─────────────
-// Mostra o título, quantidade de itens e — se alguém estiver com o
-// orçamento aberto no editor agora — um indicativo "Em edição por Fulano"
-// (atualizado em tempo real via SSE, ver OrcamentoProvider._atualizarTravaLocal).
 class _OrcamentoEmAbertoCard extends StatefulWidget {
   final OrcamentoAbertoInfo info;
   final VoidCallback onTap;
-  /// Chamado quando o usuário confirma a exclusão pelo botão de lixeira do
-  /// card. Null desabilita a exclusão a partir daqui (ex: se no futuro
-  /// quisermos restringir por permissão).
+
+  final VoidCallback? onAbrirPdf;
+  final VoidCallback? onEnviarAprovacao;
   final VoidCallback? onExcluir;
 
   const _OrcamentoEmAbertoCard({
     required this.info,
     required this.onTap,
+    this.onAbrirPdf,
+    this.onEnviarAprovacao,
     this.onExcluir,
   });
 
@@ -2907,9 +2959,15 @@ class _OrcamentoEmAbertoCard extends StatefulWidget {
 class _OrcamentoEmAbertoCardState extends State<_OrcamentoEmAbertoCard> {
   bool _hovered = false;
 
+  String _formatDataCardAberto(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
   @override
   Widget build(BuildContext context) {
     final info = widget.info;
+    final emEdicaoPorOutro =
+        info.emEdicaoPorOutro(context.watch<OrcamentoProvider>().usuarioAtualId);
+
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
@@ -2918,7 +2976,6 @@ class _OrcamentoEmAbertoCardState extends State<_OrcamentoEmAbertoCard> {
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
             color: _hovered
                 ? AppTheme.primary.withValues(alpha: 0.05)
@@ -2926,84 +2983,212 @@ class _OrcamentoEmAbertoCardState extends State<_OrcamentoEmAbertoCard> {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 4,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: AppTheme.primary,
-                  borderRadius: BorderRadius.circular(2),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(11),
+            child: Stack(
+              children: [
+                Positioned(
+                  left: 0, top: 0, bottom: 0, width: 4,
+                  child: ColoredBox(color: AppTheme.primary),
                 ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      info.titulo,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${info.quantidadeItens} ${info.quantidadeItens == 1 ? 'item' : 'itens'}'
-                      ' · #${info.id}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                if (widget.onExcluir != null && info.travaUsuarioId == null)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: Tooltip(
+                      message: 'Excluir orçamento',
+                      child: IconButton(
+                        onPressed: widget.onExcluir,
+                        icon: Icon(Icons.delete_outline, size: 18, color: AppTheme.error),
+                        visualDensity: VisualDensity.compact,
+                        splashRadius: 18,
+                        style: IconButton.styleFrom().copyWith(
+                          mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
                       ),
                     ),
-                  ],
-                ),
-              ),
-              if (info.emEdicaoPorAlguem)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: AppTheme.success.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+                Padding(
+                  padding: EdgeInsets.only(
+                    left: 20,
+                    right: widget.onExcluir != null && info.travaUsuarioId == null ? 44 : 16,
+                    top: 16,
+                    bottom: 16,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(color: AppTheme.success, shape: BoxShape.circle),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '#${info.id} — ${info.titulo}',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 15,
+                                    color: Theme.of(context).colorScheme.onSurface,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (info.criadoEm != null || info.criadorNome != null) ...[
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.calendar_today_outlined,
+                                          size: 13,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                      const SizedBox(width: 3),
+                                      Flexible(
+                                        child: Text(
+                                          [
+                                            if (info.criadoEm != null)
+                                              'Criado em ${_formatDataCardAberto(info.criadoEm!)}',
+                                            if (info.criadorNome != null) 'por ${info.criadorNome}',
+                                          ].join(' '),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          if (emEdicaoPorOutro)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: AppTheme.success.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: const BoxDecoration(
+                                        color: AppTheme.success, shape: BoxShape.circle),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Em edição por ${info.travaUsuarioNome ?? '...'}',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppTheme.success),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Em edição por ${info.travaUsuarioNome ?? '...'}',
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.success),
+                      if (info.materiais.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: info.materiais.map((m) {
+                            final nomeBase = m.nome.isNotEmpty ? m.nome : 'Material excluído';
+                            final medidaOuDimensao = (m.medida != null && m.medida!.isNotEmpty)
+                                ? m.medida
+                                : _materialDimensaoFormatada(m.largura, m.comprimento);
+                            final espessuraFormatada = (m.espessura != null && m.espessura!.isNotEmpty)
+                                ? (m.espessura!.toLowerCase().endsWith('mm') ? m.espessura : '${m.espessura}mm')
+                                : null;
+                            final partes = <String>[
+                              if (medidaOuDimensao != null && medidaOuDimensao.isNotEmpty) medidaOuDimensao,
+                              if (espessuraFormatada != null) espessuraFormatada,
+                            ];
+                            final nomeComPartes =
+                                partes.isEmpty ? nomeBase : '$nomeBase · ${partes.join(' · ')}';
+                            final desc = (m.identificador != null && m.identificador!.isNotEmpty)
+                                ? '${m.identificador} · $nomeComPartes'
+                                : nomeComPartes;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: Text(
+                                desc,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          if (widget.onAbrirPdf != null) ...[
+                            Tooltip(
+                              message: 'Baixar PDF do orçamento',
+                              child: OutlinedButton.icon(
+                                onPressed: widget.onAbrirPdf,
+                                icon: const Icon(Icons.picture_as_pdf_outlined, size: 14),
+                                label: const Text('PDF', style: TextStyle(fontSize: 12)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                ).copyWith(
+                                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          Tooltip(
+                            message: 'Abrir orçamento para edição',
+                            child: OutlinedButton.icon(
+                              onPressed: widget.onTap,
+                              icon: const Icon(Icons.edit_outlined, size: 14),
+                              label: const Text('Abrir', style: TextStyle(fontSize: 12)),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTheme.primary,
+                                side: const BorderSide(color: AppTheme.primary),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              ).copyWith(
+                                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                              ),
+                            ),
+                          ),
+                          if (widget.onEnviarAprovacao != null) ...[
+                            const SizedBox(width: 8),
+                            Tooltip(
+                              message: 'Enviar orçamento para aprovação',
+                              child: FilledButton.icon(
+                                onPressed: emEdicaoPorOutro ? null : widget.onEnviarAprovacao,
+                                icon: const Icon(Icons.send_outlined, size: 14),
+                                label: const Text('Enviar p/ Aprovação', style: TextStyle(fontSize: 12)),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.primary,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                ).copyWith(
+                                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ),
-                )
-              else ...[
-                Icon(Icons.chevron_right, size: 18, color: Theme.of(context).colorScheme.outline),
-              ],
-              // Exclusão só é oferecida quando ninguém está editando agora —
-              // excluir um orçamento que outra pessoa tem aberto no editor
-              // deixaria a guia dela apontando para um orçamento inexistente.
-              if (widget.onExcluir != null && !info.emEdicaoPorAlguem) ...[
-                const SizedBox(width: 4),
-                Tooltip(
-                  message: 'Excluir orçamento',
-                  child: IconButton(
-                    onPressed: widget.onExcluir,
-                    icon: Icon(Icons.delete_outline, size: 18, color: AppTheme.error),
-                    visualDensity: VisualDensity.compact,
-                    splashRadius: 18,
-                    style: IconButton.styleFrom().copyWith(
-                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                    ),
-                  ),
                 ),
               ],
-            ],
+            ),
           ),
         ),
       ),

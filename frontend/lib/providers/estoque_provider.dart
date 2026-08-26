@@ -30,9 +30,6 @@ class EstoqueProvider extends ChangeNotifier {
   List<RelacaoOSModel> _relacoesOS = [];
   List<RelacaoOSModel> get relacoesOS => _relacoesOS;
 
-  /// Retorna o conjunto de números de OS que já foram fechadas no controle
-  /// de estoque. Usado para bloquear a finalização de OCs que referenciam
-  /// essas OS.
   Set<String> get numerosOSFechadas => _relacoesOS
       .where((r) => r.estaFechada)
       .map((r) => r.numeroOS)
@@ -52,17 +49,93 @@ class EstoqueProvider extends ChangeNotifier {
 
   String? _erro;
   String? get erro => _erro;
+  String? _erroLista;
+  String? get erroLista => _erroLista;
 
   Future<void> carregarRelacoesOS({String? busca}) async {
     _carregando = true;
-    _erro = null;
+    _erroLista = null;
     notifyListeners();
     try {
-      _relacoesOS = await _repo.listarTodasRelacoesOS(busca: busca);
+      final resultado = await _repo.listarTodasRelacoesOS(
+        busca: busca,
+        pagina: 1,
+        porPagina: 100000,
+      );
+      _relacoesOS = resultado.itens;
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroLista = _mensagemErro(e);
     } finally {
       _carregando = false;
+      notifyListeners();
+    }
+  }
+
+  final Map<String, List<RelacaoOSModel>> _relacoesOSPaginaPorStatus = {};
+  List<RelacaoOSModel> relacoesOSPaginaDoStatus(String status, {bool numericas = false, bool textuais = false}) {
+    final sufixo = numericas ? '#num' : (textuais ? '#txt' : '');
+    return _relacoesOSPaginaPorStatus['$status$sufixo'] ?? const [];
+  }
+
+  final Map<String, int> _totalRelacoesOSPaginaPorStatus = {};
+  int totalRelacoesOSPaginaDoStatus(String status, {bool numericas = false, bool textuais = false}) {
+    final sufixo = numericas ? '#num' : (textuais ? '#txt' : '');
+    return _totalRelacoesOSPaginaPorStatus['$status$sufixo'] ?? 0;
+  }
+
+  bool _carregandoPagina = false;
+  bool get carregandoPagina => _carregandoPagina;
+
+  Future<void> carregarRelacoesOSPagina({
+    String? busca,
+    String? status,
+    String? cliente,
+    String? material,
+    String? identificador,
+    String? medida,
+    String? comprimento,
+    String? largura,
+    String? espessura,
+    DateTime? dataInicio,
+    DateTime? dataFim,
+    String? ordenarPor,
+    String? direcao,
+    bool apenasNumericas = false,
+    bool apenasTextuais = false,
+    required int pagina,
+    int porPagina = 50,
+  }) async {
+    _carregandoPagina = true;
+    _erroLista = null;
+    notifyListeners();
+    try {
+      final resultado = await _repo.listarTodasRelacoesOS(
+        busca:            busca,
+        status:           status,
+        cliente:          cliente,
+        material:         material,
+        identificador:    identificador,
+        medida:           medida,
+        comprimento:      comprimento,
+        largura:          largura,
+        espessura:        espessura,
+        dataInicio:       dataInicio,
+        dataFim:          dataFim,
+        ordenarPor:       ordenarPor,
+        direcao:          direcao,
+        apenasNumericas:  apenasNumericas,
+        apenasTextuais:   apenasTextuais,
+        pagina:           pagina,
+        porPagina:        porPagina,
+      );
+      final sufixo = apenasNumericas ? '#num' : (apenasTextuais ? '#txt' : '');
+      final chave = '${status ?? '_'}$sufixo';
+      _relacoesOSPaginaPorStatus[chave]      = resultado.itens;
+      _totalRelacoesOSPaginaPorStatus[chave] = resultado.total;
+    } catch (e) {
+      _erroLista = _mensagemErro(e);
+    } finally {
+      _carregandoPagina = false;
       notifyListeners();
     }
   }
@@ -123,10 +196,6 @@ class EstoqueProvider extends ChangeNotifier {
     }
   }
 
-  /// Igual a [registrarMovimentacao] mas NÃO chama [carregarRelacoesOS] ao
-  /// final. Use quando for registrar múltiplas movimentações em sequência e
-  /// quiser recarregar apenas uma vez ao final (evita criar RelacaoOS
-  /// duplicadas por race condition entre chamadas consecutivas).
   Future<bool> registrarMovimentacaoSilencioso({
     required int materialId,
     required String tipo,
@@ -171,27 +240,16 @@ class EstoqueProvider extends ChangeNotifier {
     try {
       await _repo.removerMovimentacao(movimentacaoId);
 
-      // Busca os dados atualizados ANTES de tocar no estado/notificar,
-      // para que a troca de _relacaoSelecionada e _relacoesOS aconteça
-      // em um único ponto, com uma única notifyListeners() ao final.
-      // Encadear vários notifyListeners() em sequência (como fazia antes,
-      // via carregarRelacoesOS() + notify explícito) pode disparar um
-      // rebuild enquanto o Flutter ainda está processando o rebuild
-      // anterior — e se esse rebuild remover da árvore o card cuja
-      // última movimentação acabou de ser excluída (ex.: ao remover a
-      // saída restante de um material), o widget é desativado nesse
-      // meio-tempo, causando "setState()/markNeedsBuild() called during
-      // build" e "Looking up a deactivated widget's ancestor is unsafe".
       RelacaoOSModel? novaSelecao;
       try {
         novaSelecao = await _repo.buscarRelacaoOS(numeroOS);
       } catch (_) {
         novaSelecao = null;
       }
-      final novasRelacoes = await _repo.listarTodasRelacoesOS();
+      final resultado = await _repo.listarTodasRelacoesOS(pagina: 1, porPagina: 100000);
 
       _relacaoSelecionada = novaSelecao;
-      _relacoesOS = novasRelacoes;
+      _relacoesOS = resultado.itens;
       notifyListeners();
       return true;
     } catch (e) {
@@ -201,8 +259,6 @@ class EstoqueProvider extends ChangeNotifier {
     }
   }
 
-  /// Usa o [relacaoOSId] numérico — OS textuais podem ter múltiplas relações
-  /// com o mesmo numeroOS, então o id garante a relação correta.
   Future<bool> excluirRelacaoOS(int relacaoOSId) async {
     try {
       await _repo.excluirRelacaoOS(relacaoOSId);
@@ -217,8 +273,6 @@ class EstoqueProvider extends ChangeNotifier {
     }
   }
 
-  /// Renomeia a OS: altera o numeroOS (e opcionalmente o cliente) no
-  /// backend e recarrega a lista.
   Future<bool> renomearOS(
     int relacaoOSId,
     String novoNumeroOS, {
@@ -230,7 +284,6 @@ class EstoqueProvider extends ChangeNotifier {
         novoNumeroOS,
         novoCliente: novoCliente,
       );
-      // Atualiza a seleção com os dados atualizados (numeroOS/cliente novos)
       _relacaoSelecionada = atualizada;
       await carregarRelacoesOS();
       notifyListeners();
@@ -242,15 +295,60 @@ class EstoqueProvider extends ChangeNotifier {
     }
   }
 
-  /// Busca o cliente já vinculado a um número de OS (autofill ao digitar
-  /// o número da OS nas telas de entrada/saída). Não altera estado nem
-  /// notifica — chamado sob demanda pela UI.
   Future<String?> buscarClientePorNumeroOS(String numeroOS) {
     return _repo.buscarClientePorNumeroOS(numeroOS);
   }
 
-  /// Fecha a OS: muda status para FECHADA no backend e remove da lista
-  /// de controle de estoque. A OS passa a aparecer só na página de relatórios.
+  List<MovimentacaoComOSModel> _movimentacoesPagina = [];
+  List<MovimentacaoComOSModel> get movimentacoesPagina => _movimentacoesPagina;
+
+  int _totalMovimentacoesPagina = 0;
+  int get totalMovimentacoesPagina => _totalMovimentacoesPagina;
+
+  bool _carregandoMovimentacoes = false;
+  bool get carregandoMovimentacoes => _carregandoMovimentacoes;
+
+  Future<void> carregarMovimentacoesPagina({
+    String? numeroOS,
+    String? material,
+    String? identificador,
+    String? medida,
+    String? comprimento,
+    String? largura,
+    String? espessura,
+    String? tipo,
+    DateTime? dataInicio,
+    DateTime? dataFim,
+    required int pagina,
+    int porPagina = 100,
+  }) async {
+    _carregandoMovimentacoes = true;
+    notifyListeners();
+    try {
+      final resultado = await _repo.listarMovimentacoes(
+        numeroOS:      numeroOS,
+        material:      material,
+        identificador: identificador,
+        medida:        medida,
+        comprimento:   comprimento,
+        largura:       largura,
+        espessura:     espessura,
+        tipo:          tipo,
+        dataInicio:    dataInicio,
+        dataFim:       dataFim,
+        pagina:        pagina,
+        porPagina:     porPagina,
+      );
+      _movimentacoesPagina      = resultado.itens;
+      _totalMovimentacoesPagina = resultado.total;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+    } finally {
+      _carregandoMovimentacoes = false;
+      notifyListeners();
+    }
+  }
+
   Future<bool> fecharOS(int relacaoOSId) async {
     _fechandoOS = true;
     notifyListeners();
@@ -270,11 +368,6 @@ class EstoqueProvider extends ChangeNotifier {
     }
   }
 
-  /// Igual a [fecharOS], mas não altera [_carregando]/[_fechandoOS] nem
-  /// recarrega a lista internamente — não dispara o spinner de tela cheia.
-  /// Usado no fechamento automático em segundo plano (ex.: ao virar o dia),
-  /// onde a lista deve ser atualizada sem "piscar" a UI. Chame
-  /// [recarregarRelacoesOSSilencioso] uma única vez ao final do lote.
   Future<bool> fecharOSSilencioso(int relacaoOSId) async {
     try {
       await _repo.fecharOS(relacaoOSId);
@@ -288,23 +381,21 @@ class EstoqueProvider extends ChangeNotifier {
     }
   }
 
-  /// Recarrega [_relacoesOS] do servidor e notifica os listeners sem passar
-  /// por [_carregando] — evita o spinner de tela cheia. Usado após um lote
-  /// de fechamentos automáticos silenciosos, para refletir o resultado na
-  /// UI com uma única atualização "suave".
   Future<void> recarregarRelacoesOSSilencioso({String? busca}) async {
     try {
-      final novasRelacoes = await _repo.listarTodasRelacoesOS(busca: busca);
-      _relacoesOS = novasRelacoes;
+      final resultado = await _repo.listarTodasRelacoesOS(
+        busca: busca,
+        pagina: 1,
+        porPagina: 100000,
+      );
+      _relacoesOS = resultado.itens;
       notifyListeners();
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroLista = _mensagemErro(e);
       notifyListeners();
     }
   }
 
-  /// Reverte a OS fechada: muda status para EM_ANDAMENTO no backend.
-  /// A OS volta ao controle de estoque e some da página de relatórios.
   Future<bool> reverterOS(String numeroOS) async {
     try {
       await _repo.reverterOS(numeroOS);
@@ -319,8 +410,6 @@ class EstoqueProvider extends ChangeNotifier {
     }
   }
 
-  /// Atualiza o preço (precoUnitario e/ou precoM2) de uma movimentação existente.
-  /// Não altera quantidade nem saldo de estoque — apenas corrige o custo registrado.
   Future<bool> atualizarPrecoMovimentacao(
     int movimentacaoId, {
     double? precoUnitario,

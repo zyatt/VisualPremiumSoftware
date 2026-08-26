@@ -14,18 +14,11 @@ class HistoricoPrecoModel {
   final double precoUnitario;
   final double? precoM2;
   final double quantidade;
-  /// Quantidade da unidade de medida por embalagem/peça (ex.: 11 m/l por
-  /// unidade de adesivo). Quando informado, [quantidade] representa o número
-  /// de embalagens compradas, e a quantidade real usada no cálculo do total
-  /// é quantidade × qtdUnidade (mesma regra da OC).
   final double? qtdUnidade;
   final bool usarM2;
   final DateTime criadoEm;
   final DateTime? dataOrdem;
 
-  /// Quantidade real usada no estoque/cálculo do total: quando há
-  /// [qtdUnidade] (ex.: 11 m/l por unidade), multiplica; senão usa
-  /// [quantidade] diretamente.
   double get quantidadeReal {
     if (!usarM2 && qtdUnidade != null && qtdUnidade! > 0) {
       return quantidade * qtdUnidade!;
@@ -184,6 +177,7 @@ class MaterialModel {
   final double? ultimoValorPagoM2;
   final double? precoMediano;
   final double? precoM2Mediano;
+  final double? precoUnidadeMedidaMediano;
 
   final List<FornecedorMaterialModel> fornecedorMateriais;
   final List<HistoricoPrecoModel> historicoPrecos;
@@ -209,9 +203,14 @@ class MaterialModel {
     this.ultimoValorPagoM2,
     this.precoMediano,
     this.precoM2Mediano,
+    this.precoUnidadeMedidaMediano,
     this.fornecedorMateriais = const [],
     this.historicoPrecos = const [],
   });
+
+  double? get precoRef => precoMediano ?? ultimoValorPago;
+  double? get precoRefM2 => precoM2Mediano ?? ultimoValorPagoM2;
+  double? get precoRefUnidadeMedida => precoUnidadeMedidaMediano;
 
   double? get qtdM2 {
     if (largura == null || comprimento == null) return null;
@@ -255,6 +254,7 @@ class MaterialModel {
       ultimoValorPagoM2:  parseDoubleOrNull(json['custoM2UltimaCompra']),
       precoMediano:       parseDoubleOrNull(json['precoMediano']),
       precoM2Mediano:     parseDoubleOrNull(json['precoM2Mediano']),
+      precoUnidadeMedidaMediano: parseDoubleOrNull(json['precoUnidadeMedidaMediano']),
       fornecedorMateriais: (json['fornecedorMateriais'] as List? ?? [])
           .map((f) => FornecedorMaterialModel.fromJson(f as Map<String, dynamic>))
           .toList(),

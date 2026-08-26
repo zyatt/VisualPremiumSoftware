@@ -1,11 +1,9 @@
 import '../utils/api_client.dart';
 
-// ─── Modelos ──────────────────────────────────────────────────────────────────
-
 class MarkupFaixa {
   final int?    id;
   final double  valorMin;
-  final double? valorMax;   // null = aberto
+  final double? valorMax;
   final double  percentual;
 
   MarkupFaixa({
@@ -45,11 +43,7 @@ class MarkupFaixa {
       );
 }
 
-// ─── Repositório ──────────────────────────────────────────────────────────────
-
 class ConfiguracaoRepository {
-  // ── Markup ──────────────────────────────────────────────────────────────────
-
   Future<List<MarkupFaixa>> listarFaixas() async {
     final list = await ApiClient.getList('/configuracoes/markup');
     return list
@@ -65,7 +59,6 @@ class ConfiguracaoRepository {
         .map((e) => MarkupFaixa.fromJson(e as Map<String, dynamic>))
         .toList();
   }
-  // ── Configurações ────────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> listarConfiguracoes() async {
     final data = await ApiClient.get('/configuracoes/config');

@@ -44,7 +44,7 @@ class _UpperCaseFormatter extends TextInputFormatter {
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    // Remove vírgulas antes de qualquer outra transformação
+
     final semVirgula = newValue.text.replaceAll(',', '');
     final texto = _removerAcentos(semVirgula).toUpperCase();
     final sel = newValue.selection.copyWith(
@@ -55,27 +55,17 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
-/// Formatter para os campos Medida e Espessura:
-/// - remove acentuação e força maiúsculas (igual ao _UpperCaseFormatter)
-/// - converte vírgula em ponto
-/// - permite apenas 1 ponto POR NÚMERO (bloqueia pontos repetidos/seguidos
-///   dentro do mesmo número, ex.: "1..5" ou "1.2.3"), mas preserva múltiplos
-///   números na mesma medida, ex.: "2.44x1.22m" (dois números, um ponto cada)
 class _MedidaEspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    // 1) Vírgula -> ponto
+
     var texto = newValue.text.replaceAll(',', '.');
 
-    // 2) Remove acentos e força minúsculas
     texto = _UpperCaseFormatter._removerAcentos(texto).toLowerCase();
 
-    // 3) Para cada bloco de dígitos+pontos (um "número"), permite apenas o
-    //    primeiro ponto e remove os demais. Não mexe no que não é dígito/ponto
-    //    (letras, "x", espaços, etc.), preservando a separação entre números.
     texto = texto.replaceAllMapped(RegExp(r'[\d.]+'), (m) {
       final partes = m.group(0)!.split('.');
       if (partes.length > 2) {
@@ -92,9 +82,6 @@ class _MedidaEspessuraFormatter extends TextInputFormatter {
   }
 }
 
-/// Formata um valor de espessura garantindo o sufixo "mm" sem duplicar.
-/// Dados antigos podem já ter sido salvos com "mm"/"MM" digitado manualmente
-/// (ex.: "2MM", "2 mm"); removemos esse sufixo antes de reanexar o nosso.
 String? formatarEspessuraComSufixo(String? valor) {
   final v = valor?.trim();
   if (v == null || v.isEmpty) return null;
@@ -103,9 +90,6 @@ String? formatarEspessuraComSufixo(String? valor) {
   return '${numero}mm';
 }
 
-/// Formatter para o campo Espessura: aceita apenas dígitos, ponto e vírgula
-/// (vírgula é convertida em ponto), bloqueando letras e qualquer outro
-/// caractere.
 class _EspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -141,112 +125,55 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
   Timer? _debounceTimer;
   late TabController _tabController;
 
-  // ── Robô assistente: tour "Como fazer uma solicitação?" ──────────────────
   final _tourKeyNovaSolicitacao = GlobalKey();
   final _criarSolicitacaoTourKeys = _CriarSolicitacaoTourKeys();
   RoboHelperProvider? _roboHelperPagina;
-  // Evita reabrir/refechar o dialog "Nova Solicitação" (ou o seletor de
-  // material dentro dele) mais de uma vez enquanto o tour navega entre
-  // paradas rapidamente — mesmo padrão usado em fornecedores_page.dart.
+
   bool _dialogTourAberto = false;
   bool _seletorTourAberto = false;
-  // Flags de transição SEPARADAS por camada de dialog — usar uma única
-  // flag compartilhada fazia o _abrirSeletorTour() ser bloqueado pelo
-  // _dialogTourEmTransicao ainda ligado pelo _abrirDialogTour() anterior
-  // (o addPostFrameCallback que o desliga só roda no frame seguinte, e o
-  // tour já tinha avançado pro próximo passo antes disso), fazendo o
-  // dialog "Selecionar Material" simplesmente não abrir durante o tour.
+
   bool _dialogTourEmTransicao = false;
   bool _seletorTourEmTransicao = false;
 
-  // ── Robô assistente: tour "Como adicionar materiais a uma solicitação
-  // existente" ──────────────────────────────────────────────────────────
-  // Keys do card em destaque na listagem do tour "Como adicionar materiais a
-  // uma solicitação existente". IMPORTANTE: usamos DUAS GlobalKeys distintas
-  // (fictício vs. linha real) em vez de reutilizar a mesma — o Flutter proíbe
-  // que a mesma GlobalKey seja usada por dois elementos montados ao mesmo
-  // tempo, e como `_tourExibirCardFicticio` é setado de forma assíncrona
-  // (dentro de `aoEntrar`), havia uma janela de frames em que o card
-  // fictício E a primeira linha real da lista (recém-chegada do provider)
-  // tentavam existir simultaneamente com a mesma key. Isso corrompia o
-  // Element daquela posição, deixando o GestureDetector/MouseRegion "preso"
-  // até um rebuild completo — exatamente o sintoma relatado de linhas que
-  // param de responder a clique/hover depois de exclusões rápidas.
   final _tourKeyCardSolicitacaoFicticio = GlobalKey();
   final _tourKeyCardSolicitacaoReal = GlobalKey();
-  // Key que o RoboTourStop efetivamente usa: aponta pra uma das duas acima,
-  // trocada apenas depois que uma delas garantidamente saiu da árvore.
+
   GlobalKey get _tourKeyCardSolicitacao =>
       _tourExibirCardFicticio ? _tourKeyCardSolicitacaoFicticio : _tourKeyCardSolicitacaoReal;
   final _tourKeyAdicionarMateriaisExistente = GlobalKey();
   bool _tourExibirCardFicticio = false;
 
-  // ── Robô assistente: tour "Como atender uma solicitação" ────────────────
-  // Keys do primeiro card COMPRADO/ESTOQUE (dentro do dialog de
-  // visualização) e do dropdown de andamento (na tabela) — só fazem
-  // sentido no primeiro item/linha, igual ao padrão de
-  // _tourKeyCardSolicitacao acima.
+  final _tourKeyBotaoAdicionarNoDialog = GlobalKey();
+  bool _dialogAdicionarMateriaisTourAberto = false;
+  final _tourVisualizarDialogStateKey =
+      GlobalKey<_VisualizarSolicitacaoDialogState>();
+
   final _tourKeyComprado = GlobalKey();
   final _tourKeyEstoque = GlobalKey();
   final _tourKeyAndamento = GlobalKey<_StatusBadgeEditavelState>();
-  // Solicitação simulada em memória (nunca enviada ao backend) usada como
-  // substituta de uma solicitação real quando a lista "Em Andamento" está
-  // vazia — apenas para o tour "Como adicionar materiais a uma solicitação
-  // existente" poder dar highlight e abrir o dialog de verdade.
+
   SolicitacaoMaterialModel? _solicitacaoTourFake;
   bool _dialogVisualizarTourAberto = false;
   bool _dialogVisualizarTourEmTransicao = false;
-  // Controla o scroll da aba "Em Andamento" — usado pelo tour pra sempre
-  // voltar ao topo da lista antes de dar highlight na primeira linha.
+
   final _scrollEmAndamento = ScrollController();
 
-  // ── Robô assistente: tour "Como orçar materiais solicitados" ────────────
-  // Keys da aba "Materiais Solicitados": o seletor "Agrupar por", o
-  // primeiro material listado (sempre o primeiro item do primeiro grupo,
-  // independente do modo de agrupamento ativo) e o botão "Orçar
-  // selecionados".
   final _tourKeyAgruparPorMateriaisSolicitados = GlobalKey();
   final _tourKeyPrimeiroMaterialSolicitado = GlobalKey();
   final _tourKeyOrcarSelecionadosMateriaisSolicitados = GlobalKey();
 
-  // ── Paginação (independente por aba) ─────────────────────────────────────
   static const int _itensPorPagina = 50;
   int _paginaEmAndamento = 0;
   int _paginaFinalizadas = 0;
 
-  // ── Totais globais (sem filtro) ──────────────────────────────────────────
-  // Capturados na primeira carga (sem busca/andamento) e atualizados sempre
-  // que o usuário limpa todos os filtros.
   int _totalItensGlobal     = 0;
   int _totalResolvidosGlobal = 0;
   bool _totaisGlobaisCarregados = false;
 
-  // Evita disparar a busca+abertura da solicitação pendente (vinda de um
-  // encaminhamento no chat) mais de uma vez enquanto ela ainda está em
-  // andamento — o build() roda de novo a cada frame do
-  // addPostFrameCallback abaixo, mas o id só é consumido do provider depois
-  // que a busca termina.
   bool _abrindoSolicitacaoPendente = false;
 
-  // Guardamos a referência ao provider (não o BuildContext) para poder
-  // remover o listener com segurança em dispose(). Nunca se deve chamar
-  // context.read<T>() dentro de dispose(): se a página estiver sendo
-  // desmontada porque o usuário deslogou/trocou de usuário (o que destrói
-  // toda a árvore do StatefulShellRoute no mesmo frame em que o provider
-  // dá notifyListeners() em resetarConexao()), o elemento já pode estar
-  // inativo nesse ponto — e o lookup do InheritedWidget feito por
-  // context.read() lança "Looking up a deactivated widget's ancestor is
-  // unsafe". Capturar a referência em didChangeDependencies() (chamado
-  // logo após initState, com o context ainda garantidamente ativo) evita
-  // esse lookup tardio.
   SolicitacaoMaterialProvider? _solicitacaoProviderRef;
 
-  // Nota: quem controla "página aberta" (badge, marcar como visualizado)
-  // é o AppShell — via SolicitacaoMaterialProvider.definirPaginaVisivel(),
-  // baseado na rota atual — e não o ciclo de vida deste State. Essa página
-  // vive dentro de um StatefulShellBranch (IndexedStack) e não é destruída
-  // ao trocar de aba, então didChangeDependencies()/dispose() aqui não são
-  // um sinal confiável de "entrei"/"saí" da tela.
   @override
   void initState() {
     super.initState();
@@ -263,29 +190,13 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
       }
     });
 
-    // Escuta o provider diretamente (em vez de depender só de
-    // context.watch() dentro de build()) para a abertura pendente vinda de
-    // um encaminhamento no chat. Motivo: esta página vive dentro de um
-    // IndexedStack/StatefulShellBranch (ver nota acima) e, em produção,
-    // context.go('/solicitacoes-material') pode apenas trocar qual branch
-    // está visível sem necessariamente reconstruir esta página no mesmo
-    // frame em que solicitarAberturaSolicitacao() chama notifyListeners() —
-    // um addListener aqui garante que reagimos ao evento assim que ele
-    // ocorre, independente de esta página estar prestes a (re)construir por
-    // conta própria. Sem isso, o valor ficava "parado" no provider até
-    // algo mais (ex.: o botão Atualizar) forçar um rebuild que finalmente
-    // o lesse dentro de build().
     context.read<SolicitacaoMaterialProvider>().addListener(_onProviderChanged);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Captura a referência do provider aqui, e não em dispose(): neste
-    // ponto o context está garantidamente ativo (didChangeDependencies só
-    // roda com o elemento montado), então o lookup do InheritedWidget é
-    // seguro. Guardamos o objeto do provider (não o context) para usar em
-    // dispose() sem precisar de um novo lookup na árvore.
+
     _solicitacaoProviderRef = context.read<SolicitacaoMaterialProvider>();
   }
 
@@ -293,42 +204,30 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     _tentarAbrirSolicitacaoPendente();
   }
 
-  // Rede de segurança: se o tour terminar (ESC, "Fechar", ou trocou de
-  // dica) enquanto um dialog aberto pelo próprio tour ainda está na tela,
-  // garante que ele seja fechado e que as flags voltem a false — senão a
-  // próxima tentativa de abrir o mesmo dialog fica bloqueada pelo guard.
   void _onRoboHelperPaginaChanged() {
     if (!mounted) return;
     if (_roboHelperPagina!.tourAtivo) return;
 
-    // Quantos dialogs o tour pode ter empilhado simultaneamente (ex.:
-    // "Nova Solicitação" com o "Selecionar Material" aberto por cima).
-    // Contamos as flags ativas ANTES de zerá-las para saber quantos
-    // maybePop() precisamos disparar.
     final dialogsAbertosPeloTour = [
       _seletorTourAberto,
       _dialogTourAberto,
       _dialogVisualizarTourAberto,
+      _dialogAdicionarMateriaisTourAberto,
     ].where((aberto) => aberto).length;
 
     _seletorTourAberto = false;
     _dialogTourAberto = false;
     _dialogVisualizarTourAberto = false;
+    _dialogAdicionarMateriaisTourAberto = false;
 
     if (dialogsAbertosPeloTour > 0) {
-      // IMPORTANTE: maybePop() é assíncrono — disparar as N chamadas em
-      // sequência sem aguardar cada uma resolver faz com que a pilha do
-      // Navigator ainda não tenha sido atualizada entre uma chamada e
-      // outra (ou faz pops concorrentes se atropelarem), deixando
-      // dialogs empilhados (ex.: "Selecionar Material" sobre "Nova
-      // Solicitação") sem fechar todos ao apertar ESC. Por isso
-      // aguardamos cada pop terminar antes de disparar o próximo.
+
       () async {
         final navigator = Navigator.of(context, rootNavigator: true);
         for (var i = 0; i < dialogsAbertosPeloTour; i++) {
           if (!mounted) return;
           final fechou = await navigator.maybePop();
-          // Se não havia mais nada pra fechar, para de tentar.
+
           if (!fechou) break;
         }
       }();
@@ -341,11 +240,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
 
   @override
   void dispose() {
-    // Usa a referência guardada em didChangeDependencies() em vez de
-    // context.read() aqui — ver comentário no campo _solicitacaoProviderRef
-    // para o motivo (evita "Looking up a deactivated widget's ancestor is
-    // unsafe" quando a página é desmontada junto com uma troca de
-    // usuário/logout).
+
     _solicitacaoProviderRef?.removeListener(_onProviderChanged);
     _debounceTimer?.cancel();
     _buscaCtrl.dispose();
@@ -359,11 +254,6 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     super.dispose();
   }
 
-  /// Consome `solicitacaoParaAbrirPendente` (se houver) e abre o diálogo de
-  /// visualização. Chamado tanto pelo listener direto do provider
-  /// (_onProviderChanged) quanto, redundantemente, pelo próprio build()
-  /// abaixo — o que ocorrer primeiro processa o id; a flag
-  /// _abrindoSolicitacaoPendente evita disparo duplicado entre as duas vias.
   void _tentarAbrirSolicitacaoPendente() {
     if (!mounted) return;
     final provider = context.read<SolicitacaoMaterialProvider>();
@@ -377,10 +267,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
       _abrindoSolicitacaoPendente = false;
       if (!mounted || !context.mounted) return;
       if (solicitacao == null) {
-        // buscarPorId falhou (rede, token expirado, solicitação excluída
-        // etc.) — em produção isso é bem mais comum que em dev (rede
-        // local/rápida), e sem este aviso o usuário só via a troca de aba
-        // acontecer sem nenhum diálogo abrir, sem nenhuma pista do motivo.
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -404,15 +291,13 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
       _paginaEmAndamento = 0;
       _paginaFinalizadas = 0;
     });
-    // Quando não há filtro ativo, a lista resultante é a global — captura os totais
+
     final semFiltro = _buscaCtrl.text.trim().isEmpty && _andamentoFiltro.isEmpty;
     if (semFiltro) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _atualizarTotaisGlobais());
     }
   }
 
-  /// Captura os totais globais a partir da lista atual do provider.
-  /// Deve ser chamado apenas quando não há filtros ativos.
   void _atualizarTotaisGlobais() {
     if (!mounted) return;
     final sols = context.read<SolicitacaoMaterialProvider>().solicitacoes;
@@ -426,11 +311,6 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     });
   }
 
-  /// Abre a página de histórico geral de solicitações (todos os materiais de
-  /// todas as OS, em ordem cronológica). Ao tocar em um item lá, a página de
-  /// histórico marca a solicitação correspondente como "pendente de abertura"
-  /// no provider e fecha — esta tela, que já observa esse estado via
-  /// `_tentarAbrirSolicitacaoPendente`, então abre o diálogo automaticamente.
   Future<void> _abrirHistoricoSolicitacoes() async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const HistoricoSolicitacoesPage()),
@@ -441,22 +321,19 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     final Widget dialog = solicitacao == null
         ? const _CriarSolicitacaoDialog()
         : _VisualizarSolicitacaoDialog(solicitacao: solicitacao);
-    
+
     final salvou = await showDialog<bool>(
       context: context,
       builder: (_) => dialog,
     );
     if (salvou == true && mounted) {
       await context.read<SolicitacaoMaterialProvider>().carregar();
-      // Se não há filtros ativos, a lista atual é a global — atualiza os totais
+
       final semFiltro = _buscaCtrl.text.trim().isEmpty && _andamentoFiltro.isEmpty;
       if (semFiltro) _atualizarTotaisGlobais();
     }
   }
 
-  /// Abre o dialog "Nova Solicitação" já com um item de material inicial
-  /// (simulando o clique em "Adicionar Material") e com as GlobalKeys do
-  /// tour vinculadas — usado apenas pelo tour do robô assistente.
   Future<void> _abrirDialogTour() async {
     if (_dialogTourAberto || _dialogTourEmTransicao) return;
     _dialogTourAberto = true;
@@ -466,16 +343,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     });
     showDialog<bool>(
       context: context,
-      // Enquanto o tour do robô guia este formulário, o balão de dica fica
-      // fora do dialog (numa camada acima dele, no Overlay raiz), e o
-      // GestureDetector de tela cheia do robô (que avança o tour a cada
-      // toque) fica por baixo do balão mas por CIMA do barrier do dialog.
-      // Se o barrier continuar dismissible, qualquer clique do usuário
-      // tentando interagir com a dica (ex.: os botões Anterior/Próximo)
-      // vaza pro barrier e fecha o formulário sem querer — foi isso que
-      // fazia o tour "pular" direto da parada do botão "Nova Solicitação"
-      // pro campo Observação: o dialog fechava e reabria no meio do tour,
-      // perdendo os passos intermediários. Mesmo padrão usado em estoque.
+
       barrierDismissible: !_dialogTourAberto,
       builder: (_) => _CriarSolicitacaoDialog(
         tourKeys: _criarSolicitacaoTourKeys,
@@ -487,16 +355,10 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
         context.read<SolicitacaoMaterialProvider>().carregar();
       }
     });
-    // Aguarda um frame para o dialog começar a montar antes de o provider
-    // tentar medir a key em destaque.
+
     await Future<void>.delayed(const Duration(milliseconds: 80));
   }
 
-  /// Fecha o dialog "Nova Solicitação" aberto pelo tour, aguardando a
-  /// animação de saída terminar antes de retornar — evita que a parada
-  /// seguinte/anterior tente medir keys enquanto ele ainda está visível.
-  /// IMPORTANTE: rootNavigator:true porque showDialog abre no Navigator
-  /// raiz; sem isso maybePop() poparia a rota da página em vez do dialog.
   Future<void> _fecharDialogTourSeAberto() async {
     if (!_dialogTourAberto || _dialogTourEmTransicao) return;
     _dialogTourAberto = false;
@@ -506,8 +368,6 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     await Future<void>.delayed(const Duration(milliseconds: 50));
   }
 
-  /// Abre o dialog "Selecionar Material" por cima do "Nova Solicitação",
-  /// já indo direto para a categoria "TODOS", com as keys do tour.
   Future<void> _abrirSeletorTour() async {
     if (_seletorTourAberto || _seletorTourEmTransicao) return;
     _seletorTourAberto = true;
@@ -517,10 +377,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     });
     showDialog<MaterialModel>(
       context: context,
-      // Mesmo motivo do dialog "Nova Solicitação" em _abrirDialogTour: o
-      // GestureDetector de tela cheia do robô fica acima do barrier deste
-      // dialog enquanto o tour está ativo, e um barrier dismissible deixa
-      // cliques nos botões da dica vazarem e fecharem o seletor sem querer.
+
       barrierDismissible: !_seletorTourAberto,
       builder: (_) => _SeletorMaterialDialog(
         tourKeys: _criarSolicitacaoTourKeys.seletorMaterial,
@@ -532,8 +389,6 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     await Future<void>.delayed(const Duration(milliseconds: 80));
   }
 
-  /// Fecha o "Selecionar Material" aberto pelo tour, para voltar ao
-  /// "Nova Solicitação" por baixo dele (ex.: botão "Anterior").
   Future<void> _fecharSeletorTourSeAberto() async {
     if (!_seletorTourAberto || _seletorTourEmTransicao) return;
     _seletorTourAberto = false;
@@ -543,18 +398,6 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     await Future<void>.delayed(const Duration(milliseconds: 50));
   }
 
-  /// Monta (apenas em memória, sem tocar o backend) uma solicitação
-  /// fictícia "em andamento" para o tour "Como adicionar materiais a uma
-  /// solicitação existente" poder dar highlight e abrir o dialog de
-  /// verdade. Antes, quando a lista estava vazia, essa etapa criava uma
-  /// solicitação real no servidor só pra servir de demonstração — o que
-  /// não faz sentido, já que a intenção é apenas simular a existência de
-  /// uma solicitação para a dica funcionar, não gerar dado real. Agora,
-  /// se não houver nenhuma solicitação em andamento, geramos um
-  /// [SolicitacaoMaterialModel] fake (guardado em [_solicitacaoTourFake])
-  /// usando um material real já carregado (só para exibição/nome), e o
-  /// dialog de visualização do tour passa a aceitar esse fake como
-  /// alternativa a uma solicitação vinda do provider.
   Future<void> _garantirSolicitacaoTourExistente() async {
     final provider = context.read<SolicitacaoMaterialProvider>();
     final temEmAndamento =
@@ -565,10 +408,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     }
 
     try {
-      // Precisa de um material real para o item de demonstração — usa o
-      // primeiro disponível já carregado no MaterialProvider (carregando
-      // a primeira página, sem filtros, se ainda não houver nada em
-      // memória).
+
       final materialProvider = context.read<MaterialProvider>();
       var materiais = materialProvider.materiais;
       if (materiais.isEmpty) {
@@ -577,8 +417,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
         materiais = materialProvider.materiais;
       }
       if (materiais.isEmpty) {
-        // Sem nenhum material cadastrado no sistema não há como montar uma
-        // solicitação de demonstração — mantém o fallback do card fictício.
+
         _solicitacaoTourFake = null;
         return;
       }
@@ -616,9 +455,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
             andamento: 'EM_ANDAMENTO',
             observacao: 'Solicitação de exemplo usada apenas nesta dica — '
                 'nada é salvo.',
-            // Não usamos o usuário logado aqui de propósito: esse campo é
-            // só exibido no dialog de visualização e o valor real não
-            // importa nesta simulação (é descartado ao sair do tour).
+
             usuarioId: 0,
             usuarioNome: 'Visual Premium',
             criadoEm: agora,
@@ -629,19 +466,26 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
         });
       }
     } catch (_) {
-      // Falhou silenciosamente (ex.: material indisponível) — o chamador
-      // cai de volta pro card fictício.
+
       _solicitacaoTourFake = null;
     }
   }
 
-  /// Abre o dialog "Solicitação OS ..." (visualização) por cima da listagem
-  /// e dá highlight no botão "Adicionar Materiais" — usado apenas pelo tour
-  /// do robô assistente. Se existir alguma solicitação em andamento, abre a
-  /// primeira delas (a mesma que está com o card em destaque); senão abre o
-  /// card fictício com uma solicitação de demonstração.
-  Future<void> _abrirDialogVisualizarTour() async {
-    if (_dialogVisualizarTourAberto || _dialogVisualizarTourEmTransicao) return;
+  Future<void> _abrirDialogVisualizarTour({bool abrirAdicionarMateriais = false}) async {
+    if (_dialogVisualizarTourAberto || _dialogVisualizarTourEmTransicao) {
+      if (abrirAdicionarMateriais &&
+          !_dialogAdicionarMateriaisTourAberto &&
+          _tourVisualizarDialogStateKey.currentState != null) {
+        _dialogAdicionarMateriaisTourAberto = true;
+        _tourVisualizarDialogStateKey.currentState!
+            .abrirAdicionarMateriaisParaTour()
+            .then((_) {
+          if (mounted) _dialogAdicionarMateriaisTourAberto = false;
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+      }
+      return;
+    }
     _dialogVisualizarTourAberto = true;
     _dialogVisualizarTourEmTransicao = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -655,17 +499,11 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
         .toList()
       ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
 
-    // Usa a primeira solicitação real "em andamento" se houver; senão cai
-    // para a solicitação simulada (montada em _garantirSolicitacaoTourExistente,
-    // nunca enviada ao backend) para que o tour continue funcionando mesmo
-    // sem nenhuma solicitação de verdade.
     final solicitacaoParaAbrir =
         emAndamento.isNotEmpty ? emAndamento.first : _solicitacaoTourFake;
 
     if (solicitacaoParaAbrir == null) {
-      // Nem solicitação real nem simulada disponível (ex.: nenhum material
-      // cadastrado no sistema) — mantém o card fictício em destaque com o
-      // texto orientando o usuário.
+
       _dialogVisualizarTourAberto = false;
       _dialogVisualizarTourEmTransicao = false;
       return;
@@ -675,34 +513,56 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
       context: context,
       barrierDismissible: !_dialogVisualizarTourAberto,
       builder: (_) => _VisualizarSolicitacaoDialog(
+        key: _tourVisualizarDialogStateKey,
         solicitacao: solicitacaoParaAbrir,
         tourKeyAdicionarMateriais: _tourKeyAdicionarMateriaisExistente,
         tourKeyComprado: _tourKeyComprado,
         tourKeyEstoque: _tourKeyEstoque,
+        tourKeyBotaoAdicionarNoDialog: _tourKeyBotaoAdicionarNoDialog,
       ),
     ).then((salvou) {
-      if (mounted) _dialogVisualizarTourAberto = false;
+      if (mounted) {
+        _dialogVisualizarTourAberto = false;
+        _dialogAdicionarMateriaisTourAberto = false;
+      }
       if (salvou == true && mounted) {
         context.read<SolicitacaoMaterialProvider>().carregar();
       }
     });
     await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    if (abrirAdicionarMateriais) {
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      if (mounted &&
+          !_dialogAdicionarMateriaisTourAberto &&
+          _tourVisualizarDialogStateKey.currentState != null) {
+        _dialogAdicionarMateriaisTourAberto = true;
+        _tourVisualizarDialogStateKey.currentState!
+            .abrirAdicionarMateriaisParaTour()
+            .then((_) {
+          if (mounted) _dialogAdicionarMateriaisTourAberto = false;
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+      }
+    }
   }
 
-  /// Fecha o dialog de visualização aberto pelo tour, aguardando a animação
-  /// de saída terminar antes de retornar.
   Future<void> _fecharDialogVisualizarTourSeAberto() async {
     if (!_dialogVisualizarTourAberto || _dialogVisualizarTourEmTransicao) return;
-    _dialogVisualizarTourAberto = false;
     _dialogVisualizarTourEmTransicao = true;
+    if (_dialogAdicionarMateriaisTourAberto) {
+      _dialogAdicionarMateriaisTourAberto = false;
+      if (!mounted) return;
+      await Navigator.of(context, rootNavigator: true).maybePop();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    _dialogVisualizarTourAberto = false;
+    if (!mounted) return;
     await Navigator.of(context, rootNavigator: true).maybePop();
     _dialogVisualizarTourEmTransicao = false;
     await Future<void>.delayed(const Duration(milliseconds: 50));
   }
 
-  /// Registra no RoboHelperProvider as opções de ajuda contextual desta
-  /// página. Chamado a cada build (barato — é só uma atribuição de lista)
-  /// pra garantir que as opções sempre apontem para as keys corretas.
   void _registrarAjudaRobo() {
     final rota = ModalRoute.of(context);
     if (rota != null && !rota.isCurrent) return;
@@ -718,9 +578,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
             texto: 'Toque aqui para abrir o formulário de uma nova '
                 'solicitação de material.',
             aoEntrar: () async {
-              // Voltando pra este passo (botão "Anterior" vindo de dentro
-              // do dialog), fecha tudo que o tour tiver aberto — senão o
-              // botão fica escondido atrás do(s) dialog(s).
+
               await _fecharSeletorTourSeAberto();
               await _fecharDialogTourSeAberto();
             },
@@ -765,10 +623,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
             texto: 'Depois de escolher o material, informe a quantidade '
                 'necessária.',
             aoEntrar: () async {
-              // Volta pro "Nova Solicitação" com o material já selecionado
-              // (o seletor fecha sozinho ao tocar num material — aqui só
-              // garantimos que a flag/estado fiquem consistentes caso o
-              // usuário tenha voltado de um passo anterior).
+
               await _fecharSeletorTourSeAberto();
               await _abrirDialogTour();
             },
@@ -782,45 +637,35 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
             texto: 'Toque aqui para anexar uma imagem de referência desse '
                 'material.',
           ),
+          RoboTourStop(
+            key: () => k.criar,
+            texto: 'Por fim, toque em "Criar" para registrar a '
+                'solicitação.',
+          ),
         ],
       ),
       RoboHelpOption(
         titulo: 'Como adicionar materiais a uma solicitação existente',
         paradas: [
           RoboTourStop(
-            // IMPORTANTE: passar o GETTER (função), não o valor já resolvido.
-            // _tourKeyCardSolicitacao decide entre a key real e a fictícia
-            // com base em _tourExibirCardFicticio — e esse flag só é ligado
-            // DENTRO do aoEntrar abaixo, de forma assíncrona (depois que
-            // _garantirSolicitacaoTourExistente() roda). Se a key fosse
-            // resolvida aqui (no momento em que esta lista de paradas é
-            // construída em _registrarAjudaRobo(), com o flag ainda false),
-            // o RoboTourStop ficaria preso apontando pra
-            // _tourKeyCardSolicitacaoReal — que nunca chega a existir na
-            // árvore quando cai no card fictício — e o highlight/dica nunca
-            // apareceriam, mesmo com o card "DEMONSTRAÇÃO" visível na tela.
+
             key: () => _tourKeyCardSolicitacao,
             texto: 'Selecione uma solicitação para abrir e adicionar mais '
                 'materiais a ela.',
             aoEntrar: () async {
               await _fecharDialogVisualizarTourSeAberto();
-              // Esse tour só faz sentido na aba "Em Andamento" — se o
-              // usuário estiver em "Finalizadas", troca automaticamente.
+
               if (_tabController.index != 0) {
                 _tabController.animateTo(0);
               }
-              // Sempre volta pra primeira página e pro topo da lista, pra
-              // garantir que a primeira solicitação (a que vai receber o
-              // highlight) esteja visível.
+
               setState(() => _paginaEmAndamento = 0);
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (_scrollEmAndamento.hasClients) {
                   _scrollEmAndamento.jumpTo(0);
                 }
               });
-              // Se não existir nenhuma solicitação em andamento, cria uma
-              // de verdade pra o tour poder abrir o dialog real no passo
-              // seguinte (em vez de só escurecer a tela e não fazer nada).
+
               await _garantirSolicitacaoTourExistente();
               final temSolicitacaoEmAndamento = mounted &&
                   context
@@ -836,7 +681,20 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
             key: () => _tourKeyAdicionarMateriaisExistente,
             texto: 'Toque aqui para adicionar mais materiais a esta '
                 'solicitação.',
-            aoEntrar: _abrirDialogVisualizarTour,
+            aoEntrar: () async {
+              if (_dialogAdicionarMateriaisTourAberto) {
+                _dialogAdicionarMateriaisTourAberto = false;
+                await Navigator.of(context, rootNavigator: true).maybePop();
+                await Future<void>.delayed(const Duration(milliseconds: 50));
+              }
+              await _abrirDialogVisualizarTour();
+            },
+          ),
+          RoboTourStop(
+            key: () => _tourKeyBotaoAdicionarNoDialog,
+            texto: 'Escolha os materiais e as quantidades e, por fim, '
+                'toque em "Adicionar" para confirmar.',
+            aoEntrar: () => _abrirDialogVisualizarTour(abrirAdicionarMateriais: true),
           ),
         ],
       ),
@@ -844,32 +702,23 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
         titulo: 'Como atender uma solicitação',
         paradas: [
           RoboTourStop(
-            // Mesmo motivo do comentário na parada equivalente do tour
-            // "Como adicionar materiais a uma solicitação existente": a key
-            // precisa ser passada como GETTER, pois _tourKeyCardSolicitacao
-            // só resolve pra o card fictício/real corretamente depois que
-            // o aoEntrar abaixo roda.
+
             key: () => _tourKeyCardSolicitacao,
             texto: 'Selecione uma solicitação para abrir e atendê-la.',
             aoEntrar: () async {
               await _fecharDialogVisualizarTourSeAberto();
-              // Esse tour só faz sentido na aba "Em Andamento" — se o
-              // usuário estiver em "Finalizadas", troca automaticamente.
+
               if (_tabController.index != 0) {
                 _tabController.animateTo(0);
               }
-              // Sempre volta pra primeira página e pro topo da lista, pra
-              // garantir que a primeira solicitação (a que vai receber o
-              // highlight) esteja visível.
+
               setState(() => _paginaEmAndamento = 0);
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (_scrollEmAndamento.hasClients) {
                   _scrollEmAndamento.jumpTo(0);
                 }
               });
-              // Se não existir nenhuma solicitação em andamento, cria uma
-              // fictícia (só em memória) pra o tour poder abrir o dialog
-              // real no passo seguinte.
+
               await _garantirSolicitacaoTourExistente();
               final temSolicitacaoEmAndamento = mounted &&
                   context
@@ -894,13 +743,9 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                 'andamento da solicitação para indicar em que etapa ela '
                 'está.',
             aoEntrar: () async {
-              // Fecha o dialog de visualização (aberto na parada anterior)
-              // para revelar a linha da solicitação na tabela por trás dele
-              // — é nela que o botão de andamento em destaque vive.
+
               await _fecharDialogVisualizarTourSeAberto();
-              // Aguarda o dialog terminar de fechar e a tabela assentar
-              // antes de seguir, senão o highlight pode medir a posição do
-              // botão still-transitioning.
+
               await Future<void>.delayed(const Duration(milliseconds: 120));
             },
           ),
@@ -911,20 +756,14 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                 'materiais, ou mude para "EM NEGOCIAÇÃO" se estiver '
                 'negociando prazo ou valores com o fornecedor.',
             aoEntrar: () async {
-              // Espera o frame atual terminar de assentar (a linha da
-              // tabela precisa estar remontada após o passo anterior
-              // fechar o dialog) e só então chama showButtonMenu() —
-              // chamar isso com o State ainda não montado faz
-              // currentState vir null e o menu simplesmente não abre,
-              // sem erro nenhum.
+
               await Future<void>.delayed(const Duration(milliseconds: 200));
               if (!mounted) return;
               await WidgetsBinding.instance.endOfFrame;
               if (!mounted) return;
               final estado = _tourKeyAndamento.currentState;
               if (estado == null) {
-                // Ainda não montou — tenta mais uma vez após outro frame
-                // em vez de desistir silenciosamente.
+
                 await Future<void>.delayed(const Duration(milliseconds: 200));
                 if (!mounted) return;
               }
@@ -942,13 +781,11 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                 'categoria, OS, necessidade ou status — escolha a forma '
                 'que for mais fácil de visualizar.',
             aoEntrar: () async {
-              // Esse tour só faz sentido na aba "Materiais Solicitados" —
-              // troca automaticamente pra ela.
+
               if (_tabController.index != 2) {
                 _tabController.animateTo(2);
               }
-              // Aguarda a troca de aba (e a TabBarView) assentarem antes
-              // de medir a posição do seletor "Agrupar por".
+
               await Future<void>.delayed(const Duration(milliseconds: 150));
             },
           ),
@@ -969,13 +806,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
 
   @override
   Widget build(BuildContext context) {
-    // ── Abertura pendente vinda de um encaminhamento no chat ────────────────
-    // Ao tocar no card de uma solicitação (ou material de uma solicitação)
-    // encaminhado no chat, o provider guarda o id aqui. A escuta principal
-    // acontece via addListener em initState (mais confiável em produção —
-    // ver comentário lá); este watch() é apenas uma rede de segurança
-    // redundante para quando build() roda por outro motivo enquanto ainda
-    // há um id pendente não consumido.
+
     context.watch<SolicitacaoMaterialProvider>().solicitacaoParaAbrirPendente;
     WidgetsBinding.instance.addPostFrameCallback((_) => _tentarAbrirSolicitacaoPendente());
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1009,6 +840,22 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                 ),
                 const Spacer(),
                 Tooltip(
+                  message: 'Ver histórico geral de solicitações',
+                  child: OutlinedButton.icon(
+                    onPressed: _abrirHistoricoSolicitacoes,
+                    icon: const Icon(Icons.history, size: 18),
+                    label: const Text('Histórico'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.onSurface,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    ).copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Tooltip(
                   message: 'Criar uma nova solicitação de material',
                   child: KeyedSubtree(
                     key: _tourKeyNovaSolicitacao,
@@ -1023,22 +870,6 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                       ).copyWith(
                         mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                       ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Tooltip(
-                  message: 'Ver histórico geral de solicitações',
-                  child: OutlinedButton.icon(
-                    onPressed: _abrirHistoricoSolicitacoes,
-                    icon: const Icon(Icons.history, size: 18),
-                    label: const Text('Histórico'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.onSurface,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                    ).copyWith(
-                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                     ),
                   ),
                 ),
@@ -1059,7 +890,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
               ],
             ),
             const SizedBox(height: 16),
-            // ── Banner de totais globais (independente de filtro) ────────────
+
             if (_totaisGlobaisCarregados && _totalItensGlobal > 0) ...[
               _BannerTotaisGlobais(
                 totalItens:      _totalItensGlobal,
@@ -1157,7 +988,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                       Tab(
                         text: provider.carregando
                             ? 'Materiais Solicitados'
-                            : 'Materiais Solicitados (${emAndamento.fold<int>(0, (soma, s) => soma + s.totalMateriais)})',
+                            : 'Materiais Solicitados (${emAndamento.fold<int>(0, (soma, s) => soma + s.totalPendentes)})',
                       ),
                     ],
                   ),
@@ -1247,20 +1078,10 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
 
   Widget _buildLista(
       List<SolicitacaoMaterialModel> lista, String mensagemVazia, _Aba aba) {
-    // Card fictício do tour "Como adicionar materiais a uma solicitação
-    // existente": só aparece na aba Em Andamento, e apenas quando não há
-    // nenhuma solicitação real disponível para dar highlight.
+
     final mostrarCardFicticio =
         _tourExibirCardFicticio && aba == _Aba.emAndamento && lista.isEmpty;
 
-    // Quando existe uma solicitação fake montada (_solicitacaoTourFake, veja
-    // _garantirSolicitacaoTourExistente), mostramos ela na própria tabela —
-    // igual a uma linha real — em vez do card genérico "Selecione uma
-    // solicitação". Isso evita a solicitação "DEMONSTRAÇÃO" aparecer do nada
-    // só no dialog do passo seguinte do tour: agora o passo 1 (lista) e o
-    // passo 2 (dialog) mostram consistentemente a mesma solicitação fake.
-    // O card genérico continua existindo como fallback para o caso raro em
-    // que não há nenhum material cadastrado no sistema para montar o fake.
     if (mostrarCardFicticio && _solicitacaoTourFake != null) {
       return SingleChildScrollView(
         controller: _scrollEmAndamento,
@@ -1524,10 +1345,6 @@ String _resolverUrl(String url) {
   return '$base$url';
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// BANNER DE TOTAIS GLOBAIS
-// ═══════════════════════════════════════════════════════════════════════════
-
 class _BannerTotaisGlobais extends StatelessWidget {
   final int totalItens;
   final int totalResolvidos;
@@ -1559,7 +1376,7 @@ class _BannerTotaisGlobais extends StatelessWidget {
             color: corPrimary,
           ),
           const SizedBox(width: 12),
-          // Texto principal
+
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -1585,7 +1402,7 @@ class _BannerTotaisGlobais extends StatelessWidget {
             ],
           ),
           const SizedBox(width: 16),
-          // Barra de progresso
+
           Expanded(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(4),
@@ -1598,7 +1415,7 @@ class _BannerTotaisGlobais extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          // Percentual
+
           Text(
             '${(progresso * 100).toStringAsFixed(0)}%',
             style: TextStyle(
@@ -1613,19 +1430,12 @@ class _BannerTotaisGlobais extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// TABELA DE SOLICITAÇÕES
-// ═══════════════════════════════════════════════════════════════════════════
-
 class _TabelaSolicitacoes extends StatelessWidget {
   final List<SolicitacaoMaterialModel> solicitacoes;
   final void Function(SolicitacaoMaterialModel) onAbrir;
-  /// Usado apenas pelo tour do robô assistente: dá highlight na primeira
-  /// linha da tabela (a solicitação que o tour vai abrir em seguida).
+
   final GlobalKey? tourKeyPrimeiraLinha;
-  /// Usado apenas pelo tour "Como atender uma solicitação": dá highlight
-  /// no dropdown de andamento da primeira linha e permite abri-lo
-  /// programaticamente.
+
   final GlobalKey<_StatusBadgeEditavelState>? tourKeyAndamentoPrimeiraLinha;
 
   const _TabelaSolicitacoes({
@@ -1690,9 +1500,7 @@ class _LinhaSolicitacao extends StatefulWidget {
   final SolicitacaoMaterialModel solicitacao;
   final void Function(SolicitacaoMaterialModel) onAbrir;
   final GlobalKey? tourKey;
-  /// Key aplicada ao badge/dropdown de andamento desta linha — usada apenas
-  /// pelo tour "Como atender uma solicitação" para dar highlight nele e
-  /// abrir o menu programaticamente.
+
   final GlobalKey<_StatusBadgeEditavelState>? tourKeyAndamento;
 
   const _LinhaSolicitacao({
@@ -1719,12 +1527,7 @@ class _LinhaSolicitacaoState extends State<_LinhaSolicitacao> {
         : Theme.of(context).colorScheme.surface;
 
     return KeyedSubtree(
-      // IMPORTANTE: nunca usar UniqueKey() aqui — isso gera uma key NOVA a
-      // cada build(), fazendo o Flutter descartar e remontar o State desta
-      // linha (perdendo _hovered e, em rebuilds concorrentes, o hit-test do
-      // GestureDetector) toda vez que o provider notifica a lista. Usamos
-      // ValueKey(sol.numeroOS + data) como identificador estável da linha
-      // entre rebuilds (mesma solicitação = mesma key = mesmo Element).
+
       key: widget.tourKey ??
           ValueKey('${sol.numeroOS}_${sol.dataSolicitacao.millisecondsSinceEpoch}'),
       child: MouseRegion(
@@ -1812,10 +1615,6 @@ class _LinhaSolicitacaoState extends State<_LinhaSolicitacao> {
   }
 }
 
-/// Card de demonstração exibido apenas durante o tour do robô assistente
-/// "Como adicionar materiais a uma solicitação existente", quando não há
-/// nenhuma solicitação real em andamento pra dar highlight. Não abre nada
-/// ao tocar — apenas ilustra onde um card real apareceria.
 class _CardSolicitacaoFicticio extends StatelessWidget {
   final GlobalKey tourKey;
   const _CardSolicitacaoFicticio({required this.tourKey});
@@ -1872,26 +1671,9 @@ class _StatusBadgeEditavel extends StatefulWidget {
 
 class _StatusBadgeEditavelState extends State<_StatusBadgeEditavel> {
   bool _salvando = false;
-  // Key interna do PopupMenuButton — usada apenas pelo tour do robô
-  // assistente para localizar o BuildContext do botão e abrir o menu
-  // programaticamente (simulando o clique do usuário), sem precisar de
-  // showMenu manual com posição calculada à mão.
+
   final _popupKey = GlobalKey<PopupMenuButtonState<String>>();
 
-  /// NOTA: este badge NÃO abre mais o dropdown de verdade durante o tour
-  /// (via showButtonMenu()/showMenu()). O balão e o overlay escurecido do
-  /// tour são promovidos para o Overlay RAIZ (ver
-  /// `RoboHelperWidget._sincronizarOverlay`), e uma rota de PopupMenu
-  /// aberta a partir do `context` deste botão pode acabar entrando num
-  /// Overlay/Navigator "de baixo" — o menu fica logicamente aberto mas
-  /// visualmente atrás do tour. Em vez disso, o passo do tour usa
-  /// `RoboTourStop.opcoesMenu` para desenhar um mini-menu ILUSTRATIVO na
-  /// mesma camada do robô (ver `_MiniMenuDica` em robo_helper_widget.dart)
-  /// — visualmente idêntico ao dropdown real, sempre visível, sem
-  /// depender de qual Navigator um showMenu() escolheria.
-  ///
-  /// Mantido como no-op (em vez de removido) para não quebrar chamadas
-  /// antigas por engano; o tour não chama mais isto.
   void abrirMenuTour() {}
 
   ({Color bg, Color fg, String label}) _estilo(String status) {
@@ -2051,8 +1833,7 @@ class _ItemMaterialCriacao {
   final TextEditingController observacaoCtrl = TextEditingController();
   final FocusNode quantidadeFocus = FocusNode();
   File? imagem;
-  /// Usada para localizar e scrollar até este item quando ele falha na
-  /// validação ao clicar em "Criar".
+
   final GlobalKey cardKey = GlobalKey();
 
   void dispose() {
@@ -2062,8 +1843,6 @@ class _ItemMaterialCriacao {
   }
 }
 
-/// GlobalKeys usadas pelo tour do robô assistente dentro do dialog
-/// "Nova Solicitação".
 class _CriarSolicitacaoTourKeys {
   final numeroOS          = GlobalKey();
   final cliente           = GlobalKey();
@@ -2074,14 +1853,13 @@ class _CriarSolicitacaoTourKeys {
   final quantidade        = GlobalKey();
   final observacaoMaterial = GlobalKey();
   final anexarImagem      = GlobalKey();
+  final criar             = GlobalKey();
   final seletorMaterial   = _SeletorMaterialTourKeys();
 }
 
 class _CriarSolicitacaoDialog extends StatefulWidget {
   final _CriarSolicitacaoTourKeys? tourKeys;
-  /// Usado pelo tour do robô assistente: já nasce com um item de material
-  /// adicionado, simulando o clique em "Adicionar Material", para poder
-  /// destacar os campos do card sem esperar uma interação real do usuário.
+
   final bool abrirComItemInicial;
 
   const _CriarSolicitacaoDialog({
@@ -2105,7 +1883,6 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
 
   final List<_ItemMaterialCriacao> _itens = [];
 
-  // ── Verificação de OS em tempo real (debounce) ──────────────────────────
   Timer? _debounceOS;
   int _checagemOSSeq = 0;
   bool _verificandoOS = false;
@@ -2117,9 +1894,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
     super.initState();
     _numeroOSCtrl.addListener(_onNumeroOSChanged);
     if (widget.abrirComItemInicial) {
-      // Simula o clique em "Adicionar Material" pro tour do robô assistente
-      // já poder destacar os campos do card sem depender de uma interação
-      // real do usuário.
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _itens.isEmpty) _adicionarItem();
       });
@@ -2155,8 +1930,6 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
       final repo = context.read<SolicitacaoMaterialProvider>().repository;
       final resultado = await repo.verificarOSExiste(numeroOS);
 
-      // Ignora resultado se o texto já mudou ou outra checagem mais nova
-      // já foi disparada enquanto esta estava em andamento.
       if (!mounted || minhaChamada != _checagemOSSeq) return;
       if (_numeroOSCtrl.text.trim() != numeroOS) return;
 
@@ -2169,8 +1942,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
             : null;
       });
     } catch (_) {
-      // Falha de rede na checagem não deve travar o usuário — a validação
-      // definitiva ainda ocorre no backend ao clicar em "Criar".
+
       if (!mounted || minhaChamada != _checagemOSSeq) return;
       setState(() => _verificandoOS = false);
     }
@@ -2211,8 +1983,6 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
     }
   }
 
-  /// Scrolla a lista de materiais até o card do [item] informado, usado
-  /// para levar o usuário direto até o item que falhou na validação.
   void _scrollAteItem(_ItemMaterialCriacao item) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ctx = item.cardKey.currentContext;
@@ -2235,12 +2005,11 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
       return;
     }
     if (_verificandoOS) {
-      // Ainda checando a OS: aguarda a checagem terminar antes de prosseguir.
+
       setState(() => _erroDialog = 'Aguarde, verificando o número da OS...');
       return;
     }
 
-    // Valida se todos os itens têm material e quantidade
     for (int i = 0; i < _itens.length; i++) {
       final item = _itens[i];
       item.quantidadeCtrl.text = item.quantidadeCtrl.text.trim();
@@ -2294,7 +2063,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
       if (!mounted) return;
 
       if (ok) {
-        // Primeiro sai do dialog, depois recarrega a lista
+
         Navigator.of(context, rootNavigator: true).pop(true);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -2331,7 +2100,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header
+
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 20, 16, 12),
               child: Row(
@@ -2358,10 +2127,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                   onDismiss: () => setState(() => _erroDialog = null),
                 ),
               ),
-            // Corpo em 2 seções: dados da solicitação (esquerda, largura
-            // fixa) e materiais (direita, ocupa o espaço restante e rola
-            // de forma independente) — evita o dialog crescer verticalmente
-            // sem controle a cada material adicionado.
+
             Flexible(
               child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -2370,7 +2136,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // ── Seção esquerda: dados da solicitação ──────────
+
                         SizedBox(
                           width: 320,
                           child: SingleChildScrollView(
@@ -2386,7 +2152,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                                       controller: _numeroOSCtrl,
                                       autofocus: widget.tourKeys == null,
                                       decoration: InputDecoration(
-                                        labelText: 'Número OS *',
+                                        labelText: 'Número OS',
                                         errorText: _erroOS,
                                         errorMaxLines: 3,
                                         suffixIcon: _verificandoOS
@@ -2419,7 +2185,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                                     key: widget.tourKeys?.cliente,
                                     child: TextFormField(
                                       controller: _clienteCtrl,
-                                      decoration: const InputDecoration(labelText: 'Nome Cliente *'),
+                                      decoration: const InputDecoration(labelText: 'Nome Cliente'),
                                       textCapitalization: TextCapitalization.words,
                                       validator: (v) => v == null || v.trim().isEmpty
                                           ? 'Nome do cliente é obrigatório'
@@ -2430,7 +2196,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                                   KeyedSubtree(
                                     key: widget.tourKeys?.dataNecessidade,
                                     child: _DatePickerField(
-                                      label: 'Data Necessidade *',
+                                      label: 'Data Necessidade',
                                       value: _dataNecessidade,
                                       firstDate: DateTime.now(),
                                       lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
@@ -2456,7 +2222,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                           ),
                         ),
                         const VerticalDivider(width: 1),
-                        // ── Seção direita: materiais ───────────────────────
+
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2554,11 +2320,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                                         separatorBuilder: (_, __) => const SizedBox(height: 12),
                                         itemBuilder: (context, index) {
                                           final item = _itens[index];
-                                          // O tour só destaca os campos do
-                                          // PRIMEIRO item — os demais (se o
-                                          // usuário já tiver adicionado mais)
-                                          // não recebem keys, evitando
-                                          // GlobalKeys duplicadas na árvore.
+
                                           final ehPrimeiro = index == 0;
                                           return _ItemMaterialCard(
                                             key: item.cardKey,
@@ -2611,6 +2373,7 @@ class _CriarSolicitacaoDialogState extends State<_CriarSolicitacaoDialog> {
                   ),
                   const SizedBox(width: 8),
                   Tooltip(
+                    key: widget.tourKeys?.criar,
                     message: 'Criar a solicitação de material',
                     child: FilledButton(
                       onPressed: _salvando ? null : _salvar,
@@ -2639,8 +2402,7 @@ class _ItemMaterialCard extends StatelessWidget {
   final int index;
   final _ItemMaterialCriacao item;
   final VoidCallback? onRemover;
-  /// Preenchidas só pelo tour do robô assistente, para destacar o campo
-  /// "Material" do item e as keys usadas dentro do dialog de seleção.
+
   final GlobalKey? tourKeyMaterial;
   final GlobalKey? tourKeyQuantidade;
   final GlobalKey? tourKeyObservacao;
@@ -2744,7 +2506,7 @@ class _ItemMaterialCard extends StatelessWidget {
                     onTap: () => _selecionarMaterial(context),
                     child: InputDecorator(
                       decoration: InputDecoration(
-                        labelText: 'Material *',
+                        labelText: 'Material',
                         suffixIcon: item.material != null
                             ? const Icon(Icons.check_circle, color: AppTheme.success, size: 20)
                             : const Icon(Icons.arrow_drop_down),
@@ -2813,7 +2575,7 @@ class _ItemMaterialCard extends StatelessWidget {
                     child: TextFormField(
                       controller: item.quantidadeCtrl,
                       focusNode: item.quantidadeFocus,
-                      decoration: const InputDecoration(labelText: 'Quantidade *'),
+                      decoration: const InputDecoration(labelText: 'Quantidade'),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
                         FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,3}')),
@@ -2881,25 +2643,22 @@ class _ItemMaterialCard extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// DIALOG: VISUALIZAR/EDITAR SOLICITAÇÃO
-// ═══════════════════════════════════════════════════════════════════════════
-
 class _VisualizarSolicitacaoDialog extends StatefulWidget {
   final SolicitacaoMaterialModel solicitacao;
-  /// Usado apenas pelo tour do robô assistente para dar highlight no botão
-  /// "Adicionar Materiais" depois que este dialog abre.
+
   final GlobalKey? tourKeyAdicionarMateriais;
-  /// Usadas apenas pelo tour "Como atender uma solicitação" para dar
-  /// highlight nos botões COMPRADO/ESTOQUE do primeiro material da lista.
+
   final GlobalKey? tourKeyComprado;
   final GlobalKey? tourKeyEstoque;
+  final GlobalKey? tourKeyBotaoAdicionarNoDialog;
 
   const _VisualizarSolicitacaoDialog({
+    super.key,
     required this.solicitacao,
     this.tourKeyAdicionarMateriais,
     this.tourKeyComprado,
     this.tourKeyEstoque,
+    this.tourKeyBotaoAdicionarNoDialog,
   });
 
   @override
@@ -2915,14 +2674,10 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
   String? _erroDialog;
   late SolicitacaoMaterialModel _solicitacaoAtual;
 
-  // Marcações de status (comprado/pendente/estoque) feitas na tela mas ainda
-  // não persistidas. Chave: "item:<id>" ou "adicional:<id>" — Valor: novo
-  // status desejado ('PENDENTE' | 'COMPRADO' | 'ESTOQUE').
   final Map<String, String> _statusPendentes = {};
 
   bool get _temAlteracoesNaoSalvas => _statusPendentes.isNotEmpty;
 
-  // Edição do cabeçalho (ADMIN ou criador da solicitação)
   late final TextEditingController _numeroOSCtrl;
   late final TextEditingController _clienteCtrl;
   late final TextEditingController _observacaoCtrl;
@@ -2937,7 +2692,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     super.initState();
     _solicitacaoAtual = widget.solicitacao;
     _tabCtrl = TabController(length: 3, vsync: this);
-    
+
     _numeroOSCtrl = TextEditingController(text: _solicitacaoAtual.numeroOS);
     _clienteCtrl = TextEditingController(text: _solicitacaoAtual.nomeCliente);
     _observacaoCtrl = TextEditingController(text: _solicitacaoAtual.observacao ?? '');
@@ -2945,8 +2700,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     _andamento = _solicitacaoAtual.andamento;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Solicitação simulada do tour (id negativo) não existe no backend —
-      // não faz sentido buscar logs dela.
+
       if (_solicitacaoAtual.id >= 0) {
         context.read<SolicitacaoMaterialProvider>().carregarLogs(_solicitacaoAtual.id);
       }
@@ -2956,11 +2710,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Escuta o MaterialProvider: se um material desta solicitação for
-    // editado em outra tela (ex.: Estoque) enquanto este dialog já está
-    // aberto, o nome/dados do material exibidos aqui ficariam desatualizados
-    // até fechar e reabrir. Recarregando a solicitação a cada notificação do
-    // MaterialProvider, os dados do material ficam em dia automaticamente.
+
     final novoProvider = context.read<MaterialProvider>();
     if (!identical(_materialProviderRef, novoProvider)) {
       _materialProviderRef?.removeListener(_onMateriaisAlterados);
@@ -2990,7 +2740,6 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     return usuario?.role.trim().toUpperCase() == 'ADMIN' || usuario?.role.trim().toUpperCase() == 'GERENTE';
   }
 
-  // Cabeçalho (aba Dados) pode ser editado pelo ADMIN ou pelo criador da solicitação.
   bool get _podeEditarCabecalho {
     final usuario = context.read<UsuarioProvider>().usuarioLogado;
     if (usuario == null) return false;
@@ -3000,9 +2749,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
   }
 
   bool get _podeAdicionarMateriais {
-    // Solicitação simulada pelo tour (nunca existe no backend) — sempre
-    // permite mostrar/destacar o botão, já que nenhuma ação real de
-    // "adicionar materiais" chegará a ser persistida a partir dela.
+
     if (_solicitacaoAtual.id < 0) return true;
     final usuario = context.read<UsuarioProvider>().usuarioLogado;
     if (usuario == null) return false;
@@ -3011,7 +2758,6 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     return ehAdmin || ehCriador;
   }
 
-  // Exclusão da solicitação: ADMIN ou o próprio criador podem excluir.
   bool get _podeExcluir {
     final usuario = context.read<UsuarioProvider>().usuarioLogado;
     if (usuario == null) return false;
@@ -3020,8 +2766,6 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     return ehAdmin || ehCriador;
   }
 
-  // Registra/desfaz uma alteração local de status (não chama a API ainda).
-  // statusOriginal/novoStatus: 'PENDENTE' | 'COMPRADO' | 'ESTOQUE'.
   void _alterarStatusLocal(String tipo, int id, String statusOriginal, String novoStatus) {
     final chave = '$tipo:$id';
     setState(() {
@@ -3033,7 +2777,6 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     });
   }
 
-  // Persiste todas as marcações pendentes no backend. Retorna true se tudo ok.
   Future<bool> _persistirComprasPendentes() async {
     final provider = context.read<SolicitacaoMaterialProvider>();
     final pendentes = Map<String, String>.from(_statusPendentes);
@@ -3088,16 +2831,13 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
       });
     }
     await _recarregarSolicitacao();
-    // Sincroniza _andamento local com o valor retornado pelo backend
-    // (pode ter sido auto-finalizado se todos os itens foram marcados como comprados/estoque)
+
     if (mounted) {
       setState(() => _andamento = _solicitacaoAtual.andamento);
     }
     return true;
   }
 
-  // Ponto único de fechamento do diálogo (X, "Fechar", ESC, clique fora).
-  // Se houver marcações não salvas, pede confirmação antes de fechar.
   Future<void> _tentarFechar() async {
     if (!_temAlteracoesNaoSalvas) {
       Navigator.pop(context, _houveMudanca ? true : null);
@@ -3142,7 +2882,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
       if (ok) {
         Navigator.pop(context, true);
       }
-      // Se falhar, o diálogo permanece aberto com o erro exibido.
+
     } else if (decisao == 'cancelar') {
       setState(() => _statusPendentes.clear());
       Navigator.pop(context, _houveMudanca ? true : null);
@@ -3170,7 +2910,6 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
       _erroDialog = null;
     });
 
-    // Primeiro persiste marcações de comprado/pendente (qualquer usuário com permissão de marcar).
     if (_temAlteracoesNaoSalvas) {
       final ok = await _persistirComprasPendentes();
       if (!ok || !mounted) {
@@ -3179,7 +2918,6 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
       }
     }
 
-    // Cabeçalho (Dados) só pode ser alterado por ADMIN ou pelo criador da solicitação.
     if (!_podeEditarCabecalho) {
       if (!mounted) return;
       setState(() => _salvando = false);
@@ -3191,9 +2929,8 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
       return;
     }
 
-    // Valida se pode finalizar
     if (_andamento == 'FINALIZADO' && !_solicitacaoAtual.todosComprados) {
-      setState(() => _erroDialog = 
+      setState(() => _erroDialog =
         'Não é possível finalizar: existem materiais ainda não marcados como comprados ou retirados do estoque.');
       setState(() => _salvando = false);
       return;
@@ -3220,9 +2957,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
         const SnackBar(content: Text('Solicitação atualizada'), backgroundColor: AppTheme.success),
       );
     } else {
-      // Captura a mensagem antes de limpar o erro no provider para evitar
-      // que o notifyListeners() do provider exiba o erro na página por trás
-      // do dialog (Consumer na SolicitacoesMaterialPage).
+
       final mensagem = provider.erro ?? 'Erro ao salvar';
       provider.limparErro();
       if (!mounted) return;
@@ -3245,10 +2980,15 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     }
   }
 
+  Future<void> abrirAdicionarMateriaisParaTour() => _adicionarMateriais();
+
   Future<void> _adicionarMateriais() async {
     final salvou = await showDialog<bool>(
       context: context,
-      builder: (_) => _AdicionarMateriaisDialog(solicitacao: _solicitacaoAtual),
+      builder: (_) => _AdicionarMateriaisDialog(
+        solicitacao: _solicitacaoAtual,
+        tourKeyBotaoAdicionar: widget.tourKeyBotaoAdicionarNoDialog,
+      ),
     );
     if (salvou == true && mounted) {
       setState(() => _houveMudanca = true);
@@ -3374,9 +3114,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
     };
     final enviado = await encaminharParaChat(context, tipo: 'solicitacao', dados: dados);
     if (!mounted || !enviado) return;
-    // O mini chat flutuante já foi acionado (expandido, com a conversa do
-    // destinatário aberta) por encaminharParaChat — aqui só fechamos esta
-    // solicitação para o usuário já cair direto na conversa.
+
     Navigator.of(context).pop(_houveMudanca ? true : null);
   }
 
@@ -3509,7 +3247,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header
+
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
               child: Row(
@@ -3551,7 +3289,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
                 ],
               ),
             ),
-            // Abas
+
             TabBar(
               controller: _tabCtrl,
               labelColor: AppTheme.primary,
@@ -3568,7 +3306,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
               child: TabBarView(
                 controller: _tabCtrl,
                 children: [
-                  // Aba Materiais
+
                   _AbaMateriaisSolicitacao(
                     solicitacao: _solicitacaoAtual,
                     statusPendentes: _statusPendentes,
@@ -3581,7 +3319,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
                     tourKeyComprado: widget.tourKeyComprado,
                     tourKeyEstoque: widget.tourKeyEstoque,
                   ),
-                  // Aba Dados
+
                   _AbaDadosSolicitacao(
                     solicitacao: _solicitacaoAtual,
                     numeroOSCtrl: _numeroOSCtrl,
@@ -3595,7 +3333,7 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
                     erroDialog: _erroDialog,
                     onDismissErro: () => setState(() => _erroDialog = null),
                   ),
-                  // Aba Histórico
+
                   _AbaHistorico(solicitacaoId: _solicitacaoAtual.id),
                 ],
               ),
@@ -3679,12 +3417,9 @@ class _VisualizarSolicitacaoDialogState extends State<_VisualizarSolicitacaoDial
   }
 }
 
-// ─── Aba Materiais ────────────────────────────────────────────────────────────
-
 class _AbaMateriaisSolicitacao extends StatelessWidget {
   final SolicitacaoMaterialModel solicitacao;
-  // Chave: "item:<id>" ou "adicional:<id>" — Valor: status pendente
-  // ('PENDENTE' | 'COMPRADO' | 'ESTOQUE') ainda não persistido.
+
   final Map<String, String> statusPendentes;
   final void Function(String tipo, int id, String statusOriginal, String novoStatus) onAlterarStatus;
   final VoidCallback? onReabrirSolicitacao;
@@ -3692,8 +3427,7 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
   final Future<void> Function(String tipo, int id, double quantidadeAtual, String? observacaoAtual) onEditarMaterial;
   final Future<void> Function(String tipo, int id, String materialNome) onExcluirMaterial;
   final Future<void> Function(String tipo, int id) onEncaminharMaterial;
-  /// Usadas apenas pelo tour "Como atender uma solicitação" para dar
-  /// highlight nos botões COMPRADO/ESTOQUE do primeiro material listado.
+
   final GlobalKey? tourKeyComprado;
   final GlobalKey? tourKeyEstoque;
 
@@ -3791,9 +3525,7 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
           ...adicionais.asMap().entries.map((entry) {
             final index = entry.key;
             final ad = entry.value;
-            // Só é o "primeiro material da lista" se não houver nenhum
-            // item original antes dele (senão o highlight já foi aplicado
-            // ao primeiro item original acima).
+
             final ehPrimeiroDaLista = index == 0 && itensOriginais.isEmpty;
             final chave = 'adicional:${ad.id}';
             final pendente = statusPendentes.containsKey(chave);
@@ -3842,7 +3574,7 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
 }
 
 class _MaterialCard extends StatelessWidget {
-  final String tipo; // 'item' ou 'adicional'
+  final String tipo;
   final int id;
   final String materialNome;
   final String? materialUnidade;
@@ -3856,8 +3588,8 @@ class _MaterialCard extends StatelessWidget {
   final double quantidade;
   final String? observacao;
   final String? imagemUrl;
-  final String status; // valor efetivo: 'PENDENTE' | 'COMPRADO' | 'ESTOQUE' (já considera alteração pendente não salva)
-  final bool pendente; // true quando há alteração local ainda não persistida
+  final String status;
+  final bool pendente;
   final DateTime? compradoEm;
   final String? compradoPorNome;
   final DateTime? estoqueEm;
@@ -3873,15 +3605,10 @@ class _MaterialCard extends StatelessWidget {
   final VoidCallback onEditar;
   final VoidCallback onExcluir;
   final VoidCallback onEncaminhar;
-  /// Usadas apenas pelo tour "Como atender uma solicitação" para dar
-  /// highlight nos botões COMPRADO/ESTOQUE deste card.
+
   final GlobalKey? tourKeyComprado;
   final GlobalKey? tourKeyEstoque;
 
-  /// Rótulo de medida/dimensão a ser exibido ao lado do nome.
-  /// Se houver medida cadastrada, mostra só a medida (evita repetir com
-  /// largura/comprimento). Caso contrário, se houver largura e comprimento,
-  /// mostra "COMPRIMENTOxLARGURAM" (ex.: "5X1.22M").
   String? get _medidaOuDimensao {
     final temMedida = materialMedida != null && materialMedida!.trim().isNotEmpty;
     if (temMedida) return materialMedida!.trim();
@@ -3952,8 +3679,6 @@ class _MaterialCard extends StatelessWidget {
     this.tourKeyEstoque,
   });
 
-  // Mostra o aviso de solicitação finalizada (com opção de reabrir para ADMIN)
-  // e retorna true se a ação deve ser bloqueada.
   bool _bloqueadoPorFinalizacao(BuildContext context) {
     if (andamento != 'FINALIZADO') return false;
 
@@ -3996,24 +3721,14 @@ class _MaterialCard extends StatelessWidget {
     onExcluir();
   }
 
-  // botaoStatus: status correspondente ao botão clicado ('COMPRADO' ou 'ESTOQUE').
-  // Se o status já está ativo, o clique desmarca (volta para PENDENTE) —
-  // caso contrário, seleciona o novo status (a troca é mutuamente exclusiva:
-  // marcar ESTOQUE desmarca COMPRADO e vice-versa).
   void _handleSelecionarStatus(BuildContext context, String botaoStatus) {
     final usuario = context.read<UsuarioProvider>().usuarioLogado;
     final ehAdmin = usuario?.role.trim().toUpperCase() == 'ADMIN' || usuario?.role.trim().toUpperCase() == 'GERENTE';
     final estaAtivo = status == botaoStatus;
     final novoStatus = estaAtivo ? 'PENDENTE' : botaoStatus;
 
-    // Bloqueia qualquer alteração se a solicitação está FINALIZADA
     if (_bloqueadoPorFinalizacao(context)) return;
 
-    // Só é restrito a ADMIN/GERENTE desmarcar ou trocar um item que JÁ está
-    // marcado como COMPRADO ou ESTOQUE e essa marcação já foi persistida
-    // (pendente == false). Marcar um item que ainda está PENDENTE (nunca foi
-    // comprado/retirado do estoque) é livre para qualquer usuário com acesso
-    // à tela, independente de já ter vindo do backend ou não.
     final alterandoValorJaSalvo =
         (status == 'COMPRADO' || status == 'ESTOQUE') && !pendente;
     if (alterandoValorJaSalvo && !ehAdmin) {
@@ -4048,7 +3763,7 @@ class _MaterialCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Coluna: Material ──────────────────────────────────────
+
                 Expanded(
                   flex: 4,
                   child: Column(
@@ -4143,7 +3858,7 @@ class _MaterialCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-                // ── Coluna: Quantidade solicitada ─────────────────────────
+
                 Expanded(
                   flex: 2,
                   child: Column(
@@ -4170,7 +3885,7 @@ class _MaterialCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-                // ── Coluna: Estoque atual ─────────────────────────────────
+
                 Expanded(
                   flex: 2,
                   child: Column(
@@ -4197,14 +3912,11 @@ class _MaterialCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // ── Coluna: Pendente + ações ───────────────────────────────
+
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    // Agrupa COMPRADO + ESTOQUE numa única key para que o tour
-                    // "Como atender uma solicitação" dê highlight nos dois
-                    // botões juntos (ambos resolvem a mesma solicitação, o
-                    // usuário escolhe qual usar conforme o caso).
+
                     Column(
                       key: tourKeyComprado,
                       crossAxisAlignment: CrossAxisAlignment.end,
@@ -4285,7 +3997,7 @@ class _MaterialCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 4,
               children: [
-                // Adicionais: funde data e autor em uma chip roxa
+
                 if (tipo == 'adicional' && adicionadoPorNome != null)
                   _InfoChip(
                     icon: Icons.add_circle_outline,
@@ -4505,7 +4217,6 @@ class _IconActionButtonState extends State<_IconActionButton> {
   }
 }
 
-// ─── Diálogo de edição de quantidade/observação de um material ──────────────
 class _EditarMaterialDialog extends StatefulWidget {
   final double quantidadeAtual;
   final String? observacaoAtual;
@@ -4554,7 +4265,18 @@ class _EditarMaterialDialogState extends State<_EditarMaterialDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Editar Material'),
+      title: Row(
+        children: [
+          const Expanded(child: Text('Editar Material')),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
+        ],
+      ),
       content: Form(
         key: _formKey,
         child: Column(
@@ -4633,8 +4355,6 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
-// ─── Aba Dados ────────────────────────────────
-
 class _AbaDadosSolicitacao extends StatelessWidget {
   final SolicitacaoMaterialModel solicitacao;
   final TextEditingController numeroOSCtrl;
@@ -4700,7 +4420,7 @@ class _AbaDadosSolicitacao extends StatelessWidget {
           Consumer<SolicitacaoMaterialProvider>(
             builder: (_, prov, __) {
               if (prov.logs.isEmpty) return const SizedBox.shrink();
-              // Logs vêm ordenados do mais recente para o mais antigo.
+
               final ultimo = prov.logs.first;
               return Padding(
                 padding: const EdgeInsets.only(bottom: 16),
@@ -4794,17 +4514,11 @@ class _AbaDadosSolicitacao extends StatelessWidget {
   }
 }
 
-// ─── Aba Histórico ────────────────────────────────────────────────────────
-
-/// Formata número sem arredondar/cortar a precisão real do valor.
-/// Ex: 5 -> "5", 3.696 -> "3.696" (não "3.70").
 String _fmtNumeroLog(num v) {
   final d = v.toDouble();
   return formatarQuantidade(d);
 }
 
-/// Quantidade + unidade a partir do snapshot de material salvo no log
-/// (ex: "25 m/l", "1 unidade"). Retorna null se não houver quantidade.
 String? _qtdComUnidadeLog(Map<String, dynamic> depois) {
   final qtd = depois['quantidade'];
   if (qtd == null) return null;
@@ -4815,8 +4529,6 @@ String? _qtdComUnidadeLog(Map<String, dynamic> depois) {
   return unidade != null && unidade.isNotEmpty ? '$qtdFmt $unidade' : qtdFmt;
 }
 
-/// Nome + detalhes (medida/espessura) de um material do log, sem a
-/// quantidade — ex: "ACRILICO TESTE2 (2MM)".
 String _formatarMaterialLogNome(Map material) {
   final nome = material['materialNome']?.toString().trim();
   if (nome == null || nome.isEmpty) return '';
@@ -4831,13 +4543,10 @@ String _formatarMaterialLogNome(Map material) {
   return '$nome (${detalhesPartes.join(' · ')})';
 }
 
-/// Quantidade/unidade de um material do log, já formatada — ex: "2 UNIDADE".
 String? _formatarMaterialLogQtd(Map material) {
   return _qtdComUnidadeLog(material.cast<String, dynamic>());
 }
 
-/// Linha de material do histórico: nome+detalhes em destaque e a
-/// quantidade em cinza, separados por espaço.
 Widget _linhaMaterialLog(Map material, {Color corNome = AppTheme.success}) {
   final nome = _formatarMaterialLogNome(material);
   final qtd = _formatarMaterialLogQtd(material);
@@ -4929,8 +4638,6 @@ class _AbaHistorico extends StatelessWidget {
               }
             }
 
-            // Lista de materiais no evento de criação — um item por linha
-            // (nome + detalhes + quantidade/unidade), sem vírgulas.
             final materiaisCriacaoLista = criada && log.depois['materiais'] is List
                 ? (log.depois['materiais'] as List)
                     .whereType<Map>()
@@ -4938,13 +4645,9 @@ class _AbaHistorico extends StatelessWidget {
                     .toList()
                 : const <Map>[];
 
-            // Material único do evento de adição extra — mesmo formato usado
-            // na lista de criação (nome + detalhes em destaque, quantidade em cinza).
             final materialAdicionadoNome =
                 adicionado ? _formatarMaterialLogNome(log.depois) : null;
 
-            // Título da entrada: identifica a ação além de quem a realizou —
-            // não basta mostrar só o nome do usuário.
             final tituloEntrada = criada
                 ? 'Solicitação criada por ${log.editorNome}'
                 : adicionado
@@ -4985,9 +4688,7 @@ class _AbaHistorico extends StatelessWidget {
                                 color: Theme.of(context).colorScheme.onSurfaceVariant)),
                       ],
                     ),
-                    // Para o evento de material extra adicionado, o nome do
-                    // material já aparece na linha de detalhe logo abaixo —
-                    // repeti-lo aqui em itálico só duplicaria a informação.
+
                     if (!adicionado && log.item != null && log.item!.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(
@@ -5136,14 +4837,14 @@ class _AbaHistorico extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// DIALOG: ADICIONAR MATERIAIS (adicional)
-// ═══════════════════════════════════════════════════════════════════════════
-
 class _AdicionarMateriaisDialog extends StatefulWidget {
   final SolicitacaoMaterialModel solicitacao;
+  final GlobalKey? tourKeyBotaoAdicionar;
 
-  const _AdicionarMateriaisDialog({required this.solicitacao});
+  const _AdicionarMateriaisDialog({
+    required this.solicitacao,
+    this.tourKeyBotaoAdicionar,
+  });
 
   @override
   State<_AdicionarMateriaisDialog> createState() => _AdicionarMateriaisDialogState();
@@ -5185,7 +4886,6 @@ class _AdicionarMateriaisDialogState extends State<_AdicionarMateriaisDialog> {
     }
   }
 
-  /// Scrolla a lista de materiais até o card do [item] informado.
   void _scrollAteItem(_ItemMaterialCriacao item) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ctx = item.cardKey.currentContext;
@@ -5388,6 +5088,7 @@ class _AdicionarMateriaisDialogState extends State<_AdicionarMateriaisDialog> {
                   ),
                   const SizedBox(width: 8),
                   Tooltip(
+                    key: widget.tourKeyBotaoAdicionar,
                     message: 'Adicionar os materiais à solicitação',
                     child: FilledButton(
                       onPressed: _salvando ? null : _salvar,
@@ -5411,10 +5112,6 @@ class _AdicionarMateriaisDialogState extends State<_AdicionarMateriaisDialog> {
     );
   }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// WIDGETS AUXILIARES
-// ═══════════════════════════════════════════
 
 class _ErroBanner extends StatelessWidget {
   final String mensagem;
@@ -5494,15 +5191,9 @@ class _DatePickerField extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// SELETOR DE MATERIAL (reutilizado do código original)
-// ═══════════════════════════════════════════
-
 const _kSelCategoriaGeral = '__GERAL__';
 const _kSelCategoriaSemCategoria = '__SEM_CATEGORIA__';
 
-/// GlobalKeys usadas pelo tour do robô assistente dentro do dialog
-/// "Selecionar Material" (aberto a partir de um item da Nova Solicitação).
 class _SeletorMaterialTourKeys {
   final filtrarCategorias = GlobalKey();
   final cardTodos         = GlobalKey();
@@ -5513,9 +5204,7 @@ class _SeletorMaterialTourKeys {
   final largura           = GlobalKey();
   final espessura         = GlobalKey();
   final primeiroMaterial  = GlobalKey();
-  /// Envolve busca por nome + todos os campos de filtro (identificador,
-  /// medida, comprimento, largura, espessura) — usado pra destacar tudo
-  /// de uma vez com uma única dica, em vez de campo a campo.
+
   final filtros           = GlobalKey();
 }
 
@@ -5562,8 +5251,7 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await context.read<MaterialProvider>().carregarCategorias();
-      // Durante o tour do robô assistente, abre direto a categoria "TODOS"
-      // pra já cair na lista de materiais e destacar os campos de filtro.
+
       if (widget.abrirTodosAutomaticamente && mounted) {
         await _abrirCategoria(_kSelCategoriaGeral, 'TODOS', AppTheme.primary);
       }
@@ -5852,7 +5540,7 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                         inputFormatters: [_UpperCaseFormatter()],
                         decoration: InputDecoration(
                           hintText: 'Nome do material',
-                          prefixIcon: Icon(Icons.search, size: 18,
+                          prefixIcon: Icon(Icons.inventory_2_outlined, size: 18,
                               color: Theme.of(context).colorScheme.outline),
                           isDense: true,
                         ),
@@ -6379,13 +6067,7 @@ class _MaterialItemSeletorState extends State<_MaterialItemSeletor> {
     );
   }
 }
-// ─────────────────────────────────────────────────────────────────────────
-// ABA "MATERIAIS SOLICITADOS": agrupamento por categoria + por nome parecido
-// (ex.: "METALON 1234 bla blabla" sem categoria e "METALON bla bla bla"
-// com categoria caem no mesmo grupo, e o grupo herda a categoria correta)
-// ─────────────────────────────────────────────────────────────────────────
-/// Um material "achatado", vindo de um item original OU de um adicional,
-/// junto com o contexto da OS de onde ele veio.
+
 class MaterialAchatadoSolicitado {
   final int materialId;
   final String nome;
@@ -6395,8 +6077,8 @@ class MaterialAchatadoSolicitado {
   final String? espessura;
   final String? unidade;
   final double quantidade;
-  final bool resolvido; // comprado || estoque
-  final String status; // 'PENDENTE' | 'COMPRADO' | 'ESTOQUE'
+  final bool resolvido;
+  final String status;
   final int solicitacaoId;
   final String numeroOS;
   final String nomeCliente;
@@ -6423,12 +6105,6 @@ class MaterialAchatadoSolicitado {
     required this.dataNecessidade,
   });
 
-  /// Chave estável do material dentro de uma solicitação/adicional — usada
-  /// para reconhecer o "mesmo" item entre rebuilds, já que a lista achatada
-  /// é reconstruída a cada build() (novas instâncias). Combina a
-  /// solicitação, o material e o momento em que foi adicionado (item
-  /// original vs. adicional na mesma solicitação nunca coincidem nesse
-  /// horário).
   @override
   bool operator ==(Object other) =>
       other is MaterialAchatadoSolicitado &&
@@ -6440,11 +6116,8 @@ class MaterialAchatadoSolicitado {
   int get hashCode => Object.hash(solicitacaoId, materialId, dataSolicitacao);
 }
 
-/// Um grupo de materiais "equivalentes" (mesmo material na prática, com
-/// possíveis diferenças de nome/categoria) dentro de uma categoria.
 class GrupoMaterialSolicitado {
-  /// Nome de exibição do grupo — o nome mais "completo/frequente" entre os
-  /// materiais agrupados.
+
   final String nomeExibicao;
   final String? categoria;
   final List<MaterialAchatadoSolicitado> materiais;
@@ -6459,16 +6132,12 @@ class GrupoMaterialSolicitado {
   int get totalPendentes => materiais.where((m) => !m.resolvido).length;
   int get totalResolvidos => materiais.where((m) => m.resolvido).length;
 
-  /// Nomes/variações distintas que caíram nesse grupo (pra deixar visível
-  /// pro usuário que, por ex., "METALON 1234" e "METALON bla" foram
-  /// unificados).
   List<String> get variacoesDeNome =>
       materiais.map((m) => m.nome.trim()).toSet().toList()..sort();
 }
 
-/// Uma categoria com seus grupos de materiais.
 class CategoriaAgrupada {
-  final String categoria; // 'SEM CATEGORIA' quando nenhum item tem categoria
+  final String categoria;
   final List<GrupoMaterialSolicitado> grupos;
 
   CategoriaAgrupada({required this.categoria, required this.grupos});
@@ -6478,10 +6147,6 @@ class CategoriaAgrupada {
   int get totalPendentes =>
       grupos.fold(0, (soma, g) => soma + g.totalPendentes);
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// ALGORITMO DE AGRUPAMENTO
-// ─────────────────────────────────────────────────────────────────────────
 
 const Map<String, String> _acentosMap = {
   'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A',
@@ -6500,28 +6165,19 @@ String _semAcentos(String s) {
   return buffer.toString();
 }
 
-/// Palavras genéricas demais para servirem de "assinatura" do material
-/// (não ajudam a diferenciar nem a agrupar).
 const Set<String> _stopwords = {
   'DE', 'DA', 'DO', 'E', 'PARA', 'COM', 'SEM', 'A', 'O', 'MM', 'CM', 'M',
 };
 
-/// Verifica se um token é "numérico/medida" (ex.: "1234", "20X20", "3/4",
-/// "2.44X1.22M") — esses tokens ajudam a diferenciar variantes (medida
-/// diferente), mas NÃO devem contar pra decidir se dois materiais são
-/// diferentes o suficiente pra não agrupar; na prática servem só de
-/// informação extra a mostrar.
 bool _pareceMedidaOuCodigo(String token) {
   if (token.isEmpty) return false;
   final temDigito = RegExp(r'\d').hasMatch(token);
   if (!temDigito) return false;
-  // Ex.: "1234", "20X20", "3/4", "2.44X1.22M", "M8"
+
   return RegExp(r'^[0-9]+([.,/X][0-9]+)*[A-Z]{0,3}$').hasMatch(token) ||
       RegExp(r'^[A-Z]{1,2}[0-9]+$').hasMatch(token);
 }
 
-/// Normaliza um nome de material para comparação: sem acento, maiúsculo,
-/// espaços colapsados.
 String _normalizar(String nome) {
   var s = _semAcentos(nome.toUpperCase());
   s = s.replaceAll(RegExp(r'[^A-Z0-9 ]'), ' ');
@@ -6529,13 +6185,6 @@ String _normalizar(String nome) {
   return s;
 }
 
-/// Extrai a "assinatura" de um nome: o conjunto de palavras significativas
-/// (ignorando stopwords e tokens de medida/código), na ORDEM em que
-/// aparecem, mas usado como conjunto para comparação de similaridade.
-/// Isso é o que permite que "METALON 1234 BLA BLABLA" e
-/// "METALON BLA BLA BLA" sejam vistos como o mesmo material-base: os dois
-/// têm a mesma palavra "forte" no começo (METALON) e conjuntos de palavras
-/// com grande sobreposição, mesmo com medidas/códigos diferentes no meio.
 List<String> _palavrasChave(String nomeNormalizado) {
   return nomeNormalizado
       .split(' ')
@@ -6545,7 +6194,6 @@ List<String> _palavrasChave(String nomeNormalizado) {
       .toList();
 }
 
-/// Similaridade de Jaccard entre dois conjuntos de palavras-chave.
 double _similaridadeJaccard(List<String> a, List<String> b) {
   if (a.isEmpty || b.isEmpty) return 0;
   final setA = a.toSet();
@@ -6556,11 +6204,6 @@ double _similaridadeJaccard(List<String> a, List<String> b) {
   return inter / uniao;
 }
 
-/// Dois materiais são considerados "o mesmo, na prática" quando:
-///  - a primeira palavra-chave (geralmente o "tipo" do material, ex.:
-///    METALON, CHAPA, PARAFUSO) é igual — isso evita agrupar coisas
-///    totalmente diferentes só por causa de palavras soltas em comum; E
-///  - a similaridade de Jaccard entre as palavras-chave é >= o limiar.
 bool _mesmoMaterial(List<String> chaveA, List<String> chaveB,
     {double limiar = 0.5}) {
   if (chaveA.isEmpty || chaveB.isEmpty) return false;
@@ -6568,13 +6211,12 @@ bool _mesmoMaterial(List<String> chaveA, List<String> chaveB,
   return _similaridadeJaccard(chaveA, chaveB) >= limiar;
 }
 
-/// Achata itens + adicionais de uma lista de solicitações em uma lista
-/// única de materiais.
 List<MaterialAchatadoSolicitado> _achatarMateriais(
     List<SolicitacaoMaterialModel> solicitacoes) {
   final resultado = <MaterialAchatadoSolicitado>[];
   for (final s in solicitacoes) {
     for (final item in s.itens) {
+      if (item.resolvido) continue;
       resultado.add(MaterialAchatadoSolicitado(
         materialId: item.materialId,
         nome: item.materialNome,
@@ -6597,6 +6239,7 @@ List<MaterialAchatadoSolicitado> _achatarMateriais(
       ));
     }
     for (final ad in s.adicionais) {
+      if (ad.resolvido) continue;
       resultado.add(MaterialAchatadoSolicitado(
         materialId: ad.materialId,
         nome: ad.materialNome,
@@ -6622,25 +6265,10 @@ List<MaterialAchatadoSolicitado> _achatarMateriais(
   return resultado;
 }
 
-/// Ponto de entrada principal: recebe as solicitações em andamento e
-/// devolve a lista de categorias já agrupadas e ordenadas (mais materiais
-/// pendentes primeiro).
-///
-/// Regra de agrupamento (resolve o problema descrito):
-///  1. Materiais são comparados pelo NOME (ignorando categoria) usando a
-///     assinatura de palavras-chave.
-///  2. Se dois (ou mais) materiais são considerados "o mesmo", eles formam
-///     um único grupo — mesmo que estejam com categorias diferentes ou um
-///     deles sem categoria.
-///  3. A categoria final do grupo é a categoria mais frequente entre os
-///     materiais do grupo (ou 'SEM CATEGORIA' se nenhum tiver).
-///     Ou seja: um material sem categoria "herda" a categoria do grupo ao
-///     qual foi associado por similaridade de nome.
 List<CategoriaAgrupada> agruparMateriaisSolicitados(
     List<SolicitacaoMaterialModel> solicitacoesEmAndamento) {
   final materiais = _achatarMateriais(solicitacoesEmAndamento);
 
-  // 1) Agrupa por similaridade de nome (independente de categoria).
   final grupos = <List<MaterialAchatadoSolicitado>>[];
   final chavesPorGrupo = <List<String>>[];
 
@@ -6655,10 +6283,7 @@ List<CategoriaAgrupada> agruparMateriaisSolicitados(
     }
     if (indiceEncontrado != null) {
       grupos[indiceEncontrado].add(m);
-      // Amplia a assinatura do grupo com a união das palavras-chave, para
-      // que o grupo continue "pegando" variações levemente diferentes
-      // conforme mais materiais entram (ex.: um 3º nome que é parecido com
-      // o 2º mas não tanto com o 1º).
+
       chavesPorGrupo[indiceEncontrado] = {
         ...chavesPorGrupo[indiceEncontrado],
         ...chave,
@@ -6669,8 +6294,6 @@ List<CategoriaAgrupada> agruparMateriaisSolicitados(
     }
   }
 
-  // 2) Para cada grupo, decide a categoria "vencedora" e o nome de
-  // exibição (nome mais longo/completo, que tende a ser o mais descritivo).
   final gruposMontados = grupos.map((materiaisDoGrupo) {
     final contagemCategorias = <String, int>{};
     for (final m in materiaisDoGrupo) {
@@ -6699,7 +6322,6 @@ List<CategoriaAgrupada> agruparMateriaisSolicitados(
     );
   }).toList();
 
-  // 3) Organiza os grupos dentro de suas categorias.
   final porCategoria = <String, List<GrupoMaterialSolicitado>>{};
   for (final g in gruposMontados) {
     final chave = g.categoria ?? 'SEM CATEGORIA';
@@ -6710,9 +6332,6 @@ List<CategoriaAgrupada> agruparMateriaisSolicitados(
       .map((e) => CategoriaAgrupada(categoria: e.key, grupos: e.value))
       .toList();
 
-  // Ordena: categorias com mais pendências primeiro; 'SEM CATEGORIA' vai
-  // sempre por último, já que é a "gaveta" que precisa de atenção do
-  // cadastro, não uma categoria real.
   categorias.sort((a, b) {
     if (a.categoria == 'SEM CATEGORIA') return 1;
     if (b.categoria == 'SEM CATEGORIA') return -1;
@@ -6726,16 +6345,10 @@ List<CategoriaAgrupada> agruparMateriaisSolicitados(
   return categorias;
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// WIDGET
-// ─────────────────────────────────────────────────────────────────────────
-
 enum _ColunaOrdenavel { os, adicionado, necessidade, status }
 
 const List<String> _ordemStatus = ['PENDENTE', 'COMPRADO', 'ESTOQUE'];
 
-/// Como a listagem "Materiais Solicitados" está agrupada no momento.
-/// O usuário escolhe pelos botões no topo da view.
 enum _ModoAgrupamento { categoria, os, necessidade, status }
 
 extension on _ModoAgrupamento {
@@ -6766,8 +6379,6 @@ extension on _ModoAgrupamento {
   }
 }
 
-/// Um grupo genérico de materiais (usado por qualquer modo de agrupamento,
-/// não só por categoria).
 class _GrupoGenerico {
   final String titulo;
   final List<MaterialAchatadoSolicitado> materiais;
@@ -6777,14 +6388,8 @@ class _GrupoGenerico {
   int get totalPendentes => materiais.where((m) => !m.resolvido).length;
 }
 
-/// Data "de necessidade" truncada pro início do dia, usada como chave de
-/// agrupamento (2 horários no mesmo dia caem no mesmo grupo).
 DateTime _diaSemHora(DateTime d) => DateTime(d.year, d.month, d.day);
 
-/// Reagrupa a lista já achatada de materiais de acordo com o modo escolhido
-/// pelo usuário. Quando o modo é "categoria", delega pro agrupamento por
-/// similaridade de nome já existente (agruparMateriaisSolicitados); nos
-/// demais modos, agrupa de forma simples pela chave correspondente.
 List<_GrupoGenerico> _agruparPorModo(
   List<SolicitacaoMaterialModel> solicitacoes,
   _ModoAgrupamento modo,
@@ -6861,9 +6466,7 @@ List<_GrupoGenerico> _agruparPorModo(
 
 class MateriaisSolicitadosView extends StatefulWidget {
   final List<SolicitacaoMaterialModel> solicitacoes;
-  /// Usadas apenas pelo tour "Como orçar materiais solicitados" para dar
-  /// highlight no seletor "Agrupar por", no primeiro material listado e
-  /// no botão "Orçar selecionados".
+
   final GlobalKey? tourKeyAgruparPor;
   final GlobalKey? tourKeyPrimeiroMaterial;
   final GlobalKey? tourKeyOrcarSelecionados;
@@ -6885,9 +6488,6 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
   bool _crescente = true;
   _ModoAgrupamento _modoAgrupamento = _ModoAgrupamento.categoria;
 
-  /// Materiais (pendentes) selecionados pra enviar pra orçamento — mesmo
-  /// padrão do "Orçar filtrados" (estoque) e "Orçar selecionados" (alertas
-  /// de estoque no AppShell).
   final Set<MaterialAchatadoSolicitado> _selecionados = {};
   bool _orcandoSelecionados = false;
 
@@ -6908,9 +6508,7 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
         _selecionados.remove(m);
         return;
       }
-      // Evita selecionar o mesmo material (mesmo materialId) mais de uma
-      // vez — mesmo que apareça em OS/linhas diferentes, pra orçamento só
-      // faz sentido entrar uma vez.
+
       final jaSelecionadoEmOutraLinha =
           _selecionados.any((s) => s.materialId == m.materialId);
       if (jaSelecionadoEmOutraLinha) {
@@ -6934,9 +6532,7 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
       if (todosJaSelecionados) {
         _selecionados.removeWhere(todosOsMateriais.contains);
       } else {
-        // Ao selecionar tudo, mantém só a primeira ocorrência de cada
-        // materialId — o mesmo material solicitado em OSs diferentes não
-        // precisa (nem deve) entrar mais de uma vez no orçamento.
+
         final idsJaVistos = _selecionados.map((s) => s.materialId).toSet();
         for (final m in todosOsMateriais) {
           if (idsJaVistos.add(m.materialId)) {
@@ -6950,27 +6546,17 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
   bool _mesmoValor(String? a, String? b) {
     final ta = (a ?? '').trim().toUpperCase();
     final tb = (b ?? '').trim().toUpperCase();
-    if (ta.isEmpty || tb.isEmpty) return true; // campo não informado → não restringe
+    if (ta.isEmpty || tb.isEmpty) return true;
     return ta == tb;
   }
 
-  /// Envia os materiais selecionados pra um novo orçamento — replica o
-  /// fluxo de "Orçar filtrados"/"Orçar selecionados" já usado em Estoque e
-  /// nos Alertas de Estoque: casa cada material selecionado com o
-  /// [MaterialModel] real (via materialId, com fallback por atributos),
-  /// monta os [ItemOrcamentoData] com os preços por fornecedor já
-  /// cadastrados, e navega para o editor de orçamento.
   Future<void> _orcarSelecionados() async {
     if (_selecionados.isEmpty || _orcandoSelecionados) return;
     setState(() => _orcandoSelecionados = true);
 
     try {
       final materialProvider = context.read<MaterialProvider>();
-      // A página de Solicitações não carrega o MaterialProvider por conta
-      // própria (só quem visita Estoque faz isso) — sem isso, a lista de
-      // materiais fica vazia e nenhum item é localizado. Carrega sob
-      // demanda aqui, uma única vez, antes de tentar casar os
-      // selecionados.
+
       if (materialProvider.materiais.isEmpty) {
         await materialProvider.carregar();
         if (!mounted) return;
@@ -6989,9 +6575,7 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
             break;
           }
         }
-        // Fallback: caso o materialId não bata (ex.: material
-        // recadastrado), tenta localizar por atributos, igual ao "Orçar
-        // selecionados" dos alertas de estoque.
+
         encontrado ??= todos.cast<MaterialModel?>().firstWhere(
               (mat) =>
                   mat != null &&
@@ -7005,7 +6589,7 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
           naoEncontrados.add(m.nome);
           continue;
         }
-        if (!jaAdicionados.add(encontrado.id)) continue; // evita duplicar
+        if (!jaAdicionados.add(encontrado.id)) continue;
 
         final precos = <int, PrecoFornecedorData>{};
         for (final fm in encontrado.fornecedorMateriais) {
@@ -7062,8 +6646,6 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
 
       setState(() => _selecionados.clear());
 
-      // Ao entrar em /orcamento, abre direto no editor (aba "abertos") com
-      // este orçamento recém-criado, em vez da lista de aprovação.
       OrcamentoPage.abrirEditorAoEntrar = true;
       context.go('/orcamento');
     } finally {
@@ -7091,7 +6673,7 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
         resultado = _ordemStatus.indexOf(a.status).compareTo(_ordemStatus.indexOf(b.status));
         break;
       case null:
-        // Ordenação padrão: pendentes primeiro, depois por necessidade mais próxima.
+
         if (a.resolvido != b.resolvido) return a.resolvido ? 1 : -1;
         return a.dataNecessidade.compareTo(b.dataNecessidade);
     }
@@ -7218,11 +6800,7 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
                             onOrdenar: _alternarOrdenacao,
                             selecionados: _selecionados,
                             onToggleSelecao: _toggleSelecao,
-                            // Só o primeiro material do primeiro grupo
-                            // recebe a key do tour "Como orçar materiais
-                            // solicitados" — é sempre o primeiro item
-                            // visível na lista, independente do modo de
-                            // agrupamento ativo.
+
                             tourKeyPrimeiraLinha:
                                 index == 0 ? widget.tourKeyPrimeiroMaterial : null,
                           ),
@@ -7237,8 +6815,6 @@ class _MateriaisSolicitadosViewState extends State<MateriaisSolicitadosView> {
   }
 }
 
-/// Botões de segmento no topo da view, pra escolher por qual critério os
-/// materiais devem ser agrupados (categoria, OS, necessidade ou status).
 class _SeletorAgrupamento extends StatelessWidget {
   final _ModoAgrupamento modoAtivo;
   final void Function(_ModoAgrupamento) onSelecionar;
@@ -7327,7 +6903,6 @@ class _SeletorAgrupamento extends StatelessWidget {
   }
 }
 
-/// Cor/ícone/rótulo de cada status de compra, reaproveitado na tabela.
 class _StatusVisual {
   final Color cor;
   final IconData icone;
@@ -7346,8 +6921,6 @@ _StatusVisual _statusVisual(String status) {
   }
 }
 
-/// Formata "quantidade + unidade" com espaço e unidade no padrão de
-/// exibição correto (ex.: "2 unidade"), em vez de grudado e em maiúsculas.
 String _formatarQuantidadeUnidade(double quantidade, String? unidade) {
   final qtd = formatarQuantidade(quantidade);
   if (unidade == null || unidade.trim().isEmpty) return qtd;
@@ -7361,9 +6934,7 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
   final void Function(_ColunaOrdenavel) onOrdenar;
   final Set<MaterialAchatadoSolicitado> selecionados;
   final void Function(MaterialAchatadoSolicitado) onToggleSelecao;
-  /// Usada apenas pelo tour "Como orçar materiais solicitados" para dar
-  /// highlight na primeira linha desta tabela (só é passada pra tabela do
-  /// primeiro grupo — ver `MateriaisSolicitadosView`).
+
   final GlobalKey? tourKeyPrimeiraLinha;
 
   const _TabelaMateriaisCategoria({
@@ -7390,7 +6961,7 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Cabeçalho da tabela ──────────────────────────────────────────
+
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
@@ -7447,7 +7018,7 @@ class _TabelaMateriaisCategoria extends StatelessWidget {
               ],
             ),
           ),
-          // ── Linhas ────────────────────────────────────────────────────────
+
           ...materiais.asMap().entries.map((entry) {
             final ultima = entry.key == materiais.length - 1;
             final m = entry.value;

@@ -1,10 +1,7 @@
-// audit_log_repository.dart
-
 import '../models/audit_log_model.dart';
 import '../utils/api_client.dart';
 
 class AuditLogRepository {
-  /// Lista todos os logs com filtros opcionais.
   Future<List<AuditLogModel>> listar({
     int? materialId,
     String? acao,
@@ -40,7 +37,6 @@ class AuditLogRepository {
         .toList();
   }
 
-  /// Lista logs de um material específico.
   Future<List<AuditLogModel>> listarPorMaterial(int materialId,
       {int limite = 200}) async {
     final list =

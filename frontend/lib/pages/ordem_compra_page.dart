@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../models/ordem_compra_model.dart';
@@ -13,17 +14,9 @@ import '../providers/material_provider.dart';
 import '../repositories/ordem_compra_repository.dart';
 import '../repositories/fornecedor_repository.dart';
 import '../theme/app_theme.dart';
+import '../providers/robo_helper_provider.dart';
 import 'controle_estoque_page.dart' show formatarMedidaOuDimensoes, formatarQuantidade;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UNIDADE: exibição em minúsculo (ex.: M/L -> m/l, ML -> ml, KG -> kg, M2/M² -> m²)
-// O valor salvo/comparado no banco continua maiúsculo; isto é só para exibição.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ESPESSURA: exibição sempre com sufixo "mm" (o valor salvo é só o número,
-// ex.: "1" -> "1mm"). Evita duplicar o sufixo caso já venha salvo com "mm".
-// ─────────────────────────────────────────────────────────────────────────────
 String espessuraExibicao(String? espessura) {
   final e = (espessura ?? '').trim();
   if (e.isEmpty) return '';
@@ -49,9 +42,6 @@ String unidadeExibicao(String? unidade) {
   }
 }
 
-// Igual a unidadeExibicao, mas com o nome por extenso entre parênteses
-// (ex.: "ml (mililitro)", "m/l (metro linear)"), no mesmo padrão usado
-// no dropdown de Unidade da tela de Estoque.
 String unidadeDescricaoCompleta(String? unidade) {
   final u = (unidade ?? '').trim();
   if (u.isEmpty) return '';
@@ -70,10 +60,6 @@ String unidadeDescricaoCompleta(String? unidade) {
     default:         return u.toLowerCase();
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FORMATTER: MAIÚSCULAS SEM ACENTOS
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _UpperCaseFormatter extends TextInputFormatter {
   static final _acentos = {
@@ -107,35 +93,15 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FORMATTER: NÚMERO NO PADRÃO BR (PONTO DE MILHAR, VÍRGULA DECIMAL)
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Usado nos campos de quantidade/preço/valor total da OC. O usuário digita
-// livremente (dígitos e, opcionalmente, uma vírgula para casas decimais); o
-// formatter recalcula a exibição a cada tecla, inserindo pontos de milhar e
-// preservando a posição do cursor em relação aos dígitos (não à posição
-// absoluta do texto, já que ela muda conforme os pontos são inseridos/
-// removidos).
-//
-// Internamente o valor "de verdade" nunca é armazenado com pontos de milhar:
-// para converter o texto exibido de volta a um double, use [parseNumeroBr].
-// Para gerar o texto formatado a partir de um double, use [formatarNumeroBr].
-
-/// Converte um texto no padrão BR ("1.234,56") para double (1234.56).
-/// Aceita também texto "cru" sem separador de milhar ("1234,56" ou
-/// "1234.56"), então é seguro usar em qualquer texto vindo desses campos.
 double? parseNumeroBr(String texto) {
   final limpo = texto.trim();
   if (limpo.isEmpty) return null;
-  // Remove pontos de milhar e troca a vírgula decimal por ponto.
+
   final semMilhar = limpo.replaceAll('.', '');
   final comPontoDecimal = semMilhar.replaceAll(',', '.');
   return double.tryParse(comPontoDecimal);
 }
 
-/// Formata um double no padrão BR com [casas] decimais fixas.
-/// Ex.: formatarNumeroBr(10500.593004, 6) → "10.500,593004"
 String formatarNumeroBr(double valor, int casas) {
   final fixo = valor.toStringAsFixed(casas);
   final partes = fixo.split('.');
@@ -156,7 +122,7 @@ String formatarNumeroBr(double valor, int casas) {
 }
 
 class _NumeroBrFormatter extends TextInputFormatter {
-  /// Quantidade máxima de casas decimais permitidas.
+
   final int casasDecimais;
 
   _NumeroBrFormatter({this.casasDecimais = 2});
@@ -168,11 +134,6 @@ class _NumeroBrFormatter extends TextInputFormatter {
   ) {
     if (newValue.text.isEmpty) return newValue;
 
-    // Permite digitar '.' como atalho para a vírgula decimal. Não podemos
-    // simplesmente trocar todo '.' por ',' no texto inteiro, pois o texto já
-    // formatado contém pontos de milhar (ex.: "1.580") que não devem virar
-    // vírgula. Por isso, comparamos com oldValue e convertemos em vírgula
-    // apenas o(s) ponto(s) recém-inserido(s) nesta edição.
     if (newValue.text.length > oldValue.text.length) {
       final cursorFim = newValue.selection.baseOffset < 0
           ? newValue.text.length
@@ -200,7 +161,6 @@ class _NumeroBrFormatter extends TextInputFormatter {
       }
     }
 
-    // Mantém só dígitos e, no máximo, uma vírgula.
     var texto = newValue.text.replaceAll(RegExp(r'[^\d,]'), '');
     final primeiraVirgula = texto.indexOf(',');
     if (primeiraVirgula != -1) {
@@ -212,13 +172,10 @@ class _NumeroBrFormatter extends TextInputFormatter {
       texto = antes + depois;
     }
 
-    // Separa parte inteira e decimal para reconstruir com pontos de milhar.
     final partes = texto.split(',');
     var inteiro = partes[0].replaceAll(RegExp(r'^0+(?=\d)'), '');
     final decimal = partes.length > 1 ? partes[1] : null;
 
-    // Quantos dígitos havia antes do cursor no texto cru (sem pontos), para
-    // reposicionar o cursor corretamente após a reformatação.
     final cursorCru = newValue.selection.baseOffset < 0
         ? texto.length
         : newValue.text
@@ -235,8 +192,6 @@ class _NumeroBrFormatter extends TextInputFormatter {
     if (decimal != null) resultado += ',$decimal';
     if (texto.endsWith(',') && decimal == null) resultado += ',';
 
-    // Reconta a posição do cursor: percorre o resultado contando dígitos e
-    // vírgula até atingir cursorCru caracteres "reais" (dígito ou vírgula).
     var restantes = cursorCru;
     var novoCursor = resultado.length;
     for (var i = 0; i < resultado.length; i++) {
@@ -257,12 +212,6 @@ class _NumeroBrFormatter extends TextInputFormatter {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FORMATTER: ESPESSURA
-// Converte vírgula em ponto, impede pontos em sequência e não permite
-// letras nem qualquer outro caractere — só dígitos e um único ponto decimal
-// (ex: "2mm" vira "2", "2,,5" vira "2.5").
-// ─────────────────────────────────────────────────────────────────────────────
 class _EspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -270,11 +219,11 @@ class _EspessuraFormatter extends TextInputFormatter {
     TextEditingValue newValue,
   ) {
     var texto = newValue.text.replaceAll(',', '.');
-    // Remove tudo que não for dígito ou ponto (bloqueia letras, "mm" etc.)
+
     texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
-    // Remove pontos duplos (ou mais) consecutivos
+
     texto = texto.replaceAll(RegExp(r'\.{2,}'), '.');
-    // Permite no máximo um ponto decimal: mantém o primeiro, remove os demais
+
     final primeiroPonto = texto.indexOf('.');
     if (primeiroPonto != -1) {
       texto = texto.substring(0, primeiroPonto + 1) +
@@ -288,25 +237,17 @@ class _EspessuraFormatter extends TextInputFormatter {
   }
 }
 
-/// Formatter para o campo Medida: converte vírgula em ponto e não permite
-/// pontos consecutivos, mas preserva letras/espaços/"x" etc. (usado para
-/// dimensões livres como "0.68x0.58"). Mesmo comportamento do formatter
-/// equivalente usado na tela de Controle de Estoque.
 class _MedidaEspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    // 1) Vírgula -> ponto
+
     var texto = newValue.text.replaceAll(',', '.');
 
-    // 2) Remove acentos e força minúsculas
     texto = _UpperCaseFormatter._removerAcentos(texto).toLowerCase();
 
-    // 3) Para cada bloco de dígitos+pontos (um "número"), permite apenas o
-    //    primeiro ponto e remove os demais. Não mexe no que não é dígito/ponto
-    //    (letras, "x", espaços, etc.), preservando a separação entre números.
     texto = texto.replaceAllMapped(RegExp(r'[\d.]+'), (m) {
       final partes = m.group(0)!.split('.');
       if (partes.length > 2) {
@@ -323,9 +264,8 @@ class _MedidaEspessuraFormatter extends TextInputFormatter {
   }
 }
 
-
 class OrdemCompraPage extends StatefulWidget {
-  /// Quando informado, abre automaticamente os detalhes desta OC ao entrar na página.
+
   final int? ocIdParaAbrir;
 
   const OrdemCompraPage({super.key, this.ocIdParaAbrir});
@@ -352,53 +292,96 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
   String _filtroBuscaMedida      = '';
   String _filtroBuscaIdentificador = '';
 
+  final _tourKeyNovaOc = GlobalKey();
+  final _tourKeyBuscaNumero = GlobalKey();
+  final _tourKeyBuscaNome = GlobalKey();
+  final _tourKeyBuscaFiltrosAvancados = GlobalKey();
+  final _tourKeyAbas = GlobalKey();
+  final _novaOcTourKeys = NovaOcTourKeys();
+  final GlobalKey<NovaOrdemCompraPageState> _novaOcPageKey =
+      GlobalKey<NovaOrdemCompraPageState>();
+
+  bool _dialogTourAberto = false;
+  bool _dialogTourEmTransicao = false;
+  RoboHelperProvider? _roboHelperPagina;
+
+  GoRouter? _goRouter;
+  bool _rotaEstaAtiva = false;
+  Timer? _debounceFiltros;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final provider = context.read<OrdemCompraProvider>();
-      await provider.carregar();
-      // Garante que o status das OS está atualizado para o bloqueio de finalização
-      if (mounted) {
-        await context.read<EstoqueProvider>().carregarRelacoesOS();
-      }
-      if (!mounted) return;
+      final helper = context.read<RoboHelperProvider>();
+      helper.notificarRota('/ordem-compra');
+      _roboHelperPagina = helper;
+      _roboHelperPagina!.addListener(_onRoboHelperPaginaChanged);
+      if (mounted) _registrarAjudaRoboOC();
 
-      // Prioridade 1: OC pendente setada pelo orçamento antes de navegar
-      // (funciona mesmo em StatefulShellRoute, onde initState pode não re-executar).
-      final ocPendente = provider.consumirOcPendente();
-      final idAlvo = ocPendente ?? widget.ocIdParaAbrir;
+      // A tela vive dentro de uma StatefulShellBranch (IndexedStack), então
+      // o widget nunca é recriado ao trocar de aba — initState só roda uma
+      // vez. Para recarregar sempre que o usuário volta pra essa aba,
+      // escutamos o próprio GoRouter e detectamos quando a rota atual
+      // volta a ser '/ordem-compra'.
+      _goRouter = GoRouter.of(context);
+      _goRouter!.routerDelegate.addListener(_onRotaMudou);
+      _rotaEstaAtiva = _rotaAtualEhOrdemCompra();
 
-      if (idAlvo != null) {
-        final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
-        final raw = todas.cast<dynamic>().firstWhere(
-          (o) {
-            final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
-            return m.id == idAlvo;
-          },
-          orElse: () => null,
-        );
-        if (raw != null && mounted) {
-          _verDetalhes(context, raw);
-        }
-      }
+      await _carregarInicial();
     });
   }
 
-  /// Chamado externamente (via GlobalKey) quando a branch já está montada
-  /// e o initState não será re-executado (StatefulShellRoute preserva estado).
-  /// Recarrega as OCs e abre os detalhes da OC com o [id] informado.
-  ///
-  /// Caso a página já esteja exibindo os detalhes de OUTRA OC (rota empilhada
-  /// no Navigator desta branch), essa rota é fechada antes de abrir a nova —
-  /// caso contrário a nova ficaria empilhada por baixo/por cima da antiga, ou
-  /// simplesmente não seria exibida.
+  Future<void> _carregarInicial() async {
+    if (!mounted) return;
+    final provider = context.read<OrdemCompraProvider>();
+    await provider.carregar();
+
+    if (mounted) {
+      await context.read<EstoqueProvider>().carregarRelacoesOS();
+    }
+    if (!mounted) return;
+
+    final ocPendente = provider.consumirOcPendente();
+    final idAlvo = ocPendente ?? widget.ocIdParaAbrir;
+
+    if (idAlvo != null) {
+      final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
+      dynamic raw = todas.cast<dynamic>().firstWhere(
+        (o) {
+          final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
+          return m.id == idAlvo;
+        },
+        orElse: () => null,
+      );
+      raw ??= await _buscarOcDiretoOuNulo(idAlvo);
+      if (raw != null && mounted) {
+        _verDetalhes(context, raw);
+      }
+    }
+  }
+
+  bool _rotaAtualEhOrdemCompra() {
+    final location = _goRouter?.routerDelegate.currentConfiguration.uri.toString() ?? '';
+    return location.startsWith('/ordem-compra');
+  }
+
+  /// Chamado toda vez que a URL do GoRouter muda (troca de aba do shell,
+  /// navegação para o detalhe/edição e volta, etc). Recarrega a listagem
+  /// sempre que a rota volta a ser '/ordem-compra' vinda de outra rota.
+  void _onRotaMudou() {
+    if (!mounted) return;
+    final ativaAgora = _rotaAtualEhOrdemCompra();
+    if (ativaAgora && !_rotaEstaAtiva) {
+      context.read<OrdemCompraProvider>().carregar();
+    }
+    _rotaEstaAtiva = ativaAgora;
+  }
+
   Future<void> abrirOcPorId(int id) async {
     if (!mounted) return;
 
-    // Volta para a lista (raiz da pilha desta branch) antes de tudo, para
-    // garantir que não há detalhes de outra OC abertos por cima.
     final nav = Navigator.of(context);
     if (nav.canPop()) {
       nav.popUntil((r) => r.isFirst);
@@ -408,27 +391,35 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
     await provider.carregar();
     if (!mounted) return;
     final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
-    final raw = todas.cast<dynamic>().firstWhere(
+    dynamic raw = todas.cast<dynamic>().firstWhere(
       (o) {
         final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
         return m.id == id;
       },
       orElse: () => null,
     );
+
+    // A OC pode não estar entre os primeiros itens carregados de cada aba
+    // (listagem agora é paginada). Se não achou localmente, busca direto.
+    raw ??= await _buscarOcDiretoOuNulo(id);
+
     if (raw != null && mounted) {
       _verDetalhes(context, raw);
     }
   }
 
-  /// Verifica se há uma OC pendente no provider (setada pelo orçamento após
-  /// gerar OC) e, em caso positivo, recarrega a lista e abre os detalhes.
-  /// Chamado em [didChangeDependencies] para capturar o caso onde a página de
-  /// OC já estava montada no StatefulShellRoute quando o usuário navegou até ela.
+  Future<dynamic> _buscarOcDiretoOuNulo(int id) async {
+    try {
+      return await OrdemCompraRepository().buscarPorId(id);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _verificarOcPendente() async {
     if (!mounted) return;
     final provider = context.read<OrdemCompraProvider>();
-    // Verifica sem consumir ainda — o consumo acontece dentro de abrirOcPorId,
-    // após o carregar() trazer a OC recém-criada da API.
+
     if (provider.ocPendente == null) return;
     final id = provider.consumirOcPendente()!;
     await abrirOcPorId(id);
@@ -436,6 +427,8 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
 
   @override
   void dispose() {
+    _debounceFiltros?.cancel();
+    _goRouter?.routerDelegate.removeListener(_onRotaMudou);
     _tabController.dispose();
     _buscaNumeroCtrl.dispose();
     _buscaNomeCtrl.dispose();
@@ -444,7 +437,268 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
     _buscaEspessuraCtrl.dispose();
     _buscaMedidaCtrl.dispose();
     _buscaIdentificadorCtrl.dispose();
+    _roboHelperPagina?.removeListener(_onRoboHelperPaginaChanged);
+    try {
+      context.read<RoboHelperProvider>().encerrarTour();
+      context.read<RoboHelperProvider>().limparOpcoes('/ordem-compra');
+    } catch (_) {}
     super.dispose();
+  }
+
+  void _onRoboHelperPaginaChanged() {
+    if (!mounted) return;
+    if (_roboHelperPagina!.tourAtivo) return;
+    _novaOcPageKey.currentState?.fecharAdicionarItemTourSeAberto();
+    if (_dialogTourAberto) {
+      _dialogTourAberto = false;
+      Navigator.of(context).maybePop();
+      _roboHelperPagina!.definirTelaSobreposta(false);
+    }
+  }
+
+  Future<void> _abrirDialogTour() async {
+    if (_dialogTourAberto || _dialogTourEmTransicao) return;
+    _dialogTourAberto = true;
+    _dialogTourEmTransicao = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _dialogTourEmTransicao = false;
+    });
+
+    // O editor "Nova OC" é uma tela sobreposta: as opções registradas em
+    // '/ordem-compra' (fazer/buscar uma ordem) são da listagem, não fazem
+    // sentido dentro do editor. Marcando telaSobrepostaAtiva, o menu
+    // "Dúvidas" some as opções da listagem enquanto o editor está aberto.
+    context.read<RoboHelperProvider>().definirTelaSobreposta(true);
+
+    final pushFuture = Navigator.of(context).push<dynamic>(
+      MaterialPageRoute(
+        builder: (_) => NovaOrdemCompraPage(
+          key: _novaOcPageKey,
+          tourKeys: _novaOcTourKeys,
+        ),
+      ),
+    );
+
+    pushFuture.then((_) {
+      if (mounted) {
+        _dialogTourAberto = false;
+        context.read<RoboHelperProvider>().definirTelaSobreposta(false);
+      }
+    });
+
+    const tentativasMax = 30;
+    for (var i = 0; i < tentativasMax; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+      if (_novaOcTourKeys.fornecedor.currentContext != null) break;
+    }
+  }
+
+  Future<void> _fecharDialogTourSeAberto() async {
+    if (!_dialogTourAberto || _dialogTourEmTransicao) return;
+    _dialogTourAberto = false;
+    _dialogTourEmTransicao = true;
+    // Usa o mesmo Navigator (sem rootNavigator) que fez o push em
+    // _abrirDialogTour. Popar com rootNavigator: true aqui podia mirar um
+    // Navigator diferente do que empilhou a rota do editor, fazendo o
+    // maybePop() não fechar nada (ou fechar a rota errada) quando o app
+    // tem navigators aninhados.
+    await Navigator.of(context).maybePop();
+    if (mounted) context.read<RoboHelperProvider>().definirTelaSobreposta(false);
+    _dialogTourEmTransicao = false;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+
+  RoboTourStop _stopOC({
+    required GlobalKey Function() key,
+    required String texto,
+    Offset offset = const Offset(0, 0),
+    Future<void> Function()? aoEntrar,
+    Future<void> Function()? aoSair,
+  }) {
+    return RoboTourStop(
+      key: key,
+      texto: texto,
+      offset: offset,
+      aoEntrar: () async {
+        if (aoEntrar != null) await aoEntrar();
+        await _scrollAteChaveTour(key());
+      },
+      aoSair: aoSair,
+    );
+  }
+
+  Future<void> _scrollAteChaveTour(GlobalKey key) async {
+    for (var i = 0; i < 20; i++) {
+      final ctx = key.currentContext;
+      if (ctx != null) {
+        if (!ctx.mounted) return;
+        await Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          alignment: 0.5,
+        );
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+  }
+
+  void _registrarAjudaRoboOC() {
+    final rota = ModalRoute.of(context);
+    if (rota != null && !rota.isCurrent) return;
+
+    final helper = context.read<RoboHelperProvider>();
+    helper.registrarOpcoes('/ordem-compra', [
+      RoboHelpOption(
+        titulo: 'Como fazer uma ordem de compra',
+        paradas: [
+          _stopOC(
+            key: () => _tourKeyNovaOc,
+            texto: 'Toque aqui para abrir o formulário de criação de uma '
+                'nova ordem de compra.',
+            aoEntrar: _fecharDialogTourSeAberto,
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.fornecedor,
+            texto: 'Selecione o fornecedor principal desta ordem de compra.',
+            aoEntrar: _abrirDialogTour,
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.requisitante,
+            texto: 'Nome de quem está requisitando esta compra.',
+            aoEntrar: () async {
+              _novaOcPageKey.currentState?.simularFornecedorTour();
+              await Future<void>.delayed(const Duration(milliseconds: 80));
+            },
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.formaPagamento,
+            texto: 'Forma de pagamento combinada com o fornecedor '
+                '(ex: Boleto, À Vista, Crédito...).',
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.prazoPagamento,
+            texto: 'Prazo de pagamento combinado (ex: 30 dias, 15/30/45...).',
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.observacoes,
+            texto: 'Observações gerais sobre esta ordem de compra '
+                '(opcional).',
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.empresa,
+            texto: 'Selecione a empresa que aparecerá no cabeçalho da '
+                'ordem de compra: Visual Premium ou Visual Guindaste.',
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.numerosOS,
+            texto: 'Preencha ao menos um número de OS. Se houver apenas '
+                'uma, ela será atribuída automaticamente aos itens.',
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.atalhoEmpresa,
+            texto: 'Use este atalho para preencher rapidamente uma OS '
+                'com "EMPRESA".',
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.atalhoOutros,
+            texto: 'E este para preencher com "OUTROS".',
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.campoOS,
+            texto: 'Ou digite o número da OS diretamente no campo.',
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.adicionarItem,
+            texto: 'Com o fornecedor selecionado, toque aqui para '
+                'adicionar itens à ordem de compra.',
+            aoEntrar: () async {
+              await _novaOcPageKey.currentState?.fecharAdicionarItemTourSeAberto();
+            },
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.verTodoEstoque,
+            texto: 'Ative aqui se quiser adicionar um material novo, '
+                'ainda não vinculado a este fornecedor. Deixe desativado '
+                'para escolher entre os materiais já vinculados a ele.',
+            aoEntrar: () async {
+              await _novaOcPageKey.currentState?.abrirAdicionarItemTour();
+            },
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.buscaMaterial,
+            texto: 'Busque o material pelo nome, identificador, medida, '
+                'comprimento, largura ou espessura — pode preencher '
+                'vários filtros ao mesmo tempo.',
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.botaoAdicionarMaterial,
+            texto: 'Toque no "+" para selecionar um material da lista.',
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.botaoConfirmarAdicionar,
+            texto: 'Depois de escolher os materiais desejados, toque em '
+                '"Adicionar" para incluí-los na ordem de compra.',
+            aoEntrar: () async {
+              _novaOcPageKey.currentState?.selecionarItensParaConfirmarTour();
+              await Future<void>.delayed(const Duration(milliseconds: 120));
+            },
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.itemUnidadeCampos,
+            texto: 'Para materiais com unidade "Unidade", preencha a '
+                'Quantidade e o Preço por Unidade — o Valor Total é '
+                'calculado automaticamente.',
+            aoEntrar: () async {
+              await _novaOcPageKey.currentState?.confirmarESairDoDialogTour();
+            },
+            aoSair: () async {
+              await _novaOcPageKey.currentState?.desfazerConfirmacaoEReabrirDialogTour();
+            },
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.itemOutraUnidadeCampos,
+            texto: 'Já para materiais com outra unidade (m/l, ml, g, '
+                'etc.), além da Quantidade, informe quanto dessa unidade '
+                'tem em cada peça, o Valor por unidade e o Valor Total.',
+          ),
+          _stopOC(
+            key: () => _novaOcTourKeys.criarOc,
+            texto: 'Por fim, revise os dados e toque em "Criar OC" para '
+                'salvar a ordem de compra.',
+          ),
+        ],
+        aoEncerrar: () async {
+          await _novaOcPageKey.currentState?.fecharAdicionarItemTourSeAberto();
+          await _fecharDialogTourSeAberto();
+        },
+      ),
+      RoboHelpOption(
+        titulo: 'Como buscar uma ordem de compra',
+        paradas: [
+          RoboTourStop(
+            key: () => _tourKeyBuscaNumero,
+            texto: 'Filtre pelo número da OC.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeyBuscaNome,
+            texto: 'Ou pelo nome do material presente na ordem de compra.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeyBuscaFiltrosAvancados,
+            texto: 'Use os filtros avançados para refinar por '
+                'identificador, medida, comprimento, largura ou espessura '
+                'do material.',
+          ),
+          RoboTourStop(
+            key: () => _tourKeyAbas,
+            texto: 'E alterne entre as abas para ver as ordens Em '
+                'Andamento, Finalizadas ou Canceladas.',
+          ),
+        ],
+      ),
+    ]);
   }
 
   bool _dependenciasInicializadas = false;
@@ -452,63 +706,46 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Na primeira chamada, o initState cuida da abertura via postFrameCallback.
-    // Nas chamadas subsequentes (ex: usuário navega de volta para esta rota no
-    // StatefulShellRoute), verifica se há uma OC pendente para abrir.
+
     if (_dependenciasInicializadas) {
       _verificarOcPendente();
     }
     _dependenciasInicializadas = true;
   }
 
-  List<dynamic> _filtrar(List<dynamic> lista) {
-    final qNum  = _filtroBuscaNumero.trim();
-    final qNome = _filtroBuscaNome.trim().toLowerCase();
-    final qComp = _filtroBuscaComprimento.trim().toLowerCase();
-    final qLarg = _filtroBuscaLargura.trim().toLowerCase();
-    final qEsp  = _filtroBuscaEspessura.trim().toLowerCase();
-    final qMed  = _filtroBuscaMedida.trim().toLowerCase();
-    final qId   = _filtroBuscaIdentificador.trim().toUpperCase();
-    if (qNum.isEmpty && qNome.isEmpty && qComp.isEmpty && qLarg.isEmpty && qEsp.isEmpty && qMed.isEmpty && qId.isEmpty) return lista;
-    return lista.where((o) {
-      final raw = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
-      if (qNum.isNotEmpty && !raw.id.toString().contains(qNum)) return false;
-      if (qNome.isNotEmpty) {
-        final tem = raw.itens.any((item) => item.materialNome.toLowerCase().contains(qNome));
-        if (!tem) return false;
-      }
-      if (qComp.isNotEmpty) {
-        final tem = raw.itens.any((item) => item.materialComprimento?.toString().toLowerCase().contains(qComp) ?? false);
-        if (!tem) return false;
-      }
-      if (qLarg.isNotEmpty) {
-        final tem = raw.itens.any((item) => item.materialLargura?.toString().toLowerCase().contains(qLarg) ?? false);
-        if (!tem) return false;
-      }
-      if (qEsp.isNotEmpty) {
-        final tem = raw.itens.any((item) => item.materialEspessura?.toLowerCase().contains(qEsp) ?? false);
-        if (!tem) return false;
-      }
-      if (qMed.isNotEmpty) {
-        final tem = raw.itens.any((item) => item.materialMedida?.toLowerCase().contains(qMed) ?? false);
-        if (!tem) return false;
-      }
-      if (qId.isNotEmpty) {
-        final tem = raw.itens.any((item) => (item.materialIdentificador ?? '').toUpperCase().contains(qId));
-        if (!tem) return false;
-      }
-      return true;
-    }).toList();
+  /// Dispara a busca no servidor (com debounce) usando os filtros atuais
+  /// dos campos de texto. Substitui a filtragem local por uma busca
+  /// paginada de verdade, para não precisar carregar todas as OCs.
+  void _agendarBuscaComFiltros() {
+    _debounceFiltros?.cancel();
+    _debounceFiltros = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      context.read<OrdemCompraProvider>().aplicarFiltros(
+        OrdemCompraFiltros(
+          numero: _filtroBuscaNumero.trim().isEmpty ? null : _filtroBuscaNumero.trim(),
+          material: _filtroBuscaNome.trim().isEmpty ? null : _filtroBuscaNome.trim(),
+          identificador: _filtroBuscaIdentificador.trim().isEmpty ? null : _filtroBuscaIdentificador.trim(),
+          medida: _filtroBuscaMedida.trim().isEmpty ? null : _filtroBuscaMedida.trim(),
+          comprimento: _filtroBuscaComprimento.trim().isEmpty ? null : _filtroBuscaComprimento.trim(),
+          largura: _filtroBuscaLargura.trim().isEmpty ? null : _filtroBuscaLargura.trim(),
+          espessura: _filtroBuscaEspessura.trim().isEmpty ? null : _filtroBuscaEspessura.trim(),
+        ),
+      );
+    });
   }
 
   Future<void> _abrirCriacaoOC() async {
+    final helper = context.read<RoboHelperProvider>();
+    helper.definirTelaSobreposta(true);
     final resultado = await Navigator.of(context).push<dynamic>(
       MaterialPageRoute(builder: (_) => NovaOrdemCompraPage()),
     );
-    // resultado pode ser OrdemCompraModel (novo fluxo) ou bool true (fallback)
+    if (mounted) helper.definirTelaSobreposta(false);
+
     if (resultado != null && mounted) {
       context.read<OrdemCompraProvider>().carregar();
     }
+    if (mounted) _registrarAjudaRoboOC();
   }
 
   @override
@@ -520,7 +757,7 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
+
             Row(
               children: [
                 Column(
@@ -536,7 +773,7 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                     SizedBox(height: 2),
                     Consumer<OrdemCompraProvider>(
                       builder: (_, p, __) {
-                        final total = p.emAndamento.length + p.finalizadas.length + p.canceladas.length;
+                        final total = p.totalEmAndamento + p.totalFinalizadas + p.totalCanceladas;
                         return Text(
                           '$total ${total == 1 ? 'ordem' : 'ordens'} no total',
                           style: Theme.of(context)
@@ -551,15 +788,18 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                 const Spacer(),
                 Tooltip(
                   message: 'Criar nova ordem de compra',
-                  child: FilledButton.icon(
-                    onPressed: _abrirCriacaoOC,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Nova Ordem de Compra'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                  child: Container(
+                    key: _tourKeyNovaOc,
+                    child: FilledButton.icon(
+                      onPressed: _abrirCriacaoOC,
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Nova Ordem de Compra'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                    ),
                   ),
                 ),
                 SizedBox(width: 12),
@@ -577,41 +817,52 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
             ),
             SizedBox(height: 20),
 
-            // ── Filtros ────────────────────────────────────────────────────
-            // Linha 1: Nº da OC + Nome do material
             Row(
               children: [
                 SizedBox(
                   width: 160,
-                  child: TextField(
-                    controller: _buscaNumeroCtrl,
-                    decoration: InputDecoration(
-                      hintText: 'Nº da OC',
-                      prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
-                      isDense: true,
+                  child: Container(
+                    key: _tourKeyBuscaNumero,
+                    child: TextField(
+                      controller: _buscaNumeroCtrl,
+                      decoration: InputDecoration(
+                        hintText: 'Nº da OC',
+                        prefixIcon: Icon(Icons.tag, color: Theme.of(context).colorScheme.outline, size: 18),
+                        isDense: true,
+                      ),
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      onChanged: (v) {
+                      setState(() => _filtroBuscaNumero = v);
+                      _agendarBuscaComFiltros();
+                    },
                     ),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    onChanged: (v) => setState(() => _filtroBuscaNumero = v),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: TextField(
-                    controller: _buscaNomeCtrl,
-                    decoration: InputDecoration(
-                      hintText: 'Nome do material',
-                      prefixIcon: Icon(Icons.inventory_2_outlined, color: Theme.of(context).colorScheme.outline, size: 18),
-                      isDense: true,
+                  child: Container(
+                    key: _tourKeyBuscaNome,
+                    child: TextField(
+                      controller: _buscaNomeCtrl,
+                      decoration: InputDecoration(
+                        hintText: 'Nome do material',
+                        prefixIcon: Icon(Icons.inventory_2_outlined, color: Theme.of(context).colorScheme.outline, size: 18),
+                        isDense: true,
+                      ),
+                      onChanged: (v) {
+                      setState(() => _filtroBuscaNome = v);
+                      _agendarBuscaComFiltros();
+                    },
                     ),
-                    onChanged: (v) => setState(() => _filtroBuscaNome = v),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            // Linha 2: Identificador, Medida, Comprimento, Largura, Espessura
+
             Row(
+              key: _tourKeyBuscaFiltrosAvancados,
               children: [
                 Expanded(
                   flex: 2,
@@ -624,7 +875,10 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                     ),
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [_UpperCaseFormatter()],
-                    onChanged: (v) => setState(() => _filtroBuscaIdentificador = v),
+                    onChanged: (v) {
+                      setState(() => _filtroBuscaIdentificador = v);
+                      _agendarBuscaComFiltros();
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -638,7 +892,10 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                       isDense: true,
                     ),
                     inputFormatters: [_MedidaEspessuraFormatter()],
-                    onChanged: (v) => setState(() => _filtroBuscaMedida = v),
+                    onChanged: (v) {
+                      setState(() => _filtroBuscaMedida = v);
+                      _agendarBuscaComFiltros();
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -654,7 +911,10 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                     ),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [_EspessuraFormatter()],
-                    onChanged: (v) => setState(() => _filtroBuscaComprimento = v),
+                    onChanged: (v) {
+                      setState(() => _filtroBuscaComprimento = v);
+                      _agendarBuscaComFiltros();
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -670,7 +930,10 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                     ),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [_EspessuraFormatter()],
-                    onChanged: (v) => setState(() => _filtroBuscaLargura = v),
+                    onChanged: (v) {
+                      setState(() => _filtroBuscaLargura = v);
+                      _agendarBuscaComFiltros();
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -686,7 +949,10 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                     ),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [_EspessuraFormatter()],
-                    onChanged: (v) => setState(() => _filtroBuscaEspessura = v),
+                    onChanged: (v) {
+                      setState(() => _filtroBuscaEspessura = v);
+                      _agendarBuscaComFiltros();
+                    },
                   ),
                 ),
                 const SizedBox(width: 4),
@@ -717,6 +983,10 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                                 _filtroBuscaMedida = '';
                                 _filtroBuscaIdentificador = '';
                               });
+                              _debounceFiltros?.cancel();
+                              context.read<OrdemCompraProvider>().aplicarFiltros(
+                                    const OrdemCompraFiltros(),
+                                  );
                             }
                           : null,
                       style: IconButton.styleFrom(
@@ -736,8 +1006,8 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
             ),
             SizedBox(height: 16),
 
-            // ── Abas ───────────────────────────────────────────────────────
             Container(
+              key: _tourKeyAbas,
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,
                 border: Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
@@ -752,16 +1022,15 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                     indicatorWeight: 2,
                     labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                     tabs: [
-                      _tabComContagem('Em Andamento', p.emAndamento.length),
-                      _tabComContagem('Finalizadas', p.finalizadas.length),
-                      _tabComContagem('Canceladas', p.canceladas.length),
+                      _tabComContagem('Em Andamento', p.totalEmAndamento),
+                      _tabComContagem('Finalizadas', p.totalFinalizadas),
+                      _tabComContagem('Canceladas', p.totalCanceladas),
                     ],
                   );
                 },
               ),
             ),
 
-            // ── Lista ──────────────────────────────────────────────────────
             Expanded(
               child: Consumer<OrdemCompraProvider>(
                 builder: (context, provider, _) {
@@ -819,7 +1088,7 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                     controller: _tabController,
                     children: [
                       _OcList(
-                        ordens: _filtrar(provider.emAndamento),
+                        ordens: provider.emAndamento,
                         statusColor: AppTheme.primary,
                         emptyMessage: 'Nenhuma ordem em andamento',
                         onFinalizar: (id) => _confirmarFinalizar(context, provider, id),
@@ -828,9 +1097,14 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                         onAbrirPdf: (ordem) => _abrirPdf(ordem),
                         onTap: (ordem) => _verDetalhes(context, ordem),
                         mostrarAcoes: true,
+                        paginaAtual: provider.paginaAtual('EM_ANDAMENTO'),
+                        totalPaginas: provider.totalPaginas('EM_ANDAMENTO'),
+                        totalItens: provider.totalEmAndamento,
+                        carregandoPagina: provider.carregandoPagina('EM_ANDAMENTO'),
+                        onPaginaChanged: (p) => provider.irParaPagina('EM_ANDAMENTO', p),
                       ),
                       _OcList(
-                        ordens: _filtrar(provider.finalizadas),
+                        ordens: provider.finalizadas,
                         statusColor: AppTheme.success,
                         emptyMessage: 'Nenhuma ordem finalizada',
                         onTap: (ordem) => _verDetalhes(context, ordem),
@@ -838,13 +1112,23 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
                         onAbrirPdf: (ordem) => _abrirPdf(ordem),
                         mostrarAcoes: false,
                         mostrarReverter: true,
+                        paginaAtual: provider.paginaAtual('FINALIZADO'),
+                        totalPaginas: provider.totalPaginas('FINALIZADO'),
+                        totalItens: provider.totalFinalizadas,
+                        carregandoPagina: provider.carregandoPagina('FINALIZADO'),
+                        onPaginaChanged: (p) => provider.irParaPagina('FINALIZADO', p),
                       ),
                       _OcList(
-                        ordens: _filtrar(provider.canceladas),
+                        ordens: provider.canceladas,
                         statusColor: AppTheme.error,
                         emptyMessage: 'Nenhuma ordem cancelada',
                         onTap: (ordem) => _verDetalhes(context, ordem),
                         mostrarAcoes: false,
+                        paginaAtual: provider.paginaAtual('CANCELADO'),
+                        totalPaginas: provider.totalPaginas('CANCELADO'),
+                        totalItens: provider.totalCanceladas,
+                        carregandoPagina: provider.carregandoPagina('CANCELADO'),
+                        onPaginaChanged: (p) => provider.irParaPagina('CANCELADO', p),
                       ),
                     ],
                   );
@@ -864,13 +1148,11 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
     final recarregar = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => OrdemCompraDetalhePage(ordem: model)),
     );
-    if (recarregar == true && mounted) {
-      // ignore: use_build_context_synchronously
+    if (recarregar == true && context.mounted) {
       context.read<OrdemCompraProvider>().carregar();
     }
   }
 
-  /// Exibe dialog de bloqueio quando uma ou mais OS da OC já estão fechadas.
   void _mostrarDialogOSFechada(BuildContext context, List<String> osBloqueadas) {
     showDialog(
       context: context,
@@ -941,7 +1223,6 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
         return;
       }
 
-      // ── Verifica OS fechadas (apenas OS numéricas) ────────────────────────
       final osFechadas = context.read<EstoqueProvider>().numerosOSFechadas;
       final osBloqueadas = model.numerosOS
           .where((os) => RegExp(r'^\d+$').hasMatch(os) && osFechadas.contains(os))
@@ -950,7 +1231,7 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
         _mostrarDialogOSFechada(context, osBloqueadas);
         return;
       }
-      // ─────────────────────────────────────────────────────────────────────
+
     }
     showDialog(
       context: context,
@@ -1027,7 +1308,6 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
     try {
       final bytes = await OrdemCompraRepository().baixarPdf(ordem.id);
 
-      // Monta nome: "OC_42_FORNECEDOR NOME.pdf" → sanitiza caracteres inválidos
       final fornecedor = (ordem.fornecedorNome ?? 'FORNECEDOR')
           .toUpperCase()
           .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
@@ -1037,7 +1317,6 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
       final file = File('${dir.path}${Platform.pathSeparator}$fileName');
       await file.writeAsBytes(bytes, flush: true);
 
-      // Abre o arquivo no visualizador/navegador padrão do sistema
       if (Platform.isWindows) {
         await Process.run('explorer', [file.path]);
       } else if (Platform.isMacOS) {
@@ -1064,8 +1343,7 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
     final atualizado = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => _EditarOrdemCompraPage(ordem: model)),
     );
-    if (atualizado == true && mounted) {
-      // ignore: use_build_context_synchronously
+    if (atualizado == true && context.mounted) {
       context.read<OrdemCompraProvider>().carregar();
     }
   }
@@ -1112,10 +1390,6 @@ class OrdemCompraPageState extends State<OrdemCompraPage>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB COM CONTAGEM
-// ─────────────────────────────────────────────────────────────────────────────
-
 Tab _tabComContagem(String texto, int contagem) {
   return Tab(
     child: Row(
@@ -1143,10 +1417,6 @@ Tab _tabComContagem(String texto, int contagem) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LIST WIDGET
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _OcList extends StatelessWidget {
   final List<dynamic> ordens;
   final Color statusColor;
@@ -1160,6 +1430,15 @@ class _OcList extends StatelessWidget {
   final bool mostrarAcoes;
   final bool mostrarReverter;
 
+  /// Página atual (1-based), total de páginas e total de itens da aba,
+  /// usados para exibir a barra de paginação numerada (igual à tela de
+  /// Estoque). Se [totalPaginas] for null ou <= 1, a barra não é exibida.
+  final int paginaAtual;
+  final int? totalPaginas;
+  final int totalItens;
+  final bool carregandoPagina;
+  final void Function(int pagina)? onPaginaChanged;
+
   const _OcList({
     required this.ordens,
     required this.statusColor,
@@ -1172,11 +1451,16 @@ class _OcList extends StatelessWidget {
     this.onAbrirPdf,
     required this.mostrarAcoes,
     this.mostrarReverter = false,
+    this.paginaAtual = 1,
+    this.totalPaginas,
+    this.totalItens = 0,
+    this.carregandoPagina = false,
+    this.onPaginaChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (ordens.isEmpty) {
+    if (ordens.isEmpty && !carregandoPagina) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1191,44 +1475,237 @@ class _OcList extends StatelessWidget {
       );
     }
 
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      itemCount: ordens.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (context, i) {
-        try {
-          final raw = ordens[i];
-          final model = raw is OrdemCompraModel
-              ? raw
-              : OrdemCompraModel.fromJson(raw as Map<String, dynamic>);
-          return _OcCard(
-            ordem: model,
-            statusColor: statusColor,
-            mostrarAcoes: mostrarAcoes,
-            mostrarReverter: mostrarReverter,
-            onTap: () => onTap?.call(model),
-            onFinalizar: () => onFinalizar?.call(model.id),
-            onCancelar: () => onCancelar?.call(model.id),
-            onEditar: () => onEditar?.call(model),
-            onReverter: () => onReverter?.call(model.id),
-            onAbrirPdf: () => onAbrirPdf?.call(model),
-          );
-        } catch (e) {
-          return Container(
-            margin: EdgeInsets.only(bottom: 8),
-            padding: EdgeInsets.all(14),
-            decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.error)),
-            child: Text('Erro ao carregar ordem: $e', style: const TextStyle(color: AppTheme.error, fontSize: 12)),
-          );
-        }
-      },
+    final mostrarBarraPaginacao = (totalPaginas ?? 1) > 1;
+
+    return Stack(
+      children: [
+        Column(
+          children: [
+            Expanded(
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                itemCount: ordens.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, i) {
+                  try {
+                    final raw = ordens[i];
+                    final model = raw is OrdemCompraModel
+                        ? raw
+                        : OrdemCompraModel.fromJson(raw as Map<String, dynamic>);
+                    return _OcCard(
+                      ordem: model,
+                      statusColor: statusColor,
+                      mostrarAcoes: mostrarAcoes,
+                      mostrarReverter: mostrarReverter,
+                      onTap: () => onTap?.call(model),
+                      onFinalizar: () => onFinalizar?.call(model.id),
+                      onCancelar: () => onCancelar?.call(model.id),
+                      onEditar: () => onEditar?.call(model),
+                      onReverter: () => onReverter?.call(model.id),
+                      onAbrirPdf: () => onAbrirPdf?.call(model),
+                    );
+                  } catch (e) {
+                    return Container(
+                      margin: EdgeInsets.only(bottom: 8),
+                      padding: EdgeInsets.all(14),
+                      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.error)),
+                      child: Text('Erro ao carregar ordem: $e', style: const TextStyle(color: AppTheme.error, fontSize: 12)),
+                    );
+                  }
+                },
+              ),
+            ),
+            if (mostrarBarraPaginacao) ...[
+              const Divider(height: 1),
+              _BarraPaginacaoOc(
+                paginaAtual: paginaAtual - 1,
+                totalPaginas: totalPaginas ?? 1,
+                totalItens: totalItens,
+                itensPorPagina: OrdemCompraProvider.porPagina,
+                onPaginaChanged: (p) => onPaginaChanged?.call(p + 1),
+              ),
+            ],
+          ],
+        ),
+        if (carregandoPagina)
+          Positioned.fill(
+            child: Container(
+              color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.6),
+              child: const Center(
+                child: CircularProgressIndicator(color: AppTheme.primary),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CARD
-// ─────────────────────────────────────────────────────────────────────────────
+/// Barra de paginação numerada, com o mesmo design e layout dos botões de
+/// paginação usados na tela de Estoque.
+class _BarraPaginacaoOc extends StatelessWidget {
+  final int paginaAtual;
+  final int totalPaginas;
+  final int totalItens;
+  final int itensPorPagina;
+  final void Function(int) onPaginaChanged;
+
+  const _BarraPaginacaoOc({
+    required this.paginaAtual,
+    required this.totalPaginas,
+    required this.totalItens,
+    required this.itensPorPagina,
+    required this.onPaginaChanged,
+  });
+
+  List<int> _paginas() {
+    if (totalPaginas <= 7) return List.generate(totalPaginas, (i) => i);
+    final Set<int> vis = {0, totalPaginas - 1, paginaAtual};
+    if (paginaAtual > 0) vis.add(paginaAtual - 1);
+    if (paginaAtual < totalPaginas - 1) vis.add(paginaAtual + 1);
+    final sorted = vis.toList()..sort();
+    final List<int> result = [];
+    for (int i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.add(-1);
+      result.add(sorted[i]);
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inicio  = paginaAtual * itensPorPagina + 1;
+    final fim     = ((paginaAtual + 1) * itensPorPagina).clamp(0, totalItens);
+    final paginas = _paginas();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'Exibindo $inicio–$fim de $totalItens ordens',
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _BotaoPaginaOc(
+                icon: Icons.chevron_left,
+                tooltip: 'Página anterior',
+                enabled: paginaAtual > 0,
+                onTap: () => onPaginaChanged(paginaAtual - 1),
+              ),
+              const SizedBox(width: 4),
+              for (final p in paginas) ...[
+                if (p == -1)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text('…', style: TextStyle(color: Theme.of(context).colorScheme.outline)),
+                  )
+                else
+                  _BotaoNumeroPaginaOc(
+                    numero: p,
+                    ativa: p == paginaAtual,
+                    onTap: () => onPaginaChanged(p),
+                  ),
+                const SizedBox(width: 4),
+              ],
+              _BotaoPaginaOc(
+                icon: Icons.chevron_right,
+                tooltip: 'Próxima página',
+                enabled: paginaAtual < totalPaginas - 1,
+                onTap: () => onPaginaChanged(paginaAtual + 1),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BotaoPaginaOc extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _BotaoPaginaOc({
+    required this.icon,
+    required this.tooltip,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: enabled ? Theme.of(context).colorScheme.outlineVariant : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
+            ),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BotaoNumeroPaginaOc extends StatelessWidget {
+  final int numero;
+  final bool ativa;
+  final VoidCallback onTap;
+
+  const _BotaoNumeroPaginaOc({
+    required this.numero,
+    required this.ativa,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: ativa ? null : onTap,
+      mouseCursor: ativa ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: ativa ? AppTheme.primary : Colors.transparent,
+          border: Border.all(
+            color: ativa ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '${numero + 1}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
+            color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _OcCard extends StatefulWidget {
   final OrdemCompraModel ordem;
@@ -1294,7 +1771,7 @@ class _OcCardState extends State<_OcCard> {
           borderRadius: BorderRadius.circular(11),
           child: Stack(
             children: [
-              // Barra colorida lateral esquerda
+
               Positioned(
                 left: 0, top: 0, bottom: 0, width: 4,
                 child: ColoredBox(color: statusColor),
@@ -1366,9 +1843,7 @@ class _OcCardState extends State<_OcCard> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: ordem.itens.map((item) {
-                  // Item fantasma: material foi excluído após a OC ser criada.
-                  // Nesse caso materialNome vem vazio do backend (material: null),
-                  // então cai para descricaoItem para não exibir uma linha em branco.
+
                   final nomeBase = item.materialNome.isNotEmpty
                       ? item.materialNome
                       : ((item.descricaoItem ?? '').isNotEmpty
@@ -1543,10 +2018,6 @@ class _OcCardState extends State<_OcCard> {
       'R\$ ${formatarNumeroBr(v, 2)}';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PÁGINA DE DETALHE DA OC
-// ─────────────────────────────────────────────────────────────────────────────
-
 class OrdemCompraDetalhePage extends StatefulWidget {
   final OrdemCompraModel ordem;
   const OrdemCompraDetalhePage({super.key, required this.ordem});
@@ -1568,11 +2039,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Escuta o MaterialProvider: se um material usado nesta OC for editado
-    // em outra tela (ex.: Estoque) enquanto esta tela de detalhes já está
-    // aberta, o nome/unidade/medida exibidos aqui viriam desatualizados até
-    // fechar e reabrir a OC. Recarregando a OC a cada notificação do
-    // MaterialProvider, o join com o material fica em dia automaticamente.
+
     final novoProvider = context.read<MaterialProvider>();
     if (!identical(_materialProvider, novoProvider)) {
       _materialProvider?.removeListener(_onMateriaisAlterados);
@@ -1593,7 +2060,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
   }
 
   Future<void> _confirmarFinalizar() async {
-    // ── Verifica OS fechadas antes de abrir o diálogo de confirmação (apenas OS numéricas) ──
+
     final osFechadas = context.read<EstoqueProvider>().numerosOSFechadas;
     final osBloqueadas = _ordem.numerosOS
         .where((os) => RegExp(r'^\d+$').hasMatch(os) && osFechadas.contains(os))
@@ -1601,7 +2068,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
     if (osBloqueadas.isNotEmpty) {
       if (!mounted) return;
       showDialog(
-        // ignore: use_build_context_synchronously
+
         context: context,
         builder: (ctx) => AlertDialog(
           title: Row(children: [
@@ -1649,7 +2116,6 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
       );
       return;
     }
-    // ─────────────────────────────────────────────────────────────────────────
 
     final ok = await showDialog<bool>(
       context: context,
@@ -1671,18 +2137,18 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
       ),
     );
     if (ok != true) return;
+    if (!mounted) return;
     setState(() => _processando = true);
-    // ignore: use_build_context_synchronously
+
     final provider = context.read<OrdemCompraProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
     try {
       await provider.finalizar(_ordem.id);
-      if (!mounted) return;
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ordem finalizada com sucesso!'), backgroundColor: AppTheme.success));
-      // ignore: use_build_context_synchronously
-      Navigator.of(context).pop(true);
+      messenger.showSnackBar(const SnackBar(content: Text('Ordem finalizada com sucesso!'), backgroundColor: AppTheme.success));
+      navigator.pop(true);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: AppTheme.error));
+      messenger.showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: AppTheme.error));
     } finally {
       if (mounted) setState(() => _processando = false);
     }
@@ -1709,18 +2175,18 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
       ),
     );
     if (ok != true) return;
+    if (!mounted) return;
     setState(() => _processando = true);
-    // ignore: use_build_context_synchronously
+
     final provider = context.read<OrdemCompraProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
     try {
       await provider.cancelar(_ordem.id);
-      if (!mounted) return;
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ordem cancelada.'), backgroundColor: AppTheme.error));
-      // ignore: use_build_context_synchronously
-      Navigator.of(context).pop(true);
+      messenger.showSnackBar(const SnackBar(content: Text('Ordem cancelada.'), backgroundColor: AppTheme.error));
+      navigator.pop(true);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: AppTheme.error));
+      messenger.showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: AppTheme.error));
     } finally {
       if (mounted) setState(() => _processando = false);
     }
@@ -1747,18 +2213,18 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
       ),
     );
     if (ok != true) return;
+    if (!mounted) return;
     setState(() => _processando = true);
-    // ignore: use_build_context_synchronously
+
     final provider = context.read<OrdemCompraProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
     try {
       await provider.reverter(_ordem.id);
-      if (!mounted) return;
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ordem revertida para Em Andamento.'), backgroundColor: AppTheme.primary));
-      // ignore: use_build_context_synchronously
-      Navigator.of(context).pop(true);
+      messenger.showSnackBar(const SnackBar(content: Text('Ordem revertida para Em Andamento.'), backgroundColor: AppTheme.primary));
+      navigator.pop(true);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: AppTheme.error));
+      messenger.showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: AppTheme.error));
     } finally {
       if (mounted) setState(() => _processando = false);
     }
@@ -1773,13 +2239,6 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
 
   bool _recarregandoOrdem = false;
 
-  /// Busca a OC atualizada direto da API (não da lista em cache do provider)
-  /// e atualiza o estado local. Usado após editar/finalizar/etc, garantindo
-  /// que a tela de detalhes reflita imediatamente o que foi salvo no backend.
-  ///
-  /// Também é chamada quando o MaterialProvider notifica alterações (ex.:
-  /// material editado em outra tela enquanto esta já está aberta), então tem
-  /// uma trava simples pra evitar requisições concorrentes/empilhadas.
   Future<void> _recarregarOrdemAtual() async {
     if (_recarregandoOrdem) return;
     _recarregandoOrdem = true;
@@ -1787,10 +2246,10 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
       final dados = await OrdemCompraRepository().buscarPorId(_ordem.id);
       final atualizado = OrdemCompraModel.fromJson(dados);
       if (mounted) setState(() => _ordem = atualizado);
-      // Atualiza a lista em background para as outras telas ficarem em dia.
+
       if (mounted) unawaited(context.read<OrdemCompraProvider>().carregar());
     } catch (e) {
-      // Se falhar, ao menos recarrega a lista do provider como fallback.
+
       if (mounted) await context.read<OrdemCompraProvider>().carregar();
     } finally {
       _recarregandoOrdem = false;
@@ -1808,7 +2267,6 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
     try {
       final bytes = await OrdemCompraRepository().baixarPdf(_ordem.id);
 
-      // Monta nome: "OC_42_FORNECEDOR NOME.pdf" → sanitiza caracteres inválidos
       final fornecedor = (_ordem.fornecedorNome ?? 'FORNECEDOR')
           .toUpperCase()
           .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
@@ -1818,7 +2276,6 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
       final file = File('${dir.path}${Platform.pathSeparator}$fileName');
       await file.writeAsBytes(bytes, flush: true);
 
-      // Abre o arquivo no visualizador/navegador padrão do sistema
       if (Platform.isWindows) {
         await Process.run('explorer', [file.path]);
       } else if (Platform.isMacOS) {
@@ -1848,7 +2305,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
+
             Row(
               children: [
                 _BotaoVoltar(
@@ -2008,23 +2465,23 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                     _itemChip(Icons.assignment_outlined, 'OS: ${item.numeroOS}'),
                     _itemChip(
                       Icons.format_list_numbered,
-                      'Qtd: ${item.quantidade}',
+                      'Qtd: ${formatarQuantidade(item.quantidade)}',
                     ),
-                    // Exibe a quantidade por unidade logo após a quantidade principal
+
                     if (item.qtdUnidade != null && item.qtdUnidade! > 0)
                       _itemChipDestaque(
                         Icons.inventory_2_outlined,
-                        '${item.qtdUnidade! % 1 == 0 ? item.qtdUnidade!.toInt() : item.qtdUnidade} ${unidadeExibicao(item.materialUnidade).isEmpty ? 'unid.' : unidadeExibicao(item.materialUnidade)}/unidade',
+                        '${formatarQuantidade(item.qtdUnidade!)} ${unidadeExibicao(item.materialUnidade).isEmpty ? 'unid.' : unidadeExibicao(item.materialUnidade)}/unidade',
                         ativo: true,
                       ),
                     _itemChipDestaque(
                       Icons.attach_money,
                       () {
                         if (item.qtdUnidade != null && item.qtdUnidade! > 0) {
-                          return 'R\$ ${formatarNumeroBr(item.precoUnitario, 6)}/${unidadeExibicao(item.materialUnidade).isEmpty ? 'unid.' : unidadeExibicao(item.materialUnidade)}';
+                          return 'R\$ ${formatarNumeroBr(item.precoUnitario, 2)}/${unidadeExibicao(item.materialUnidade).isEmpty ? 'unid.' : unidadeExibicao(item.materialUnidade)}';
                         }
                         return item.precoUnitario > 0
-                            ? 'Preço: R\$ ${formatarNumeroBr(item.precoUnitario, 6)}'
+                            ? 'Preço: R\$ ${formatarNumeroBr(item.precoUnitario, 2)}'
                             : 'Preço: —';
                       }(),
                       ativo: true,
@@ -2053,20 +2510,18 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
   }
 
   Future<void> _recarregar() async {
-    await context.read<OrdemCompraProvider>().carregar();
-    if (!mounted) return;
-    final provider = context.read<OrdemCompraProvider>();
-    final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
-    final raw = todas.firstWhere(
-      (o) {
-        final m = o is OrdemCompraModel ? o : OrdemCompraModel.fromJson(o as Map<String, dynamic>);
-        return m.id == _ordem.id;
-      },
-      orElse: () => null,
-    );
-    if (mounted) {
-      final atualizada = raw;
-      setState(() => _ordem = atualizada);
+    // Recarrega a listagem em segundo plano (não bloqueia a tela de
+    // detalhe) e busca a OC atual diretamente por id — mais leve e
+    // confiável do que procurar nas páginas já carregadas em memória,
+    // já que a listagem agora é paginada.
+    unawaited(context.read<OrdemCompraProvider>().carregar());
+    try {
+      final dados = await OrdemCompraRepository().buscarPorId(_ordem.id);
+      if (mounted) {
+        setState(() => _ordem = OrdemCompraModel.fromJson(dados));
+      }
+    } catch (_) {
+      // Mantém os dados atuais em tela se a atualização falhar.
     }
   }
 
@@ -2223,13 +2678,6 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
   String _formatData(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PÁGINA DE EDIÇÃO DA OC
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Rola a tela até o widget referenciado por [key], usado para guiar o
-/// usuário até o campo que falhou na validação (chamado logo após um
-/// setState que define a flag de erro correspondente).
 void _scrollToKey(GlobalKey key) {
   WidgetsBinding.instance.addPostFrameCallback((_) {
     final ctx = key.currentContext;
@@ -2263,7 +2711,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
   FornecedorModel? _fornecedor;
   bool _salvando = false;
 
-  // ── Chaves e flags de erro (trim vermelho + rolagem até o campo) ─────────
   final GlobalKey _fornecedorKey = GlobalKey();
   final GlobalKey _empresaKey = GlobalKey();
   final GlobalKey _itensKey = GlobalKey();
@@ -2290,19 +2737,16 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
     _carregarFornecedor();
   }
 
-  /// Agrupa itens do banco (um por linha OS) de volta em _ItemRascunho com
-  /// múltiplas linhas de distribuição. Itens do mesmo material com o mesmo
-  /// preço e descrição são consolidados.
   List<_ItemRascunho> _agruparItensEmRascunhos(List<OrdemCompraItemModel> itens) {
     final grupos = <String, _ItemRascunho>{};
     for (final i in itens) {
-      // Itens fantasma (material excluído) não podem ser editados — pula.
+
       final materialId = i.materialId;
       if (materialId == null) continue;
-      // Chave: material + preço + modo + descrição
+
       final chave = '$materialId|${i.precoUnitario}|${i.descricaoItem ?? ''}';
       if (grupos.containsKey(chave)) {
-        // Adiciona linha de distribuição ao rascunho existente
+
         final r = grupos[chave]!;
         r.distribuicao.add(_DistribuicaoLinha(os: i.numeroOS, quantidade: i.quantidade));
         r.quantidade += i.quantidade;
@@ -2379,7 +2823,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
                   orElse: () => null,
                 );
             if (vinculo != null) {
-              // Atualiza preço com o do novo fornecedor se disponível
+
               if (vinculo.preco > 0) {
                 item.precoUnitario = vinculo.preco;
               }
@@ -2414,9 +2858,9 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         materialLargura:        vinculo.materialLargura,
         materialComprimento:    vinculo.materialComprimento,
         numeroOS:               osAuto,
-        // Começa vazio: usuário deve preencher a quantidade manualmente.
+
         quantidade:             0,
-        precoUnitario:          vinculo.preco,
+        precoTotalInicial:      vinculo.preco > 0 ? vinculo.preco : null,
         precoMetroQuadrado:
             vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
       ));
@@ -2425,7 +2869,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
 
   void _removerItem(int idx) => setState(() => _itens.removeAt(idx));
 
-  /// Limpa todas as flags de erro (trim vermelho) antes de revalidar.
   void _limparErros() {
     _erroFornecedor = false;
     _erroEmpresa = false;
@@ -2473,7 +2916,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       return;
     }
     for (final item in _itens) {
-      // Pelo menos uma linha deve ter OS selecionada E que ainda conste na lista atual
+
       final temOSSelecionada = item.distribuicao.any(
         (l) => l.os.isNotEmpty && _numerosOS.contains(l.os),
       );
@@ -2486,7 +2929,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         ));
         return;
       }
-      // Nenhuma linha com OS válida pode ter qtd = 0
+
       final linhaComZero = item.distribuicao.any(
         (l) => l.os.isNotEmpty && _numerosOS.contains(l.os) && l.quantidade <= 0,
       );
@@ -2499,7 +2942,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         ));
         return;
       }
-      // Total distribuído deve ser exatamente igual à quantidade do item
+
       final totalDistribuido = item.distribuicao.fold(0.0, (s, l) => s + l.quantidade);
       final diff = totalDistribuido - item.quantidade;
       if (diff > 0.0001) {
@@ -2570,7 +3013,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           'descricaoItem': i.descricaoItem,
           'numeroOS': i.distribuicao.firstWhere((l) => l.os.isNotEmpty, orElse: () => _DistribuicaoLinha()).os,
           'quantidade': i.quantidade,
-          'qtdUnidade': i.qtdUnidade,           // ← LINHA ADICIONADA
+          'qtdUnidade': i.qtdUnidade,
           'precoUnitario': i.precoUnitario,
           'precoMetroQuadrado': i.precoM2Calculado,
           'usarM2': false,
@@ -2712,7 +3155,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
       ),
       body: ListView(padding: const EdgeInsets.all(20), children: [
 
-        // ── Dados gerais ────────────────────────────────────────────────────
         _card(titulo: 'Dados da Ordem de Compra', children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2820,7 +3262,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         ]),
         const SizedBox(height: 16),
 
-        // ── Empresa ──────────────────────────────────────────────────────────
         _card(
           key: _empresaKey,
           titulo: 'Empresa',
@@ -2840,7 +3281,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         ),
         const SizedBox(height: 16),
 
-        // ── Números de OS ─────────────────────────────────────────────────────
         _OsInputSection(
           key: _osSectionKey,
           numerosOS: _numerosOS,
@@ -2848,9 +3288,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           onChanged: () {
             setState(() {
               _erroOS = false;
-              // Se agora não há exatamente 1 OS (0 ou 2+),
-              // limpa a OS atribuída aos itens para forçar
-              // o usuário a selecionar novamente
+
               if (_numerosOS.length != 1) {
                 for (final item in _itens) {
                   item.numeroOS = '';
@@ -2860,11 +3298,10 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
                 }
               }
             });
-          },    
+          },
         ),
         const SizedBox(height: 16),
 
-        // ── Itens ─────────────────────────────────────────────────────────────
         _card(
           key: _itensKey,
           titulo: 'Itens (${_itens.length})',
@@ -2980,11 +3417,6 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PÁGINA DE CRIAÇÃO DE NOVA OC (navegação dedicada)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Dados de um item de orçamento a serem pré-carregados na nova OC.
 class ItemPreCarregadoOC {
   final int materialId;
   final String materialNome;
@@ -3003,16 +3435,40 @@ class ItemPreCarregadoOC {
   });
 }
 
+class NovaOcTourKeys {
+  final fornecedor              = GlobalKey();
+  final requisitante            = GlobalKey();
+  final formaPagamento          = GlobalKey();
+  final prazoPagamento          = GlobalKey();
+  final observacoes             = GlobalKey();
+  final empresa                 = GlobalKey();
+  final numerosOS               = GlobalKey();
+  final atalhoEmpresa           = GlobalKey();
+  final atalhoOutros            = GlobalKey();
+  final campoOS                 = GlobalKey();
+  final adicionarItem           = GlobalKey();
+  final verTodoEstoque          = GlobalKey();
+  final buscaMaterial           = GlobalKey();
+  final botaoAdicionarMaterial  = GlobalKey();
+  final botaoConfirmarAdicionar = GlobalKey();
+  final itemUnidadeCampos       = GlobalKey();
+  final itemOutraUnidadeCampos  = GlobalKey();
+  final criarOc                 = GlobalKey();
+}
+
 class NovaOrdemCompraPage extends StatefulWidget {
-  /// Quando vindo do orçamento, lista de itens pré-carregados.
+
   final List<ItemPreCarregadoOC> itensPreCarregados;
-  /// Quando vindo do orçamento, fornecedor já selecionado.
+
   final FornecedorModel? fornecedorInicial;
+
+  final NovaOcTourKeys? tourKeys;
 
   const NovaOrdemCompraPage({
     super.key,
     this.itensPreCarregados = const [],
     this.fornecedorInicial,
+    this.tourKeys,
   });
 
   @override
@@ -3035,7 +3491,6 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   bool _salvando = false;
   int? _proximoId;
 
-  // ── Chaves e flags de erro (trim vermelho + rolagem até o campo) ─────────
   final GlobalKey _fornecedorKey = GlobalKey();
   final GlobalKey _empresaKey = GlobalKey();
   final GlobalKey _itensKey = GlobalKey();
@@ -3045,15 +3500,140 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   bool _erroItensVazio = false;
   bool _erroOS = false;
 
+  bool _tourSimulado = false;
+  bool _dialogItemTourAberto = false;
+  bool _dialogItemTourEmTransicao = false;
+  final GlobalKey<_AdicionarItemDialogState> _adicionarItemDialogTourKey =
+      GlobalKey<_AdicionarItemDialogState>();
+
+  static final _materiaisSimuladosTour = [
+    FornecedorMaterialVinculoModel(
+      id: -1,
+      fornecedorId: -1,
+      materialId: -1,
+      materialNome: 'ABS AÇO ESCOVADO PRATA',
+      materialIdentificador: 'IDEN-EXEMPLO',
+      materialMedida: '1.20x0.60m',
+      materialComprimento: 1.20,
+      materialLargura: 0.60,
+      materialEspessura: '13mm',
+      materialUnidade: 'UNIDADE',
+      preco: 170.11,
+      precoMetroQuadrado: 0,
+      ativo: true,
+    ),
+    FornecedorMaterialVinculoModel(
+      id: -2,
+      fornecedorId: -1,
+      materialId: -2,
+      materialNome: 'ADESIVO ORACAL 053 LIME TREE GREEN',
+      materialIdentificador: '',
+      materialMedida: '1.27m',
+      materialUnidade: 'M/L',
+      preco: 0,
+      precoMetroQuadrado: 0,
+      ativo: true,
+    ),
+  ];
+
   List<FornecedorMaterialVinculoModel> get _materiaisDoFornecedor =>
-      _fornecedor?.materiais ?? [];
+      _tourSimulado ? _materiaisSimuladosTour : (_fornecedor?.materiais ?? []);
+
+  void simularFornecedorTour() {
+    if (_fornecedor != null) return;
+    setState(() {
+      _tourSimulado = true;
+      _fornecedor = FornecedorModel(
+        id: -1,
+        nomeFantasia: 'FORNECEDOR DE EXEMPLO',
+        materiais: _materiaisSimuladosTour,
+        ativo: true,
+      );
+      _erroFornecedor = false;
+    });
+  }
+
+  Future<void> abrirAdicionarItemTour() async {
+    if (_dialogItemTourAberto || _dialogItemTourEmTransicao) return;
+    _dialogItemTourAberto = true;
+    _dialogItemTourEmTransicao = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _dialogItemTourEmTransicao = false;
+    });
+    showDialog(
+      context: context,
+      builder: (_) => _AdicionarItemDialog(
+        key: _adicionarItemDialogTourKey,
+        materiais: _materiaisDoFornecedor,
+        fornecedorId: _fornecedor?.id ?? -1,
+        materiaisJaAdicionados: _itens.map((i) => i.materialId).toSet(),
+        tourKeys: widget.tourKeys,
+        onConfirmar: (lista) {
+          for (final v in lista) {
+            _adicionarItem(v);
+          }
+        },
+      ),
+    ).then((_) {
+      if (mounted) _dialogItemTourAberto = false;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+  }
+
+  Future<void> fecharAdicionarItemTourSeAberto() async {
+    if (!_dialogItemTourAberto || _dialogItemTourEmTransicao) return;
+    _dialogItemTourAberto = false;
+    _dialogItemTourEmTransicao = true;
+    await Navigator.of(context, rootNavigator: true).maybePop();
+    _dialogItemTourEmTransicao = false;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+
+  /// Marca os itens do tour como selecionados no diálogo "Adicionar Itens",
+  /// deixando o botão "Adicionar" habilitado e destacável pelo tour — sem
+  /// fechar o diálogo nem confirmar a adição. O diálogo só é de fato
+  /// fechado quando o usuário (ou o próprio avanço do tour) aciona o botão
+  /// real, como em qualquer outro stop.
+  void selecionarItensParaConfirmarTour() {
+    if (_itens.isNotEmpty) return;
+    final dialogState = _adicionarItemDialogTourKey.currentState;
+    dialogState?.selecionarTodosTour();
+  }
+
+  /// Confirma de fato a adição dos itens simulados/selecionados e fecha o
+  /// diálogo "Adicionar Itens". Chamado ao entrar no stop seguinte ao
+  /// botão "Adicionar" (depois do highlight nesse botão já ter sido
+  /// mostrado), simulando o efeito real do clique no botão: os materiais
+  /// de exemplo do tour passam a aparecer de verdade na lista "Itens" da
+  /// página, e não só marcados visualmente dentro do diálogo.
+  Future<void> confirmarESairDoDialogTour() async {
+    if (_itens.isEmpty) {
+      for (final v in _materiaisSimuladosTour) {
+        _adicionarItem(v);
+      }
+    }
+    await fecharAdicionarItemTourSeAberto();
+  }
+
+  /// Desfaz a confirmação simulada (remove os itens de exemplo adicionados
+  /// por [confirmarESairDoDialogTour]) e reabre o diálogo "Adicionar Itens"
+  /// com os materiais já marcados/selecionados, deixando o tour de volta
+  /// exatamente no estado do stop "botaoConfirmarAdicionar" (diálogo aberto,
+  /// highlight no botão "Adicionar"). Espelha o padrão usado em
+  /// orcamento_editor_page.dart (_reabrirDialogPrecoAoVoltar).
+  Future<void> desfazerConfirmacaoEReabrirDialogTour() async {
+    setState(() {
+      _itens.removeWhere((i) => i.materialId == -1 || i.materialId == -2);
+    });
+    await abrirAdicionarItemTour();
+    selecionarItensParaConfirmarTour();
+  }
 
   @override
   void initState() {
     super.initState();
     _carregarProximoId();
 
-    // Pré-preencher fornecedor e itens quando vindo do orçamento
     if (widget.fornecedorInicial != null) {
       _fornecedor = widget.fornecedorInicial;
     }
@@ -3084,7 +3664,6 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
     super.dispose();
   }
 
-  /// Limpa todas as flags de erro (trim vermelho) antes de revalidar.
   void _limparErros() {
     _erroFornecedor = false;
     _erroEmpresa = false;
@@ -3130,7 +3709,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
     }
 
     for (final item in _itens) {
-      // Pelo menos uma linha deve ter OS selecionada E que ainda conste na lista atual
+
       final temOSSelecionada = item.distribuicao.any(
         (l) => l.os.isNotEmpty && _numerosOS.contains(l.os),
       );
@@ -3140,7 +3719,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         _showErro('Selecione a OS para o item "${item.materialNome}".');
         return;
       }
-      // Nenhuma linha com OS válida pode ter qtd = 0
+
       final linhaComZero = item.distribuicao.any(
         (l) => l.os.isNotEmpty && _numerosOS.contains(l.os) && l.quantidade <= 0,
       );
@@ -3150,7 +3729,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         _showErro('A quantidade deve ser maior que 0 para todos os itens da distribuição em "${item.materialNome}".');
         return;
       }
-      // Total distribuído deve ser exatamente igual à quantidade do item
+
       final totalDistribuido = item.distribuicao.fold(0.0, (s, l) => s + l.quantidade);
       final diff = totalDistribuido - item.quantidade;
       if (diff > 0.0001) {
@@ -3224,14 +3803,13 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
 
       if (!mounted) return;
 
-      // Recarrega a lista para obter o model da OC recém-criada
       final provider = context.read<OrdemCompraProvider>();
       await provider.carregar();
 
       if (!mounted) return;
 
       OrdemCompraModel? ocCriada;
-      // Busca pelo ID esperado (carregado antes de salvar)
+
       if (_proximoId != null) {
         final todas = [...provider.emAndamento, ...provider.finalizadas, ...provider.canceladas];
         final raw = todas.cast<dynamic>().firstWhere(
@@ -3248,7 +3826,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
               : OrdemCompraModel.fromJson(raw as Map<String, dynamic>);
         }
       }
-      // Fallback: a mais recente em andamento
+
       ocCriada ??= provider.emAndamento.isNotEmpty
           ? (provider.emAndamento.first is OrdemCompraModel
               ? provider.emAndamento.first as OrdemCompraModel
@@ -3260,7 +3838,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
             content: Text('Ordem de compra criada com sucesso!'),
             backgroundColor: AppTheme.success),
       );
-      // Retorna o OrdemCompraModel para que o chamador possa navegar para detalhes
+
       Navigator.of(context).pop(ocCriada ?? true);
     } catch (e) {
       _showErro(e.toString());
@@ -3275,7 +3853,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
   }
 
    void _adicionarItem(FornecedorMaterialVinculoModel vinculo) {
-    // Se há exatamente 1 OS cadastrada, preenche automaticamente
+
     final osAuto = _numerosOS.length == 1 ? _numerosOS.first : '';
     setState(() {
       _erroItensVazio = false;
@@ -3289,9 +3867,9 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         materialLargura:        vinculo.materialLargura,
         materialComprimento:    vinculo.materialComprimento,
         numeroOS:               osAuto,
-        // Começa vazio: usuário deve preencher a quantidade manualmente.
+
         quantidade:             0,
-        precoUnitario:          vinculo.preco,
+        precoTotalInicial:      vinculo.preco > 0 ? vinculo.preco : null,
         precoMetroQuadrado:
             vinculo.precoMetroQuadrado > 0 ? vinculo.precoMetroQuadrado : null,
       ));
@@ -3395,7 +3973,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            // ── Banner: itens vindos do orçamento ──────────────────────────
+
             if (widget.itensPreCarregados.isNotEmpty) ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -3421,11 +3999,11 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                 ),
               ),
             ],
-            // ── Dados da OC ────────────────────────────────────────────────
+
             _card(
               titulo: 'Dados da Ordem de Compra',
               children: [
-                // Número OC (automático) + Data lado a lado
+
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -3487,100 +4065,124 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                 ),
                 SizedBox(height: 14),
 
-                // Fornecedor
-                _label('Fornecedor principal'),
-                InkWell(
-                  key: _fornecedorKey,
-                  onTap: _selecionarFornecedor,
-                  mouseCursor: SystemMouseCursors.click,
-                  borderRadius: BorderRadius.circular(8),
-                  child: InputDecorator(
-                    decoration: _deco('Buscar fornecedor...', hasError: _erroFornecedor).copyWith(
-                      prefixIcon: Icon(Icons.search,
-                          size: 18, color: Theme.of(context).colorScheme.outline),
-                    ),
-                    child: Text(
-                      _fornecedor?.nomeFantasia ?? '',
-                      style: TextStyle(
-                          fontSize: 14,
-                          color: _fornecedor == null
-                              ? Theme.of(context).colorScheme.outline
-                              : Theme.of(context).colorScheme.onSurface),
-                    ),
+                Container(
+                  key: widget.tourKeys?.fornecedor ?? _fornecedorKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _label('Fornecedor principal'),
+                      InkWell(
+                        onTap: _selecionarFornecedor,
+                        mouseCursor: SystemMouseCursors.click,
+                        borderRadius: BorderRadius.circular(8),
+                        child: InputDecorator(
+                          decoration: _deco('Buscar fornecedor...', hasError: _erroFornecedor).copyWith(
+                            prefixIcon: Icon(Icons.search,
+                                size: 18, color: Theme.of(context).colorScheme.outline),
+                          ),
+                          child: Text(
+                            _fornecedor?.nomeFantasia ?? '',
+                            style: TextStyle(
+                                fontSize: 14,
+                                color: _fornecedor == null
+                                    ? Theme.of(context).colorScheme.outline
+                                    : Theme.of(context).colorScheme.onSurface),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 14),
 
-                // Requisitante
-                _label('Requisitante'),
-                TextFormField(
-                  controller: _requisitanteCtrl,
-                  decoration: _deco('Nome do requisitante'),
+                Container(
+                  key: widget.tourKeys?.requisitante,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _label('Requisitante'),
+                      TextFormField(
+                        controller: _requisitanteCtrl,
+                        decoration: _deco('Nome do requisitante'),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 14),
 
-                // Forma de Pagamento + Prazo lado a lado
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       flex: 3,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _label('Forma de Pagamento'),
-                          const SizedBox(height: 6),
-                          SizedBox(
-                            height: 48,
-                            child: TextFormField(
-                              controller: _formaPagamentoCtrl,
-                              decoration: _deco(
-                                'Ex: Boleto, À Vista, Crédito...',
+                      child: Container(
+                        key: widget.tourKeys?.formaPagamento,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _label('Forma de Pagamento'),
+                            const SizedBox(height: 6),
+                            SizedBox(
+                              height: 48,
+                              child: TextFormField(
+                                controller: _formaPagamentoCtrl,
+                                decoration: _deco(
+                                  'Ex: Boleto, À Vista, Crédito...',
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       flex: 2,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _label('Prazo de Pagamento'),
-                          const SizedBox(height: 6),
-                          SizedBox(
-                            height: 48,
-                            child: TextFormField(
-                              controller: _prazoPagamentoCtrl,
-                              decoration: _deco(
-                                'Ex: 30 dias, 15/30/45...',
+                      child: Container(
+                        key: widget.tourKeys?.prazoPagamento,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _label('Prazo de Pagamento'),
+                            const SizedBox(height: 6),
+                            SizedBox(
+                              height: 48,
+                              child: TextFormField(
+                                controller: _prazoPagamentoCtrl,
+                                decoration: _deco(
+                                  'Ex: 30 dias, 15/30/45...',
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 14),
 
-                // Observações
-                _label('Observações'),
-                TextFormField(
-                  controller: _observacoesCtrl,
-                  decoration: _deco('Observações gerais'),
-                  minLines: 3,
-                  maxLines: null,
+                Container(
+                  key: widget.tourKeys?.observacoes,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _label('Observações'),
+                      TextFormField(
+                        controller: _observacoesCtrl,
+                        decoration: _deco('Observações gerais'),
+                        minLines: 3,
+                        maxLines: null,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
 
-            // ── Empresa ────────────────────────────────────────────────────
             _card(
-              key: _empresaKey,
+              key: widget.tourKeys?.empresa ?? _empresaKey,
               titulo: 'Empresa',
               subtitulo:
                   'Selecione a empresa que aparecerá no cabeçalho da Ordem de Compra:',
@@ -3601,17 +4203,15 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
             ),
             const SizedBox(height: 16),
 
-            // ── Números de OS ──────────────────────────────────────────────
             _OsInputSection(
-              key: _osSectionKey,
+              key: widget.tourKeys?.numerosOS ?? _osSectionKey,
               numerosOS: _numerosOS,
               hasError: _erroOS,
+              tourKeys: widget.tourKeys,
               onChanged: () {
                 setState(() {
                   _erroOS = false;
-                  // Se agora não há exatamente 1 OS (0 ou 2+),
-                  // limpa a OS atribuída aos itens para forçar
-                  // o usuário a selecionar novamente
+
                   if (_numerosOS.length != 1) {
                     for (final item in _itens) {
                       item.numeroOS = '';
@@ -3625,7 +4225,6 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
             ),
             const SizedBox(height: 16),
 
-            // ── Itens ──────────────────────────────────────────────────────
             _card(
               key: _itensKey,
               titulo: 'Itens (${_itens.length})',
@@ -3656,6 +4255,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                     child: Tooltip(
                       message: 'Adicionar item à ordem de compra',
                       child: OutlinedButton.icon(
+                        key: widget.tourKeys?.adicionarItem,
                         onPressed: () {
                           showDialog(
                             context: context,
@@ -3700,6 +4300,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                     numerosOS: _numerosOS,
                     onRemover: () => _removerItem(idx),
                     onChanged: () => setState(() {}),
+                    tourKeys: widget.tourKeys,
                   );
                 }),
                 if (_itens.isNotEmpty) ...[
@@ -3740,6 +4341,7 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                 child: MouseRegion(
                   cursor: SystemMouseCursors.click,
                   child: GestureDetector(
+                    key: widget.tourKeys?.criarOc,
                     onTap: _salvando ? null : _salvar,
                     behavior: HitTestBehavior.opaque,
                     child: Container(
@@ -3776,8 +4378,6 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       ),
     );
   }
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
 
   Widget _card({
     Key? key,
@@ -3934,16 +4534,13 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
       );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SEÇÃO DE NÚMEROS DE OS (campos fixos + botão +)
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _OsInputSection extends StatefulWidget {
   final List<String> numerosOS;
   final VoidCallback onChanged;
   final bool hasError;
+  final NovaOcTourKeys? tourKeys;
 
-  const _OsInputSection({super.key, required this.numerosOS, required this.onChanged, this.hasError = false});
+  const _OsInputSection({super.key, required this.numerosOS, required this.onChanged, this.hasError = false, this.tourKeys});
 
   @override
   State<_OsInputSection> createState() => _OsInputSectionState();
@@ -3955,13 +4552,13 @@ class _OsInputSectionState extends State<_OsInputSection> {
   @override
   void initState() {
     super.initState();
-    // Cria os 3 campos padrão aqui dentro (não na declaração da classe)
+
     _controllers = [
       TextEditingController(),
       TextEditingController(),
       TextEditingController(),
     ];
-    // Se já há valores pré-existentes (modo edição), preenche os campos
+
     for (int i = 0; i < widget.numerosOS.length; i++) {
       if (i < _controllers.length) {
         _controllers[i].text = widget.numerosOS[i];
@@ -3988,8 +4585,7 @@ class _OsInputSectionState extends State<_OsInputSection> {
     widget.numerosOS
       ..clear()
       ..addAll(novos);
-    // Adia o setState do pai para depois do frame atual, evitando
-    // "setState called during build"
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.onChanged();
     });
@@ -4049,7 +4645,6 @@ class _OsInputSectionState extends State<_OsInputSection> {
           Row(children: [
             Text('Números de OS',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
-            Text(' *', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w700)),
           ]),
           SizedBox(height: 4),
           Text(
@@ -4058,16 +4653,16 @@ class _OsInputSectionState extends State<_OsInputSection> {
           ),
           const SizedBox(height: 12),
 
-          // Atalhos rápidos
           Wrap(
             spacing: 8,
             children: [
               Tooltip(
                 message: "Preenche automaticamente com 'EMPRESA'",
                 child: _AtalhoChip(
+                  key: widget.tourKeys?.atalhoEmpresa,
                   label: 'Empresa',
                   onTap: () {
-                    // Preenche o primeiro campo vazio ou adiciona
+
                     final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
                     if (idx != -1) {
                       setState(() => _controllers[idx].text = 'EMPRESA');
@@ -4081,6 +4676,7 @@ class _OsInputSectionState extends State<_OsInputSection> {
               Tooltip(
                 message: "Preenche automaticamente com 'OUTROS'",
                 child: _AtalhoChip(
+                  key: widget.tourKeys?.atalhoOutros,
                   label: 'Outros',
                   onTap: () {
                     final idx = _controllers.indexWhere((c) => c.text.trim().isEmpty);
@@ -4097,7 +4693,6 @@ class _OsInputSectionState extends State<_OsInputSection> {
           ),
           const SizedBox(height: 12),
 
-          // Campos de OS
           ...List.generate(_controllers.length, (i) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -4105,6 +4700,7 @@ class _OsInputSectionState extends State<_OsInputSection> {
                 children: [
                   Expanded(
                     child: TextFormField(
+                      key: i == 0 ? widget.tourKeys?.campoOS : null,
                       controller: _controllers[i],
                       decoration: _deco('OS ${i + 1}'),
                       onChanged: (_) => _sincronizar(),
@@ -4175,13 +4771,10 @@ class _OsInputSectionState extends State<_OsInputSection> {
 
 }
 
-/// Chip de atalho ("Empresa" / "Outros") com feedback visual de hover:
-/// preenche o fundo, intensifica a borda e destaca o texto na cor primária
-/// quando o mouse passa por cima, além do cursor de clique já existente.
 class _AtalhoChip extends StatefulWidget {
   final String label;
   final VoidCallback onTap;
-  const _AtalhoChip({required this.label, required this.onTap});
+  const _AtalhoChip({super.key, required this.label, required this.onTap});
 
   @override
   State<_AtalhoChip> createState() => _AtalhoChipState();
@@ -4244,6 +4837,7 @@ class _ItemRascunho {
   double? qtdUnidade;
   double precoUnitario;
   double? precoMetroQuadrado;
+  double? precoTotalInicial;
   List<_DistribuicaoLinha> distribuicao;
 
   final GlobalKey cardKey = GlobalKey();
@@ -4268,6 +4862,7 @@ class _ItemRascunho {
     this.qtdUnidade,
     this.precoUnitario = 0,
     this.precoMetroQuadrado,
+    this.precoTotalInicial,
     List<_DistribuicaoLinha>? distribuicao,
   }) : distribuicao = distribuicao ?? [_DistribuicaoLinha(os: numeroOS, quantidade: quantidade)];
 
@@ -4308,6 +4903,7 @@ class _ItemFormCard extends StatefulWidget {
   final List<String> numerosOS;
   final VoidCallback onRemover;
   final VoidCallback onChanged;
+  final NovaOcTourKeys? tourKeys;
 
   const _ItemFormCard({
     super.key,
@@ -4315,6 +4911,7 @@ class _ItemFormCard extends StatefulWidget {
     required this.numerosOS,
     required this.onRemover,
     required this.onChanged,
+    this.tourKeys,
   });
 
   @override
@@ -4327,7 +4924,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
   late TextEditingController _precoCtrl;
   late TextEditingController _precoTotalCtrl;
   late TextEditingController _descricaoCtrl;
-  
+
   bool _ignorarCalculo = false;
   String _campoEditado = 'unitario';
 
@@ -4347,16 +4944,28 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     _precoCtrl = TextEditingController(
         text: widget.item.precoUnitario == 0
             ? ''
-            : formatarNumeroBr(widget.item.precoUnitario, 6));
-    
+            : formatarNumeroBr(widget.item.precoUnitario, 2));
+
+    final precoTotalCalculado = _calcularPrecoTotal();
+    final usarPrecoTotalInicial = precoTotalCalculado == 0 &&
+        widget.item.precoUnitario == 0 &&
+        widget.item.precoTotalInicial != null &&
+        widget.item.precoTotalInicial! > 0;
+
     _precoTotalCtrl = TextEditingController(
-        text: _calcularPrecoTotal() == 0
-            ? ''
-            : formatarNumeroBr(_calcularPrecoTotal(), 2));
-    
+        text: usarPrecoTotalInicial
+            ? formatarNumeroBr(widget.item.precoTotalInicial!, 2)
+            : (precoTotalCalculado == 0
+                ? ''
+                : formatarNumeroBr(precoTotalCalculado, 2)));
+
+    if (usarPrecoTotalInicial) {
+      _campoEditado = 'total';
+    }
+
     _descricaoCtrl = TextEditingController(
         text: widget.item.descricaoItem ?? '');
-    
+
     _precoCtrl.addListener(_onPrecoUnitarioChanged);
     _precoTotalCtrl.addListener(_onPrecoTotalChanged);
   }
@@ -4377,30 +4986,30 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     final qtd = parseNumeroBr(_qtdCtrl.text) ?? 0;
     final qtdUnit = parseNumeroBr(_qtdUnidadeCtrl.text);
     final preco = parseNumeroBr(_precoCtrl.text) ?? 0;
-    
+
     if (qtd <= 0 || preco <= 0) return 0;
-    
+
     if (qtdUnit != null && qtdUnit > 0) {
       return qtd * qtdUnit * preco;
     }
     return qtd * preco;
   }
-  
+
   void _onPrecoUnitarioChanged() {
     if (_ignorarCalculo) return;
-    
+
     final preco = parseNumeroBr(_precoCtrl.text);
     if (preco == null || preco <= 0) {
-      if (_precoTotalCtrl.text.isNotEmpty) {
+      if (_campoEditado == 'unitario' && _precoTotalCtrl.text.isNotEmpty) {
         _ignorarCalculo = true;
         _precoTotalCtrl.clear();
         _ignorarCalculo = false;
       }
       return;
     }
-    
+
     _campoEditado = 'unitario';
-    
+
     final total = _calcularPrecoTotal();
     if (total > 0) {
       final novoTexto = formatarNumeroBr(total, 2);
@@ -4414,27 +5023,27 @@ class _ItemFormCardState extends State<_ItemFormCard> {
 
   void _onPrecoTotalChanged() {
     if (_ignorarCalculo) return;
-    
+
     final total = parseNumeroBr(_precoTotalCtrl.text);
     if (total == null || total <= 0) {
       return;
     }
-    
+
     _campoEditado = 'total';
-    
+
     final qtd = parseNumeroBr(_qtdCtrl.text) ?? 0;
     final qtdUnit = parseNumeroBr(_qtdUnidadeCtrl.text);
-    
+
     if (qtd <= 0) return;
-    
+
     double precoUnitario;
     if (qtdUnit != null && qtdUnit > 0) {
       precoUnitario = total / (qtd * qtdUnit);
     } else {
       precoUnitario = total / qtd;
     }
-    
-    final novoTexto = formatarNumeroBr(precoUnitario, 6);
+
+    final novoTexto = formatarNumeroBr(precoUnitario, 2);
     if (_precoCtrl.text != novoTexto) {
       _ignorarCalculo = true;
       _precoCtrl.text = novoTexto;
@@ -4444,14 +5053,14 @@ class _ItemFormCardState extends State<_ItemFormCard> {
       setState(() {});
     }
   }
-  
+
   void _recalcularComBaseNaPrioridade() {
     if (_campoEditado == 'total') {
       final total = parseNumeroBr(_precoTotalCtrl.text);
       if (total != null && total > 0) {
         final qtd = parseNumeroBr(_qtdCtrl.text) ?? 0;
         final qtdUnit = parseNumeroBr(_qtdUnidadeCtrl.text);
-        
+
         if (qtd > 0) {
           double precoUnitario;
           if (qtdUnit != null && qtdUnit > 0) {
@@ -4459,9 +5068,9 @@ class _ItemFormCardState extends State<_ItemFormCard> {
           } else {
             precoUnitario = total / qtd;
           }
-          
+
           _ignorarCalculo = true;
-          _precoCtrl.text = formatarNumeroBr(precoUnitario, 6);
+          _precoCtrl.text = formatarNumeroBr(precoUnitario, 2);
           widget.item.precoUnitario = precoUnitario;
           _ignorarCalculo = false;
         }
@@ -4600,7 +5209,9 @@ class _ItemFormCardState extends State<_ItemFormCard> {
           ),
           SizedBox(height: 8),
           if (item.precisaQtdUnidade) ...[
-            Row(
+            Container(
+              key: item.materialId == -2 ? widget.tourKeys?.itemOutraUnidadeCampos : null,
+              child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
@@ -4645,12 +5256,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
                               color: Theme.of(context).colorScheme.onSurfaceVariant),
-                          children: const [
-                            TextSpan(
-                                text: ' *',
-                                style: TextStyle(color: AppTheme.error, fontWeight: FontWeight.w700)),
-                          ],
-                        ),
+              ),
                       ),
                       const SizedBox(height: 4),
                       TextFormField(
@@ -4661,11 +5267,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                         onChanged: (v) {
                           item.qtdUnidade = parseNumeroBr(v);
                           item.erroQtdUnidade = false;
-                          // Se o valor total já estiver preenchido, ele tem
-                          // prioridade: alterar a qtd/unidade não deve mudar
-                          // o total, e sim recalcular o valor por unidade
-                          // para que quantidade × qtdUnidade × valor
-                          // continue batendo com o total já informado.
+
                           final totalJaPreenchido =
                               (parseNumeroBr(_precoTotalCtrl.text) ?? 0) > 0;
                           if (totalJaPreenchido) _campoEditado = 'total';
@@ -4682,7 +5284,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Valor/${unidade.isNotEmpty ? unidade : 'unid.'}',
+                      Text('Valor por ${unidade.isNotEmpty ? unidade : 'unid.'}',
                           style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
@@ -4691,7 +5293,17 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       TextFormField(
                         controller: _precoCtrl,
                         decoration: _deco('0,000000', hasError: item.erroPreco).copyWith(
-                          prefixText: 'R\$ ',
+                          prefixIcon: Padding(
+                            padding: const EdgeInsets.only(left: 10, right: 4),
+                            child: Center(
+                              widthFactor: 1,
+                              child: Text('R\$',
+                                  style: TextStyle(
+                                      color: Theme.of(context).colorScheme.onSurface,
+                                      fontSize: 14)),
+                            ),
+                          ),
+                          prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
                         ),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: [_NumeroBrFormatter(casasDecimais: 6)],
@@ -4719,7 +5331,17 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       TextFormField(
                         controller: _precoTotalCtrl,
                         decoration: _deco('0,00').copyWith(
-                          prefixText: 'R\$ ',
+                          prefixIcon: Padding(
+                            padding: const EdgeInsets.only(left: 10, right: 4),
+                            child: Center(
+                              widthFactor: 1,
+                              child: Text('R\$',
+                                  style: TextStyle(
+                                      color: Theme.of(context).colorScheme.onSurface,
+                                      fontSize: 14)),
+                            ),
+                          ),
+                          prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
                         ),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: [_NumeroBrFormatter(casasDecimais: 2)],
@@ -4732,6 +5354,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                   ),
                 ),
               ],
+            ),
             ),
             if (item.qtdUnidade != null && item.qtdUnidade! > 0 && item.quantidade > 0)
               Padding(
@@ -4755,7 +5378,9 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                 ),
               ),
           ] else ...[
-            Row(
+            Container(
+              key: item.materialId == -1 ? widget.tourKeys?.itemUnidadeCampos : null,
+              child: Row(
               children: [
                 Expanded(
                   child: Column(
@@ -4779,7 +5404,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                             item.distribuicao[0].os = widget.numerosOS.first;
                             item.distribuicao[0].quantidade = item.quantidade;
                           }
-                          // ← MODIFICADO: usa o novo método
+
                           _recalcularComBaseNaPrioridade();
                           widget.onChanged();
                           setState(() {});
@@ -4795,7 +5420,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                     children: [
                       Row(
                         children: [
-                          Text('Preço Unitário',
+                          Text('Preço por Unidade',
                               style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
@@ -4806,7 +5431,17 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       TextFormField(
                         controller: _precoCtrl,
                         decoration: _deco('0,00', hasError: item.erroPreco).copyWith(
-                          prefixText: 'R\$ ',
+                          prefixIcon: Padding(
+                            padding: const EdgeInsets.only(left: 10, right: 4),
+                            child: Center(
+                              widthFactor: 1,
+                              child: Text('R\$',
+                                  style: TextStyle(
+                                      color: Theme.of(context).colorScheme.onSurface,
+                                      fontSize: 14)),
+                            ),
+                          ),
+                          prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
                         ),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: [_NumeroBrFormatter(casasDecimais: 6)],
@@ -4834,7 +5469,17 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                       TextFormField(
                         controller: _precoTotalCtrl,
                         decoration: _deco('0,00').copyWith(
-                          prefixText: 'R\$ ',
+                          prefixIcon: Padding(
+                            padding: const EdgeInsets.only(left: 10, right: 4),
+                            child: Center(
+                              widthFactor: 1,
+                              child: Text('R\$',
+                                  style: TextStyle(
+                                      color: Theme.of(context).colorScheme.onSurface,
+                                      fontSize: 14)),
+                            ),
+                          ),
+                          prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
                         ),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: [_NumeroBrFormatter(casasDecimais: 2)],
@@ -4847,6 +5492,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                   ),
                 ),
               ],
+            ),
             ),
           ],
           const SizedBox(height: 8),
@@ -4865,14 +5511,6 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS DO ITEM FORM CARD
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DISTRIBUIÇÃO POR OS (sempre expandida)
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _DistribuicaoSection extends StatefulWidget {
   final _ItemRascunho item;
@@ -4902,11 +5540,10 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
   @override
   void didUpdateWidget(covariant _DistribuicaoSection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Quando muda de múltiplas OS para uma só (ou já é uma só),
-    // preenche automaticamente OS e quantidade na linha 0.
+
     final preencheuAuto = _autoFillSeUmaOS();
     if (preencheuAuto) {
-      // Atualiza o controller da linha 0 para refletir a nova quantidade
+
       if (_qtdCtrls.isNotEmpty) {
         final qtd = widget.item.distribuicao[0].quantidade;
         final novoTexto = qtd == 0 ? '' : formatarNumeroBr(qtd, qtd % 1 == 0 ? 0 : 2);
@@ -4915,8 +5552,7 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
         }
       }
     }
-    // Quando a quantidade total do item muda e há exatamente 1 OS,
-    // mantém o controller sincronizado com a quantidade atualizada.
+
     if (widget.numerosOS.length == 1 &&
         widget.item.distribuicao.length == 1 &&
         _qtdCtrls.isNotEmpty) {
@@ -4928,25 +5564,22 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
     }
   }
 
-  /// Quando há exatamente 1 OS cadastrada, preenche automaticamente a
-  /// linha 0 da distribuição com essa OS e a quantidade total do item.
-  /// Retorna true se fez alguma alteração.
   bool _autoFillSeUmaOS() {
     if (widget.numerosOS.length != 1) return false;
     final umaOS = widget.numerosOS.first;
     final dist = widget.item.distribuicao;
-    // Garante que existe pelo menos 1 linha
+
     if (dist.isEmpty) {
       dist.add(_DistribuicaoLinha(os: umaOS, quantidade: widget.item.quantidade));
       return true;
     }
     bool changed = false;
-    // Remove linhas extras (caso tenha sobrado de quando havia 2 OS)
+
     while (dist.length > 1) {
       dist.removeLast();
       changed = true;
     }
-    // Preenche a linha 0
+
     if (dist[0].os != umaOS) {
       dist[0].os = umaOS;
       changed = true;
@@ -5019,7 +5652,7 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Cabeçalho ────────────────────────────────────────────────────
+
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
             child: Row(
@@ -5052,7 +5685,6 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
             ),
           ),
 
-          // ── Barra de excesso ─────────────────────────────────────────────
           if (excesso > 0.0001)
             Container(
               height: 4,
@@ -5080,7 +5712,6 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
             ),
           if (excesso > 0.0001) SizedBox(height: 6),
 
-          // ── Cabeçalho da tabela ──────────────────────────────────────────
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 10),
             child: Row(
@@ -5094,7 +5725,6 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
           ),
           SizedBox(height: 4),
 
-          // ── Linhas ────────────────────────────────────────────────────────
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 10),
             child: Column(
@@ -5117,7 +5747,7 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
                     children: [
                       Expanded(
                         child: widget.numerosOS.isEmpty
-                            // Sem OS cadastradas: campo bloqueado
+
                             ? Container(
                                 padding: EdgeInsets.symmetric(horizontal: 10, vertical: 9),
                                 decoration: BoxDecoration(
@@ -5130,7 +5760,7 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
                                   style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline, fontStyle: FontStyle.italic),
                                 ),
                               )
-                            // Com OS cadastradas: dropdown
+
                             : DropdownButtonFormField<String>(
                                 key: ValueKey('os_dd_${idx}_${widget.numerosOS.join(",")}_${widget.item.distribuicao.length}_${linha.os}'),
                                 initialValue: linha.os.isNotEmpty && widget.numerosOS.contains(linha.os) ? linha.os : null,
@@ -5200,7 +5830,6 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
             ),
           ),
 
-          // ── Ações ─────────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
             child: Row(
@@ -5239,10 +5868,6 @@ class _DistribuicaoSectionState extends State<_DistribuicaoSection> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FORNECEDOR PICKER DIALOG
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _FornecedorPicker extends StatefulWidget {
   final FornecedorProvider provider;
 
@@ -5278,8 +5903,21 @@ class _FornecedorPickerState extends State<_FornecedorPicker> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Selecionar Fornecedor',
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text('Selecionar Fornecedor',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
+        ],
+      ),
       content: SizedBox(
         width: double.maxFinite,
         height: 400,
@@ -5340,22 +5978,21 @@ class _FornecedorPickerState extends State<_FornecedorPicker> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DIALOG UNIFICADO: FILTRO + SELEÇÃO DE MATERIAIS
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _AdicionarItemDialog extends StatefulWidget {
   final List<FornecedorMaterialVinculoModel> materiais;
   final int fornecedorId;
   final void Function(List<FornecedorMaterialVinculoModel>) onConfirmar;
-  /// IDs dos materiais que já estão na OC — impede adicionar duplicatas.
+
   final Set<int> materiaisJaAdicionados;
+  final NovaOcTourKeys? tourKeys;
 
   const _AdicionarItemDialog({
+    super.key,
     required this.materiais,
     required this.fornecedorId,
     required this.onConfirmar,
     this.materiaisJaAdicionados = const {},
+    this.tourKeys,
   });
 
   @override
@@ -5370,22 +6007,19 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
   final _larguraCtrl       = TextEditingController();
   final _espessuraCtrl     = TextEditingController();
 
-  // materialId → quantidade de cópias a adicionar
   final Map<int, int> _quantidades = {};
 
-  // ── modo "todo o estoque" ──────────────────────────────────────────────────
   late bool _verTodoEstoque;
   bool _buscando = false;
   List<Map<String, dynamic>> _todosOsMateriais = [];
 
-  /// IDs já vinculados ao fornecedor
   Set<int> get _idsVinculados =>
       widget.materiais.map((m) => m.materialId).toSet();
 
   @override
   void initState() {
     super.initState();
-    // Abre já no modo "todo o estoque" se o fornecedor não tiver vinculados
+
     _verTodoEstoque = widget.materiais.isEmpty;
     if (_verTodoEstoque) _carregarTodoEstoque();
   }
@@ -5401,7 +6035,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
     super.dispose();
   }
 
-  // ── lista filtrada para o modo "só vinculados" ─────────────────────────────
   List<FornecedorMaterialVinculoModel> get _filtradosVinculados {
     var lista = widget.materiais;
     final ident       = _identificadorCtrl.text.trim().toLowerCase();
@@ -5426,7 +6059,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
     return lista;
   }
 
-  // ── lista filtrada para o modo "todo o estoque" (client-side após fetch) ──
   List<Map<String, dynamic>> get _filtradosTodos {
     var lista = _todosOsMateriais;
     final ident       = _identificadorCtrl.text.trim().toLowerCase();
@@ -5459,7 +6091,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
 
       if (mounted) setState(() { _todosOsMateriais = todos; });
     } catch (_) {
-      // silencia — a lista fica vazia e o usuário vê o aviso
+
     } finally {
       if (mounted) setState(() { _buscando = false; });
     }
@@ -5484,18 +6116,26 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
         _espessuraCtrl.clear();
       });
 
+  void selecionarTodosTour() {
+    setState(() {
+      for (final m in widget.materiais) {
+        _quantidades[m.materialId] = 1;
+      }
+    });
+  }
+
   void _confirmar() {
     final escolhidos = <FornecedorMaterialVinculoModel>[];
 
     if (!_verTodoEstoque) {
-      // modo vinculados — um item por material selecionado
+
       for (final m in widget.materiais) {
         if (_quantidades.containsKey(m.materialId)) {
           escolhidos.add(m);
         }
       }
     } else {
-      // modo todo o estoque
+
       final vinculadosPorId = { for (final m in widget.materiais) m.materialId: m };
       for (final m in _todosOsMateriais) {
         final mid = m['id'] as int;
@@ -5628,6 +6268,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
               child: MouseRegion(
                 cursor: SystemMouseCursors.click,
                 child: GestureDetector(
+                  key: materialId == -1 ? widget.tourKeys?.botaoAdicionarMaterial : null,
                   onTap: () {
                     setState(() {
                       if (selecionado) {
@@ -5680,6 +6321,14 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                     fontSize: 12),
               ),
             ),
+          const SizedBox(width: 8),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
         ],
       ),
       contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -5689,8 +6338,9 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Toggle ver todo estoque ────────────────────────────────────
+
             Row(
+              key: widget.tourKeys?.verTodoEstoque,
               children: [
                 Switch(
                   value: _verTodoEstoque,
@@ -5715,97 +6365,102 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
               ],
             ),
             const SizedBox(height: 6),
-            // ── Filtros ────────────────────────────────────────────────────
-            Row(
+
+            Column(
+              key: widget.tourKeys?.buscaMaterial,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _nomeCtrl,
-                    autofocus: true,
-                    decoration: _deco('Nome do material', icon: Icons.inventory_2_outlined),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: TextField(
-                    controller: _identificadorCtrl,
-                    decoration: _deco('Identificador', icon: Icons.qr_code),
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [_UpperCaseFormatter()],
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  flex: 3,
-                  child: TextField(
-                    controller: _medidaCtrl,
-                    decoration: _deco('Medida', icon: Icons.straighten),
-                    inputFormatters: [_MedidaEspessuraFormatter()],
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  flex: 4,
-                  child: TextField(
-                    controller: _comprimentoCtrl,
-                    decoration: _deco('Comprimento', icon: Icons.height, suffix: 'm'),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [_EspessuraFormatter()],
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  flex: 3,
-                  child: TextField(
-                    controller: _larguraCtrl,
-                    decoration: _deco('Largura', icon: Icons.width_normal, suffix: 'm'),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [_EspessuraFormatter()],
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  flex: 3,
-                  child: TextField(
-                    controller: _espessuraCtrl,
-                    decoration: _deco('Espessura', icon: Icons.layers, suffix: 'mm'),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [_EspessuraFormatter()],
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                SizedBox(width: 4),
-                IconButton(
-                  onPressed: _temFiltro ? _limparFiltros : null,
-                  icon: Icon(
-                    Icons.filter_alt_off,
-                    size: 18,
-                    color: _temFiltro ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
-                  ),
-                  tooltip: 'Limpar filtros',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  style: IconButton.styleFrom().copyWith(
-                    mouseCursor: WidgetStateProperty.all(
-                      _temFiltro ? SystemMouseCursors.click : SystemMouseCursors.basic,
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _nomeCtrl,
+                        autofocus: widget.tourKeys == null,
+                        decoration: _deco('Nome do material', icon: Icons.inventory_2_outlined),
+                        onChanged: (_) => setState(() {}),
+                      ),
                     ),
-                  ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        controller: _identificadorCtrl,
+                        decoration: _deco('Identificador', icon: Icons.qr_code),
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: [_UpperCaseFormatter()],
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        controller: _medidaCtrl,
+                        decoration: _deco('Medida', icon: Icons.straighten),
+                        inputFormatters: [_MedidaEspessuraFormatter()],
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      flex: 4,
+                      child: TextField(
+                        controller: _comprimentoCtrl,
+                        decoration: _deco('Comprimento', icon: Icons.height, suffix: 'm'),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [_EspessuraFormatter()],
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        controller: _larguraCtrl,
+                        decoration: _deco('Largura', icon: Icons.width_normal, suffix: 'm'),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [_EspessuraFormatter()],
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        controller: _espessuraCtrl,
+                        decoration: _deco('Espessura', icon: Icons.layers, suffix: 'mm'),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [_EspessuraFormatter()],
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ),
+                    SizedBox(width: 4),
+                    IconButton(
+                      onPressed: _temFiltro ? _limparFiltros : null,
+                      icon: Icon(
+                        Icons.filter_alt_off,
+                        size: 18,
+                        color: _temFiltro ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
+                      ),
+                      tooltip: 'Limpar filtros',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      style: IconButton.styleFrom().copyWith(
+                        mouseCursor: WidgetStateProperty.all(
+                          _temFiltro ? SystemMouseCursors.click : SystemMouseCursors.basic,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
             const SizedBox(height: 6),
 
-            // ── Contador ───────────────────────────────────────────────────
             Text(
               _verTodoEstoque
                   ? '${filtradosTodos.length} ${filtradosTodos.length == 1 ? 'material encontrado' : 'materiais encontrados'}'
@@ -5815,7 +6470,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
             const SizedBox(height: 6),
             Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
 
-            // ── Lista ──────────────────────────────────────────────────────
             Expanded(
               child: _verTodoEstoque
                   ? _buscando
@@ -5854,7 +6508,6 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                     ? nomeComIdentificador
                                     : '$nomeComIdentificador · ${partes.join(' · ')}';
 
-                                // Preço do vínculo existente, se houver
                                 final vinculo = widget.materiais.cast<FornecedorMaterialVinculoModel?>()
                                     .firstWhere((v) => v?.materialId == mid, orElse: () => null);
                                 final precoStr = vinculo != null
@@ -5873,7 +6526,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
                                 );
                               },
                             )
-                  // ── modo vinculados (comportamento original) ─────────────
+
                   : filtradosVinc.isEmpty
                       ? Center(
                           child: Text(
@@ -5921,6 +6574,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
         Tooltip(
           message: _totalItens == 0 ? 'Selecione ao menos um item' : 'Adicionar os itens selecionados à ordem de compra',
           child: FilledButton(
+            key: widget.tourKeys?.botaoConfirmarAdicionar,
             onPressed: _totalItens == 0 ? null : _confirmar,
             style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
                 .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
@@ -5933,8 +6587,7 @@ class _AdicionarItemDialogState extends State<_AdicionarItemDialog> {
     );
   }
 }
-// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
-// Mesmo padrão usado no cabeçalho das páginas de estoque / histórico / orçamento.
+
 class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;

@@ -6,8 +6,6 @@ import '../models/solicitacao_material_model.dart';
 import '../providers/solicitacao_material_provider.dart';
 import '../theme/app_theme.dart';
 
-// ── Formatação de data/hora ────────────────────────────────────────────────
-
 String _fmtData(DateTime? dt) {
   if (dt == null) return '—';
   return '${dt.day.toString().padLeft(2, '0')}/'
@@ -31,9 +29,6 @@ String _fmtDataCompleta(DateTime dt) {
   return '${_fmtData(dt)} • ${dias[dt.weekday]}';
 }
 
-/// Formata uma quantidade sem arredondar/cortar a precisão real do valor,
-/// aplicando separador de milhar (ponto) na parte inteira e vírgula como
-/// separador decimal (padrão brasileiro).
 String _formatarQuantidade(double v) {
   final bool isInteiro = v == v.truncateToDouble();
   final String bruto = isInteiro ? v.toStringAsFixed(0) : v.toString();
@@ -83,8 +78,6 @@ String formatarUnidadeExibicao(String? unidade) {
   }
 }
 
-// ── Formatter: maiúsculas sem acentos (mesmo padrão das outras telas) ─────
-
 class _UpperCaseFormatter extends TextInputFormatter {
   static final _acentos = {
     'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A',
@@ -117,8 +110,6 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
-// ── Status visual de compra/estoque (mesmo padrão da tela principal) ──────
-
 class _StatusVisual {
   final Color cor;
   final IconData icone;
@@ -136,8 +127,6 @@ _StatusVisual _statusVisual(String status) {
       return const _StatusVisual(AppTheme.primary, Icons.schedule, 'PENDENTE');
   }
 }
-
-// ── Status visual do andamento da solicitação (mesmo padrão da tela principal) ──
 
 ({Color bg, Color fg, String label}) _andamentoEstilo(String status) {
   switch (status) {
@@ -168,8 +157,6 @@ _StatusVisual _statusVisual(String status) {
   }
 }
 
-// ── Formatação de valores de log (antes/depois) ────────────────────────────
-
 const _camposLabel = {
   'numeroOS': 'Número OS',
   'nomeCliente': 'Cliente',
@@ -195,8 +182,6 @@ String? _fmtNumeroLog(dynamic v) {
   return _formatarQuantidade(n.toDouble());
 }
 
-/// Quantidade + unidade a partir do snapshot de material salvo no log
-/// (ex: "25 m/l", "1 Unidade").
 String? _qtdComUnidadeLog(Map material) {
   final qtd = material['quantidade'];
   if (qtd == null) return null;
@@ -208,8 +193,6 @@ String? _qtdComUnidadeLog(Map material) {
       : qtdFmt;
 }
 
-/// Nome + detalhes (medida/espessura) de um material salvo no log — ex:
-/// "ACRÍLICO TESTE (2mm)".
 String _nomeMaterialLog(Map material) {
   final nome = material['materialNome']?.toString().trim();
   if (nome == null || nome.isEmpty) return '';
@@ -222,8 +205,6 @@ String _nomeMaterialLog(Map material) {
   return '$nome (${detalhes.join(' · ')})';
 }
 
-// ── Classificação do log de edição ─────────────────────────────────────────
-
 enum _TipoLog { criacao, adicao, remocao, edicao }
 
 _TipoLog _tipoDoLog(LogEdicaoSolicitacaoModel log) {
@@ -233,8 +214,6 @@ _TipoLog _tipoDoLog(LogEdicaoSolicitacaoModel log) {
   return _TipoLog.edicao;
 }
 
-/// Campos que mudaram entre `antes` e `depois` — vazio para eventos
-/// especiais (criação/adição/remoção), que têm exibição própria.
 List<String> _camposAlterados(LogEdicaoSolicitacaoModel log) {
   if (_tipoDoLog(log) != _TipoLog.edicao) return const [];
   final campos = <String>[];
@@ -246,13 +225,7 @@ List<String> _camposAlterados(LogEdicaoSolicitacaoModel log) {
   return campos;
 }
 
-// ── Filtro por status do material ──────────────────────────────────────────
-
 enum _FiltroStatus { todos, pendente, comprado, estoque }
-
-// ── Evento genérico da timeline: pode ser um material (item/adicional) ou
-// um evento de edição (log). Unifica os dois para que possam ser ordenados,
-// agrupados por dia e renderizados juntos numa única lista.
 
 abstract class _Evento {
   DateTime get data;
@@ -277,11 +250,6 @@ class _EventoEdicao extends _Evento {
   DateTime get data => log.editadoEm;
 }
 
-// ── Item flatten: um material (original ou adicional) + a solicitação a
-// que ele pertence. Normaliza os dois modelos (ItemSolicitacaoModel e
-// AdicionalSolicitacaoModel) em um único formato, já que eles compartilham
-// praticamente todos os campos relevantes para exibição.
-
 class _ItemHistorico {
   final SolicitacaoMaterialModel solicitacao;
   final bool isAdicional;
@@ -295,12 +263,9 @@ class _ItemHistorico {
   final String? compradoPorNome;
   final DateTime? estoqueEm;
   final String? estoquePorNome;
-  // Quem originou este material especificamente: para item original, o
-  // criador da solicitação (todos os itens originais nascem junto com ela);
-  // para adicional, quem de fato adicionou aquele material — nunca o
-  // criador da solicitação, que pode ser outra pessoa.
+
   final String? criadoPorNome;
-  final DateTime dataReferencia; // data usada para ordenar/agrupar
+  final DateTime dataReferencia;
 
   _ItemHistorico({
     required this.solicitacao,
@@ -333,9 +298,7 @@ class _ItemHistorico {
       compradoPorNome: i.compradoPorNome,
       estoqueEm: i.estoqueEm,
       estoquePorNome: i.estoquePorNome,
-      // Item original: editadoPorNome (se já foi editado) tem prioridade
-      // por ser a informação mais recente sobre "quem mexeu nisso"; senão,
-      // cai para o criador da própria solicitação.
+
       criadoPorNome: i.editadoPorNome ?? sol.usuarioNome,
       dataReferencia: i.estoqueEm ?? i.compradoEm ?? i.criadoEm,
     );
@@ -355,18 +318,12 @@ class _ItemHistorico {
       compradoPorNome: a.compradoPorNome,
       estoqueEm: a.estoqueEm,
       estoquePorNome: a.estoquePorNome,
-      // Adicional: quem editou por último (se já foi editado) ou, senão,
-      // quem de fato o adicionou — nunca o criador da solicitação
-      // original, que é quem estava (incorretamente) sendo usado antes.
+
       criadoPorNome: a.editadoPorNome ?? a.adicionadoPorNome,
       dataReferencia: a.estoqueEm ?? a.compradoEm ?? a.adicionadoEm,
     );
   }
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Página principal
-// ═════════════════════════════════════════════════════════════════════════════
 
 class HistoricoSolicitacoesPage extends StatefulWidget {
   const HistoricoSolicitacoesPage({super.key});
@@ -382,12 +339,10 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
   Timer? _debounceTimer;
 
   _FiltroStatus _filtroStatus = _FiltroStatus.todos;
-  String? _filtroAndamento; // null = todos
+  String? _filtroAndamento;
   DateTime? _dataInicio;
   DateTime? _dataFim;
 
-  // Logs de edição de cada solicitação, buscados à parte (o endpoint de
-  // listagem não os inclui) e mesclados na timeline junto com os materiais.
   final Map<int, List<LogEdicaoSolicitacaoModel>> _logsPorSolicitacao = {};
   bool _carregandoLogs = false;
 
@@ -406,8 +361,6 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
     super.dispose();
   }
 
-  /// Recarrega a lista de solicitações e, em seguida, busca os logs de
-  /// edição de cada uma (em paralelo) para montar a timeline completa.
   Future<void> _carregarTudo() async {
     final provider = context.read<SolicitacaoMaterialProvider>();
     await provider.carregar();
@@ -448,8 +401,6 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
     });
   }
 
-  /// true se um evento com o nome de material [nomeMaterial] (pode ser
-  /// vazio/nulo) deve passar pelo filtro de texto de material.
   bool _passaFiltroMaterial(String filtro, String? nomeMaterial) {
     if (filtro.isEmpty) return true;
     if (nomeMaterial == null) return false;
@@ -468,7 +419,6 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
       if (os.isNotEmpty && !sol.numeroOS.toUpperCase().contains(os)) continue;
       if (cliente.isNotEmpty && !sol.nomeCliente.toLowerCase().contains(cliente)) continue;
 
-      // ── Materiais (itens originais + adicionais) ──────────────────────
       final materiais = <_ItemHistorico>[
         ...sol.itens.map((i) => _ItemHistorico.deItem(sol, i)),
         ...sol.adicionais.map((a) => _ItemHistorico.deAdicional(sol, a)),
@@ -478,12 +428,6 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
         if (_filtroStatus == _FiltroStatus.comprado && item.statusCompra != 'COMPRADO') continue;
         if (_filtroStatus == _FiltroStatus.estoque && item.statusCompra != 'ESTOQUE') continue;
 
-        // Um material ainda PENDENTE (nunca comprado nem colocado em
-        // estoque) não é um evento à parte: sua criação/adição já aparece
-        // via log (_EventoEdicao) logo abaixo. Sem esse corte, o mesmo
-        // acontecimento aparecia duas vezes — "ADICIONAR" (log) e
-        // "PENDENTE" (estado atual). Só mostramos aqui quando algum
-        // filtro de status obriga a exibição (aba "Pendentes" etc).
         if (!statusAtivo && item.statusCompra == 'PENDENTE') continue;
 
         if (!_passaFiltroMaterial(material, item.materialNome)) continue;
@@ -495,9 +439,6 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
         eventos.add(_EventoMaterial(item));
       }
 
-      // ── Edições (logs) ──────────────────────────────────────────────────
-      // Eventos de edição não têm um "status de compra" próprio, então só
-      // entram na timeline quando nenhum filtro de status está ativo.
       if (statusAtivo) continue;
       final logs = _logsPorSolicitacao[sol.id] ?? const [];
       for (final log in logs) {
@@ -569,7 +510,7 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
     final provider = context.watch<SolicitacaoMaterialProvider>();
     final eventos = _itensFiltrados(provider.solicitacoes);
     final grupos = _agruparPorDia(eventos);
-    final chavesOrdenadas = grupos.keys.toList(); // já em ordem desc pois eventos estão ordenados
+    final chavesOrdenadas = grupos.keys.toList();
 
     final materiaisEventos = eventos.whereType<_EventoMaterial>().map((e) => e.item);
     final totalPendentes = materiaisEventos.where((i) => i.statusCompra == 'PENDENTE').length;
@@ -585,7 +526,7 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
+
             Row(
               children: [
                 _BotaoVoltar(
@@ -632,7 +573,6 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
             ),
             const SizedBox(height: 20),
 
-            // ── Filtros de texto ──────────────────────────────────────────
             Row(
               children: [
                 Expanded(
@@ -668,7 +608,7 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
                     controller: _buscaMaterialCtrl,
                     onChanged: _onFiltroDigitado,
                     decoration: InputDecoration(
-                      hintText: 'Filtrar por material',
+                      hintText: 'Nome do material',
                       prefixIcon: Icon(Icons.inventory_2_outlined,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
@@ -707,7 +647,6 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
             ),
             const SizedBox(height: 10),
 
-            // ── Status do material + período + contadores ────────────────
             Row(
               children: [
                 SegmentedButton<_FiltroStatus>(
@@ -806,7 +745,6 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
             ),
             const SizedBox(height: 8),
 
-            // ── Filtro por andamento da solicitação ────────────────────────
             Row(
               children: [
                 Text('Andamento:',
@@ -849,11 +787,9 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
             ),
             const SizedBox(height: 16),
 
-            // ── Cabeçalho fixo da tabela ───────────────────────────────────
             const _CabecalhoTabela(),
             const SizedBox(height: 4),
 
-            // ── Lista ──────────────────────────────────────────────────────
             Expanded(
               child: carregandoTudo && eventos.isEmpty
                   ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
@@ -938,21 +874,12 @@ class _HistoricoSolicitacoesPageState extends State<HistoricoSolicitacoesPage> {
   }
 }
 
-// ── Linha de histórico ──────────────────────────────────────────────────────
-// O card inteiro é clicável (abre a solicitação), com hover e cursor de mão,
-// seguindo o mesmo padrão visual do histórico de movimentações de estoque.
-
-// ── Larguras de coluna compartilhadas pela tabela (linhas de material e de
-// edição usam exatamente as mesmas, para o cabeçalho alinhar com o corpo).
-
 const double _colSolicitacaoW = 170;
 const double _colAcaoW = 118;
 const double _colCampoW = 120;
 const double _colUsuarioW = 130;
 const double _colHoraW = 50;
 
-/// Badge de ação (usado tanto para o status do material quanto para o tipo
-/// de edição) — mesmo visual do badge de andamento, só que reutilizável.
 Widget _badgeTabela(String label, Color cor, {double width = _colAcaoW}) {
   return SizedBox(
     width: width,
@@ -974,7 +901,6 @@ Widget _badgeTabela(String label, Color cor, {double width = _colAcaoW}) {
   );
 }
 
-/// Coluna "Solicitação": número da OS (clicável) + nome do cliente.
 Widget _celulaSolicitacao(
   SolicitacaoMaterialModel sol,
   ColorScheme scheme, {
@@ -1021,7 +947,6 @@ Widget _celulaSolicitacao(
   );
 }
 
-/// Coluna "Usuário": ícone de pessoa + nome de quem realizou a ação.
 Widget _celulaUsuario(String? nome, ColorScheme scheme) {
   return SizedBox(
     width: _colUsuarioW,
@@ -1042,7 +967,6 @@ Widget _celulaUsuario(String? nome, ColorScheme scheme) {
   );
 }
 
-/// Coluna "Hora".
 Widget _celulaHora(DateTime dt, ColorScheme scheme) {
   return SizedBox(
     width: _colHoraW,
@@ -1054,9 +978,6 @@ Widget _celulaHora(DateTime dt, ColorScheme scheme) {
   );
 }
 
-/// Chip compacto para valores de "antes"/"depois", no mesmo padrão visual
-/// usado no histórico de materiais (fundo levemente colorido + texto na cor
-/// da ação: vermelho para "antes", verde para "depois").
 Widget _valorChip(String valor, Color cor) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1073,13 +994,10 @@ Widget _valorChip(String valor, Color cor) {
   );
 }
 
-/// Texto "—" para quando não há valor de antes/depois.
 Widget _valorVazio(ColorScheme scheme) {
   return Text('—', style: TextStyle(fontSize: 12, color: scheme.outline));
 }
 
-/// Cabeçalho fixo da tabela, alinhado com as mesmas larguras de coluna
-/// usadas nas linhas de material e de edição.
 class _CabecalhoTabela extends StatelessWidget {
   const _CabecalhoTabela();
 
@@ -1139,17 +1057,13 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
     final temIdentificador =
         item.materialIdentificador != null && item.materialIdentificador!.isNotEmpty;
 
-    // Quem realizou a última ação e quando, dependendo do status atual.
     String? responsavel;
     if (item.statusCompra == 'ESTOQUE') {
       responsavel = item.estoquePorNome;
     } else if (item.statusCompra == 'COMPRADO') {
       responsavel = item.compradoPorNome;
     } else {
-      // PENDENTE: quem originou este material específico (criador da
-      // solicitação para item original, ou quem adicionou no caso de
-      // adicional) — não sol.usuarioNome direto, que sempre aponta para
-      // o criador da OS mesmo quando outra pessoa adicionou o material.
+
       responsavel = item.criadoPorNome ?? sol.usuarioNome;
     }
 
@@ -1179,15 +1093,13 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── 1. Ação (status do material) ─────────────────────
+
                     _badgeTabela(statusInfo.label, statusInfo.cor),
                     const SizedBox(width: 10),
 
-                    // ── 2. Solicitação ───────────────────────────────────
                     _celulaSolicitacao(sol, scheme, hovered: _hovered),
                     const SizedBox(width: 10),
 
-                    // ── 3. Material + quantidade ─────────────────────────
                     Expanded(
                       flex: 3,
                       child: Text.rich(
@@ -1219,7 +1131,6 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
                     ),
                     const SizedBox(width: 10),
 
-                    // ── 4. Campo / Antes / Depois ────────────────────────
                     SizedBox(
                       width: _colCampoW,
                       child: item.observacao != null && item.observacao!.trim().isNotEmpty
@@ -1254,10 +1165,8 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
                     ),
                     const SizedBox(width: 10),
 
-                    // ── 5. Usuário ────────────────────────────────────────
                     _celulaUsuario(responsavel, scheme),
 
-                    // ── 6. Hora ───────────────────────────────────────────
                     _celulaHora(item.dataReferencia, scheme),
                   ],
                 ),
@@ -1269,11 +1178,6 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
     );
   }
 }
-
-// ── Linha de edição (log) ────────────────────────────────────────────────
-// Mostra criação/adição/remoção de material ou alteração de campos (com
-// diff antes/depois), no mesmo padrão visual usado na aba "Histórico" do
-// diálogo de cada solicitação.
 
 class _LinhaEdicao extends StatefulWidget {
   final LogEdicaoSolicitacaoModel log;
@@ -1317,7 +1221,6 @@ class _LinhaEdicaoState extends State<_LinhaEdicao> {
         break;
     }
 
-    // Materiais envolvidos no evento (criação pode ter vários; adição, um só).
     final materiaisCriacao = tipo == _TipoLog.criacao && log.depois['materiais'] is List
         ? (log.depois['materiais'] as List)
             .whereType<Map>()
@@ -1330,7 +1233,6 @@ class _LinhaEdicaoState extends State<_LinhaEdicao> {
         ? const Color(0xFFFF9800).withValues(alpha: 0.10)
         : scheme.surface;
 
-    // ── Conteúdo da coluna "Material" ─────────────────────────────────────
     Widget colunaMaterial;
     if (materiaisCriacao.isNotEmpty) {
       colunaMaterial = Column(
@@ -1360,9 +1262,6 @@ class _LinhaEdicaoState extends State<_LinhaEdicao> {
       );
     }
 
-    // ── Conteúdo das colunas "Campo" / "Antes" / "Depois" ──────────────────
-    // Quando há múltiplos campos alterados no mesmo log, empilha uma linha
-    // por campo (mesmo padrão do histórico de materiais).
     Widget colunaCampo;
     Widget colunaAntes;
     Widget colunaDepois;
@@ -1436,19 +1335,16 @@ class _LinhaEdicaoState extends State<_LinhaEdicao> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── 1. Ação ───────────────────────────────────────────
+
                     _badgeTabela(acaoLabel, cor),
                     const SizedBox(width: 10),
 
-                    // ── 2. Solicitação ───────────────────────────────────
                     _celulaSolicitacao(sol, scheme, hovered: _hovered),
                     const SizedBox(width: 10),
 
-                    // ── 3. Material + quantidade ─────────────────────────
                     Expanded(flex: 3, child: colunaMaterial),
                     const SizedBox(width: 10),
 
-                    // ── 4. Campo / Antes / Depois ─────────────────────────
                     SizedBox(width: _colCampoW, child: colunaCampo),
                     const SizedBox(width: 10),
                     Expanded(flex: 2, child: colunaAntes),
@@ -1456,10 +1352,8 @@ class _LinhaEdicaoState extends State<_LinhaEdicao> {
                     Expanded(flex: 2, child: colunaDepois),
                     const SizedBox(width: 10),
 
-                    // ── 5. Usuário ────────────────────────────────────────
                     _celulaUsuario(log.editorNome, scheme),
 
-                    // ── 6. Hora ───────────────────────────────────────────
                     _celulaHora(log.editadoEm, scheme),
                   ],
                 ),
@@ -1472,8 +1366,6 @@ class _LinhaEdicaoState extends State<_LinhaEdicao> {
   }
 }
 
-/// Linha compacta de material (nome+detalhes em destaque, quantidade em
-/// cinza) usada nos eventos de criação/adição de material.
 Widget _linhaMaterialLogCompacta(Map material) {
   final nome = _nomeMaterialLog(material);
   final qtd = _qtdComUnidadeLog(material);
@@ -1494,8 +1386,6 @@ Widget _linhaMaterialLogCompacta(Map material) {
   );
 }
 
-// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
-// Mesmo padrão usado no cabeçalho das outras páginas do sistema.
 class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;

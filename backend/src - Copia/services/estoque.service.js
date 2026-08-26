@@ -1,0 +1,914 @@
+const prisma = require('../utils/prisma');
+
+function formatUnidade(unidade) {
+  if (!unidade || !unidade.trim()) return '';
+  const u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'UNIDADE': return 'Unidade';
+    case 'M/L':     return 'm/l';
+    case 'M':       return 'm';
+    case 'ML':      return 'ml';
+    case 'M²':
+    case 'M2':      return 'm²';
+    case 'KG':      return 'Kg';
+    case 'G':       return 'g';
+    default:        return unidade;
+  }
+}
+const materialSvc = require('./material.service');
+
+const _includeMovimentacoes = {
+  movimentacoes: {
+    include: {
+      material: {
+        select: {
+          id: true, nome: true, unidade: true,
+          identificador: true, medida: true, espessura: true,
+          largura: true, comprimento: true,
+        },
+      },
+      materialOrigem: {
+        select: { id: true, nome: true },
+      },
+    },
+    orderBy: { criadoEm: 'desc' },
+  },
+};
+
+async function listarEmAndamento(busca) {
+  const where = { status: 'EM_ANDAMENTO' };
+  if (busca) where.numeroOS = { contains: busca, mode: 'insensitive' };
+
+  return prisma.relacaoOS.findMany({
+    where,
+    include: _includeMovimentacoes,
+    orderBy: { atualizadoEm: 'desc' },
+  });
+}
+
+async function buscarPorNumeroOS(numeroOS) {
+  return prisma.relacaoOS.findFirst({
+    where:   { numeroOS },
+    orderBy: { criadoEm: 'desc' },
+    include: _includeMovimentacoes,
+  });
+}
+
+async function resolverRelacaoOSDescritiva(nomeBase) {
+  const _d   = new Date();
+  const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`;
+
+  const relacaoAberta = await prisma.relacaoOS.findFirst({
+    where: {
+      status: 'EM_ANDAMENTO',
+      OR: [
+        { numeroOS: nomeBase },
+        { numeroOS: { startsWith: `${nomeBase}-${hoje}` } },
+      ],
+    },
+    orderBy: { criadoEm: 'asc' },
+  });
+
+  if (relacaoAberta) return relacaoAberta;
+
+  let candidato = `${nomeBase}-${hoje}`;
+  let sufixoSeq = 1;
+
+  while (true) {
+    const existente = await prisma.relacaoOS.findUnique({ where: { numeroOS: candidato } });
+    if (!existente) {
+      return prisma.relacaoOS.create({ data: { numeroOS: candidato, status: 'EM_ANDAMENTO' } });
+    }
+    if (existente.status !== 'FECHADA') return existente;
+    sufixoSeq += 1;
+    candidato = `${nomeBase}-${hoje}-${sufixoSeq}`;
+  }
+}
+
+async function registrarMovimentacao({
+  materialId, tipo, quantidade, numeroOS,
+  precoUnitario, precoM2, observacao, ordemCompraId, descricaoItem,
+  larguraUsada, comprimentoUsado,
+  materialOrigemId,
+  usuarioNome,
+  cliente,
+}) {
+  const material = await prisma.material.findUnique({ where: { id: materialId } });
+  if (!material) throw { status: 404, message: 'Material não encontrado' };
+  
+  const osEhNumerica = /^\d+$/.test(numeroOS);
+  const osTemSufixo  = /#(OC|S|E)/.test(numeroOS);
+  if (osEhNumerica) {
+    const relacaoExistente = await prisma.relacaoOS.findFirst({
+      where: { numeroOS },
+      orderBy: { criadoEm: 'desc' },
+    });
+
+    if (relacaoExistente?.status === 'FECHADA') {
+      throw {
+        status: 400,
+        message: `A OS ${numeroOS} está fechada e não aceita novas movimentações`,
+      };
+    }
+  }
+
+  if (tipo === 'SAIDA') {
+    const saldo = Number(material.quantidade);
+    if (saldo < quantidade) {
+      throw {
+        status: 400,
+        message: `Estoque insuficiente: disponível ${saldo} ${formatUnidade(material.unidade)}`.trim(),
+      };
+    }
+  }
+
+  const delta = tipo === 'ENTRADA' ? quantidade : -quantidade;
+
+  const clienteTrim = (cliente ?? '').trim();
+
+  let relacao;
+
+  if (osEhNumerica || osTemSufixo) {
+    relacao = await prisma.relacaoOS.upsert({
+      where:  { numeroOS },
+      create: { numeroOS, status: 'EM_ANDAMENTO', cliente: clienteTrim || null },
+      update: {},
+    });
+  } else {
+    relacao = await resolverRelacaoOSDescritiva(numeroOS);
+  }
+
+  if (clienteTrim && !relacao.cliente) {
+    relacao = await prisma.relacaoOS.update({
+      where: { id: relacao.id },
+      data:  { cliente: clienteTrim },
+    });
+  }
+  const precoUnitarioFinal = precoUnitario ?? null;
+
+  const _unidadeMat = (material.unidade ?? '').toLowerCase().trim();
+  const _eMetroLinear = ['m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'].includes(_unidadeMat);
+
+  let precoM2Final = precoM2 ?? null;
+  if (
+    tipo === 'SAIDA' &&
+    !_eMetroLinear &&
+    larguraUsada != null && comprimentoUsado != null &&
+    material.largura != null && material.comprimento != null
+  ) {
+    const larg      = Number(larguraUsada);
+    const comp      = Number(comprimentoUsado);
+    const largTotal = Number(material.largura);
+    const compTotal = Number(material.comprimento);
+
+    if (larg > 0 && comp > 0 && largTotal > 0 && compTotal > 0) {
+      const areaUsada = larg * comp;
+      const areaTotal = largTotal * compTotal;
+      const custoM2 = precoM2 != null
+        ? Number(precoM2)
+        : (precoUnitario != null && areaTotal > 0
+            ? Number(precoUnitario) / areaTotal
+            : null);
+      if (custoM2 != null) {
+        precoM2Final = Math.round(custoM2 * areaUsada * 1000000) / 1000000;
+      }
+    }
+  }
+
+  const obsAutomatica = `${tipo === 'SAIDA' ? 'Saída' : 'Entrada'} via controle de estoque – ${usuarioNome ?? 'Usuário'}`;
+  const obsFinal = (observacao && observacao.trim())
+    ? `${obsAutomatica}\n${observacao.trim()}`
+    : obsAutomatica;
+
+  const [movimentacao] = await prisma.$transaction([
+    prisma.movimentacaoEstoque.create({
+      data: {
+        materialId,
+        tipo,
+        quantidade,
+        numeroOS,
+        relacaoOSId:      relacao.id,
+        precoUnitario:    precoUnitarioFinal,
+        precoM2:          precoM2Final,
+        observacao:       obsFinal,
+        ordemCompraId:    ordemCompraId ?? null,
+        descricaoItem:    descricaoItem ?? null,
+        larguraUsada:     (larguraUsada    != null ? Number(larguraUsada)    : null),
+        comprimentoUsado: (comprimentoUsado != null ? Number(comprimentoUsado) : null),
+        materialOrigemId: materialOrigemId ?? null,
+      },
+    }),
+    prisma.material.update({
+      where: { id: materialId },
+      data:  { quantidade: { increment: delta } },
+    }),
+    prisma.relacaoOS.update({
+      where: { id: relacao.id },
+      data:  { atualizadoEm: new Date() },
+    }),
+  ]);
+
+  const atualizado = await prisma.material.findUnique({ where: { id: materialId } });
+  const novoStatus = _calcularStatus(atualizado.quantidade, atualizado.estoqueMinimo, atualizado.ativo);
+  await prisma.material.update({ where: { id: materialId }, data: { status: novoStatus } });
+  materialSvc.notificarSeCritico(material.status, { ...atualizado, status: novoStatus });
+
+  if (
+    tipo === 'SAIDA' &&
+    larguraUsada != null && comprimentoUsado != null &&
+    material.largura != null && material.comprimento != null
+  ) {
+    const larg      = Number(larguraUsada);
+    const comp      = Number(comprimentoUsado);
+    const largTotal = Number(material.largura);
+    const compTotal = Number(material.comprimento);
+
+    if (larg > 0 && comp > 0 && largTotal > 0 && compTotal > 0) {
+      const areaTotal   = largTotal * compTotal;
+      const areaUsada   = larg * comp;
+      const areaRetalho = Math.round((areaTotal - areaUsada) * 10000) / 10000;
+
+      if (areaRetalho > 0.0001) {
+        let retalhoMat = await prisma.material.findFirst({
+          where: {
+            nome:          { equals: material.nome, mode: 'insensitive' },
+            identificador: { equals: 'RETALHO',    mode: 'insensitive' },
+            espessura:     material.espessura
+              ? { equals: material.espessura, mode: 'insensitive' }
+              : null,
+          },
+        });
+
+        const custoM2Retalho = (() => {
+          if (precoM2Final != null && precoM2Final > 0) {
+            const areaUsada = Number(larguraUsada) * Number(comprimentoUsado);
+            if (areaUsada > 0) return precoM2Final / areaUsada;
+          }
+          const pu = precoUnitario != null ? Number(precoUnitario) : null;
+          const areaT = Number(material.largura) * Number(material.comprimento);
+          if (pu != null && pu > 0 && areaT > 0) return pu / areaT;
+          return material.ultimoValorPagoM2 != null ? Number(material.ultimoValorPagoM2) : null;
+        })();
+
+        const obsRetalho =
+          `Retalho de ${areaRetalho} m² gerado pela saída de ${material.nome} (OS ${numeroOS}) – ${usuarioNome ?? 'Usuário'}`;
+
+        if (!retalhoMat) {
+          try {
+            retalhoMat = await prisma.material.create({
+              data: {
+                nome:              material.nome,
+                unidade:           'M²',
+                categoria:         material.categoria   ?? null,
+                medida:            null,
+                espessura:         material.espessura   ?? null,
+                identificador:     'RETALHO',
+                quantidade:        areaRetalho,
+                estoqueMinimo:     0,
+                status:            _calcularStatus(areaRetalho, 0, true),
+                estoqueConfirmado: false,
+                ativo:             true,
+                ultimoValorPago:   null,
+                ultimoValorPagoM2: custoM2Retalho,
+              },
+            });
+          } catch (err) {
+            if (err?.code === 'P2002') {
+              retalhoMat = await prisma.material.findFirst({
+                where: {
+                  nome:      { equals: material.nome, mode: 'insensitive' },
+                  medida:    null,
+                  espessura: material.espessura
+                    ? { equals: material.espessura, mode: 'insensitive' }
+                    : null,
+                },
+              });
+              if (!retalhoMat) throw err;
+              const novaQtd = Number(retalhoMat.quantidade) + areaRetalho;
+              await prisma.material.update({
+                where: { id: retalhoMat.id },
+                data: {
+                  quantidade: novaQtd,
+                  status:     _calcularStatus(novaQtd, Number(retalhoMat.estoqueMinimo), retalhoMat.ativo),
+                },
+              });
+            } else {
+              throw err;
+            }
+          }
+        } else {
+          const novaQtd = Number(retalhoMat.quantidade) + areaRetalho;
+          await prisma.material.update({
+            where: { id: retalhoMat.id },
+            data: {
+              quantidade:        novaQtd,
+              status:            _calcularStatus(novaQtd, Number(retalhoMat.estoqueMinimo), retalhoMat.ativo),
+              ultimoValorPago:   null,
+              ...(custoM2Retalho != null ? { ultimoValorPagoM2: custoM2Retalho } : {}),
+            },
+          });
+        }
+
+        await prisma.movimentacaoEstoque.create({
+          data: {
+            materialId:  retalhoMat.id,
+            tipo:        'ENTRADA',
+            quantidade:  areaRetalho,
+            numeroOS,
+            relacaoOSId: relacao.id,
+            precoM2:     custoM2Retalho ?? undefined,
+            observacao:  obsRetalho,
+          },
+        });
+        await prisma.relacaoOS.update({
+          where: { id: relacao.id },
+          data:  { atualizadoEm: new Date() },
+        });
+      }
+    }
+  }
+
+  return movimentacao;
+}
+
+async function removerMovimentacao(movimentacaoId) {
+  const mov = await prisma.movimentacaoEstoque.findUnique({ where: { id: movimentacaoId } });
+  if (!mov) throw { status: 404, message: 'Movimentação não encontrada' };
+
+  const relacao = await prisma.relacaoOS.findUnique({ where: { id: mov.relacaoOSId } });
+  if (relacao?.status === 'FECHADA') {
+    throw { status: 400, message: 'Não é possível remover movimentações de uma OS fechada' };
+  }
+
+  const material = await prisma.material.findUnique({ where: { id: mov.materialId } });
+
+  const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
+
+  let retalhoParaReverter = null;
+  if (
+    mov.tipo === 'SAIDA' &&
+    mov.larguraUsada != null && mov.comprimentoUsado != null &&
+    material?.largura != null && material?.comprimento != null
+  ) {
+    const larg      = Number(mov.larguraUsada);
+    const comp      = Number(mov.comprimentoUsado);
+    const largTotal = Number(material.largura);
+    const compTotal = Number(material.comprimento);
+
+    if (larg > 0 && comp > 0 && largTotal > 0 && compTotal > 0) {
+      const areaTotal   = largTotal * compTotal;
+      const areaUsada   = larg * comp;
+      const areaRetalho = Math.round((areaTotal - areaUsada) * 10000) / 10000;
+
+      if (areaRetalho > 0.0001) {
+        const retalhoMat = await prisma.material.findFirst({
+          where: {
+            nome:          { equals: material.nome, mode: 'insensitive' },
+            identificador: { equals: 'RETALHO',    mode: 'insensitive' },
+            espessura:     material.espessura
+              ? { equals: material.espessura, mode: 'insensitive' }
+              : null,
+          },
+        });
+        if (retalhoMat) {
+          retalhoParaReverter = { id: retalhoMat.id, areaRetalho };
+        }
+      }
+    }
+  }
+
+  const ehTransferenciaProducao =
+    mov.tipo === 'SAIDA' &&
+    (mov.origemProducao === 'TRANSFERENCIA' ||
+      (mov.numeroOS ?? '').startsWith('TRANSFERENCIA-PRODUCAO'));
+
+  const ehSaidaDeProducao =
+    mov.tipo === 'SAIDA' &&
+    !ehTransferenciaProducao &&
+    (mov.origemProducao === 'BAIXA' ||
+      (mov.origemProducao == null &&
+        /^(Baixa via produção|Baixa do estoque de produção|Baixa da produção)/i.test((mov.observacao ?? '').trim())));
+
+  if (mov.producao == null && (ehTransferenciaProducao || ehSaidaDeProducao)) {
+    const fonte = `${mov.numeroOS ?? ''} ${mov.observacao ?? ''}`;
+    const match = fonte.match(/PRODUCAO ?([12])|produção ([12])/i);
+    mov.producao = match ? (match[1] || match[2]) : '1';
+  }
+
+  await prisma.$transaction([
+    prisma.movimentacaoEstoque.delete({ where: { id: movimentacaoId } }),
+    ...(ehSaidaDeProducao
+      ? []
+      : [prisma.material.update({
+          where: { id: mov.materialId },
+          data:  { quantidade: { increment: delta } },
+        })]),
+    ...(retalhoParaReverter
+      ? [prisma.material.update({
+          where: { id: retalhoParaReverter.id },
+          data:  { quantidade: { decrement: retalhoParaReverter.areaRetalho } },
+        })]
+      : []),
+
+    ...(ehTransferenciaProducao
+      ? [prisma.estoqueProducao.updateMany({
+          where: { materialId: mov.materialId, producao: mov.producao },
+          data:  { quantidade: { decrement: Number(mov.quantidade) } },
+        }),
+         prisma.movimentacaoProducao.create({
+          data: {
+            materialId:  mov.materialId,
+            tipo:       'BAIXA',
+            quantidade:  Number(mov.quantidade),
+            producao:    mov.producao,
+            observacao:  `Estorno: transferência para o estoque normal (OS de transferência para produção ${mov.producao} removida)`,
+            usuarioNome: null,
+          },
+        })]
+      : []),
+
+    ...(ehSaidaDeProducao
+      ? [prisma.estoqueProducao.upsert({
+          where:  { materialId_producao: { materialId: mov.materialId, producao: mov.producao } },
+          create: { materialId: mov.materialId, producao: mov.producao, quantidade: Number(mov.quantidade) },
+          update: { quantidade: { increment: Number(mov.quantidade) } },
+        }),
+         prisma.movimentacaoProducao.create({
+          data: {
+            materialId:  mov.materialId,
+            tipo:        'TRANSFERENCIA',
+            quantidade:  Number(mov.quantidade),
+            producao:    mov.producao,
+            numeroOS:    mov.numeroOS ?? null,
+            observacao:  `Estorno automático: baixa da produção ${mov.producao} removida do controle de estoque`,
+            usuarioNome: null,
+          },
+        })]
+      : []),
+  ]);
+
+  if (ehTransferenciaProducao) {
+    const ep = await prisma.estoqueProducao.findUnique({
+      where: { materialId_producao: { materialId: mov.materialId, producao: mov.producao } },
+    });
+    if (ep && Number(ep.quantidade) < 0) {
+      await prisma.estoqueProducao.update({
+        where: { materialId_producao: { materialId: mov.materialId, producao: mov.producao } },
+        data:  { quantidade: 0 },
+      });
+    }
+  }
+
+  const mat      = await prisma.material.findUnique({ where: { id: mov.materialId } });
+  const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
+  await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
+  materialSvc.notificarSeCritico(material.status, { ...mat, status: novoStatus });
+
+  if (retalhoParaReverter) {
+    const retalhoMatAntes = await prisma.material.findUnique({ where: { id: retalhoParaReverter.id } });
+    const qtdFinal = Math.max(0, Number(retalhoMatAntes.quantidade));
+    const statusRetalho = _calcularStatus(qtdFinal, Number(retalhoMatAntes.estoqueMinimo), retalhoMatAntes.ativo);
+    await prisma.material.update({
+      where: { id: retalhoParaReverter.id },
+      data:  { quantidade: qtdFinal, status: statusRetalho },
+    });
+    materialSvc.notificarSeCritico(retalhoMatAntes.status, { ...retalhoMatAntes, quantidade: qtdFinal, status: statusRetalho });
+  }
+
+  const count = await prisma.movimentacaoEstoque.count({ where: { relacaoOSId: relacao.id } });
+  if (count === 0) {
+    await prisma.relacaoOS.delete({ where: { id: relacao.id } });
+    return { relacaoExcluida: true };
+  }
+
+  await prisma.relacaoOS.update({
+    where: { id: relacao.id },
+    data:  { atualizadoEm: new Date() },
+  });
+
+  return { relacaoExcluida: false };
+}
+
+async function excluirRelacaoOS(relacaoOSId) {
+  const relacao = await prisma.relacaoOS.findUnique({
+    where:   { id: relacaoOSId },
+    include: { movimentacoes: { include: { material: true } } },
+  });
+  if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
+  if (relacao.status === 'FECHADA') {
+    throw { status: 400, message: 'Não é possível excluir uma OS fechada' };
+  }
+
+  const estornoProducaoTransferencia = new Map();
+  const estornoProducaoBaixa         = new Map();
+
+  for (const mov of relacao.movimentacoes) {
+    const delta = mov.tipo === 'ENTRADA' ? -Number(mov.quantidade) : Number(mov.quantidade);
+
+    const ehTransferenciaProducao =
+      mov.tipo === 'SAIDA' &&
+      (mov.origemProducao === 'TRANSFERENCIA' ||
+        (mov.numeroOS ?? '').startsWith('TRANSFERENCIA-PRODUCAO'));
+
+    const ehSaidaDeProducao =
+      mov.tipo === 'SAIDA' &&
+      !ehTransferenciaProducao &&
+      (mov.origemProducao === 'BAIXA' ||
+        (mov.origemProducao == null &&
+          /^(Baixa via produção|Baixa do estoque de produção|Baixa da produção)/i.test((mov.observacao ?? '').trim())));
+
+    let producaoMov = mov.producao;
+    if (producaoMov == null && (ehTransferenciaProducao || ehSaidaDeProducao)) {
+      const fonte = `${mov.numeroOS ?? ''} ${mov.observacao ?? ''}`;
+      const match = fonte.match(/PRODUCAO ?([12])|produção ([12])/i);
+      producaoMov = match ? (match[1] || match[2]) : '1';
+    }
+
+    const statusAntes = mov.material?.status
+      ?? (await prisma.material.findUnique({ where: { id: mov.materialId } }))?.status;
+
+    if (!ehSaidaDeProducao) {
+      await prisma.material.update({
+        where: { id: mov.materialId },
+        data:  { quantidade: { increment: delta } },
+      });
+      const mat = await prisma.material.findUnique({ where: { id: mov.materialId } });
+      const novoStatus = _calcularStatus(mat.quantidade, mat.estoqueMinimo, mat.ativo);
+      await prisma.material.update({ where: { id: mov.materialId }, data: { status: novoStatus } });
+      materialSvc.notificarSeCritico(statusAntes, { ...mat, status: novoStatus });
+    }
+
+    if (ehTransferenciaProducao) {
+      const chave = `${mov.materialId}:${producaoMov}`;
+      const acumulado = estornoProducaoTransferencia.get(chave) ?? { materialId: mov.materialId, producao: producaoMov, qtd: 0 };
+      acumulado.qtd += Number(mov.quantidade);
+      estornoProducaoTransferencia.set(chave, acumulado);
+    }
+
+    if (ehSaidaDeProducao) {
+      const chave = `${mov.materialId}:${producaoMov}`;
+      const acumulado = estornoProducaoBaixa.get(chave) ?? { materialId: mov.materialId, producao: producaoMov, qtd: 0 };
+      acumulado.qtd += Number(mov.quantidade);
+      estornoProducaoBaixa.set(chave, acumulado);
+    }
+  }
+
+  await prisma.movimentacaoEstoque.deleteMany({ where: { relacaoOSId: relacao.id } });
+  await prisma.relacaoOS.delete({ where: { id: relacao.id } });
+
+  for (const { materialId, producao, qtd: qtdEstorno } of estornoProducaoTransferencia.values()) {
+    await prisma.estoqueProducao.updateMany({
+      where: { materialId, producao },
+      data:  { quantidade: { decrement: qtdEstorno } },
+    });
+    await prisma.movimentacaoProducao.create({
+      data: {
+        materialId,
+        tipo:       'BAIXA',
+        quantidade: qtdEstorno,
+        producao,
+        observacao: `Estorno automático: OS de transferência para produção ${producao} excluída do controle de estoque`,
+        usuarioNome: null,
+      },
+    });
+    const ep = await prisma.estoqueProducao.findUnique({ where: { materialId_producao: { materialId, producao } } });
+    if (ep && Number(ep.quantidade) < 0) {
+      await prisma.estoqueProducao.update({
+        where: { materialId_producao: { materialId, producao } },
+        data:  { quantidade: 0 },
+      });
+    }
+  }
+
+  for (const { materialId, producao, qtd: qtdDevolver } of estornoProducaoBaixa.values()) {
+    await prisma.estoqueProducao.upsert({
+      where:  { materialId_producao: { materialId, producao } },
+      create: { materialId, producao, quantidade: qtdDevolver },
+      update: { quantidade: { increment: qtdDevolver } },
+    });
+    await prisma.movimentacaoProducao.create({
+      data: {
+        materialId,
+        tipo:       'TRANSFERENCIA',
+        quantidade: qtdDevolver,
+        producao,
+        observacao: `Estorno automático: OS excluída do controle de estoque (baixa da produção ${producao})`,
+        usuarioNome: null,
+      },
+    });
+  }
+}
+
+async function fecharOS(relacaoOSId, fechadoPorNome) {
+  const relacao = await prisma.relacaoOS.findUnique({
+    where:   { id: relacaoOSId },
+    include: { movimentacoes: { include: { material: { select: { nome: true } } } } },
+  });
+  if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
+  if (relacao.status === 'FECHADA') {
+    throw { status: 400, message: 'Esta OS já está fechada' };
+  }
+
+  // A validação de baixa pendente de materiais vindos de ordem de compra só
+  // se aplica a OS numéricas (as "reais", vinculadas a pedidos de produção).
+  // OS textuais são relações descritivas/administrativas e podem ser
+  // finalizadas mesmo com saldo de entrada de OC ainda não baixado.
+  const osEhNumerica = /^\d+$/.test(relacao.numeroOS);
+
+  if (osEhNumerica) {
+    const saldosPorMaterial = new Map();
+    for (const mov of relacao.movimentacoes) {
+      if (mov.tipo === 'ENTRADA' && mov.ordemCompraId != null) {
+        const atual = saldosPorMaterial.get(mov.materialId) ?? { nome: mov.material?.nome ?? 'Material', saldo: 0 };
+        atual.saldo += Number(mov.quantidade);
+        saldosPorMaterial.set(mov.materialId, atual);
+      } else if (mov.tipo === 'SAIDA' && saldosPorMaterial.has(mov.materialId)) {
+        const atual = saldosPorMaterial.get(mov.materialId);
+        atual.saldo -= Number(mov.quantidade);
+      }
+    }
+
+    const pendentes = [...saldosPorMaterial.values()].filter((m) => m.saldo > 0.0001);
+    if (pendentes.length > 0) {
+      const listaNomes = pendentes.map((m) => m.nome).join(', ');
+      throw {
+        status: 400,
+        message: `Não é possível finalizar: os materiais a seguir vieram de uma ordem de compra e ainda não tiveram saída registrada: ${listaNomes}. Dê baixa nesses materiais antes de finalizar a OS.`,
+      };
+    }
+  }
+
+  return prisma.relacaoOS.update({
+    where:   { id: relacaoOSId },
+    data:    { status: 'FECHADA', fechadoPorNome: fechadoPorNome ?? null },
+    include: _includeMovimentacoes,
+  });
+}
+
+function _calcularStatus(quantidade, estoqueMinimo, ativo) {
+  if (!ativo) return 'INATIVO';
+  const q   = Number(quantidade);
+  const min = Number(estoqueMinimo);
+  if (q > min) return 'OK';
+  if (q === min) return 'LIMITE';
+  return 'CRITICO';
+}
+
+async function listarTodas(filtros = {}) {
+  const {
+    busca, status, cliente,
+    material, identificador, medida, comprimento, largura, espessura,
+    dataInicio, dataFim,
+    ordenarPor, direcao,
+    apenasNumericas, apenasTextuais,
+    pagina = 1, porPagina = 50,
+  } = filtros;
+
+  const where = {};
+  if (busca)  where.numeroOS = { contains: busca, mode: 'insensitive' };
+  if (status === 'EM_ANDAMENTO' || status === 'FECHADA') where.status = status;
+  if (cliente) where.cliente = { contains: cliente, mode: 'insensitive' };
+
+  if (dataInicio || dataFim) {
+    where.criadoEm = {};
+    if (dataInicio) where.criadoEm.gte = new Date(`${dataInicio}T00:00:00`);
+    if (dataFim)    where.criadoEm.lte = new Date(`${dataFim}T23:59:59.999`);
+  }
+
+  const materialWhere = {};
+  if (material)      materialWhere.nome         = { contains: material, mode: 'insensitive' };
+  if (identificador)  materialWhere.identificador = { contains: identificador, mode: 'insensitive' };
+  if (medida)         materialWhere.medida        = { contains: medida, mode: 'insensitive' };
+  if (espessura)       materialWhere.espessura     = { contains: espessura, mode: 'insensitive' };
+  if (comprimento)     materialWhere.comprimento   = { equals: Number(comprimento) };
+  if (largura)          materialWhere.largura       = { equals: Number(largura) };
+  if (Object.keys(materialWhere).length > 0) {
+    where.movimentacoes = { some: { material: { is: materialWhere } } };
+  }
+
+  const orderBy =
+    ordenarPor === 'criacao' ? { criadoEm: direcao === 'asc' ? 'asc' : 'desc' } :
+    ordenarPor === 'numero'  ? { numeroOS: direcao === 'asc' ? 'asc' : 'desc' } :
+    /* recente (default) */    { atualizadoEm: direcao === 'asc' ? 'asc' : 'desc' };
+
+  // numeroOS é String no schema do Prisma — não há um filtro portátil para
+  // "contém só dígitos" sem regex nativo do banco (que varia por dialeto).
+  // Como a distinção numérica/textual é só para separar o agrupamento visual
+  // (grade "Ordens de Serviço" vs. cards de categoria "Outros"), e o volume
+  // de OS textuais tende a ser pequeno perto do de numéricas, resolvemos com
+  // um filtro em memória sobre o resultado já filtrado pelo `where` — sem
+  // reintroduzir o problema original (que era carregar TODAS as OS,
+  // numéricas e textuais, com todas as movimentações, sem filtro nenhum).
+  if (apenasNumericas || apenasTextuais) {
+    const todos = await prisma.relacaoOS.findMany({ where, include: _includeMovimentacoes, orderBy });
+    const numericoRegex = /^\s*\d+\s*$/;
+    const filtrados = todos.filter((r) =>
+      apenasNumericas ? numericoRegex.test(r.numeroOS) : !numericoRegex.test(r.numeroOS));
+    const total = filtrados.length;
+    const take = Number(porPagina) || 50;
+    const skip = (Number(pagina) - 1) * take;
+    // Textuais alimentam o agrupamento por categoria na tela, que precisa
+    // do conjunto completo — não paginamos essa metade.
+    const data = apenasTextuais ? filtrados : filtrados.slice(skip, skip + take);
+    return { data, total };
+  }
+
+  const take = Number(porPagina) || 50;
+  const skip = (Number(pagina) - 1) * take;
+
+  const [data, total] = await Promise.all([
+    prisma.relacaoOS.findMany({
+      where,
+      include: _includeMovimentacoes,
+      orderBy,
+      take,
+      skip,
+    }),
+    prisma.relacaoOS.count({ where }),
+  ]);
+
+  return { data, total };
+}
+
+/**
+ * Lista movimentações "achatadas" (com a relaçãoOS embutida), paginada e
+ * filtrável no nível da própria movimentação — usada pela tela de Histórico,
+ * que antes carregava todas as OS com todas as movimentações via
+ * listarTodas() e filtrava tudo no client.
+ */
+async function listarMovimentacoes(filtros = {}) {
+  const {
+    numeroOS, material, identificador, medida, comprimento, largura, espessura,
+    tipo, dataInicio, dataFim,
+    pagina = 1, porPagina = 100,
+  } = filtros;
+
+  const where = {};
+
+  if (numeroOS) where.numeroOS = { contains: numeroOS, mode: 'insensitive' };
+  if (tipo === 'ENTRADA' || tipo === 'SAIDA') where.tipo = tipo;
+
+  if (dataInicio || dataFim) {
+    where.criadoEm = {};
+    if (dataInicio) where.criadoEm.gte = new Date(`${dataInicio}T00:00:00`);
+    if (dataFim)    where.criadoEm.lte = new Date(`${dataFim}T23:59:59.999`);
+  }
+
+  const materialWhere = {};
+  if (material)       materialWhere.nome           = { contains: material, mode: 'insensitive' };
+  if (identificador)  materialWhere.identificador   = { contains: identificador, mode: 'insensitive' };
+  if (medida)         materialWhere.medida          = { contains: medida, mode: 'insensitive' };
+  if (espessura)      materialWhere.espessura       = { contains: espessura, mode: 'insensitive' };
+  if (comprimento)    materialWhere.comprimento     = { equals: Number(comprimento) };
+  if (largura)        materialWhere.largura         = { equals: Number(largura) };
+  if (Object.keys(materialWhere).length > 0) where.material = { is: materialWhere };
+
+  const take = Number(porPagina) || 100;
+  const skip = (Number(pagina) - 1) * take;
+
+  const [data, total] = await Promise.all([
+    prisma.movimentacaoEstoque.findMany({
+      where,
+      include: {
+        material: {
+          select: {
+            id: true, nome: true, unidade: true,
+            identificador: true, medida: true, espessura: true,
+            largura: true, comprimento: true,
+          },
+        },
+        materialOrigem: { select: { id: true, nome: true } },
+        relacaoOS:       { select: { id: true, numeroOS: true, cliente: true, status: true } },
+      },
+      orderBy: { criadoEm: 'desc' },
+      take,
+      skip,
+    }),
+    prisma.movimentacaoEstoque.count({ where }),
+  ]);
+
+  return { data, total };
+}
+
+async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, precoM2 }, usuario) {
+  const mov = await prisma.movimentacaoEstoque.findUnique({
+    where:   { id: movimentacaoId },
+    include: { relacaoOS: true },
+  });
+  if (!mov) throw { status: 404, message: 'Movimentação não encontrada' };
+  if (mov.relacaoOS?.status === 'FECHADA') {
+    throw { status: 400, message: 'Não é possível editar movimentações de uma OS fechada' };
+  }
+
+  const data = {};
+  if (precoUnitario !== undefined) data.precoUnitario = precoUnitario != null && Number(precoUnitario) > 0 ? Number(precoUnitario) : null;
+  if (precoM2       !== undefined) data.precoM2       = precoM2       != null && Number(precoM2)       > 0 ? Number(precoM2)       : null;
+
+  if (Object.keys(data).length === 0) {
+    throw { status: 400, message: 'Nenhum campo de preço informado' };
+  }
+
+  const _fmt = (v) => v != null ? `R$ ${Number(v).toFixed(6)}` : null;
+
+  const auditEntries = [];
+
+  if ('precoUnitario' in data) {
+    auditEntries.push({
+      materialId:  mov.materialId,
+      acao:        'CUSTO_MANUAL',
+      campo:       'Custo unit. (mov.)',
+      valorAntes:  _fmt(mov.precoUnitario),
+      valorDepois: _fmt(data.precoUnitario),
+      usuarioId:   usuario?.id   ?? null,
+      usuarioNome: usuario?.nome ?? null,
+    });
+  }
+
+  if ('precoM2' in data) {
+    auditEntries.push({
+      materialId:  mov.materialId,
+      acao:        'CUSTO_MANUAL',
+      campo:       'Custo m² (mov.)',
+      valorAntes:  _fmt(mov.precoM2),
+      valorDepois: _fmt(data.precoM2),
+      usuarioId:   usuario?.id   ?? null,
+      usuarioNome: usuario?.nome ?? null,
+    });
+  }
+
+  const [movimentacaoAtualizada] = await prisma.$transaction([
+    prisma.movimentacaoEstoque.update({
+      where: { id: movimentacaoId },
+      data,
+      include: {
+        material: {
+          select: {
+            id: true, nome: true, unidade: true,
+            identificador: true, medida: true, espessura: true,
+          },
+        },
+      },
+    }),
+    ...auditEntries.map((entry) => prisma.auditLogMaterial.create({ data: entry })),
+    prisma.relacaoOS.update({
+      where: { id: mov.relacaoOSId },
+      data:  { atualizadoEm: new Date() },
+    }),
+  ]);
+
+  return movimentacaoAtualizada;
+}
+
+async function renomearOS(id, novoNumeroOS, novoCliente) {
+  const novoNome = (novoNumeroOS ?? '').trim().toUpperCase();
+  if (!novoNome) throw { status: 400, message: 'Nome da OS não pode ser vazio' };
+
+  const relacao = await prisma.relacaoOS.findUnique({ where: { id } });
+  if (!relacao) throw { status: 404, message: 'OS não encontrada' };
+
+  const conflito = await prisma.relacaoOS.findUnique({ where: { numeroOS: novoNome } });
+  if (conflito && conflito.id !== id) {
+    throw { status: 409, message: `Já existe uma OS com o nome "${novoNome}"` };
+  }
+
+  const clienteData = novoCliente === undefined
+    ? {}
+    : { cliente: novoCliente.trim() === '' ? null : novoCliente.trim() };
+
+  const atualizada = await prisma.relacaoOS.update({
+    where: { id },
+    data:  { numeroOS: novoNome, ...clienteData },
+    include: _includeMovimentacoes,
+  });
+
+  await prisma.movimentacaoEstoque.updateMany({
+    where: { relacaoOSId: id },
+    data:  { numeroOS: novoNome },
+  });
+
+  return atualizada;
+}
+
+async function buscarClientePorNumeroOS(numeroOS) {
+  const relacao = await prisma.relacaoOS.findFirst({
+    where:   { numeroOS },
+    orderBy: { criadoEm: 'desc' },
+    select:  { cliente: true },
+  });
+  return relacao?.cliente ?? null;
+}
+
+module.exports = {
+  listarEmAndamento,
+  buscarPorNumeroOS,
+  registrarMovimentacao,
+  removerMovimentacao,
+  excluirRelacaoOS,
+  fecharOS,
+  listarTodas,
+  listarMovimentacoes,
+  renomearOS,
+  atualizarPrecoMovimentacao,
+  resolverRelacaoOSDescritiva,
+  buscarClientePorNumeroOS,
+};

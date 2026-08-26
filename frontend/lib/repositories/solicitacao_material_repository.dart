@@ -4,7 +4,6 @@ import 'package:http/http.dart' as http;
 import '../models/solicitacao_material_model.dart';
 import '../utils/api_client.dart';
 
-/// Resultado da checagem de existência de uma OS.
 class VerificacaoOSResult {
   final bool existe;
   final int? id;
@@ -32,7 +31,6 @@ class VerificacaoOSResult {
 }
 
 class SolicitacaoMaterialRepository {
-  // ── Listar ────────────────────────────────────────────────────────────────
   Future<List<SolicitacaoMaterialModel>> listar({
     String? busca,
     String? andamento,
@@ -73,15 +71,11 @@ class SolicitacaoMaterialRepository {
         .toList();
   }
 
-  // ── Buscar por ID ─────────────────────────────────────────────────────────
   Future<SolicitacaoMaterialModel> buscarPorId(int id) async {
     final data = await ApiClient.get('/solicitacoes-material/$id');
     return SolicitacaoMaterialModel.fromJson(data);
   }
 
-  // ── Verificar se já existe uma solicitação para esse número de OS ──────────
-  // [ignorarId]: usado na tela de edição, para não acusar conflito com a
-  // própria solicitação que está sendo editada.
   Future<VerificacaoOSResult> verificarOSExiste(
     String numeroOS, {
     int? ignorarId,
@@ -97,7 +91,6 @@ class SolicitacaoMaterialRepository {
     return VerificacaoOSResult.fromJson(data);
   }
 
-  // ── Criar (multipart — múltiplos itens com imagens opcionais) ─────────────
   Future<SolicitacaoMaterialModel> criar(
     Map<String, dynamic> dados, {
     List<Map<String, dynamic>> itens = const [],
@@ -113,7 +106,6 @@ class SolicitacaoMaterialRepository {
     return SolicitacaoMaterialModel.fromJson(data);
   }
 
-  // ── Atualizar cabeçalho (somente ADMIN) ───────────────────────────────────
   Future<SolicitacaoMaterialModel> atualizar(
     int id,
     Map<String, dynamic> dados,
@@ -122,7 +114,6 @@ class SolicitacaoMaterialRepository {
     return SolicitacaoMaterialModel.fromJson(data);
   }
 
-  // ── Adicionar materiais extras ─────────────────────────────────────────────
   Future<SolicitacaoMaterialModel> adicionarMateriais(
     int solicitacaoId, {
     required List<Map<String, dynamic>> itens,
@@ -138,7 +129,6 @@ class SolicitacaoMaterialRepository {
     return SolicitacaoMaterialModel.fromJson(data);
   }
 
-  // ── Marcar item original como comprado ────────────────────────────────────
   Future<ItemSolicitacaoModel> marcarItemComprado(
     int itemId, {
     required bool comprado,
@@ -150,7 +140,6 @@ class SolicitacaoMaterialRepository {
     return ItemSolicitacaoModel.fromJson(data);
   }
 
-  // ── Marcar adicional como comprado ────────────────────────────────────────
   Future<AdicionalSolicitacaoModel> marcarAdicionalComprado(
     int adicionalId, {
     required bool comprado,
@@ -162,7 +151,6 @@ class SolicitacaoMaterialRepository {
     return AdicionalSolicitacaoModel.fromJson(data);
   }
 
-  // ── Marcar item original como retirado do estoque ──────────────────────────
   Future<ItemSolicitacaoModel> marcarItemEstoque(
     int itemId, {
     required bool estoque,
@@ -174,7 +162,6 @@ class SolicitacaoMaterialRepository {
     return ItemSolicitacaoModel.fromJson(data);
   }
 
-  // ── Marcar adicional como retirado do estoque ───────────────────────────────
   Future<AdicionalSolicitacaoModel> marcarAdicionalEstoque(
     int adicionalId, {
     required bool estoque,
@@ -186,7 +173,6 @@ class SolicitacaoMaterialRepository {
     return AdicionalSolicitacaoModel.fromJson(data);
   }
 
-  // ── Editar quantidade/observação de um item original ──────────────────────
   Future<ItemSolicitacaoModel> atualizarItem(
     int itemId, {
     required double quantidade,
@@ -199,7 +185,6 @@ class SolicitacaoMaterialRepository {
     return ItemSolicitacaoModel.fromJson(data);
   }
 
-  // ── Editar quantidade/observação de um adicional ──────────────────────────
   Future<AdicionalSolicitacaoModel> atualizarAdicional(
     int adicionalId, {
     required double quantidade,
@@ -212,22 +197,18 @@ class SolicitacaoMaterialRepository {
     return AdicionalSolicitacaoModel.fromJson(data);
   }
 
-  // ── Excluir um item original ───────────────────────────────────────────────
   Future<void> excluirItem(int itemId) async {
     await ApiClient.delete('/solicitacoes-material/itens/$itemId');
   }
 
-  // ── Excluir um adicional ───────────────────────────────────────────────────
   Future<void> excluirAdicional(int adicionalId) async {
     await ApiClient.delete('/solicitacoes-material/adicionais/$adicionalId');
   }
 
-  // ── Excluir ───────────────────────────────────────────────────────────────
   Future<void> excluir(int id) async {
     await ApiClient.delete('/solicitacoes-material/$id');
   }
 
-  // ── Logs de edição ────────────────────────────────────────────────────────
   Future<List<LogEdicaoSolicitacaoModel>> listarLogs(int solicitacaoId) async {
     final list = await ApiClient.getList(
       '/solicitacoes-material/$solicitacaoId/logs',
@@ -238,7 +219,6 @@ class SolicitacaoMaterialRepository {
         .toList();
   }
 
-  // ── Helper: multipart com lista de itens e imagens por índice ─────────────
   Future<Map<String, dynamic>> _enviarMultipartComItens(
     String method,
     String path,
@@ -256,15 +236,12 @@ class SolicitacaoMaterialRepository {
       request.headers['Authorization'] = 'Bearer $token';
     }
 
-    // Campos escalares
     campos.forEach((key, value) {
       if (value != null) request.fields[key] = value.toString();
     });
 
-    // Itens como JSON string
     request.fields['itens'] = jsonEncode(itens);
 
-    // Imagens por índice: campo "imagens[N]"
     for (final entry in imagensPorIndice.entries) {
       request.files.add(
         await http.MultipartFile.fromPath(

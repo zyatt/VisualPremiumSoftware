@@ -86,6 +86,11 @@ function _mapearMaterial(m) {
     .filter((p) => p > 0)
     .sort((a, b) => a - b);
 
+  const precosUnidadeMedida = m.fornecedorMateriais
+    .map((fm) => Number(fm.precoUnidadeMedida))
+    .filter((p) => p > 0)
+    .sort((a, b) => a - b);
+
   const media = (arr) => {
     if (!arr.length) return null;
     return arr.reduce((a, b) => a + b, 0) / arr.length;
@@ -93,10 +98,11 @@ function _mapearMaterial(m) {
 
   return {
     ...m,
-    precoMediano:         media(precos),
-    precoM2Mediano:       media(precosM2),
-    custoUltimaCompra:    _normalizarPreco(m.ultimoValorPago),
-    custoM2UltimaCompra:  _normalizarPreco(m.ultimoValorPagoM2),
+    precoMediano:              media(precos),
+    precoM2Mediano:            media(precosM2),
+    precoUnidadeMedidaMediano: media(precosUnidadeMedida),
+    custoUltimaCompra:         _normalizarPreco(m.ultimoValorPago),
+    custoM2UltimaCompra:       _normalizarPreco(m.ultimoValorPagoM2),
   };
 }
 
@@ -130,14 +136,21 @@ function _montarWhere(filtros = {}) {
     const espessuraNum = espessura.replace(',', '.').match(/[\d.]+/)?.[0];
     where.espessura = { contains: espessuraNum ?? espessura, mode: 'insensitive' };
   }
-  if (largura !== undefined && largura !== '')     where.largura     = Number(largura);
-  if (comprimento !== undefined && comprimento !== '') where.comprimento = Number(comprimento);
+  if (largura !== undefined && largura !== '') {
+    const larguraNum = Number(largura);
+    if (!Number.isNaN(larguraNum)) where.largura = larguraNum;
+  }
+  if (comprimento !== undefined && comprimento !== '') {
+    const comprimentoNum = Number(comprimento);
+    if (!Number.isNaN(comprimentoNum)) where.comprimento = comprimentoNum;
+  }
   if (semCategoria === 'true') {
     where.categoria = null;
   } else if (categoria) {
     where.categoria = { equals: categoria, mode: 'insensitive' };
   }
-  if (status)              where.status = status;
+  const _statusValidos = new Set(['OK', 'LIMITE', 'CRITICO', 'INATIVO']);
+  if (status && _statusValidos.has(status)) where.status = status;
   if (comFornecedor === 'true') {
     where.fornecedorMateriais = { some: { ativo: true } };
   }
@@ -244,7 +257,15 @@ async function listarPaginado(filtros = {}) {
 }
 
 async function listarParaMovimentacao(filtros = {}) {
-  return listar({ ...filtros, ativo: 'true' });
+  const { pagina = 1, porPagina = 50 } = filtros;
+  return listarPaginado({
+    ...filtros,
+    ativo:      'true',
+    pagina,
+    porPagina,
+    ordenarPor: filtros.ordenarPor ?? 'nome',
+    direcao:    filtros.direcao,
+  });
 }
 
 async function buscarPorId(id) {
@@ -267,11 +288,7 @@ async function buscarPorId(id) {
 
   if (!m) return null;
 
-  return {
-    ...m,
-    custoUltimaCompra:   _normalizarPreco(m.ultimoValorPago),
-    custoM2UltimaCompra: _normalizarPreco(m.ultimoValorPagoM2),
-  };
+  return _mapearMaterial(m);
 }
 
 async function criar(data, usuarioId, usuarioNome) {
@@ -544,11 +561,12 @@ async function atualizarCustoManual(id, data, usuarioId, usuarioNome) {
 
   _broadcast('material_atualizado', { motivo: 'custo', materialId: id }, usuarioId);
 
-  return {
-    ...result,
-    custoUltimaCompra:   _normalizarPreco(result.ultimoValorPago),
-    custoM2UltimaCompra: _normalizarPreco(result.ultimoValorPagoM2),
-  };
+  const resultCompleto = await prisma.material.findUnique({
+    where: { id },
+    include: _includeFornecedores,
+  });
+
+  return _mapearMaterial(resultCompleto);
 }
 
 module.exports = {

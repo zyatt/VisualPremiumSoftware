@@ -14,8 +14,6 @@ class InicioPage extends StatelessWidget {
     final scheme    = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
-    // Gera os cards a partir da mesma fonte de verdade da sidebar —
-    // qualquer alteração em AppShell.getMenuForRole() reflete aqui automaticamente.
     final menuItems = AppShell.getMenuForRole(usuario?.role);
 
     return Scaffold(
@@ -58,8 +56,6 @@ class InicioPage extends StatelessWidget {
     );
   }
 }
-
-// ── Card individual ───────────────────────────────────────────────────────────
 
 class _DashCard extends StatelessWidget {
   final IconData    icon;

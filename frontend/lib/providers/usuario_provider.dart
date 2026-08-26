@@ -6,9 +6,6 @@ import '../utils/api_client.dart';
 import 'solicitacao_material_provider.dart';
 import 'chat_provider.dart';
 
-/// Converte exceções técnicas (SocketException, ClientException, TimeoutException
-/// etc.) em uma mensagem amigável para o usuário. Mensagens de erro vindas do
-/// próprio servidor (ex: "Credenciais inválidas") são mantidas como estão.
 String _mensagemErro(Object e) {
   final texto = e.toString();
   if (texto.contains('SocketException') ||
@@ -33,10 +30,6 @@ class UsuarioProvider extends ChangeNotifier {
   void setOrcamentoProvider(OrcamentoProvider p) => _orcamentoProvider = p;
   void setSolicitacaoMaterialProvider(SolicitacaoMaterialProvider p) =>
       _solicitacaoMaterialProvider = p;
-  /// Liga o ChatProvider global a este provider, para que login/logout/troca
-  /// de usuário controlem diretamente o ciclo de vida da conexão de chat
-  /// (SSE + heartbeat + lista de usuários), em vez de depender da ChatPage
-  /// ter sido aberta pelo menos uma vez.
   void setChatProvider(ChatProvider p) => _chatProvider = p;
 
   UsuarioModel? _usuarioLogado;
@@ -55,24 +48,19 @@ class UsuarioProvider extends ChangeNotifier {
   String? get erro => _erro;
 
   List<UsuarioModel> _usuariosSalvos = [];
-  /// Usuários que já logaram nesta máquina (para troca rápida).
   List<UsuarioModel> get usuariosSalvos => _usuariosSalvos;
 
-  /// Atualiza a lista de usuários salvos; chamado na inicialização e após login.
   Future<void> _refreshUsuariosSalvos() async {
     _usuariosSalvos = await _repo.getUsuariosSalvos();
   }
 
-  // Chamado em main() antes de runApp — tenta restaurar sessão salva
   Future<void> restaurarSessao() async {
     await _refreshUsuariosSalvos();
     try {
       final sessao = await _repo.carregarSessao();
       if (sessao != null) {
-        // Seta o token salvo para poder chamar /auth/refresh
         ApiClient.setToken(sessao.token);
         try {
-          // Renova o token (útil para usuários que tinham token com expiresIn antigo)
           final data = await ApiClient.post('/auth/refresh', {});
           final novoToken = data['token'] as String;
           _token         = novoToken;
@@ -82,7 +70,6 @@ class UsuarioProvider extends ChangeNotifier {
           await _orcamentoProvider?.trocarUsuario(_usuarioLogado!.id, _usuarioLogado!.nome);
           await _chatProvider?.inicializar(_usuarioLogado!.id, novoToken);
         } catch (_) {
-          // Token rejeitado pelo servidor — limpa e vai para login
           _token         = null;
           _usuarioLogado = null;
           ApiClient.setToken(null);
@@ -91,7 +78,6 @@ class UsuarioProvider extends ChangeNotifier {
         }
       }
     } catch (_) {
-      // Sessão corrompida — ignora e segue para login
       await _repo.limparSessao();
     } finally {
       _restaurando = false;
@@ -99,7 +85,6 @@ class UsuarioProvider extends ChangeNotifier {
     }
   }
 
-  /// Remove um usuário salvo da lista de troca rápida (não afeta o usuário no servidor).
   Future<void> removerUsuarioSalvo(UsuarioModel usuario) async {
     await _repo.removerUsuarioSalvo(usuario.id);
     await _refreshUsuariosSalvos();
@@ -111,8 +96,6 @@ class UsuarioProvider extends ChangeNotifier {
     _erro       = null;
     notifyListeners();
     try {
-      // Garante que não existe SSE/estado residual de uma sessão anterior
-      // antes de autenticar o novo usuário.
       await _solicitacaoMaterialProvider?.resetarConexao();
       _chatProvider?.limparToken();
       final result   = await _repo.login(username, senha);
@@ -140,29 +123,15 @@ class UsuarioProvider extends ChangeNotifier {
     await _repo.limparSessao();
     _orcamentoProvider?.trocarUsuario(null);
     _chatProvider?.limparToken();
-    // Encerra a conexão SSE e zera o estado de solicitações do usuário que
-    // saiu, para que o próximo usuário a logar comece do zero.
     await _solicitacaoMaterialProvider?.resetarConexao();
     notifyListeners();
   }
 
-  /// Troca diretamente para outro usuário que já logou nesta máquina,
-  /// sem precisar de senha. Requer que haja um token ativo no momento.
   Future<bool> loginComoUsuario(UsuarioModel alvo) async {
-    // Não chama notifyListeners() aqui: como o GoRouter escuta este provider
-    // via refreshListenable, uma notificação intermediária (com o usuário
-    // antigo ainda ativo e _carregando=true) dispara um redirect no meio da
-    // troca — concorrendo com o Navigator.pop() do diálogo de seleção e com
-    // o rebuild do AppShell/sidebar que acontece na notificação final. Essa
-    // corrida entre dois Navigators mexendo na árvore quase ao mesmo tempo
-    // é o que produz o erro '_elements.contains(element): is not true'.
     _carregando = true;
     _erro       = null;
     try {
       await _solicitacaoMaterialProvider?.resetarConexao();
-      // Zera o estado de chat do usuário anterior (SSE, heartbeat, lista de
-      // usuários e conversas) ANTES de logar como o novo usuário, para não
-      // vazar dados de uma sessão para a outra durante a troca.
       _chatProvider?.limparToken();
       final data    = await ApiClient.post('/auth/trocar-usuario', {'id': alvo.id});
       final token   = data['token'] as String;
@@ -181,16 +150,10 @@ class UsuarioProvider extends ChangeNotifier {
       return false;
     } finally {
       _carregando = false;
-      // Notificação única, no final, já com o usuário/role definitivos.
-      // Garante que o redirect do GoRouter e o rebuild do AppShell vejam
-      // exatamente o mesmo estado consistente, em vez de dois estados
-      // intermediários conflitantes.
       notifyListeners();
     }
   }
 
-  /// Efetua logout do usuário atual sem limpar a lista de usuários salvos,
-  /// sinalizando ao router que deve ir para a tela de login.
   Future<void> iniciarTrocaUsuario() async {
     _usuarioLogado = null;
     _token         = null;

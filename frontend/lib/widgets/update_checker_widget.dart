@@ -16,7 +16,6 @@ class UpdateChecker extends StatefulWidget {
 }
 
 class _UpdateCheckerState extends State<UpdateChecker> with WidgetsBindingObserver {
-  // Impede verificações simultâneas e reabertura do dialog enquanto já está visível
   bool _isChecking = false;
   bool _dialogVisible = false;
 
@@ -40,14 +39,12 @@ class _UpdateCheckerState extends State<UpdateChecker> with WidgetsBindingObserv
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Só verifica ao retomar se não há verificação em andamento nem dialog aberto
     if (state == AppLifecycleState.resumed && mounted && !_isChecking && !_dialogVisible) {
       _checkForUpdates();
     }
   }
 
   Future<void> _checkForUpdates() async {
-    // Guarda dupla: evita chamadas concorrentes
     if (_isChecking || _dialogVisible) return;
 
     _isChecking = true;
@@ -65,15 +62,13 @@ class _UpdateCheckerState extends State<UpdateChecker> with WidgetsBindingObserv
       debugPrint('[UpdateChecker] Atualização encontrada: ${updateInfo.latestVersion}');
 
       final navigatorState = AppRouter.rootNavigatorKey.currentState;
-      if (navigatorState == null) {
+      if (navigatorState == null || !navigatorState.mounted) {
         debugPrint('[UpdateChecker] Navigator ainda não está pronto');
         return;
       }
 
-      // Marca dialog como visível antes de exibir
       _dialogVisible = true;
 
-      // ignore: use_build_context_synchronously
       await AutoUpdateDialog.show(navigatorState.context, updateInfo);
     } catch (e, stack) {
       debugPrint('[UpdateChecker] ERRO ao verificar updates: $e');

@@ -1,0 +1,89 @@
+const svc = require('../services/producao.service');
+
+const listarMateriais = async (req, res, next) => {
+  try {
+    const { busca, categoria, status, id, identificador, medida, espessura } = req.query;
+    res.json(await svc.listarMateriais({ busca, categoria, status, id, identificador, medida, espessura }));
+  } catch (e) { next(e); }
+};
+
+const listarCategorias = async (req, res, next) => {
+  try {
+    res.json(await svc.listarCategorias());
+  } catch (e) { next(e); }
+};
+
+const listarSolicitacoes = async (req, res, next) => {
+  try {
+    const { status, busca } = req.query;
+    const statusArr = status ? status.split(',').map((s) => s.trim()) : undefined;
+    res.json(await svc.listarSolicitacoes({ status: statusArr, busca }));
+  } catch (e) { next(e); }
+};
+
+const listarHistorico = async (req, res, next) => {
+  try {
+    const { busca } = req.query;
+    res.json(await svc.listarSolicitacoes({ status: ['FINALIZADA'], busca }));
+  } catch (e) { next(e); }
+};
+
+const buscarSolicitacao = async (req, res, next) => {
+  try {
+    res.json(await svc.buscarSolicitacao(Number(req.params.id)));
+  } catch (e) { next(e); }
+};
+
+const criarSolicitacao = async (req, res, next) => {
+  try {
+    const { materialId, descricaoItem, quantidadeReservada, numeroOS, larguraUsada, comprimentoUsado } = req.body;
+    const sol = await svc.criarSolicitacao({
+      materialId:          Number(materialId),
+      descricaoItem,
+      quantidadeReservada: Number(quantidadeReservada),
+      numeroOS,
+      usuarioId:           req.usuario.id,
+      larguraUsada:        larguraUsada != null ? Number(larguraUsada) : undefined,
+      comprimentoUsado:    comprimentoUsado != null ? Number(comprimentoUsado) : undefined,
+    });
+    res.status(201).json(sol);
+  } catch (e) { next(e); }
+};
+
+const registrarBaixa = async (req, res, next) => {
+  try {
+    const { quantidade, observacao } = req.body;
+    const sol = await svc.registrarBaixa({
+      solicitacaoId: Number(req.params.id),
+      quantidade:    Number(quantidade),
+      observacao,
+    });
+    res.json(sol);
+  } catch (e) { next(e); }
+};
+
+const finalizarSolicitacao = async (req, res, next) => {
+  try {
+    const sol = await svc.finalizarSolicitacao({ solicitacaoId: Number(req.params.id) });
+    res.json(sol);
+  } catch (e) { next(e); }
+};
+
+const excluirHistorico = async (req, res, next) => {
+  try {
+    await svc.excluirHistorico(Number(req.params.id));
+    res.status(204).send();
+  } catch (e) { next(e); }
+};
+
+module.exports = {
+  listarMateriais,
+  listarCategorias,
+  listarSolicitacoes,
+  listarHistorico,
+  buscarSolicitacao,
+  criarSolicitacao,
+  registrarBaixa,
+  finalizarSolicitacao,
+  excluirHistorico,
+};

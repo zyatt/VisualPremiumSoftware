@@ -8,9 +8,6 @@ import '../providers/veiculo_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-// Formata número com separador de milhar (.) e vírgula decimal, sempre 2 casas
 String _fmtMilhar(double v) {
   final negativo = v < 0;
   final fixado   = v.abs().toStringAsFixed(2);
@@ -37,7 +34,6 @@ String _fmtData(DateTime? dt) {
       '${dt.year}';
 }
 
-// Quantidade: arredondada em 2 casas, com separador de milhar
 String _fmtQtd(double q) {
   final arredondado = double.parse(q.toStringAsFixed(2));
   return arredondado == arredondado.truncateToDouble()
@@ -45,7 +41,6 @@ String _fmtQtd(double q) {
       : _fmtMilhar(arredondado);
 }
 
-// Custo unitário: arredondado em 2 casas, com separador de milhar
 String _fmtCusto(double v) => _fmtMilhar(v);
 
 String _fmtDim(double v) {
@@ -82,10 +77,6 @@ const _coresCat = [
 ];
 
 Color _corCategoria(int index) => _coresCat[index % _coresCat.length];
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Página principal
-// ═════════════════════════════════════════════════════════════════════════════
 
 class GastosCategoriaPage extends StatefulWidget {
   const GastosCategoriaPage({super.key});
@@ -199,7 +190,6 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ─────────────────────────────────────────────────
             Row(
               children: [
                 Column(
@@ -229,6 +219,7 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
                   onPressed: () {
                     matProvider.carregarEstoque();
                     matProvider.recarregarGastos();
+                    matProvider.carregarMensal(ano: matProvider.anoMensal);
                     veiProvider.carregarGastos(
                         dataInicio: _dataInicio, dataFim: _dataFim);
                     veiProvider.carregarResumoAnual(ano: _anoSelecionado);
@@ -252,7 +243,6 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
             ),
             const SizedBox(height: 20),
 
-            // ── Filtro de período (só afeta Gastos e Veículos) ────────────
             Row(
               children: [
                 _DatePickerField(
@@ -300,7 +290,6 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
             ),
             const SizedBox(height: 16),
 
-            // ── Resumo global (3 números compactos no topo) ───────────────
             if (!matProvider.carregandoEstoque &&
                 !matProvider.carregandoGastos &&
                 !veiProvider.carregandoGastos)
@@ -312,7 +301,6 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
 
             const SizedBox(height: 16),
 
-            // ── Abas ──────────────────────────────────────────────────────
             Container(
               decoration: BoxDecoration(
                 color:        Theme.of(context).colorScheme.surface,
@@ -364,21 +352,17 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
             ),
             const SizedBox(height: 16),
 
-            // ── Conteúdo das abas ─────────────────────────────────────────
             Expanded(
               child: TabBarView(
                 controller: _tabCtrl,
                 children: [
-                  // ─── ABA ESTOQUE ─────────────────────────────────────
                   _AbaEstoque(provider: matProvider),
 
-                  // ─── ABA GASTOS ──────────────────────────────────────
                   _AbaGastos(
                     provider:  matProvider,
                     temFiltro: _temFiltro,
                   ),
 
-                  // ─── ABA VEÍCULOS ────────────────────────────────────
                   _AbaVeiculos(
                     provider:      veiProvider,
                     anoSelecionado: _anoSelecionado,
@@ -396,10 +380,6 @@ class _GastosCategoriaPageState extends State<GastosCategoriaPage>
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Resumo global (3 cards compactos no topo)
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _ResumoGeralGlobal extends StatelessWidget {
   final double totalEstoque;
@@ -507,10 +487,6 @@ class _TotalBadge extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// ABA 1 — ESTOQUE ATUAL
-// ═════════════════════════════════════════════════════════════════════════════
-
 class _AbaEstoque extends StatefulWidget {
   final GastosCategoriaProvider provider;
   const _AbaEstoque({required this.provider});
@@ -602,7 +578,6 @@ class _AbaEstoqueState extends State<_AbaEstoque> {
                     m.nome.toLowerCase().contains(busca)))
             .toList();
 
-    // Total de materiais sem custo cadastrado
     final semCusto = prov.estoque
         .expand((c) => c.materiais)
         .where((m) => m.semCusto)
@@ -610,7 +585,6 @@ class _AbaEstoqueState extends State<_AbaEstoque> {
 
     return CustomScrollView(
       slivers: [
-        // Card de resumo
         SliverToBoxAdapter(
           child: _ResumoEstoque(
             totalValor: prov.totalValorEstoque,
@@ -619,7 +593,6 @@ class _AbaEstoqueState extends State<_AbaEstoque> {
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
-        // Título + busca
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -838,7 +811,6 @@ class _EstoqueCategoriaCardState extends State<_EstoqueCategoriaCard> {
       ),
       child: Column(
         children: [
-          // ── Cabeçalho da categoria ──────────────────────────────────
           Tooltip(
             message: _expandido ? 'Recolher categoria' : 'Expandir categoria',
             child: InkWell(
@@ -900,12 +872,10 @@ class _EstoqueCategoriaCardState extends State<_EstoqueCategoriaCard> {
             ),
           ),
 
-          // ── Materiais (expandido) ───────────────────────────────────
           if (_expandido) ...[
             Divider(
                 height: 1,
                 color: Theme.of(context).colorScheme.outlineVariant),
-            // Cabeçalho da tabela
             Padding(
               padding: const EdgeInsets.symmetric(
                   horizontal: 16, vertical: 8),
@@ -974,7 +944,6 @@ class _LinhaEstoque extends StatelessWidget {
             ? m.ultimoValorPagoM2!
             : null;
 
-    // Sufixo da unidade para o custo unitário
     String sufixoCusto;
     if (!temCustoUnit && temCustoM2) {
       sufixoCusto = '/m²';
@@ -1096,10 +1065,6 @@ class _LinhaEstoque extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// ABA 2 — GASTOS (OS FECHADAS, ORIGEM OC)
-// ═════════════════════════════════════════════════════════════════════════════
-
 class _AbaGastos extends StatefulWidget {
   final GastosCategoriaProvider provider;
   final bool                    temFiltro;
@@ -1205,19 +1170,16 @@ class _AbaGastosState extends State<_AbaGastos> {
 
     return CustomScrollView(
       slivers: [
-        // Resumo
         SliverToBoxAdapter(
           child: _ResumoGastos(totalGasto: prov.totalGastos),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 12)),
 
-        // Gráfico mensal
         SliverToBoxAdapter(
           child: _GraficoMensal(provider: prov),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
-        // Título + busca
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -1626,10 +1588,6 @@ class _LinhaGasto extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Gráfico de barras — gastos mensais
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _GraficoMensal extends StatefulWidget {
   final GastosCategoriaProvider provider;
   const _GraficoMensal({required this.provider});
@@ -1881,7 +1839,6 @@ class _BarChart extends StatelessWidget {
           child: Stack(
             clipBehavior: Clip.hardEdge,
             children: [
-              // Barras
               Positioned(
                 top: 0, left: 0, right: 0,
                 height: chartHeight,
@@ -1951,7 +1908,6 @@ class _BarChart extends StatelessWidget {
                 ),
               ),
 
-              // Rótulos dos meses
               Positioned(
                 bottom: 0, left: 0, right: 0,
                 height: labelHeight,
@@ -1981,7 +1937,6 @@ class _BarChart extends StatelessWidget {
                 ),
               ),
 
-              // Tooltip
               if (hoveredIndex != null)
                 Builder(builder: (context) {
                   final i    = hoveredIndex!;
@@ -2067,10 +2022,6 @@ class _TooltipBar extends StatelessWidget {
     );
   }
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-// ABA 3 — VEÍCULOS (mantida igual à versão anterior)
-// ═════════════════════════════════════════════════════════════════════════════
 
 class _AbaVeiculos extends StatelessWidget {
   final VeiculoProvider   provider;
@@ -2513,10 +2464,6 @@ class _GastoVeiculoCardState extends State<_GastoVeiculoCard> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Widgets auxiliares compartilhados
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _HeaderCol extends StatelessWidget {
   final String    text;
   final TextAlign align;
@@ -2556,10 +2503,6 @@ class _HeaderColWide extends StatelessWidget {
             )),
       );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Seletor de data
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _DatePickerField extends StatelessWidget {
   final String                 label;

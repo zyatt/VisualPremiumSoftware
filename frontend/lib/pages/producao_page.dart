@@ -7,17 +7,6 @@ import '../providers/estoque_producao_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 
-/// Formata um valor monetário arredondado para 2 casas decimais.
-/// Ex.: 1.5 → "R$ 1,50"; 0.000125 → "R$ 0,00"; 1.234560 → "R$ 1,23".
-String _brl6(double v) {
-  final s2 = v.toStringAsFixed(2);
-  final partes = s2.split('.');
-  return 'R\$ ${partes[0].replaceAll('.', ',')},${partes[1]}';
-}
-
-/// Formata uma quantidade para EXIBIÇÃO — com separador de milhar (ponto)
-/// na parte inteira e vírgula como separador decimal (padrão brasileiro).
-/// Ex.: 1000 → "1.000"; 3.696 → "3,696"; 4.0 → "4".
 String formatarQuantidadeExibicao(double v) {
   final bool isInteiro = v == v.truncateToDouble();
   final String bruto = isInteiro ? v.toStringAsFixed(0) : v.toString();
@@ -43,9 +32,6 @@ String formatarQuantidadeExibicao(double v) {
   return negativo ? '-$resultado' : resultado;
 }
 
-/// Formata a unidade para exibição (o valor interno permanece em maiúsculo,
-/// usado para comparações/enum). Ex.: 'UNIDADE' → 'Unidade'; 'M' → 'm';
-/// 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²' → 'm²'; 'KG' → 'Kg'; 'G' → 'g'.
 String formatarUnidadeExibicao(String? unidade) {
   if (unidade == null || unidade.trim().isEmpty) return '';
   final u = unidade.trim().toUpperCase();
@@ -102,16 +88,11 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
-/// Formata o valor de espessura para exibição, acrescentando o sufixo
-/// 'mm'. Retorna null/vazio inalterado.
 String? _fmtEspessura(String? espessura) {
   if (espessura == null || espessura.trim().isEmpty) return espessura;
   return '${espessura.trim()}mm';
 }
 
-/// Formata um campo decimal: converte vírgula em ponto e impede pontos
-/// seguidos (ex.: "1..2" nunca é produzido, digitar um segundo ponto
-/// seguido é ignorado).
 class _DecimalCommaFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -119,7 +100,7 @@ class _DecimalCommaFormatter extends TextInputFormatter {
     TextEditingValue newValue,
   ) {
     var texto = newValue.text.replaceAll(',', '.');
-    // Remove pontos consecutivos, mantendo apenas o primeiro.
+
     texto = texto.replaceAll(RegExp(r'\.{2,}'), '.');
     if (texto == newValue.text) return newValue;
     final offset = newValue.selection.end - (newValue.text.length - texto.length);
@@ -131,9 +112,6 @@ class _DecimalCommaFormatter extends TextInputFormatter {
   }
 }
 
-/// Formata o campo de espessura: aplica as mesmas regras do
-/// [_DecimalCommaFormatter] (vírgula → ponto, sem pontos seguidos) e ainda
-/// bloqueia letras e qualquer caractere que não seja dígito ou ponto.
 class _EspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -153,10 +131,6 @@ class _EspessuraFormatter extends TextInputFormatter {
   }
 }
 
-/// Formatter para campos numéricos com separador de milhar (ponto) e vírgula
-/// decimal (padrão brasileiro), aplicado em tempo real enquanto o usuário
-/// digita. Ex.: digitar "1000" exibe "1.000"; digitar "1000,5" exibe
-/// "1.000,5". Usado para quantidades de baixa/devolução.
 class _MilharInputFormatter extends TextInputFormatter {
   static String _aplicarMilhar(String digitosInteiros) {
     final buffer = StringBuffer();
@@ -210,8 +184,6 @@ class _MilharInputFormatter extends TextInputFormatter {
   }
 }
 
-/// Converte o texto de um campo formatado com [_MilharInputFormatter]
-/// (ex.: "1.000,50") para um double (1000.5).
 double? _parseMilhar(String texto) {
   final v = texto.trim();
   if (v.isEmpty) return null;
@@ -219,33 +191,11 @@ double? _parseMilhar(String texto) {
   return double.tryParse(semMilhar);
 }
 
-/// Corrige o texto de um campo de dimensão usada para não ultrapassar o
-/// [maximo] da chapa. Se o valor digitado exceder o máximo, o controller é
-/// truncado para o próprio máximo (formatado) e a seleção movida para o fim.
-void _limitarDimensao(TextEditingController ctrl, double maximo) {
-  final v = double.tryParse(ctrl.text.replaceAll(',', '.'));
-  if (v == null || v <= maximo) return;
-  final fmt = maximo == maximo.truncateToDouble()
-      ? maximo.toStringAsFixed(0)
-      : maximo.toStringAsFixed(2);
-  ctrl.value = TextEditingValue(
-    text: fmt,
-    selection: TextSelection.collapsed(offset: fmt.length),
-  );
-}
-
-// Sentinels para categorias especiais
 const _kCategoriaGeral        = '__GERAL__';
 const _kCategoriaSemCategoria = '__SEM_CATEGORIA__';
 
-// Sentinels para identificadores especiais
 const _kIdentificadorTodos           = '__TODOS__';
 const _kIdentificadorSemIdentificador = '__SEM_IDENTIFICADOR__';
-
-// O antigo seletor "Produção 1 / Produção 2" no cabeçalho foi substituído
-// por abas próprias — "Estoque Produção 1" e "Estoque Produção 2" — quando
-// o usuário logado é ADMIN/GERENTE/COMPRAS (ver _ProducaoPageState), então
-// esse widget não é mais necessário.
 
 class ProducaoPage extends StatefulWidget {
   const ProducaoPage({super.key});
@@ -255,73 +205,29 @@ class ProducaoPage extends StatefulWidget {
 }
 
 class _ProducaoPageState extends State<ProducaoPage> {
-  // Guarda de qual usuário/role a linha de produção foi definida por
-  // último, para detectar troca de usuário (login diferente) mesmo que
-  // esta página não seja remontada — StatefulShellRoute preserva o estado
-  // do branch '/producao' entre navegações e entre logins, então o
-  // initState só roda uma vez por sessão do app.
+
   String? _ultimoUsuarioId;
 
-  // Guarda se o usuário logado enxerga as duas linhas combinadas em uma só
-  // lista (ADMIN/GERENTE/COMPRAS) ou apenas a própria linha (PRODUCAO1/
-  // PRODUCAO2). A diferença é só o conteúdo da lista de estoque: para duas
-  // linhas, mostra a lista combinada com uma coluna extra indicando de qual
-  // linha (1 ou 2) cada material é; para uma linha, mostra só o que
-  // pertence à linha do usuário.
   bool? _duasLinhasAtual;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Reexecuta sempre que as dependências (incl. UsuarioProvider, via
-    // context.watch mais abaixo no build) mudarem — isto é, sempre que o
-    // usuário logado mudar — e não apenas na primeira montagem da página.
-    //
-    // IMPORTANTE: didChangeDependencies pode disparar durante a fase de
-    // build (ex.: no _firstBuild da página, ou quando outro provider
-    // notifica ouvintes enquanto a árvore ainda está sendo construída).
-    // _definirProducaoDoUsuario chama estoqueProvider.definirProducao(...),
-    // que dispara notifyListeners() — e, se isso acontecer durante o
-    // build, o Flutter lança "setState() or markNeedsBuild() called during
-    // build". Por isso adiamos a chamada com addPostFrameCallback, que só
-    // executa depois que o frame atual terminar de ser construído.
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _definirProducaoDoUsuario();
     });
   }
 
-  /// Define no [EstoqueProducaoProvider] qual linha de produção ('1' ou '2')
-  /// o usuário logado enxerga, a partir do seu cargo (PRODUCAO1/PRODUCAO2).
-  /// ADMIN, GERENTE e COMPRAS não têm linha própria — podem ver as duas,
-  /// escolhendo pelo seletor no topo da tela; aqui só definimos um padrão
-  /// ('1') na primeira vez que esse tipo de usuário abre a tela.
-  ///
-  /// Sempre que detecta que o usuário logado mudou desde a última chamada,
-  /// força a redefinição da linha e recarrega estoque/histórico — isso é o
-  /// que evita o bug de um usuário PRODUCAO2 herdar a linha '1' que ficou
-  /// setada no provider por um usuário anterior (PRODUCAO1, ADMIN, etc.),
-  /// já que o provider e esta página não são recriados a cada login.
   void _definirProducaoDoUsuario() {
     final usuario = context.read<UsuarioProvider>().usuarioLogado;
-    // Usa o id real do usuário (UsuarioModel.id) como chave de detecção de
-    // troca — mais robusto que identityHashCode, pois continua funcionando
-    // mesmo se o provider recriar o objeto UsuarioModel com os mesmos dados
-    // (ex.: refresh de token).
+
     final usuarioId = usuario?.id.toString();
     final trocouUsuario = usuarioId != _ultimoUsuarioId;
     if (!trocouUsuario) return;
     _ultimoUsuarioId = usuarioId;
 
-    // Se a página de Produção estiver com alguma categoria/identificador
-    // aberto (ex.: dentro de "Estoque Produção 1"), volta para a tela
-    // principal ao trocar de usuário — o detalhe aberto pode não fazer mais
-    // sentido para quem logou agora (ex.: estava vendo a Produção 1 e o
-    // novo usuário é PRODUCAO2, que só pode ver a própria linha). Vale para
-    // qualquer troca de usuário, não só quando o cargo muda, e não afeta a
-    // navegação de outras abas do app: cada branch do StatefulShellRoute
-    // tem seu próprio Navigator, então isto só fecha telas empilhadas
-    // dentro da própria aba de Produção.
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).popUntil((route) => route.isFirst);
     }
@@ -331,7 +237,7 @@ class _ProducaoPageState extends State<ProducaoPage> {
     final producao = switch (role) {
       'PRODUCAO1' => '1',
       'PRODUCAO2' => '2',
-      _           => '1', // ADMIN/GERENTE/COMPRAS: linha ativa "padrão", usada por telas de detalhe/baixa que ainda dependem de uma única linha
+      _           => '1',
     };
     final estoqueProvider = context.read<EstoqueProducaoProvider>();
     estoqueProvider.definirProducao(producao);
@@ -342,16 +248,11 @@ class _ProducaoPageState extends State<ProducaoPage> {
     }
     estoqueProvider.carregarHistorico();
 
-    // Atualiza a flag (usada para trocar o conteúdo da lista de estoque
-    // entre "lista combinada com coluna Produção" e "lista da própria
-    // linha").
     if (_duasLinhasAtual != duasLinhas) {
       setState(() => _duasLinhasAtual = duasLinhas);
     }
   }
 
-  /// Abre o histórico de movimentações de produção como uma página própria,
-  /// no mesmo padrão do botão "Histórico" em Controle de Estoque.
   Future<void> _abrirHistorico() async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const _HistoricoProducaoPage()),
@@ -360,21 +261,7 @@ class _ProducaoPageState extends State<ProducaoPage> {
 
   @override
   Widget build(BuildContext context) {
-    // IMPORTANTE: este watch é o que faz didChangeDependencies disparar
-    // sempre que o usuário logado mudar — inclusive via "Trocar para" no
-    // menu do app_shell, e mesmo com esta página offstage (invisível) no
-    // IndexedStack do StatefulShellRoute, que a mantém sempre montada.
-    //
-    // Sem este watch, o build desta página não ficava registrado como
-    // dependente do UsuarioProvider (só alguns widgets FILHOS faziam
-    // watch, só para exibir/ocultar botões conforme o cargo) — e
-    // didChangeDependencies só é chamado pelo Flutter quando o widget
-    // realmente depende do InheritedWidget que mudou. Resultado: ao trocar
-    // de usuário (ex. de PRODUCAO1 para GERENTE) sem relogar, o
-    // _tabController continuava com 2 abas (modo "uma linha") e a aba
-    // "Estoque Produção 2" nunca aparecia, porque _definirProducaoDoUsuario
-    // nunca era chamado — só era executado o reload correto ao relogar
-    // (quando a página remonta do zero via initState).
+
     context.watch<UsuarioProvider>();
 
     return Scaffold(
@@ -448,11 +335,7 @@ class _ProducaoPageState extends State<ProducaoPage> {
             SizedBox(height: 20),
 
             Expanded(
-              // combinada=true (ADMIN/GERENTE/COMPRAS): uma única lista com
-              // as duas linhas juntas, cada material com uma coluna
-              // "Produção" indicando de qual linha ele é. combinada=false
-              // (PRODUCAO1/PRODUCAO2): só a própria linha, sem essa coluna
-              // extra (redundante, já que é sempre a mesma linha).
+
               child: _EstoqueProducaoTab(combinada: _duasLinhasAtual == true),
             ),
           ],
@@ -462,9 +345,6 @@ class _ProducaoPageState extends State<ProducaoPage> {
   }
 }
 
-/// Página de histórico de movimentações de produção, aberta a partir do
-/// botão "Histórico" no topo de Produção — mesmo padrão do histórico de
-/// Controle de Estoque.
 class _HistoricoProducaoPage extends StatelessWidget {
   const _HistoricoProducaoPage();
 
@@ -477,7 +357,7 @@ class _HistoricoProducaoPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
+
             Row(
               children: [
                 _BotaoVoltar(
@@ -516,10 +396,6 @@ class _HistoricoProducaoPage extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────
-// CARD DE CATEGORIA
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _CategoriaCardProducao extends StatefulWidget {
   final String     categoria;
@@ -597,10 +473,6 @@ class _CategoriaCardProducaoState extends State<_CategoriaCardProducao> {
     );
   }
 }
-
-// ─────────────────────────────────────────────
-// CARD DE IDENTIFICADOR
-// ─────────────────────────────────────────────
 
 class _IdentificadorCardProducao extends StatefulWidget {
   final String     label;
@@ -690,22 +562,14 @@ class _IdentificadorCardProducaoState extends State<_IdentificadorCardProducao> 
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TABELA DE MATERIAIS
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _ColDef {
   final String label;
   final double? fixed;
   final double? flex;
-  /// Identificador de ordenação; null = coluna não ordenável
+
   final String? sortKey;
   const _ColDef({required this.label, this.fixed, this.flex, this.sortKey});
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CABEÇALHO ORDENÁVEL (compartilhado pelas tabelas da página de Produção)
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _CabecalhoOrdenavel extends StatelessWidget {
   final String label;
@@ -770,11 +634,6 @@ int _compareNullableNum(num? a, num? b) {
   if (b == null) return 1;
   return a.compareTo(b);
 }
-
-
-// ─────────────────────────────────────────────
-// ABA HISTÓRICO
-// ─────────────────────────────────────────────────────────────────────────
 
 class _HistoricoTab extends StatefulWidget {
   const _HistoricoTab();
@@ -871,10 +730,6 @@ class _HistoricoTabState extends State<_HistoricoTab> {
     );
   }
 }
-
-// ─────────────────────────────────────────────
-// PAGINAÇÃO
-// ─────────────────────────────────────────────
 
 class _BarraPaginacao extends StatelessWidget {
   final int paginaAtual;
@@ -977,6 +832,7 @@ class _BotaoPagina extends StatelessWidget {
       message: tooltip,
       child: InkWell(
         onTap: enabled ? onTap : null,
+        mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
         borderRadius: BorderRadius.circular(6),
         child: Container(
           width: 32,
@@ -1013,6 +869,7 @@ class _BotaoNumeroPagina extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: ativa ? null : onTap,
+      mouseCursor: ativa ? SystemMouseCursors.basic : SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(6),
       child: Container(
         width: 32,
@@ -1104,22 +961,11 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
     );
   }
 }
-// ═════════════════════════════════════════════════════════════════════════
-// ABA: Estoque Produção — materiais transferidos do estoque normal,
-// disponíveis para dar baixa em uma OS.
-// ═════════════════════════════════════════════════════════════════════════
+
 String _fmtQtdProducao(double v) => formatarQuantidadeExibicao(v);
 
-// ─────────────────────────────────────────────
-// ABA: Estoque Produção — nível 1 da hierarquia (categorias)
-// ─────────────────────────────────────────────
-
 class _EstoqueProducaoTab extends StatefulWidget {
-  /// true para ADMIN/GERENTE/COMPRAS: exibe a lista COMBINADA das duas
-  /// linhas de produção (1 e 2 juntas), com uma coluna extra "Produção"
-  /// identificando de qual linha cada material é. false para PRODUCAO1/
-  /// PRODUCAO2: exibe apenas a própria linha (a "ativa" do provider), sem
-  /// a coluna extra.
+
   final bool combinada;
 
   const _EstoqueProducaoTab({required this.combinada});
@@ -1218,8 +1064,7 @@ class _EstoqueProducaoTabState extends State<_EstoqueProducaoTab> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<EstoqueProducaoProvider>();
-    // combinada=true (ADMIN/GERENTE/COMPRAS): lista das duas linhas juntas.
-    // combinada=false (PRODUCAO1/PRODUCAO2): só a linha "ativa" do usuário.
+
     final estoqueLista = widget.combinada
         ? provider.estoqueCombinado
         : provider.estoque;
@@ -1399,10 +1244,6 @@ class _EstoqueProducaoTabState extends State<_EstoqueProducaoTab> {
     );
   }
 }
-
-// ─────────────────────────────────────────────
-// ESTOQUE PRODUÇÃO — PÁGINA DE IDENTIFICADORES (nível 2)
-// ─────────────────────────────────────────────
 
 class _EstoqueProducaoIdentificadorPage extends StatefulWidget {
   final String   categoriaId;
@@ -1671,10 +1512,6 @@ class _EstoqueProducaoIdentificadorPageState extends State<_EstoqueProducaoIdent
   }
 }
 
-// ─────────────────────────────────────────────
-// ESTOQUE PRODUÇÃO — PÁGINA DE MATERIAIS POR CATEGORIA (nível 3, com busca completa)
-// ─────────────────────────────────────────────
-
 class _EstoqueProducaoCategoriaPage extends StatefulWidget {
   final String   categoriaId;
   final String   categoriaLabel;
@@ -1683,9 +1520,7 @@ class _EstoqueProducaoCategoriaPage extends StatefulWidget {
   final String?  identificadorFiltro;
   final String?  identificadorLabel;
   final bool     mostrarBotaoIdentificadores;
-  /// true para ADMIN/GERENTE/COMPRAS: exibe a lista COMBINADA das duas
-  /// linhas de produção (1 e 2 juntas), com a coluna extra "Produção".
-  /// false para PRODUCAO1/PRODUCAO2: exibe apenas a própria linha ativa.
+
   final bool     combinada;
 
   const _EstoqueProducaoCategoriaPage({
@@ -1735,21 +1570,12 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
     return widget.categoriaId;
   }
 
-  /// Transferir material entre as duas linhas de produção é restrito a
-  /// ADMIN/GERENTE — nem COMPRAS (que também vê a visão combinada) pode.
-  /// Regra reforçada no backend (rota /transferir-linha).
   bool get _podeTransferirEntreLinhas {
     if (!widget.combinada) return false;
     final role = context.watch<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
     return role == 'ADMIN' || role == 'GERENTE';
   }
 
-  /// Devolver material da produção para o estoque padrão segue a mesma
-  /// regra de ESCRITA usada em transferir/dar baixa (ADMIN, GERENTE,
-  /// COMPRAS, PRODUCAO1, PRODUCAO2) — reforçada no backend (rota
-  /// /estoque-producao/devolver). Diferente de [_podeTransferirEntreLinhas],
-  /// não exige a visão combinada: PRODUCAO1/PRODUCAO2 também podem devolver
-  /// a própria linha para o estoque padrão.
   bool get _podeDevolver {
     final role = context.watch<UsuarioProvider>().usuarioLogado?.role.trim().toUpperCase() ?? '';
     return ['ADMIN', 'GERENTE', 'COMPRAS', 'PRODUCAO1', 'PRODUCAO2'].contains(role);
@@ -1777,13 +1603,13 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
   }
 
   void _aplicarFiltros() {
-    setState(() {}); // atualiza estado do botão "Limpar filtros" imediatamente
+    setState(() {});
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 400), () {
       setState(() => _paginaAtual = 0);
       final provider = context.read<EstoqueProducaoProvider>();
       if (widget.combinada) {
-        // ADMIN/GERENTE/COMPRAS: aplica o mesmo filtro nas duas linhas.
+
         provider.carregarEstoque(
           producao:      '1',
           busca:         _buscaCtrl.text.trim(),
@@ -1934,9 +1760,11 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
                     controller: _buscaCtrl,
                     decoration: InputDecoration(
                       hintText:   'Nome do material',
-                      prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
+                      prefixIcon: Icon(Icons.inventory_2_outlined, color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense:    true,
                     ),
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [_UpperCaseFormatter()],
                     onChanged: (_) => _aplicarFiltros(),
                     onSubmitted: (_) => _aplicarFiltros(),
                   ),
@@ -2043,8 +1871,7 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
             Expanded(
               child: Consumer<EstoqueProducaoProvider>(
                 builder: (_, provider, __) {
-                  // Resolve getters pela visão combinada (ADMIN/GERENTE/COMPRAS)
-                  // ou pela linha ativa do usuário (PRODUCAO1/PRODUCAO2).
+
                   final carregando = widget.combinada
                       ? provider.carregandoEstoqueCombinado
                       : provider.carregandoEstoque;
@@ -2149,12 +1976,6 @@ class _EstoqueProducaoCategoriaPageState extends State<_EstoqueProducaoCategoria
   }
 }
 
-// ─────────────────────────────────────────────
-// ESTOQUE PRODUÇÃO — TABELA (mesmo layout do Estoque padrão)
-// ─────────────────────────────────────────────
-
-/// Ordena a lista de materiais de estoque de produção conforme a chave
-/// de ordenação selecionada e a direção.
 List<MaterialEstoqueProducaoModel> _ordenarEstoqueProducao(
   List<MaterialEstoqueProducaoModel> lista,
   String? sortKey,
@@ -2185,21 +2006,11 @@ List<MaterialEstoqueProducaoModel> _ordenarEstoqueProducao(
 class _TabelaEstoqueProducao extends StatefulWidget {
   final List<MaterialEstoqueProducaoModel> materiais;
   final bool mostrarCategoria;
-  /// true quando a lista é a visão COMBINADA (ADMIN/GERENTE/COMPRAS vendo
-  /// as duas linhas juntas) — exibe a coluna "Produção" à esquerda do ID,
-  /// indicando de qual linha (1 ou 2) é cada material.
+
   final bool mostrarColunaProducao;
-  /// true para ADMIN/GERENTE na visão combinada: exibe a coluna "Ações" à
-  /// direita com o botão de transferir o material para a outra linha de
-  /// produção. COMPRAS também vê a visão combinada, mas NÃO pode
-  /// transferir — só ADMIN/GERENTE (regra também reforçada no backend).
+
   final bool podeTransferirEntreLinhas;
-  /// true para quem pode devolver material da produção para o estoque
-  /// padrão (ADMIN/GERENTE/COMPRAS/PRODUCAO1/PRODUCAO2 — mesma regra de
-  /// ESCRITA usada em transferir/dar baixa, reforçada no backend). Ao
-  /// contrário de [podeTransferirEntreLinhas], não é restrito a
-  /// ADMIN/GERENTE, pois devolver ao estoque padrão é uma ação simétrica à
-  /// transferência original, disponível a quem já pode transferir.
+
   final bool podeDevolver;
   final String? colunaOrdem;
   final bool crescente;
@@ -2218,8 +2029,7 @@ class _TabelaEstoqueProducao extends StatefulWidget {
 
   static const _ColDef _colProducao =
       _ColDef(label: 'Produção', fixed: 90, sortKey: 'producao');
-  // Largura da coluna de Ações cresce quando os dois botões (transferir
-  // entre linhas + devolver ao estoque padrão) aparecem juntos.
+
   static const _ColDef _colAcoes =
       _ColDef(label: 'Ações', fixed: 56);
   static const _ColDef _colAcoesDuplas =
@@ -2324,10 +2134,10 @@ class _TabelaEstoqueProducaoState extends State<_TabelaEstoqueProducao> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Cabeçalho fixo — não entra no scroll vertical
+
         _cabecalho(),
         Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
-        // Corpo rolável ocupa o espaço restante
+
         Expanded(child: corpoRolavel),
       ],
     );
@@ -2533,14 +2343,6 @@ class _LinhaEstoqueProducaoState extends State<_LinhaEstoqueProducao> {
   }
 }
 
-/// Diálogo de baixa: informa quantidade (ou dimensão usada, para materiais
-/// UNIDADE com chapa cadastrada) e número da OS. Decrementa apenas o
-/// estoque de produção (o material já saiu do estoque normal na transferência)
-/// e registra a saída vinculada à OS informada.
-/// Tipo de baixa escolhido pelo usuário para materiais UNIDADE com chapa
-/// cadastrada (ver [_BaixaEstoqueProducaoDialogState._podeInformarDimensao]):
-/// baixa de unidade(s) inteira(s), baixa de chapa parcial (por dimensão
-/// usada) ou as duas combinadas numa única operação.
 enum _TipoBaixaChapa { inteira, parcial, combinada }
 
 class _BaixaEstoqueProducaoDialog extends StatefulWidget {
@@ -2558,24 +2360,16 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
   final _larguraCtrl = TextEditingController();
   final _alturaCtrl  = TextEditingController();
   bool  _enviando        = false;
-  // Tipo de baixa escolhido nos cards (null = ainda não escolhido, exibe os
-  // 3 cards). Só se aplica quando [_podeInformarDimensao] é true; para os
-  // demais materiais a baixa é sempre só por quantidade.
+
   _TipoBaixaChapa? _tipoBaixaChapa;
   String? _erro;
 
-  /// True quando a seção de dimensão usada deve ser exibida/considerada —
-  /// ou seja, quando o usuário escolheu "Chapa parcial" ou "Chapa(s)
-  /// inteira(s) + Chapa parcial" nos cards.
   bool get _modoDimensional =>
       _tipoBaixaChapa == _TipoBaixaChapa.parcial || _tipoBaixaChapa == _TipoBaixaChapa.combinada;
-  // Erros de validação exibidos embaixo dos campos de dimensão usada
-  // (comprimento/largura), acionados em tempo real ao digitar.
+
   String? _erroComprimento;
   String? _erroLargura;
-  // Erro de validação exibido embaixo do campo de quantidade (unidades
-  // inteiras), no mesmo padrão dos campos de dimensão acima — em vez de
-  // aparecer solto no rodapé do diálogo, longe do campo que originou o erro.
+
   String? _erroQuantidade;
 
   @override
@@ -2588,14 +2382,11 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
     super.dispose();
   }
 
-  /// True se a unidade do material é metro linear (m, m/l, ml, etc.).
   bool get _eMetroLinear {
     final u = widget.material.unidade?.toLowerCase().trim() ?? '';
     return const {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'}.contains(u);
   }
 
-  /// True se o material é UNIDADE (chapa/peça) e tem largura + comprimento
-  /// cadastrados — mesma regra usada no diálogo de solicitação.
   bool get _podeInformarDimensao {
     final m = widget.material;
     if (_eMetroLinear) return false;
@@ -2607,13 +2398,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
   String _fmt(double v) =>
       v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
 
-  /// Valida o texto de um campo de dimensão (comprimento/largura usada)
-  /// contra o [maximo] da chapa, retornando a mensagem de erro (ou null se
-  /// válido/vazio). Diferente de [_limitarDimensao] (usado no diálogo de
-  /// solicitação), aqui NÃO truncamos o texto digitado — apenas sinalizamos
-  /// o erro em tempo real, permitindo que o usuário veja e corrija o que
-  /// digitou (ex.: "2" já no limite e o usuário continua digitando "3"
-  /// formando "23", que deve acusar erro imediatamente).
   String? _validarDimensao(String texto, double maximo) {
     if (texto.trim().isEmpty) return null;
     final v = double.tryParse(texto.replaceAll(',', '.'));
@@ -2624,11 +2408,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
     return null;
   }
 
-  /// Valida em tempo real se a quantidade total a dar baixa (unidades
-  /// inteiras + 1 unidade parcial, se houver dimensão informada) não excede
-  /// o disponível em estoque, atualizando [_erro] imediatamente — sem
-  /// esperar o usuário clicar em "Confirmar Baixa". Mesma regra aplicada em
-  /// [_confirmar].
   void _validarQuantidadeTotal() {
     final qtdTexto = _quantCtrl.text.trim();
     final qtdInteira = qtdTexto.isEmpty ? null : _parseMilhar(qtdTexto);
@@ -2647,9 +2426,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
     }
   }
 
-  /// Seção superior do diálogo: quantidade inteira a dar baixa. Sempre
-  /// opcional — a obrigatoriedade (pelo menos uma das duas seções) é
-  /// validada em conjunto com a seção de dimensão em [_confirmar].
   static Widget _celTabHeader(BuildContext context, String text) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
         child: Text(
@@ -2740,8 +2516,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
     );
   }
 
-  /// Card individual de escolha do tipo de baixa (usado em
-  /// [_cardsEscolhaTipoBaixa]).
   Widget _cardEscolha({
     required IconData icone,
     required String titulo,
@@ -2784,9 +2558,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
     );
   }
 
-  /// Tela de escolha do tipo de baixa: 3 cards numa única linha. Exibida
-  /// apenas para materiais UNIDADE com chapa cadastrada, antes de mostrar os
-  /// campos de quantidade e/ou dimensão.
   Widget _cardsEscolhaTipoBaixa() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2832,8 +2603,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
     );
   }
 
-  /// Botão para sair da seção de quantidade/dimensão escolhida e voltar
-  /// para a tela dos 3 cards, limpando os campos e erros preenchidos.
   Widget _botaoVoltarTipoBaixa() {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
@@ -2862,11 +2631,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
     );
   }
 
-  /// Seção inferior do diálogo (só para materiais UNIDADE com medida
-  /// cadastrada — ver [_podeInformarDimensao]): baixa por dimensão usada,
-  /// que sempre representa 1 unidade parcial adicional (gera retalho com a
-  /// sobra). Também opcional; combinável com a quantidade inteira da seção
-  /// acima numa única baixa.
   Widget _secaoDimensao(MaterialEstoqueProducaoModel m) {
     final largura     = m.largura!;
     final comprimento = m.comprimento!;
@@ -3027,8 +2791,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
     final os = _osCtrl.text.trim();
     setState(() => _erroQuantidade = null);
 
-    // Para materiais UNIDADE com chapa cadastrada, o tipo de baixa precisa
-    // ter sido escolhido nos cards antes de confirmar.
     if (_podeInformarDimensao && _tipoBaixaChapa == null) {
       setState(() => _erro = 'Escolha o tipo de baixa de material');
       return;
@@ -3038,19 +2800,10 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
     double? compUsado;
     double? qtdInteira;
 
-    // Quantidade (unidades inteiras) é exigida quando o material não tem
-    // chapa cadastrada, ou quando o card escolhido foi "Chapa(s) inteira(s)"
-    // ou "Chapa(s) inteira(s) + Chapa parcial".
     final exigeQuantidade = !_podeInformarDimensao ||
         _tipoBaixaChapa == _TipoBaixaChapa.inteira ||
         _tipoBaixaChapa == _TipoBaixaChapa.combinada;
 
-    // Valida quantidade e dimensão ANTES de decidir se retorna, e aplica
-    // os erros de todos os campos vazios num único setState. Sem isso (modo
-    // "combinada", com quantidade E dimensão exigidas ao mesmo tempo), um
-    // "return" antecipado logo após checar a quantidade fazia o usuário ver
-    // só "Informe a quantidade" e, ao corrigir, só então "Informe o
-    // comprimento usado" — em vez de ver os três avisos de uma vez.
     String? erroQtd;
     double? qtdParsed;
     if (exigeQuantidade) {
@@ -3094,8 +2847,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
       compUsado = c;
     }
 
-    // Total baixado do estoque: unidades inteiras + 1 unidade parcial (se
-    // houver dimensão informada) — mesma regra aplicada no backend.
     final qtdTotal = (qtdInteira ?? 0) + (largUsada != null ? 1 : 0);
     if (qtdTotal > widget.material.quantidade) {
       setState(() => _erro = 'Quantidade maior que o disponível (${widget.material.quantidade})');
@@ -3159,7 +2910,18 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
     final subtitulo = detalhes.join(' · ');
 
     return AlertDialog(
-      title: const Text('Baixa de Material'),
+      title: Row(
+        children: [
+          const Expanded(child: Text('Baixa de Material')),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
+        ],
+      ),
       content: SizedBox(
         width: 600,
         child: SingleChildScrollView(
@@ -3176,10 +2938,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
               ),
               const SizedBox(height: 14),
 
-              // ── Card do material — mesmo padrão visual do diálogo de
-              // Nova Saída no Controle de Estoque: fundo laranja translúcido,
-              // borda laranja, ícone de check e nome/detalhes empilhados,
-              // cada um em um Wrap para nunca cortar texto com "...".
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -3190,7 +2948,7 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Cabeçalho: ícone + nome + detalhes ──────────────────
+
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -3225,16 +2983,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
                     ),
                     const SizedBox(height: 10),
 
-                    // ── Para materiais UNIDADE com chapa cadastrada, o
-                    // usuário primeiro escolhe o tipo de baixa em 3 cards
-                    // (Chapa(s) inteira(s) / Chapa parcial / combinada). A
-                    // escolha define quais seções (quantidade e/ou dimensão)
-                    // aparecem e se tornam obrigatórias. Quando as duas são
-                    // exigidas (combinada), a baixa soma as unidades
-                    // inteiras + 1 unidade parcial (dimensional) numa única
-                    // operação (ex.: chapa 2x1, estoque=3: quantidade=2 +
-                    // dimensão 1x1 → baixa total = 3, sobrando um retalho de
-                    // 1 m² sobre a unidade parcial).
                     if (!_podeInformarDimensao)
                       _secaoQuantidade(m)
                     else if (_tipoBaixaChapa == null)
@@ -3252,13 +3000,7 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
                                 width: 28,
                                 child: Column(
                                   children: [
-                                    // Pula parte da altura do cabeçalho das seções
-                                    // ao lado ("Unidades inteiras" / "Dimensão usada",
-                                    // 44px) pra aproximar o centro dos CAMPOS, não do
-                                    // bloco inteiro. 22 (metade de 44) é o ponto
-                                    // calibrado: pular os 44px inteiros deslocava o +
-                                    // pra baixo demais, e não pular nada deslocava pra
-                                    // cima demais.
+
                                     const SizedBox(height: 22),
                                     Expanded(
                                       child: Center(
@@ -3331,11 +3073,11 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
                                 child: Table(
                                   defaultVerticalAlignment: TableCellVerticalAlignment.middle,
                                   columnWidths: const {
-                                    0: FlexColumnWidth(0.9), // Identificador
-                                    1: FlexColumnWidth(2.2), // Material
-                                    2: FlexColumnWidth(0.8), // Medida
-                                    3: FlexColumnWidth(0.8), // Espessura
-                                    4: FlexColumnWidth(0.9), // Quantidade
+                                    0: FlexColumnWidth(0.9),
+                                    1: FlexColumnWidth(2.2),
+                                    2: FlexColumnWidth(0.8),
+                                    3: FlexColumnWidth(0.8),
+                                    4: FlexColumnWidth(0.9),
                                   },
                                   children: [
                                     TableRow(
@@ -3472,13 +3214,6 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
   }
 }
 
-/// Diálogo de devolução de material do estoque de produção de volta para o
-/// estoque padrão (operação inversa da transferência feita no Controle de
-/// Estoque). Disponível para quem pode transferir/dar baixa (ADMIN,
-/// GERENTE, COMPRAS, PRODUCAO1, PRODUCAO2 — ver `_podeDevolver`), regra
-/// também reforçada no backend (rota /estoque-producao/devolver). Gera um
-/// registro tanto no histórico do estoque padrão (ENTRADA) quanto no
-/// histórico compartilhado de produção (DEVOLUCAO).
 class _DevolverEstoquePadraoDialog extends StatefulWidget {
   final MaterialEstoqueProducaoModel material;
   const _DevolverEstoquePadraoDialog({required this.material});
@@ -3547,7 +3282,18 @@ class _DevolverEstoquePadraoDialogState extends State<_DevolverEstoquePadraoDial
   Widget build(BuildContext context) {
     final m = widget.material;
     return AlertDialog(
-      title: const Text('Devolver ao estoque padrão'),
+      title: Row(
+        children: [
+          const Expanded(child: Text('Devolver ao estoque padrão')),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
+        ],
+      ),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -3651,12 +3397,6 @@ class _DevolverEstoquePadraoDialogState extends State<_DevolverEstoquePadraoDial
   }
 }
 
-/// Diálogo de transferência de material entre as duas linhas de produção
-/// (ex.: sobrou na produção 1, transferir para a produção 2). Restrito a
-/// ADMIN/GERENTE — o botão que abre este diálogo só aparece pra esses
-/// cargos (ver `podeTransferirEntreLinhas` em _TabelaEstoqueProducao), e o
-/// backend reforça a mesma regra. A linha de destino é sempre "a outra"
-/// (só existem duas linhas), então não há seletor — só confirmação.
 class _TransferirEntreLinhasDialog extends StatefulWidget {
   final MaterialEstoqueProducaoModel material;
   const _TransferirEntreLinhasDialog({required this.material});
@@ -3727,7 +3467,18 @@ class _TransferirEntreLinhasDialogState extends State<_TransferirEntreLinhasDial
   Widget build(BuildContext context) {
     final m = widget.material;
     return AlertDialog(
-      title: const Text('Transferir entre produções'),
+      title: Row(
+        children: [
+          const Expanded(child: Text('Transferir entre produções')),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
+        ],
+      ),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -3831,11 +3582,6 @@ class _TransferirEntreLinhasDialogState extends State<_TransferirEntreLinhasDial
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════
-// ABA: Histórico Estoque Produção — agora incorporada à aba "Histórico"
-// unificada acima. Este widget renderiza apenas o card de uma movimentação
-// (transferência/baixa/estorno) do estoque de produção.
-// ═════════════════════════════════════════════════════════════════════════
 class _MovimentacaoEstoqueProducaoCard extends StatefulWidget {
   final MovimentacaoProducaoModel movimentacao;
   const _MovimentacaoEstoqueProducaoCard({required this.movimentacao});
@@ -3939,12 +3685,6 @@ class _MovimentacaoEstoqueProducaoCardState extends State<_MovimentacaoEstoquePr
       detalhes.add(_fmtEspessura(mov.materialEspessura)!);
     }
 
-    // Histórico é compartilhado entre as duas linhas de produção, então
-    // cada rótulo precisa deixar explícito de/para qual linha (1 ou 2) a
-    // movimentação se refere — sem isso, ADMIN/GERENTE/COMPRAS (que veem
-    // as duas linhas juntas) não conseguem saber a qual das duas o registro
-    // pertence. O texto é diferente para cada tipo (transferência aponta o
-    // destino, baixa aponta a origem, estorno aponta de onde foi retirado).
     final rotulo = ehTransferenciaLinha
         ? 'Transferência: Produção ${mov.producaoOrigemDerivada} → Produção ${mov.producao}'
         : (ehTransferencia

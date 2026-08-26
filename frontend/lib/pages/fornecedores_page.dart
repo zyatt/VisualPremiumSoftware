@@ -10,17 +10,12 @@ import '../providers/robo_helper_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_client.dart';
 
-/// Resolve uma URL relativa (ex.: "/uploads/fornecedores/x.png") retornada
-/// pelo backend para uma URL absoluta, usando o mesmo host configurado no
-/// ApiClient. URLs já absolutas (http/https) são retornadas como estão.
 String _resolverUrlImagem(String url) {
   if (url.startsWith('http://') || url.startsWith('https://')) return url;
   final base = ApiClient.baseUrl.replaceAll(RegExp(r'/$'), '');
   return '$base$url';
 }
 
-/// Formata a unidade para exibição. Ex.: 'UNIDADE' → 'Unidade'; 'M' → 'm';
-/// 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²' → 'm²'; 'KG' → 'Kg'; 'G' → 'g'.
 String _formatarUnidadeExibicao(String? unidade) {
   if (unidade == null || unidade.trim().isEmpty) return '—';
   final u = unidade.trim().toUpperCase();
@@ -45,9 +40,6 @@ String _formatarUnidadeExibicao(String? unidade) {
   }
 }
 
-/// Formata um valor monetário no padrão brasileiro, com separador de
-/// milhar (ponto) e duas casas decimais (vírgula). Ex.: 1000.0 -> '1.000,00';
-/// 1234567.5 -> '1.234.567,50'.
 String _formatarPreco(num valor) {
   final partes = valor.toStringAsFixed(2).split('.');
   final inteiro = partes[0];
@@ -66,28 +58,17 @@ String _formatarPreco(num valor) {
   return '${negativo ? '-' : ''}${buffer.toString()},$decimais';
 }
 
-/// Monta o label dinâmico do campo/coluna de preço por unidade de medida,
-/// ex.: 'Preço m/l', 'Preço g', 'Preço ml'. Quando a unidade não é
-/// conhecida, cai de volta em 'Preço unidade'.
 String _labelPrecoUnidade(String? unidade) {
   final u = _formatarUnidadeExibicao(unidade);
   if (u == '—' || u.isEmpty) return 'Preço unidade';
   return 'Preço $u';
 }
 
-/// Indica se o campo/coluna de preço por unidade de medida faz sentido para
-/// este material. Quando a unidade já é "Unidade", o campo seria redundante
-/// com o "Preço" comum, então não deve aparecer.
 bool _deveExibirPrecoUnidade(String? unidade) {
   if (unidade == null || unidade.trim().isEmpty) return false;
   return unidade.trim().toUpperCase() != 'UNIDADE';
 }
 
-/// Formata a dimensão (largura x comprimento) de um material como "50x1.27m"
-/// — usado como fallback quando o material não tem `medida` cadastrada.
-/// Mesma convenção usada em outras telas (comprimento x largura, minúsculo).
-/// Aceita `dynamic` porque esses campos podem chegar como String (ex.:
-/// Decimal do Prisma serializado) ou num, dependendo do endpoint.
 String? _materialDimensaoFormatada(dynamic larguraRaw, dynamic comprimentoRaw) {
   final largura = larguraRaw is num ? larguraRaw : num.tryParse(larguraRaw?.toString() ?? '');
   final comprimento = comprimentoRaw is num ? comprimentoRaw : num.tryParse(comprimentoRaw?.toString() ?? '');
@@ -130,8 +111,6 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
-/// Garante o sufixo "mm" numa espessura sem duplicar quando o dado já foi
-/// salvo antigamente com "mm"/"MM" digitado manualmente (ex.: "2MM").
 String _comSufixoMm(String espessura) {
   final numero = espessura.replaceAll(
     RegExp('mm\\s*\$', caseSensitive: false),
@@ -160,9 +139,6 @@ class _MedidaEspessuraFormatter extends TextInputFormatter {
   }
 }
 
-/// Formatter para o campo Espessura: aceita apenas dígitos, ponto e vírgula
-/// (vírgula é convertida em ponto), bloqueando letras e qualquer outro
-/// caractere.
 class _EspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -183,35 +159,6 @@ class _EspessuraFormatter extends TextInputFormatter {
   }
 }
 
-class _DecimalInputFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    var texto = newValue.text.replaceAll(',', '.');
-    texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
-    final partes = texto.split('.');
-    if (partes.length > 2) {
-      texto = '${partes[0]}.${partes.sublist(1).join('')}';
-    }
-    final sel = newValue.selection.copyWith(
-      baseOffset: newValue.selection.baseOffset.clamp(0, texto.length),
-      extentOffset: newValue.selection.extentOffset.clamp(0, texto.length),
-    );
-    return newValue.copyWith(text: texto, selection: sel);
-  }
-}
-
-/// Formatter para campos de preço em BRL: aplica separador de milhar (ponto)
-/// na parte inteira em tempo real enquanto o usuário digita, usando vírgula
-/// como separador decimal (padrão brasileiro). Ex.: digitar "1000" exibe
-/// "1.000"; digitar "1000,5" exibe "1.000,5".
-///
-/// O texto exposto ao controller já vem SEM separador de milhar (apenas
-/// dígitos + ponto decimal, ex.: "1000.5") para não quebrar `double.parse`
-/// no restante do código — a exibição com milhar é feita só visualmente
-/// através do `TextEditingValue` retornado aqui.
 class _PrecoInputFormatter extends TextInputFormatter {
   static String _aplicarMilhar(String digitosInteiros) {
     final buffer = StringBuffer();
@@ -231,16 +178,11 @@ class _PrecoInputFormatter extends TextInputFormatter {
   ) {
     var texto = newValue.text;
 
-    // Conta quantos caracteres de máscara (pontos de milhar) existiam antes
-    // do cursor no valor antigo, para poder recolocar o cursor no lugar
-    // certo depois de re-formatar.
     final cursorPos = newValue.selection.end.clamp(0, texto.length);
     final antesDoCursor = texto.substring(0, cursorPos);
     final digitosAntesCursor =
         antesDoCursor.replaceAll(RegExp(r'[^\d,]'), '').length;
 
-    // Aceita apenas dígitos e vírgula (o ponto de milhar é recalculado, não
-    // digitado pelo usuário).
     texto = texto.replaceAll(RegExp(r'[^\d,]'), '');
 
     final partes = texto.split(',');
@@ -250,7 +192,6 @@ class _PrecoInputFormatter extends TextInputFormatter {
       decimais = decimais.substring(0, 2);
     }
 
-    // Remove zeros à esquerda supérfluos, mantendo pelo menos um dígito.
     inteiro = inteiro.replaceFirst(RegExp(r'^0+(?=\d)'), '');
     if (inteiro.isEmpty) inteiro = '';
 
@@ -259,9 +200,6 @@ class _PrecoInputFormatter extends TextInputFormatter {
         ? '$inteiroFormatado,$decimais'
         : (texto.contains(',') ? '$inteiroFormatado,' : inteiroFormatado);
 
-    // Reposiciona o cursor: conta dígitos+vírgula até atingir a mesma
-    // quantidade que havia antes do cursor original, pulando os pontos de
-    // milhar (que não contam como "digitados" pelo usuário).
     int novoOffset = 0;
     int contador = 0;
     for (int i = 0; i < textoFormatado.length; i++) {
@@ -278,9 +216,6 @@ class _PrecoInputFormatter extends TextInputFormatter {
   }
 }
 
-/// Converte o texto de um campo formatado com [_PrecoInputFormatter]
-/// (ex.: "1.000,50") para um double (1000.5), para uso em cálculos/envio
-/// ao backend.
 double _parsePreco(String texto) {
   if (texto.trim().isEmpty) return 0;
   final semMilhar = texto.replaceAll('.', '').replaceAll(',', '.');
@@ -320,9 +255,6 @@ class _CnpjInputFormatter extends TextInputFormatter {
   }
 }
 
-/// GlobalKeys usadas pelo tour do robô assistente dentro do dialog "Novo
-/// fornecedor" — precisam viver na página (e não no dialog) porque o
-/// dialog só é montado quando o tour chega no passo que o abre.
 class _NovoFornecedorTourKeys {
   final nomeFantasia  = GlobalKey();
   final razaoSocial   = GlobalKey();
@@ -331,32 +263,25 @@ class _NovoFornecedorTourKeys {
   final nomeVendedor  = GlobalKey();
   final tipo          = GlobalKey();
   final anexarImagem  = GlobalKey();
+  final botaoCriar    = GlobalKey();
 }
 
-/// GlobalKeys usadas pelo tour do robô assistente dentro do dialog
-/// "Vincular por Material".
 class _VincularPorMaterialTourKeys {
   final nomeMaterial    = GlobalKey();
   final identificador   = GlobalKey();
   final buscaFornecedor = GlobalKey();
   final valores         = GlobalKey();
+  final salvarVinculos  = GlobalKey();
 }
 
-/// GlobalKeys usadas pelo tour do robô assistente dentro do dialog
-/// "Materiais vinculados".
 class _MateriaisTourKeys {
   final busca            = GlobalKey();
   final filtrosAvancados = GlobalKey();
 }
 
-// ── Dropdown de tipo de fornecedor ──────────────────────────────────────────
-// Mesmo padrão visual e de interação dos filtros "Categoria"/"Status" da
-// tela de Estoque: campo fechado com label + valor selecionado
-// (InputDecorator) e, ao abrir, um MenuAnchor com campo de busca no topo
-// para filtrar a lista de tipos em tempo real.
 class _TipoFiltroDropdown extends StatefulWidget {
   final List<String> tipos;
-  final String valorSelecionado; // '' = TODOS
+  final String valorSelecionado;
   final ValueChanged<String> onSelecionar;
   const _TipoFiltroDropdown({
     super.key,
@@ -410,8 +335,6 @@ class _TipoFiltroDropdownState extends State<_TipoFiltroDropdown> {
         menuChildren: [
           StatefulBuilder(
             builder: (context, setMenuState) {
-              // Recalculado a cada setMenuState (ex.: ao digitar na busca),
-              // já que _busca pode ter mudado desde o último build externo.
               final filtrados = _busca.trim().isEmpty
                   ? widget.tipos
                   : widget.tipos
@@ -536,7 +459,9 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
   String _tipoFiltro  = '';
   Timer? _debounceTimer;
 
-  // ── Ajuda do robô ────────────────────────────────────────────────────────
+  static const int _itensPorPagina = 40;
+  int _paginaAtual = 0;
+
   final _tourKeyVincularPorMaterial = GlobalKey();
   final _tourKeyNovoFornecedor      = GlobalKey();
   final _tourKeyBusca               = GlobalKey();
@@ -549,16 +474,9 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
   final _vincularPorMaterialTourKeys = _VincularPorMaterialTourKeys();
   final _novoFornecedorTourKeys      = _NovoFornecedorTourKeys();
   final _materiaisTourKeys           = _MateriaisTourKeys();
-  // true enquanto o DIALOG do tour estiver aberto por causa do tour — usado
-  // pra fechá-lo de novo se o usuário clicar "Anterior" e voltar pro passo
-  // do botão (que fica escondido atrás do dialog).
+
   bool _dialogTourAberto = false;
-  // true enquanto o MENU de contexto do tour estiver aberto por causa do
-  // tour. Separada de _dialogTourAberto porque menu e dialog podem existir
-  // em paradas adjacentes do mesmo tour — reaproveitar uma única flag pros
-  // dois fazia _fecharMenuTourSeAberto "roubar" o estado do dialog (e
-  // vice-versa) quando o usuário navegava com Anterior/Próximo entre uma
-  // parada que abre menu e outra que abre dialog.
+
   bool _menuTourAberto = false;
 
   static const _cores = [
@@ -574,7 +492,8 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<FornecedorProvider>().carregar();
+      _carregarPaginaAtual(irParaPagina: 0);
+      context.read<FornecedorProvider>().carregarTipos();
       final helper = context.read<RoboHelperProvider>();
       helper.notificarRota('/fornecedores');
       _roboHelperPagina = helper;
@@ -582,20 +501,12 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
     });
   }
 
-  // Rede de segurança: independente de qual parada estava ativa quando o
-  // tour terminou (ESC, "Fechar", ou trocou de dica no meio do caminho),
-  // garante que _dialogTourAberto/_menuTourAberto voltem a false e que
-  // qualquer menu/dialog que essa opção tenha aberto seja fechado. Sem
-  // isso, um tour encerrado no meio de uma parada com dialog/menu aberto
-  // deixava a flag presa em true — e a mesma dica nunca mais conseguia
-  // reabrir esse menu/dialog da próxima vez (o guard de _abrirDialogTour/
-  // _abrirMenuTour bloqueava).
   void _onRoboHelperPaginaChanged() {
     if (!mounted) return;
     if (_roboHelperPagina!.tourAtivo) return;
     if (_dialogTourAberto) {
       _dialogTourAberto = false;
-      // rootNavigator:true porque showDialog abre no Navigator raiz.
+
       Navigator.of(context, rootNavigator: true).maybePop();
     }
     if (_menuTourAberto) {
@@ -609,9 +520,6 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
     _debounceTimer = Timer(const Duration(milliseconds: 400), _aplicarFiltros);
   }
 
-  /// Registra no RoboHelperProvider as opções de ajuda contextual desta
-  /// página. Chamado a cada build (barato — é só uma atribuição de lista)
-  /// pra garantir que as opções sempre apontem para as keys corretas.
   void _registrarAjudaRobo() {
     final rota = ModalRoute.of(context);
     if (rota != null && !rota.isCurrent) return;
@@ -658,6 +566,11 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
             texto: 'Toque aqui para anexar uma logo ou imagem do '
                 'fornecedor.',
           ),
+          RoboTourStop(
+            key: () => _novoFornecedorTourKeys.botaoCriar,
+            texto: 'Por fim, toque em "Criar" para salvar o novo '
+                'fornecedor.',
+          ),
         ],
       ),
       RoboHelpOption(
@@ -670,7 +583,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
           ),
           RoboTourStop(
             key: () => _tourKeyFiltroTipo,
-            texto: 'Ou refine por Tipo de fornecedor. Os dois filtros '
+            texto: 'Ou busque por Tipo de fornecedor. Os dois filtros '
                 'podem ser combinados.',
           ),
         ],
@@ -693,7 +606,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
           ),
           RoboTourStop(
             key: () => _vincularPorMaterialTourKeys.identificador,
-            texto: 'Ou refine a busca filtrando pelo identificador, '
+            texto: 'Ou busque filtrando pelo identificador, '
                 'medida, comprimento, largura ou espessura do material.',
           ),
           RoboTourStop(
@@ -706,6 +619,12 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
             key: () => _vincularPorMaterialTourKeys.valores,
             texto: 'Para cada fornecedor adicionado, informe o valor do '
                 'material, o valor por m² e/ou o valor por unidade (m/l, g, ml) cobrado por ele.',
+          ),
+          RoboTourStop(
+            key: () => _vincularPorMaterialTourKeys.salvarVinculos,
+            texto: 'Por fim, toque em "Salvar vínculos" para confirmar a '
+                'ligação entre o material e todos os fornecedores '
+                'adicionados.',
           ),
         ],
       ),
@@ -728,11 +647,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
             texto: '...e selecione "Materiais vinculados" no menu que '
                 'aparece.',
             aoEntrar: () async {
-              // Se estivermos voltando pra este passo (botão "Anterior"
-              // vindo do passo "busca", que abriu o dialog "Materiais
-              // vinculados"), fecha esse dialog antes de abrir o menu —
-              // senão _dialogTourAberto continua true e o dialog fica
-              // preso na tela por cima do menu.
+
               await _fecharDialogTourSeAberto();
               await _abrirMenuTour();
             },
@@ -748,7 +663,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
           ),
           RoboTourStop(
             key: () => _materiaisTourKeys.filtrosAvancados,
-            texto: 'Ou refine por identificador, medida, comprimento, '
+            texto: 'Ou busque filtrando por identificador, medida, comprimento, '
                 'largura ou espessura do material.',
           ),
         ],
@@ -756,13 +671,8 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
     ]);
   }
 
-  /// Semáforo simples pra evitar que aberturas/fechamentos concorrentes do
-  /// dialog do tour se sobreponham (ex.: usuário clica "Próximo"/"Anterior"
-  /// rápido demais, antes da animação de saída do dialog anterior terminar).
   bool _dialogTourEmTransicao = false;
 
-  /// Abre o dialog do tour e aguarda um frame para que ele comece a montar
-  /// antes de o provider tentar medir a key em destaque.
   Future<void> _abrirDialogTour(Future<void> Function() abrir) async {
     if (_dialogTourAberto || _dialogTourEmTransicao) return;
     _dialogTourAberto = true;
@@ -770,19 +680,13 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _dialogTourEmTransicao = false;
     });
-    // Não await no showDialog — ele resolve só ao fechar. Apenas disparamos
-    // e esperamos o frame inicial para que o dialog comece a montar.
+
     abrir().then((_) {
       if (mounted) _dialogTourAberto = false;
     });
     await Future<void>.delayed(const Duration(milliseconds: 80));
   }
 
-  /// Fecha o dialog do tour aguardando a animação de saída terminar antes
-  /// de retornar — evita que o aoEntrar da parada seguinte/anterior tente
-  /// medir keys enquanto o dialog ainda está visível.
-  /// IMPORTANTE: usa rootNavigator:true porque showDialog abre no Navigator
-  /// raiz; sem isso maybePop() poppa a rota da página em vez do dialog.
   Future<void> _fecharDialogTourSeAberto() async {
     if (!_dialogTourAberto || _dialogTourEmTransicao) return;
     _dialogTourAberto = false;
@@ -835,10 +739,30 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
   }
 
   void _aplicarFiltros() {
-    context.read<FornecedorProvider>().carregar(
-          busca: _buscaCtrl.text,
-          tipo: _tipoFiltro,
-        );
+    _carregarPaginaAtual(irParaPagina: 0);
+  }
+
+  Future<void> _recarregarSemResetarPagina() {
+    return _carregarPaginaAtual(irParaPagina: _paginaAtual);
+  }
+
+  Future<void> _carregarPaginaAtual({required int irParaPagina}) async {
+    final provider = context.read<FornecedorProvider>();
+    await provider.carregarPaginado(
+      busca:     _buscaCtrl.text,
+      tipo:      _tipoFiltro,
+      pagina:    irParaPagina + 1,
+      porPagina: _itensPorPagina,
+    );
+    if (!mounted) return;
+    if (provider.fornecedoresPagina.isEmpty &&
+        provider.totalItensPagina > 0 &&
+        irParaPagina > 0) {
+      setState(() => _paginaAtual = irParaPagina - 1);
+      await _carregarPaginaAtual(irParaPagina: irParaPagina - 1);
+    } else {
+      setState(() => _paginaAtual = irParaPagina);
+    }
   }
 
   Future<void> _abrirVincularPorMaterial({bool simulado = false}) {
@@ -846,7 +770,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
       context: context,
       barrierDismissible: true,
       builder: (_) => _VincularPorMaterialDialog(
-        onSalvo:  () => context.read<FornecedorProvider>().recarregar(),
+        onSalvo:  _recarregarSemResetarPagina,
         tourKeys: _vincularPorMaterialTourKeys,
         emSimulacao: simulado,
       ),
@@ -861,10 +785,6 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
     );
   }
 
-  /// Abre o dialog "Materiais vinculados" com um fornecedor genérico (sem
-  /// materiais reais) — usado só pelo tour do robô assistente pra ilustrar
-  /// os campos de busca/filtro sem depender de um fornecedor real já
-  /// cadastrado.
   Future<void> _abrirMateriaisSimulado() {
     return showDialog(
       context: context,
@@ -920,7 +840,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
 
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(
-          sucesso ? 'Fornecedor removido.' : prov.erro ?? 'Erro ao remover.'),
+          sucesso ? 'Fornecedor removido.' : prov.erroAcao ?? 'Erro ao remover.'),
       backgroundColor: sucesso ? AppTheme.success : AppTheme.error,
     ));
     if (sucesso) _aplicarFiltros();
@@ -1001,7 +921,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                 ),
                 SizedBox(width: 10),
                 IconButton(
-                  onPressed: () => context.read<FornecedorProvider>().carregar(),
+                  onPressed: _recarregarSemResetarPagina,
                   icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
                   style: IconButton.styleFrom(
@@ -1062,7 +982,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                         if (!temFiltro) return;
                         _buscaCtrl.clear();
                         setState(() => _tipoFiltro = '');
-                        context.read<FornecedorProvider>().carregar();
+                        _aplicarFiltros();
                       },
                       style: IconButton.styleFrom(
                         side: BorderSide(color: Theme.of(context).colorScheme.outline),
@@ -1084,7 +1004,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
           Expanded(
             child: Consumer<FornecedorProvider>(
               builder: (_, prov, __) {
-                if (prov.carregando) {
+                if (prov.carregandoPagina && prov.fornecedoresPagina.isEmpty) {
                   return const Center(
                     child: CircularProgressIndicator(color: AppTheme.primary),
                   );
@@ -1105,7 +1025,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                         ),
                         const SizedBox(height: 16),
                         FilledButton.icon(
-                          onPressed: prov.recarregar,
+                          onPressed: _recarregarSemResetarPagina,
                           icon: const Icon(Icons.refresh, size: 18),
                           label: const Text('Tentar novamente'),
                           style: FilledButton.styleFrom(
@@ -1116,7 +1036,7 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                     ),
                   );
                 }
-                if (prov.fornecedores.isEmpty) {
+                if (prov.fornecedoresPagina.isEmpty) {
                   return Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -1153,31 +1073,50 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                   );
                 }
 
-                return SingleChildScrollView(
-                  child: Wrap(
-                    spacing: 16,
-                    runSpacing: 16,
-                    children: List.generate(prov.fornecedores.length, (i) {
-                      final f = prov.fornecedores[i];
-                      final cor = _cores[i % _cores.length];
-                      return _FornecedorCard(
-                        fornecedor: f,
-                        cor: cor,
-                        onTap: () => _abrirFormulario(fornecedor: f),
-                        onVerMateriais: () => _abrirMateriais(f),
-                        tourKeyBotaoMateriaisVinculados:
-                            i == 0 ? _tourKeyBotaoMateriaisVinculados : null,
-                        tourKeyCard:
-                            i == 0 ? _tourKeyPrimeiroFornecedorCard : null,
-                        tourKeyMenuMateriaisVinculados:
-                            i == 0 ? _tourKeyMenuMateriaisVinculados : null,
-                        abrirMenuTrigger:
-                            i == 0 ? _abrirMenuPrimeiroCard : null,
-                        fecharMenuTrigger:
-                            i == 0 ? _fecharMenuPrimeiroCard : null,
-                      );
-                    }),
-                  ),
+                final totalItens  = prov.totalItensPagina;
+                final totalPaginas = (totalItens / _itensPorPagina).ceil().clamp(1, 999999999);
+
+                return Column(
+                  children: [
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Wrap(
+                          spacing: 16,
+                          runSpacing: 16,
+                          children: List.generate(prov.fornecedoresPagina.length, (i) {
+                            final f = prov.fornecedoresPagina[i];
+                            final cor = _cores[i % _cores.length];
+                            return _FornecedorCard(
+                              fornecedor: f,
+                              cor: cor,
+                              onTap: () => _abrirFormulario(fornecedor: f),
+                              onVerMateriais: () => _abrirMateriais(f),
+                              tourKeyBotaoMateriaisVinculados:
+                                  i == 0 ? _tourKeyBotaoMateriaisVinculados : null,
+                              tourKeyCard:
+                                  i == 0 ? _tourKeyPrimeiroFornecedorCard : null,
+                              tourKeyMenuMateriaisVinculados:
+                                  i == 0 ? _tourKeyMenuMateriaisVinculados : null,
+                              abrirMenuTrigger:
+                                  i == 0 ? _abrirMenuPrimeiroCard : null,
+                              fecharMenuTrigger:
+                                  i == 0 ? _fecharMenuPrimeiroCard : null,
+                            );
+                          }),
+                        ),
+                      ),
+                    ),
+                    if (totalPaginas > 1) ...[
+                      const SizedBox(height: 12),
+                      _BarraPaginacaoFornecedores(
+                        paginaAtual:     _paginaAtual,
+                        totalPaginas:    totalPaginas,
+                        totalItens:      totalItens,
+                        itensPorPagina:  _itensPorPagina,
+                        onPaginaChanged: (p) => _carregarPaginaAtual(irParaPagina: p),
+                      ),
+                    ],
+                  ],
                 );
               },
             ),
@@ -1189,6 +1128,170 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
   }
 }
 
+class _BarraPaginacaoFornecedores extends StatelessWidget {
+  final int paginaAtual;
+  final int totalPaginas;
+  final int totalItens;
+  final int itensPorPagina;
+  final void Function(int) onPaginaChanged;
+
+  const _BarraPaginacaoFornecedores({
+    required this.paginaAtual,
+    required this.totalPaginas,
+    required this.totalItens,
+    required this.itensPorPagina,
+    required this.onPaginaChanged,
+  });
+
+  List<int> _paginas() {
+    if (totalPaginas <= 7) return List.generate(totalPaginas, (i) => i);
+    final Set<int> vis = {0, totalPaginas - 1, paginaAtual};
+    if (paginaAtual > 0) vis.add(paginaAtual - 1);
+    if (paginaAtual < totalPaginas - 1) vis.add(paginaAtual + 1);
+    final sorted = vis.toList()..sort();
+    final List<int> result = [];
+    for (int i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.add(-1);
+      result.add(sorted[i]);
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inicio  = paginaAtual * itensPorPagina + 1;
+    final fim     = ((paginaAtual + 1) * itensPorPagina).clamp(0, totalItens);
+    final paginas = _paginas();
+
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'Exibindo $inicio–$fim de $totalItens fornecedores',
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _BotaoPaginaFornecedores(
+                icon: Icons.chevron_left,
+                tooltip: 'Página anterior',
+                enabled: paginaAtual > 0,
+                onTap: () => onPaginaChanged(paginaAtual - 1),
+              ),
+              SizedBox(width: 4),
+              for (final p in paginas) ...[
+                if (p == -1)
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Text('…', style: TextStyle(color: Theme.of(context).colorScheme.outline)),
+                  )
+                else
+                  _BotaoNumeroPaginaFornecedores(
+                    numero: p,
+                    ativa: p == paginaAtual,
+                    onTap: () => onPaginaChanged(p),
+                  ),
+                const SizedBox(width: 4),
+              ],
+              _BotaoPaginaFornecedores(
+                icon: Icons.chevron_right,
+                tooltip: 'Próxima página',
+                enabled: paginaAtual < totalPaginas - 1,
+                onTap: () => onPaginaChanged(paginaAtual + 1),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BotaoPaginaFornecedores extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _BotaoPaginaFornecedores({
+    required this.icon,
+    required this.tooltip,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: enabled ? Theme.of(context).colorScheme.outlineVariant : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
+            ),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BotaoNumeroPaginaFornecedores extends StatelessWidget {
+  final int numero;
+  final bool ativa;
+  final VoidCallback onTap;
+
+  const _BotaoNumeroPaginaFornecedores({
+    required this.numero,
+    required this.ativa,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: ativa ? null : onTap,
+      mouseCursor: ativa ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: ativa ? AppTheme.primary : Colors.transparent,
+          border: Border.all(
+            color: ativa ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '${numero + 1}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
+            color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _FornecedorCard extends StatefulWidget {
   final FornecedorModel fornecedor;
   final Color cor;
@@ -1197,11 +1300,9 @@ class _FornecedorCard extends StatefulWidget {
   final Key? tourKeyBotaoMateriaisVinculados;
   final Key? tourKeyCard;
   final Key? tourKeyMenuMateriaisVinculados;
-  /// Quando o tour do robô assistente precisa abrir o menu deste card
-  /// programaticamente (simulando o clique), ele incrementa este notifier.
+
   final ValueNotifier<int>? abrirMenuTrigger;
-  /// Quando o tour do robô assistente precisa fechar o menu deste card
-  /// programaticamente, ele incrementa este notifier.
+
   final ValueNotifier<int>? fecharMenuTrigger;
 
   const _FornecedorCard({
@@ -1238,9 +1339,6 @@ class _FornecedorCardState extends State<_FornecedorCard> {
     }
   }
 
-  // Fecha o menu sozinho se o tour do robô assistente terminar (usuário
-  // clicou "Fechar" ou apertou ESC) enquanto o menu ainda está aberto —
-  // já que este overlay não escuta o Navigator como um dialog normal.
   void _onRoboHelperChanged() {
     if (!mounted) return;
     if (!_roboHelper!.tourAtivo) _fecharMenu();
@@ -1290,12 +1388,6 @@ class _FornecedorCardState extends State<_FornecedorCard> {
     }
   }
 
-  // Usa um OverlayEntry manual (em vez de showMenu) porque showMenu abre
-  // uma Route — e o tour do robô assistente encerra sozinho quando a key
-  // em destaque está dentro de uma rota que não é ModalRoute.isCurrent
-  // (proteção contra destacar algo "escondido atrás" de uma tela nova).
-  // Um OverlayEntry comum não é uma Route, então as keys aqui dentro se
-  // comportam como qualquer outro widget da página para fins do tour.
   void _abrirMenu(BuildContext context) {
     if (_menuOverlayEntry != null) return;
     final scheme = Theme.of(context).colorScheme;
@@ -1303,7 +1395,7 @@ class _FornecedorCardState extends State<_FornecedorCard> {
     _menuOverlayEntry = OverlayEntry(
       builder: (_) => Stack(
         children: [
-          // Barreira transparente pra fechar ao clicar fora.
+
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -1431,19 +1523,12 @@ class _FornecedorCardState extends State<_FornecedorCard> {
           ),
           child: Column(
             children: [
-              // Imagem ou ícone
+
               Container(
                 width: double.infinity,
                 height: 120,
                 decoration: BoxDecoration(
-                  // Fundo sempre branco por trás da logo, independente do
-                  // tema claro/escuro: a maioria dos logos de fornecedores
-                  // já vem com fundo branco/opaco próprio, então tingir esse
-                  // container com widget.cor (que varia por fornecedor)
-                  // deixava algumas logos ilegíveis no escuro e brigando
-                  // com a cor do card no claro. Quando não há imagem, o
-                  // ícone genérico continua usando a cor do card por cima
-                  // de um fundo neutro levemente tingido.
+
                   color: temImagem
                       ? Colors.white
                       : widget.cor.withValues(alpha: 0.10),
@@ -1459,10 +1544,7 @@ class _FornecedorCardState extends State<_FornecedorCard> {
                           topRight: Radius.circular(14),
                         ),
                         child: Padding(
-                          // Padding evita que a logo encoste nas bordas do
-                          // card e garante área de respiro consistente,
-                          // já que fit: contain por si só não garante isso
-                          // quando a imagem já vem "colada" nas bordas.
+
                           padding: const EdgeInsets.all(12),
                           child: Image.network(
                             _resolverUrlImagem(f.imagemUrl!),
@@ -1481,7 +1563,7 @@ class _FornecedorCardState extends State<_FornecedorCard> {
                         color: widget.cor,
                       ),
               ),
-              // Informações
+
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.all(12),
@@ -1603,6 +1685,11 @@ class _FornecedorDialog extends StatefulWidget {
 
 class _FornecedorDialogState extends State<_FornecedorDialog> {
   final _formKey = GlobalKey<FormState>();
+
+  Timer? _debounceSemelhantes;
+  bool _verificandoSemelhantes = false;
+  List<FornecedorSemelhanteModel> _fornecedoresSemelhantes = [];
+
   late final TextEditingController _nomeFantasiaCtrl;
   late final TextEditingController _razaoSocialCtrl;
   late final TextEditingController _cnpjCtrl;
@@ -1670,11 +1757,46 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
       _roboHelper = context.read<RoboHelperProvider>();
       _roboHelper!.addListener(_onRoboHelperChanged);
     }
+
+    _nomeFantasiaCtrl.addListener(_agendarVerificacaoSemelhantes);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _verificarSemelhantes());
   }
 
-  // Fecha este dialog sozinho quando o tour do robô assistente termina
-  // (usuário clicou "Concluir" na última parada, "Fechar", ou apertou ESC)
-  // — só se aplica quando o dialog foi aberto pelo próprio tour.
+  void _agendarVerificacaoSemelhantes() {
+    _debounceSemelhantes?.cancel();
+    _debounceSemelhantes =
+        Timer(const Duration(milliseconds: 450), _verificarSemelhantes);
+  }
+
+  Future<void> _verificarSemelhantes() async {
+    if (!mounted) return;
+    final nome = _nomeFantasiaCtrl.text.trim();
+
+    if (nome.length < 3) {
+      if (_fornecedoresSemelhantes.isNotEmpty || _verificandoSemelhantes) {
+        setState(() {
+          _fornecedoresSemelhantes = [];
+          _verificandoSemelhantes = false;
+        });
+      }
+      return;
+    }
+
+    setState(() => _verificandoSemelhantes = true);
+
+    final prov = context.read<FornecedorProvider>();
+    final resultado = await prov.verificarSemelhantes(
+      nomeFantasia: nome,
+      ignorarId: widget.fornecedor?.id,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _fornecedoresSemelhantes = resultado;
+      _verificandoSemelhantes = false;
+    });
+  }
+
   RoboHelperProvider? _roboHelper;
   void _onRoboHelperChanged() {
     if (!mounted) return;
@@ -1685,6 +1807,7 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
 
   @override
   void dispose() {
+    _debounceSemelhantes?.cancel();
     _nomeFantasiaCtrl.dispose();
     _razaoSocialCtrl.dispose();
     _cnpjCtrl.dispose();
@@ -1697,6 +1820,27 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
 
   Future<void> _salvar() async {
     if (!_formKey.currentState!.validate()) return;
+
+    // Última checagem antes de salvar, garantindo que o aviso de nome
+    // idêntico esteja atualizado mesmo se o usuário digitar e salvar
+    // rápido demais para o debounce disparar.
+    final semelhantesAtualizados = await context.read<FornecedorProvider>().verificarSemelhantes(
+          nomeFantasia: _nomeFantasiaCtrl.text.trim(),
+          ignorarId: widget.fornecedor?.id,
+        );
+    final exatas = semelhantesAtualizados.where((s) => s.exata).toList();
+    final duplicataExata = exatas.isNotEmpty ? exatas.first : null;
+    if (duplicataExata != null) {
+      if (!mounted) return;
+      setState(() {
+        _fornecedoresSemelhantes = semelhantesAtualizados;
+        _erroDialog =
+            'Já existe um fornecedor cadastrado com este nome fantasia (${duplicataExata.nomeFantasia}).';
+      });
+      return;
+    }
+
+    if (!mounted) return;
     setState(() {
       _salvando = true;
       _erroDialog = null;
@@ -1722,6 +1866,7 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
           : _tipoCtrl.text.trim(),
     };
 
+    if (!mounted) return;
     final prov = context.read<FornecedorProvider>();
     final bool sucesso = _editando
         ? await prov.atualizar(widget.fornecedor!.id, dados,
@@ -1739,61 +1884,116 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
         backgroundColor: AppTheme.success,
       ));
     } else {
-      setState(() => _erroDialog = prov.erro ?? 'Erro ao salvar.');
+      setState(() => _erroDialog = prov.erroAcao ?? 'Erro ao salvar.');
     }
+  }
+
+  Widget _buildAvisoPanel(BuildContext context) {
+    return Container(
+      width: 260,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: const BorderRadius.only(
+          topLeft:    Radius.circular(16),
+          bottomLeft: Radius.circular(16),
+        ),
+        border: Border(
+          right: BorderSide(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
+            child: Row(
+              children: [
+                Icon(Icons.search_outlined, size: 16,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Fornecedores semelhantes',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(14),
+              child: _AvisoFornecedorSemelhante(
+                carregando: _verificandoSemelhantes,
+                semelhantes: _fornecedoresSemelhantes,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: SizedBox(
-        width: 480,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      _editando ? 'Editar fornecedor' : 'Novo fornecedor',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontWeight: FontWeight.w600,
-                          ),
+    final formPanel = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _editando ? 'Editar fornecedor' : 'Novo fornecedor',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
+              if (_editando && widget.onRemover != null)
+                Tooltip(
+                  message: 'Remover este fornecedor',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: TextButton.icon(
+                      onPressed: _salvando
+                          ? null
+                          : () {
+                              Navigator.of(context, rootNavigator: true).pop(false);
+                              widget.onRemover!(widget.fornecedor!);
+                            },
+                      icon: const Icon(Icons.delete_outline, size: 16),
+                      label: const Text('Remover'),
+                      style: TextButton.styleFrom(foregroundColor: AppTheme.error)
+                          .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                     ),
                   ),
-                  if (_editando && widget.onRemover != null)
-                    Tooltip(
-                      message: 'Remover este fornecedor',
-                      child: MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: TextButton.icon(
-                          onPressed: _salvando
-                              ? null
-                              : () {
-                                  Navigator.of(context, rootNavigator: true).pop(false);
-                                  widget.onRemover!(widget.fornecedor!);
-                                },
-                          icon: const Icon(Icons.delete_outline, size: 16),
-                          label: const Text('Remover'),
-                          style: TextButton.styleFrom(foregroundColor: AppTheme.error)
-                              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-                        ),
-                      ),
-                    ),
-                ],
+                ),
+              IconButton(
+                onPressed: _salvando ? null : () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close, size: 20),
+                tooltip: 'Fechar',
+                style: IconButton.styleFrom().copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
               ),
-            ),
+            ],
+          ),
+        ),
 
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-                child: Form(
+        Flexible(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+            child: Form(
                   key: _formKey,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -1838,7 +2038,7 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                         controller: _nomeFantasiaCtrl,
                         autofocus: !_editando,
                         decoration:
-                            const InputDecoration(labelText: 'Nome fantasia *'),
+                            const InputDecoration(labelText: 'Nome fantasia'),
                         inputFormatters: [_UpperCaseFormatter()],
                         onChanged: (_) {
                           if (_erroDialog != null) {
@@ -1929,12 +2129,7 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                           height: 140,
                           margin: const EdgeInsets.only(bottom: 10),
                           decoration: BoxDecoration(
-                            // Fundo branco fixo, independente do tema: a
-                            // maioria das logos enviadas já tem fundo
-                            // branco/opaco próprio, então usar a cor de
-                            // superfície do tema (escura no dark mode)
-                            // deixava o preview com contraste ruim, igual
-                            // acontecia no card da listagem.
+
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(
@@ -2042,6 +2237,7 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
                     child: MouseRegion(
                       cursor: SystemMouseCursors.click,
                       child: FilledButton(
+                        key: widget.tourKeys?.botaoCriar,
                         onPressed: _salvando ? null : _salvar,
                         style: FilledButton.styleFrom(
                                 backgroundColor: AppTheme.primary)
@@ -2064,6 +2260,27 @@ class _FornecedorDialogState extends State<_FornecedorDialog> {
               ),
             ),
           ],
+        );
+
+    return Dialog(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        child: SizedBox(
+          width: 480 + 260,
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildAvisoPanel(context),
+                Flexible(child: formPanel),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -2101,10 +2318,7 @@ class _TelefoneFormatter extends TextInputFormatter {
 class _MateriaisDialog extends StatefulWidget {
   final FornecedorModel? fornecedor;
   final _MateriaisTourKeys? tourKeys;
-  /// Quando true, este dialog foi aberto pelo tour do robô assistente e não
-  /// há um fornecedor real selecionado — nesse caso a lista de materiais
-  /// exibe dados fictícios só para ilustrar os campos de busca/filtro
-  /// durante a dica, sem depender de um fornecedor real já cadastrado.
+
   final bool emSimulacao;
   const _MateriaisDialog({
     this.fornecedor,
@@ -2127,10 +2341,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
   final _filtroLarguraCtrl      = TextEditingController();
   final _filtroEspessuraCtrl    = TextEditingController();
 
-  /// True quando o dialog foi aberto pelo tour do robô assistente e ainda
-  /// não há um fornecedor real selecionado. Nesse caso mostramos uma lista
-  /// fictícia de materiais só para ilustrar os campos de busca/filtro
-  /// durante a dica.
   bool get _mostrandoSimulacao => widget.emSimulacao && _fornecedor == null;
 
   static final _materiaisSimulados = [
@@ -2153,9 +2363,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
   List<FornecedorMaterialVinculoModel> get _materiaisBase =>
       _mostrandoSimulacao ? _materiaisSimulados : (_fornecedor?.materiais ?? []);
 
-  // Fecha este dialog sozinho quando o tour do robô assistente termina
-  // (usuário clicou "Concluir" na última parada, "Fechar", ou apertou ESC)
-  // — só se aplica quando o dialog foi aberto pelo próprio tour.
   RoboHelperProvider? _roboHelper;
   void _onRoboHelperChanged() {
     if (!mounted) return;
@@ -2301,7 +2508,7 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
-              sucesso ? 'Material desvinculado.' : prov.erro ?? 'Erro'),
+              sucesso ? 'Material desvinculado.' : prov.erroAcao ?? 'Erro'),
           backgroundColor: sucesso ? AppTheme.success : AppTheme.error,
         ));
       }
@@ -2391,7 +2598,7 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                       cursor: SystemMouseCursors.click,
                       child: IconButton(
                         onPressed: () => Navigator.of(context).pop(),
-                        icon: Icon(Icons.close),
+                        icon: Icon(Icons.close, size: 20),
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         style: IconButton.styleFrom().copyWith(
                           mouseCursor:
@@ -2420,7 +2627,7 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                           inputFormatters: [_UpperCaseFormatter()],
                           decoration: InputDecoration(
                             hintText: 'Nome do material',
-                            prefixIcon: Icon(Icons.search,
+                            prefixIcon: Icon(Icons.inventory_2_outlined,
                                 color: Theme.of(context).colorScheme.outline, size: 18),
                             isDense: true,
                             contentPadding: const EdgeInsets.symmetric(
@@ -3096,7 +3303,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
       if (mounted) Navigator.of(context).pop();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(prov.erro ?? 'Erro ao salvar'),
+        content: Text(prov.erroAcao ?? 'Erro ao salvar'),
         backgroundColor: AppTheme.error,
       ));
     }
@@ -3106,7 +3313,18 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: Theme.of(context).colorScheme.surface,
-      title: Text(_editando ? 'Editar valor' : 'Vincular material'),
+      title: Row(
+        children: [
+          Expanded(child: Text(_editando ? 'Editar valor' : 'Vincular material')),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
+        ],
+      ),
       content: SizedBox(
         width: 900,
         child: Form(
@@ -3501,11 +3719,7 @@ class _FornecedorVinculoEntry {
 class _VincularPorMaterialDialog extends StatefulWidget {
   final Future<void> Function() onSalvo;
   final _VincularPorMaterialTourKeys? tourKeys;
-  /// Quando true, este dialog foi aberto pelo tour do robô assistente e
-  /// ainda não há um material real selecionado — nesse caso a lista de
-  /// fornecedores exibe dados fictícios (material "MATERIAL" com
-  /// fornecedores de exemplo) só para ilustrar os campos durante a dica,
-  /// sem depender de uma busca real no backend.
+
   final bool emSimulacao;
   const _VincularPorMaterialDialog({
     required this.onSalvo,
@@ -3549,10 +3763,6 @@ class _VincularPorMaterialDialogState
   bool _buscandoFornecedor = false;
   Timer? _debounceFornecedor;
 
-  /// True quando o dialog foi aberto pelo tour do robô assistente e ainda
-  /// não há um material real selecionado. Nesse caso mostramos uma prévia
-  /// fictícia (material "MATERIAL" com fornecedores de exemplo) só para
-  /// ilustrar os campos de valor durante a dica.
   bool get _mostrandoSimulacao =>
       widget.emSimulacao && _materialIdSelecionado == null;
 
@@ -3561,9 +3771,6 @@ class _VincularPorMaterialDialogState
     {'nome': 'FORNECEDOR B', 'valor': '800.00', 'valorM2': '0.63', 'valorUnidade': '40.00'},
   ];
 
-  // Fecha este dialog sozinho quando o tour do robô assistente termina
-  // (usuário clicou "Concluir" na última parada, "Fechar", ou apertou ESC)
-  // — só se aplica quando o dialog foi aberto pelo próprio tour.
   RoboHelperProvider? _roboHelper;
   void _onRoboHelperChanged() {
     if (!mounted) return;
@@ -3811,8 +4018,6 @@ class _VincularPorMaterialDialogState
     });
   }
 
-  /// True quando algum dos campos de filtro/material está preenchido —
-  /// controla se o botão "Limpar filtros" deve reagir como clicável.
   bool get _algumFiltroPreenchido =>
       _materialIdCtrl.text.trim().isNotEmpty ||
       _materialNomeCtrl.text.trim().isNotEmpty ||
@@ -3987,8 +4192,6 @@ class _VincularPorMaterialDialogState
     }
   }
 
-  /// Formata um valor numérico (largura/comprimento) removendo casas
-  /// decimais desnecessárias, ex: 1.2700 -> "1.27", 2.0 -> "2".
   static String _formatarDimensao(dynamic valor) {
     if (valor == null) return '';
     final d = valor is num ? valor.toDouble() : double.tryParse(valor.toString());
@@ -4127,7 +4330,7 @@ class _VincularPorMaterialDialogState
                       cursor: SystemMouseCursors.click,
                       child: IconButton(
                         onPressed: () => Navigator.of(context).pop(),
-                        icon: Icon(Icons.close),
+                        icon: Icon(Icons.close, size: 20),
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         style: IconButton.styleFrom().copyWith(
                           mouseCursor:
@@ -4169,7 +4372,7 @@ class _VincularPorMaterialDialogState
                             decoration: InputDecoration(
                               labelText: 'Nome do material',
                               isDense: true,
-                              prefixIcon: Icon(Icons.search,
+                              prefixIcon: Icon(Icons.inventory_2_outlined,
                                   color: Theme.of(context).colorScheme.outline, size: 18),
                               suffixIcon: _buscandoMaterial
                                   ? const Padding(
@@ -4648,6 +4851,7 @@ class _VincularPorMaterialDialogState
                   ),
                   const SizedBox(width: 8),
                   Tooltip(
+                    key: widget.tourKeys?.salvarVinculos,
                     message: 'Salvar vínculos deste material com os fornecedores selecionados',
                     child: MouseRegion(
                       cursor: (_salvando ||
@@ -5070,6 +5274,141 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+class _AvisoFornecedorSemelhante extends StatelessWidget {
+  final bool carregando;
+  final List<FornecedorSemelhanteModel> semelhantes;
+  const _AvisoFornecedorSemelhante({
+    required this.carregando,
+    required this.semelhantes,
+  });
+
+  String? _cnpjFormatado(String? cnpj) {
+    if (cnpj == null || cnpj.trim().isEmpty) return null;
+    final digits = cnpj.replaceAll(RegExp(r'\D'), '');
+    if (digits.length != 14) return cnpj;
+    return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8, 12)}-${digits.substring(12)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (carregando && semelhantes.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.6),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Verificando fornecedores semelhantes...',
+                style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.outline),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (semelhantes.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.check_circle_outline, size: 14,
+                color: Theme.of(context).colorScheme.outline),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Nenhum fornecedor parecido encontrado até agora',
+                style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.outline),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final temExata = semelhantes.any((s) => s.exata);
+    final cor = temExata ? AppTheme.error : AppTheme.warning;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cor.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 16, color: cor),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  temExata
+                      ? 'Já existe um fornecedor com este nome fantasia'
+                      : 'Pode já existir um fornecedor parecido cadastrado',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: cor),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...semelhantes.map((s) {
+            final cnpjFmt = _cnpjFormatado(s.cnpj);
+            final detalhes = [
+              if (cnpjFmt != null) cnpjFmt,
+              if (s.tipoFornecedor != null && s.tipoFornecedor!.trim().isNotEmpty)
+                s.tipoFornecedor!.trim(),
+            ].join(' • ');
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    s.exata ? Icons.error_outline : Icons.info_outline,
+                    size: 13,
+                    color: cor,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          s.nomeFantasia,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                        if (detalhes.isNotEmpty)
+                          Text(
+                            detalhes,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
       ),
     );
   }

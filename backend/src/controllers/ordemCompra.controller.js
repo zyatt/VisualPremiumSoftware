@@ -2,6 +2,32 @@ const svc = require('../services/ordemCompra.service');
 const prisma = require('../utils/prisma');
 
 const listar      = async (req, res, next) => { try { res.json(await svc.listar(req.query.status)); } catch(e){next(e);} };
+
+const listarPagina = async (req, res, next) => {
+  try {
+    const {
+      status, numero, material, identificador, medida,
+      comprimento, largura, espessura, pagina, porPagina,
+    } = req.query;
+    res.json(await svc.listarPagina({
+      status,
+      numero,
+      material,
+      identificador,
+      medida,
+      comprimento,
+      largura,
+      espessura,
+      pagina:    pagina    ? Number(pagina)    : 1,
+      porPagina: porPagina ? Number(porPagina) : 50,
+    }));
+  } catch(e){next(e);}
+};
+
+const contarPorStatus = async (req, res, next) => {
+  try { res.json(await svc.contarPorStatus()); } catch(e){next(e);}
+};
+
 const buscarPorId = async (req, res, next) => { try { res.json(await svc.buscarPorId(+req.params.id)); } catch(e){next(e);} };
 const proximoId   = async (req, res, next) => {
   try {
@@ -77,4 +103,4 @@ const excluir = async (req, res, next) => {
   } catch(e){next(e);}
 };
 
-module.exports = { listar, buscarPorId, proximoId, criar, criarDeOrcamento, atualizar, adicionarItem, removerItem, atualizarItem, finalizar, cancelar, reverter, excluir };
+module.exports = { listar, listarPagina, contarPorStatus, buscarPorId, proximoId, criar, criarDeOrcamento, atualizar, adicionarItem, removerItem, atualizarItem, finalizar, cancelar, reverter, excluir };

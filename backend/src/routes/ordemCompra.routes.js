@@ -8,6 +8,8 @@ const ESCRITA  = ['ADMIN','GERENTE','COMPRAS'];
 const EXCLUSAO = ['ADMIN','GERENTE','COMPRAS'];
 
 router.get('/',                                       authMiddleware, roleMiddleware(LEITURA),  ctrl.listar);
+router.get('/pagina',                                 authMiddleware, roleMiddleware(LEITURA),  ctrl.listarPagina);
+router.get('/contagem-status',                        authMiddleware, roleMiddleware(LEITURA),  ctrl.contarPorStatus);
 router.get('/proximo-id',                             authMiddleware, roleMiddleware(LEITURA),  ctrl.proximoId);
 router.get('/:id/pdf',                                authMiddleware, roleMiddleware(LEITURA),  pdfCtrl.gerarPdf);
 router.get('/:id',                                    authMiddleware, roleMiddleware(LEITURA),  ctrl.buscarPorId);

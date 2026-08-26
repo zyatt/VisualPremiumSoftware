@@ -35,13 +35,63 @@ class FornecedorRepository {
         .toList();
   }
 
+  Future<FornecedoresPaginadosModel> listarPaginado({
+    String? busca,
+    String? tipo,
+    String? id,
+    required int pagina,
+    int porPagina = 40,
+  }) async {
+    final params = <String>[];
+
+    if (busca != null && busca.isNotEmpty) {
+      params.add('busca=${Uri.encodeComponent(busca)}');
+    }
+    if (tipo != null && tipo.isNotEmpty) {
+      params.add('tipo=${Uri.encodeComponent(tipo)}');
+    }
+    if (id != null && id.isNotEmpty) {
+      params.add('id=${Uri.encodeComponent(id)}');
+    }
+    params.add('pagina=$pagina');
+    params.add('porPagina=$porPagina');
+
+    final path = '/fornecedores/paginado?${params.join('&')}';
+    final data = await ApiClient.get(path);
+
+    final itens = (data['data'] as List? ?? [])
+        .map((e) => FornecedorModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final total = (data['total'] as num?)?.toInt() ?? itens.length;
+    return FornecedoresPaginadosModel(itens: itens, total: total);
+  }
+
   Future<FornecedorModel> buscarPorId(int id) async {
     final data = await ApiClient.get('/fornecedores/$id');
     return FornecedorModel.fromJson(data);
   }
 
-  /// Busca rápida para o overlay de vínculo — retorna apenas campos essenciais,
-  /// sem include pesado de materiais. [busca] nulo lista os primeiros 50.
+  Future<List<String>> listarTipos() async {
+    final list = await ApiClient.getList('/fornecedores/tipos');
+    return list.map((e) => e.toString()).toList();
+  }
+
+  Future<List<FornecedorSemelhanteModel>> verificarSemelhantes({
+    required String nomeFantasia,
+    int? ignorarId,
+  }) async {
+    final params = <String>[
+      'nomeFantasia=${Uri.encodeComponent(nomeFantasia)}',
+      if (ignorarId != null) 'ignorarId=$ignorarId',
+    ];
+    final list = await ApiClient.getList(
+      '/fornecedores/verificar-semelhantes?${params.join('&')}',
+    );
+    return list
+        .map((e) => FornecedorSemelhanteModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<List<FornecedorModel>> buscarParaVinculo({String? busca}) async {
     final params = <String>[];
     if (busca != null && busca.isNotEmpty) {
@@ -64,8 +114,6 @@ class FornecedorRepository {
         .toList();
   }
 
-  /// Cria um fornecedor. Se [imagem] for informada, envia como multipart
-  /// (campo "imagem"); caso contrário, envia JSON comum.
   Future<FornecedorModel> criar(
     Map<String, dynamic> dados, {
     File? imagem,
@@ -76,8 +124,6 @@ class FornecedorRepository {
     return FornecedorModel.fromJson(data);
   }
 
-  /// Atualiza um fornecedor. Se [imagem] for informada, envia como multipart
-  /// (campo "imagem"), substituindo a imagem atual; caso contrário, envia JSON.
   Future<FornecedorModel> atualizar(
     int id,
     Map<String, dynamic> dados, {
@@ -151,7 +197,6 @@ class FornecedorRepository {
     }).toList();
   }
 
-  // ── Helper: multipart com campos escalares + 1 arquivo de imagem ──────────
   Future<Map<String, dynamic>> _enviarMultipart(
     String method,
     String path,

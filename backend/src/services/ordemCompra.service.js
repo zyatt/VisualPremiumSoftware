@@ -93,10 +93,6 @@ async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
 
     const qtdUnit = item.qtdUnidade != null ? Number(item.qtdUnidade) : null;
     const precoUnitBruto = Number(item.precoUnitario ?? 0);
-    // Quando o item tem qtdUnidade (ex.: 50 m/l por lona), o valor digitado
-    // pelo usuário em "Valor/(unidade)" já é o preço por unidade de medida
-    // (m/l, kg, g, ml...) e deve alimentar precoUnidadeMedida do vínculo,
-    // não o "preco" (que representa o valor por embalagem/peça inteira).
     const usaUnidadeMedida = qtdUnit != null && qtdUnit > 0;
     const precoPorEmbalagem = usaUnidadeMedida
       ? precoUnitBruto * qtdUnit
@@ -145,6 +141,92 @@ async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
   }
 }
 
+async function _sincronizarVinculosFornecedorPorTotal(fornecedorId, itens) {
+  if (!fornecedorId || !Array.isArray(itens) || itens.length === 0) return;
+
+  const porMaterial = new Map();
+  for (const item of itens) {
+    if (!item.materialId) continue;
+    const mid = Number(item.materialId);
+
+    const totalItem = Number(item.precoTotal ?? 0);
+    if (totalItem <= 0) continue;
+
+    const quantidadeEmbalagens = Number(item.quantidade ?? 0);
+    if (quantidadeEmbalagens <= 0) continue;
+
+    const quantidadeReal = _calcularQuantidadeReal({
+      quantidade: item.quantidade,
+      usarM2:     item.usarM2,
+      qtdUnidade: item.qtdUnidade,
+    });
+    if (quantidadeReal <= 0) continue;
+
+    const existing = porMaterial.get(mid) || {
+      totalAcumulado: 0,
+      quantidadeEmbalagensAcumulada: 0,
+      quantidadeRealAcumulada: 0,
+      usarM2: item.usarM2 ?? false,
+    };
+    existing.totalAcumulado += totalItem;
+    existing.quantidadeEmbalagensAcumulada += quantidadeEmbalagens;
+    existing.quantidadeRealAcumulada += quantidadeReal;
+    existing.usarM2 = existing.usarM2 || (item.usarM2 ?? false);
+    porMaterial.set(mid, existing);
+  }
+
+  for (const [materialId, dados] of porMaterial) {
+    if (dados.usarM2) {
+      if (dados.quantidadeRealAcumulada <= 0) continue;
+      const precoMedioM2 = dados.totalAcumulado / dados.quantidadeRealAcumulada;
+      if (!(precoMedioM2 > 0)) continue;
+
+      await prisma.fornecedorMaterial.upsert({
+        where:  { fornecedorId_materialId: { fornecedorId, materialId } },
+        create: {
+          fornecedorId,
+          materialId,
+          precoMetroQuadrado: precoMedioM2,
+          ativo: true,
+        },
+        update: {
+          precoMetroQuadrado: precoMedioM2,
+          ativo: true,
+        },
+      });
+      continue;
+    }
+
+    const precoPorEmbalagem = dados.quantidadeEmbalagensAcumulada > 0
+      ? dados.totalAcumulado / dados.quantidadeEmbalagensAcumulada
+      : 0;
+    const precoPorMedida = dados.quantidadeRealAcumulada > 0
+      ? dados.totalAcumulado / dados.quantidadeRealAcumulada
+      : 0;
+
+    const updateData = {};
+    if (precoPorEmbalagem > 0) updateData.preco = precoPorEmbalagem;
+    if (precoPorMedida > 0) updateData.precoUnidadeMedida = precoPorMedida;
+
+    if (Object.keys(updateData).length === 0) continue;
+
+    await prisma.fornecedorMaterial.upsert({
+      where:  { fornecedorId_materialId: { fornecedorId, materialId } },
+      create: {
+        fornecedorId,
+        materialId,
+        preco:               precoPorEmbalagem > 0 ? precoPorEmbalagem : null,
+        precoUnidadeMedida:  precoPorMedida > 0 ? precoPorMedida : null,
+        ativo: true,
+      },
+      update: {
+        ...updateData,
+        ativo: true,
+      },
+    });
+  }
+}
+
 async function listar(status) {
   const where = {};
   if (status) where.status = status;
@@ -160,6 +242,76 @@ async function listar(status) {
     },
     orderBy: { criadoEm: 'desc' },
   });
+}
+
+async function listarPagina(filtros = {}) {
+  const {
+    status,
+    numero,
+    material,
+    identificador,
+    medida,
+    comprimento,
+    largura,
+    espessura,
+    pagina = 1,
+    porPagina = 50,
+  } = filtros;
+
+  const where = {};
+  if (status) where.status = status;
+
+  const numeroNum = numero != null && String(numero).trim() !== ''
+    ? Number(String(numero).trim())
+    : null;
+  if (numeroNum != null && !Number.isNaN(numeroNum)) where.id = numeroNum;
+
+  const itemMaterialWhere = {};
+  if (material)      itemMaterialWhere.nome         = { contains: material, mode: 'insensitive' };
+  if (identificador)  itemMaterialWhere.identificador = { contains: identificador, mode: 'insensitive' };
+  if (medida)          itemMaterialWhere.medida        = { contains: medida, mode: 'insensitive' };
+  if (espessura)        itemMaterialWhere.espessura     = { contains: espessura, mode: 'insensitive' };
+  if (comprimento)      itemMaterialWhere.comprimento   = { equals: Number(comprimento) };
+  if (largura)           itemMaterialWhere.largura       = { equals: Number(largura) };
+
+  if (Object.keys(itemMaterialWhere).length > 0) {
+    where.itens = { some: { material: { is: itemMaterialWhere } } };
+  }
+
+  const take = Number(porPagina) || 50;
+  const skip = (Number(pagina) - 1) * take;
+
+  const [data, total] = await Promise.all([
+    prisma.ordemCompra.findMany({
+      where,
+      include: {
+        fornecedor: { select: { id: true, nomeFantasia: true } },
+        usuario:    { select: { id: true, nome: true } },
+        itens: {
+          include: { material: { select: _selectMaterial } },
+        },
+        numerosOS: true,
+      },
+      orderBy: { criadoEm: 'desc' },
+      take,
+      skip,
+    }),
+    prisma.ordemCompra.count({ where }),
+  ]);
+
+  return { data, total };
+}
+
+async function contarPorStatus() {
+  const grupos = await prisma.ordemCompra.groupBy({
+    by: ['status'],
+    _count: { _all: true },
+  });
+  const resultado = { EM_ANDAMENTO: 0, FINALIZADO: 0, CANCELADO: 0 };
+  for (const g of grupos) {
+    resultado[g.status] = g._count._all;
+  }
+  return resultado;
 }
 
 async function buscarPorId(id) {
@@ -598,6 +750,8 @@ async function finalizar(id, usuarioNome) {
     });
   }
 
+  await _sincronizarVinculosFornecedorPorTotal(ordem.fornecedorId, ordem.itens);
+
   if (ordem.orcamentoId) {
     await prisma.orcamento.update({
       where: { id: ordem.orcamentoId },
@@ -743,7 +897,7 @@ async function excluir(id) {
 }
 
 module.exports = {
-  listar, buscarPorId, criar, atualizar,
+  listar, listarPagina, contarPorStatus, buscarPorId, criar, atualizar,
   adicionarItem, removerItem, atualizarItem,
   finalizar, cancelar, reverter,
   criarDeOrcamento, excluir,

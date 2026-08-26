@@ -20,12 +20,6 @@ function formatNumber(value) {
   return n % 1 === 0 ? String(n) : n.toFixed(2).replace('.', ',');
 }
 
-/// Normaliza a unidade para exibição minúscula no PDF (mesma convenção usada
-/// no app): 'M/L' -> 'm/l'; 'M' -> 'm'; 'ML' -> 'ml'; 'M²'/'M2' -> 'm²';
-/// 'UNIDADE' -> 'Unidade' ou 'Unidades'; 'G' -> 'g'. Preserva valores
-/// desconhecidos, só com a caixa baixa aplicada.
-/// Quando `unidade` for 'UNIDADE', o parâmetro `quantidade` define o plural:
-/// 1 -> 'Unidade', diferente de 1 -> 'Unidades'.
 function formatUnidade(unidade, quantidade) {
   if (!unidade) return unidade;
   const norm = unidade.trim().toUpperCase();
@@ -285,9 +279,11 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
   cx += cols[0].w;
 
   if (comPreco) {
-    const qtdLabel = item.unidade
-      ? `${formatNumber(item.quantidade)} ${formatUnidade(item.unidade, item.quantidade)}`
-      : formatNumber(item.quantidade);
+    const qtdLabel = item.usarM2
+      ? `${formatNumber(item.quantidade)} m²`
+      : item.unidade
+        ? `${formatNumber(item.quantidade)} ${formatUnidade(item.unidade, item.quantidade)}`
+        : formatNumber(item.quantidade);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(qtdLabel, cx + 4, tySingle, { width: cols[1].w - 8, align: 'center', lineBreak: false });
     cx += cols[1].w;
@@ -310,9 +306,11 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.lightGray)
        .text(formatDate(item.data), cx + 4, tySingle, { width: cols[4].w - 8, align: 'right', lineBreak: false });
   } else {
-    const qtdLabel = item.unidade
-      ? `${formatNumber(item.quantidade)} ${formatUnidade(item.unidade, item.quantidade)}`
-      : formatNumber(item.quantidade);
+    const qtdLabel = item.usarM2
+      ? `${formatNumber(item.quantidade)} m²`
+      : item.unidade
+        ? `${formatNumber(item.quantidade)} ${formatUnidade(item.unidade, item.quantidade)}`
+        : formatNumber(item.quantidade);
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
        .text(qtdLabel, cx + 4, tySingle, { width: cols[1].w - 8, align: 'center', lineBreak: false });
     cx += cols[1].w;

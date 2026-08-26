@@ -30,11 +30,8 @@ class OrcamentoVendaProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
-  // Filtros ativos
   String _busca = '';
   String? _statusFiltro;
-
-  // ── Listagem ───────────────────────────────────────────────────────────────
 
   Future<void> carregar({String busca = '', String? status}) async {
     _busca        = busca;
@@ -54,8 +51,6 @@ class OrcamentoVendaProvider extends ChangeNotifier {
 
   Future<void> recarregar() =>
       carregar(busca: _busca, status: _statusFiltro);
-
-  // ── CRUD ───────────────────────────────────────────────────────────────────
 
   Future<OrcamentoVendaModel?> buscarPorId(int id) async {
     try {
@@ -127,8 +122,6 @@ class OrcamentoVendaProvider extends ChangeNotifier {
     }
   }
 
-  // ── Itens ──────────────────────────────────────────────────────────────────
-
   Future<bool> adicionarItem(
       int orcamentoId, Map<String, dynamic> dados) async {
     try {
@@ -166,8 +159,6 @@ class OrcamentoVendaProvider extends ChangeNotifier {
       return false;
     }
   }
-
-  // ── Clientes ───────────────────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listarClientes({String? busca}) async {
     try {

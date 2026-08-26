@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // ── Paleta base (compartilhada) ───────────────────────────────
   static const Color primary      = Color(0xFFFF781F);
   static const Color primaryDark  = Color(0xFFDC5800);
   static const Color primaryLight = Color(0xFFFF9A52);
@@ -17,7 +16,6 @@ class AppTheme {
   static const Color statusBaixo   = Color(0xFFD97706);
   static const Color statusCritico = Color(0xFFDC2626);
 
-  // ── Paleta light ──────────────────────────────────────────────
   static const Color black          = Color(0xFF201E1E);
   static const Color background     = Color(0xFFF7F4F2);
   static const Color surface        = Color(0xFFFFFFFF);
@@ -29,7 +27,6 @@ class AppTheme {
   static const Color sidebar        = Color(0xFF201E1E);
   static const Color sidebarActive  = Color(0xFF2E2A2A);
 
-  // ── Paleta dark ───────────────────────────────────────────────
   static const Color darkBackground     = Color(0xFF141212);
   static const Color darkSurface        = Color(0xFF1E1B1B);
   static const Color darkSurfaceVariant = Color(0xFF2A2626);
@@ -40,14 +37,11 @@ class AppTheme {
   static const Color darkSidebar        = Color(0xFF0F0D0D);
   static const Color darkSidebarActive  = Color(0xFF1A1717);
 
-  // ── Temas públicos ────────────────────────────────────────────
   static ThemeData get light => _buildTheme(Brightness.light);
   static ThemeData get dark  => _buildTheme(Brightness.dark);
 
-  /// Alias legado
   static ThemeData get theme => light;
 
-  // ─────────────────────────────────────────────────────────────
   static ThemeData _buildTheme(Brightness brightness) {
     final isDark = brightness == Brightness.dark;
 

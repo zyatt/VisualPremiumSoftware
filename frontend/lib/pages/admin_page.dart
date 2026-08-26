@@ -55,7 +55,6 @@ class _AdminPageState extends State<AdminPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
             Row(
               children: [
                 Column(
@@ -82,7 +81,6 @@ class _AdminPageState extends State<AdminPage>
             ),
             SizedBox(height: 20),
 
-            // ── TabBar ──────────────────────────────────────────────────────
             TabBar(
               controller: _tabController,
               isScrollable: true,
@@ -117,7 +115,6 @@ class _AdminPageState extends State<AdminPage>
             Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
             const SizedBox(height: 16),
 
-            // ── Conteúdo ────────────────────────────────────────────────────
             Expanded(
               child: TabBarView(
                 controller: _tabController,
@@ -133,8 +130,6 @@ class _AdminPageState extends State<AdminPage>
     );
   }
 }
-
-// ─── Aba de Usuários ──────────────────────────────────────────────────────────
 
 class _UsuariosTab extends StatefulWidget {
   const _UsuariosTab();
@@ -256,7 +251,6 @@ class _UsuariosTabState extends State<_UsuariosTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Barra: contagem + botão
         Row(
           children: [
             if (!_carregando && _erro == null)
@@ -298,7 +292,6 @@ class _UsuariosTabState extends State<_UsuariosTab> {
         ),
         const SizedBox(height: 16),
 
-        // Conteúdo
         Expanded(
           child: _carregando
               ? const Center(
@@ -379,8 +372,6 @@ class _UsuariosTabState extends State<_UsuariosTab> {
   }
 }
 
-// ─── Tabela ───────────────────────────────────────────────────────────────────
-
 class _TabelaUsuarios extends StatelessWidget {
   final List<Map<String, dynamic>> usuarios;
   final void Function(Map<String, dynamic>) onEditar;
@@ -404,7 +395,6 @@ class _TabelaUsuarios extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         child: Column(
           children: [
-            // Cabeçalho
             Container(
               padding:
                   EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -426,7 +416,6 @@ class _TabelaUsuarios extends StatelessWidget {
             ),
             Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
 
-            // Linhas
             Expanded(
               child: ListView.separated(
                 itemCount: usuarios.length,
@@ -445,8 +434,6 @@ class _TabelaUsuarios extends StatelessWidget {
     );
   }
 }
-
-// ─── Linha clicável com hover ─────────────────────────────────────────────────
 
 class _LinhaUsuario extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -498,7 +485,6 @@ class _LinhaUsuarioState extends State<_LinhaUsuario> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                // Nome + avatar
                 Expanded(
                   flex: 3,
                   child: Row(
@@ -532,7 +518,6 @@ class _LinhaUsuarioState extends State<_LinhaUsuario> {
                   ),
                 ),
 
-                // Username
                 Expanded(
                   flex: 2,
                   child: Text(
@@ -544,13 +529,11 @@ class _LinhaUsuarioState extends State<_LinhaUsuario> {
                   ),
                 ),
 
-                // Role
                 Expanded(
                   flex: 2,
                   child: _RoleLabel(role: role),
                 ),
 
-                // Status
                 Expanded(
                   flex: 2,
                   child: Row(
@@ -637,8 +620,6 @@ class _HeaderCell extends StatelessWidget {
   }
 }
 
-// ─── Botão de ação com hover ──────────────────────────────────────────────────
-
 class _IconBtn extends StatefulWidget {
   final IconData icon;
   final Color color;
@@ -691,8 +672,6 @@ class _IconBtnState extends State<_IconBtn> {
   }
 }
 
-// ─── Badge de cargo ───────────────────────────────────────────────────────────
-
 class _RoleLabel extends StatelessWidget {
   final String role;
   const _RoleLabel({required this.role});
@@ -725,8 +704,6 @@ class _RoleLabel extends StatelessWidget {
     );
   }
 }
-
-// ─── Dialog de criação/edição ─────────────────────────────────────────────────
 
 class _UsuarioFormDialog extends StatefulWidget {
   final Map<String, dynamic>? usuario;
@@ -762,9 +739,6 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
 
   bool get _isEdicao => widget.usuario != null;
 
-  /// True quando o usuário sendo editado é o próprio usuário logado —
-  /// nesse caso ele não pode se autodesativar nem se autoexcluir, pois
-  /// perderia acesso ao sistema sem outro admin ativo para reverter.
   bool get _isSelf =>
       _isEdicao &&
       widget.idUsuarioLogado != null &&
@@ -811,9 +785,6 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
         'nome': _nomeCtrl.text.trim(),
         'username': _usernameCtrl.text.trim(),
         'role': _role,
-        // Garante que o próprio usuário nunca seja salvo como inativo,
-        // mesmo que _ativo tenha sido alterado por algum caminho que não
-        // passe pelo Switch (defesa extra além do onChanged desabilitado).
         'ativo': _isSelf ? true : _ativo,
       };
       if (_senhaCtrl.text.isNotEmpty) dados['senha'] = _senhaCtrl.text;
@@ -883,7 +854,6 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Erro inline
                 if (_erroDialog != null) ...[
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -917,11 +887,8 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                   const SizedBox(height: 16),
                 ],
 
-                // Nome
                 TextFormField(
                   controller: _nomeCtrl,
-                  // Só autofoca ao criar um usuário novo; na edição não
-                  // força o teclado/foco de cara.
                   autofocus: !_isEdicao,
                   decoration:
                       const InputDecoration(labelText: 'Nome'),
@@ -931,7 +898,6 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                 ),
                 const SizedBox(height: 12),
 
-                // Username
                 TextFormField(
                   controller: _usernameCtrl,
                   enabled: !_isEdicao,
@@ -947,7 +913,6 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                 ),
                 const SizedBox(height: 12),
 
-                // Senha
                 TextFormField(
                   controller: _senhaCtrl,
                   obscureText: !_mostrarSenha,
@@ -978,10 +943,9 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                 ),
                 const SizedBox(height: 12),
 
-                // Cargo
                 DropdownButtonFormField<String>(
                   initialValue: _role,
-                  decoration: const InputDecoration(labelText: 'Cargo *'),
+                  decoration: const InputDecoration(labelText: 'Cargo'),
                   mouseCursor: SystemMouseCursors.click,
                   icon: const Icon(Icons.arrow_drop_down),
                   items: _roles
@@ -1002,14 +966,10 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                 ),
                 const SizedBox(height: 16),
 
-                // Status ativo
                 Row(
                   children: [
                     Switch(
                       value: _ativo,
-                      // Impede que o próprio usuário logado se desative:
-                      // ele perderia acesso imediatamente e ninguém
-                      // conseguiria reverter sem mexer direto no banco.
                       onChanged: _isSelf
                           ? null
                           : (v) => setState(() => _ativo = v),
@@ -1098,7 +1058,6 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
     );
   }
 }
-// ─── Aba de Configurações ─────────────────────────────────────────────────────
 
 class _ConfiguracaoTab extends StatefulWidget {
   const _ConfiguracaoTab();
@@ -1110,20 +1069,16 @@ class _ConfiguracaoTab extends StatefulWidget {
 class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
   final _repo = ConfiguracaoRepository();
 
-  // ── Estado das faixas de markup ────────────────────────────────────────────
   List<MarkupFaixa> _faixas     = [];
   bool _carregandoFaixas        = true;
   bool _salvandoFaixas          = false;
   String? _erroFaixas;
 
-  // ── Estado do imposto sobre sobra ──────────────────────────────────────────
   final _impostoCtrl = TextEditingController();
   bool _carregandoConfig        = true;
   bool _salvandoConfig          = false;
   String? _erroConfig;
 
-  // ── Controladores das linhas de faixa ─────────────────────────────────────
-  // Cada faixa tem 3 controladores: valorMin, valorMax, percentual
   final List<TextEditingController> _minCtrls   = [];
   final List<TextEditingController> _maxCtrls   = [];
   final List<TextEditingController> _pctCtrls   = [];
@@ -1177,7 +1132,6 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
   }
 
   void _sincronizarControladores(List<MarkupFaixa> faixas) {
-    // Limpa antigos
     for (final c in _minCtrls) {
       c.dispose();
     }
@@ -1200,13 +1154,12 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
 
   void _adicionarFaixa() {
     final ultima = _faixas.isNotEmpty ? _faixas.last : null;
-    // A nova faixa começa onde a anterior termina
     final novoMin = (ultima?.valorMax != null) ? ultima!.valorMax! + 0.01 : 0.0;
     final novaFaixa = MarkupFaixa(valorMin: novoMin, percentual: 0);
     setState(() {
       _faixas.add(novaFaixa);
       _minCtrls.add(TextEditingController(text: _fmtNum(novoMin)));
-      _maxCtrls.add(TextEditingController(text: ''));  // aberta por padrão
+      _maxCtrls.add(TextEditingController(text: ''));
       _pctCtrls.add(TextEditingController(text: ''));
     });
   }
@@ -1224,7 +1177,6 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
   }
 
   Future<void> _salvarFaixas() async {
-    // Constrói lista de faixas a partir dos controladores
     final List<MarkupFaixa> novas = [];
     for (int i = 0; i < _faixas.length; i++) {
       final min = double.tryParse(_minCtrls[i].text.replaceAll(',', '.'));
@@ -1241,7 +1193,6 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
         _snack('O valor máximo da faixa ${i + 1} deve ser maior que o mínimo.', erro: true);
         return;
       }
-      // Somente a última pode ter max nulo
       if (max == null && i < _faixas.length - 1) {
         _snack('Somente a última faixa pode ficar sem valor máximo.', erro: true);
         return;
@@ -1287,8 +1238,6 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
     ));
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -1298,7 +1247,6 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ─── Seção Markup ────────────────────────────────────────────────
           _SecaoCard(
             titulo: 'Markup por faixa de valor',
             subtitulo:
@@ -1315,7 +1263,6 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
                     : Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ── Cabeçalho da tabela ──
                           if (_faixas.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 6),
@@ -1326,12 +1273,11 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
                                   _ColLabel('Até (R\$)',    flex: 2),
                                   const SizedBox(width: 8),
                                   _ColLabel('Markup (%)',   flex: 2),
-                                  const SizedBox(width: 40), // espaço do botão excluir
+                                  const SizedBox(width: 40),
                                 ],
                               ),
                             ),
 
-                          // ── Linhas de faixa ──
                           for (int i = 0; i < _faixas.length; i++)
                             _FaixaLinha(
                               key: ValueKey(i),
@@ -1356,7 +1302,6 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
 
                           const SizedBox(height: 12),
 
-                          // ── Botões ──
                           Row(
                             children: [
                               OutlinedButton.icon(
@@ -1395,7 +1340,6 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
 
           const SizedBox(height: 20),
 
-          // ─── Seção Imposto sobre Sobra ────────────────────────────────────
           _SecaoCard(
             titulo: 'Imposto sobre sobra de material',
             subtitulo:
@@ -1466,8 +1410,6 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
     );
   }
 }
-
-// ─── Widget: linha de faixa de markup ─────────────────────────────────────────
 
 class _FaixaLinha extends StatelessWidget {
   final int                    index;
@@ -1593,8 +1535,6 @@ class _FaixaLinha extends StatelessWidget {
   }
 }
 
-// ─── Widget: card de seção ────────────────────────────────────────────────────
-
 class _SecaoCard extends StatelessWidget {
   final String   titulo;
   final String   subtitulo;
@@ -1662,8 +1602,6 @@ class _SecaoCard extends StatelessWidget {
   }
 }
 
-// ─── Widget: label de coluna ──────────────────────────────────────────────────
-
 class _ColLabel extends StatelessWidget {
   final String texto;
   final int    flex;
@@ -1685,8 +1623,6 @@ class _ColLabel extends StatelessWidget {
     );
   }
 }
-
-// ─── Widget: erro inline com retry ───────────────────────────────────────────
 
 class _ErroInline extends StatelessWidget {
   final String       mensagem;
@@ -1720,8 +1656,6 @@ class _ErroInline extends StatelessWidget {
     );
   }
 }
-
-// ─── Helper local ─────────────────────────────────────────────────────────────
 
 String _fmtNum(double v) =>
     v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(2);

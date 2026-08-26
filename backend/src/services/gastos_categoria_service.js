@@ -84,7 +84,7 @@ async function valorEmEstoque() {
 }
 
 async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
-  const whereMovimentacao = { relacaoOS: { status: 'FECHADA' } };
+  const whereRelacaoOS = { status: 'FECHADA' };
 
   if (dataInicio || dataFim) {
     const filtroData = {};
@@ -94,11 +94,13 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
       fim.setHours(23, 59, 59, 999);
       filtroData.lte = fim;
     }
-    whereMovimentacao.criadoEm = filtroData;
+    // Filtra pela data de CRIAÇÃO da OS, não da movimentação individual,
+    // para que o gasto de uma OS caia sempre no período em que ela foi aberta.
+    whereRelacaoOS.criadoEm = filtroData;
   }
 
   const movimentacoes = await prisma.movimentacaoEstoque.findMany({
-    where: whereMovimentacao,
+    where: { relacaoOS: whereRelacaoOS },
     include: {
       material: {
         select: {
@@ -167,45 +169,59 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
         };
       }
 
-      let primeiroSaidaVisto = false;
-      let qtdSaida           = 0;
-      let qtdDevolucao       = 0;
-      let precoRef           = 0;
-
       const _ehEntradaOC = (m) =>
         m.ordemCompraId != null ||
         (m.observacao    && m.observacao.includes('via OC')) ||
         (m.descricaoItem && m.descricaoItem.includes('via OC'));
 
+      // Primeira passagem: soma a devolução total (entradas não-OC após a
+      // primeira saída) para descontar das saídas mais recentes primeiro.
+      let primeiroSaidaVisto   = false;
+      let qtdDevolucaoRestante = 0;
       for (const mov of movs) {
-        const qtd = Number(mov.quantidade);
-
-        if (mov.tipo === 'ENTRADA') {
-          if (_ehEntradaOC(mov)) continue;
-          if (primeiroSaidaVisto) qtdDevolucao += qtd;
-          continue;
+        if (mov.tipo === 'ENTRADA' && !_ehEntradaOC(mov) && primeiroSaidaVisto) {
+          qtdDevolucaoRestante += Number(mov.quantidade);
         }
-
-        if (qtd <= 0) continue;
-        primeiroSaidaVisto = true;
-        qtdSaida += qtd;
-
-        const pu    = Number(mov.precoUnitario || 0);
-        const pm2   = Number(mov.precoM2       || 0);
-        const preco = pu > 0 ? pu : pm2;
-        if (preco > precoRef) precoRef = preco;
+        if (mov.tipo === 'SAIDA') primeiroSaidaVisto = true;
       }
 
-      const qtdLiquida = Math.max(0, qtdSaida - qtdDevolucao);
-      const valorBruto = precoRef * qtdLiquida;
+      // Segunda passagem: valora cada SAÍDA pelo seu próprio preço (não pelo
+      // maior preço da OS), descontando a devolução da(s) saída(s) mais recente(s).
+      const saidasLiquidas = [];
+      let qtdLiquidaTotal   = 0;
+      for (const mov of movs) {
+        if (mov.tipo !== 'SAIDA') continue;
+        const qtd = Number(mov.quantidade);
+        if (qtd <= 0) continue;
 
-      const valorRetalho = valorRetalhoPorOSMaterial[`${osId}-${matId}`] || 0;
-      const gasto        = Math.max(0, valorBruto - valorRetalho);
+        const devDesc         = Math.min(qtd, qtdDevolucaoRestante);
+        qtdDevolucaoRestante -= devDesc;
+        const qtdLiquida      = qtd - devDesc;
+
+        if (qtdLiquida > 0) {
+          const pu    = Number(mov.precoUnitario || 0);
+          const pm2   = Number(mov.precoM2       || 0);
+          const preco = pu > 0 ? pu : pm2;
+          saidasLiquidas.push({ valor: preco * qtdLiquida, qtd: qtdLiquida });
+          qtdLiquidaTotal += qtdLiquida;
+        }
+      }
+
+      // Desconta o valor do retalho reaproveitado, começando pelas saídas
+      // mais recentes (mesma ordem usada em gastosMensais).
+      let valorRetalhoRestante = valorRetalhoPorOSMaterial[`${osId}-${matId}`] || 0;
+      for (let i = saidasLiquidas.length - 1; i >= 0 && valorRetalhoRestante > 0; i--) {
+        const desconto = Math.min(saidasLiquidas[i].valor, valorRetalhoRestante);
+        saidasLiquidas[i].valor -= desconto;
+        valorRetalhoRestante    -= desconto;
+      }
+
+      const gasto = saidasLiquidas.reduce((s, x) => s + Math.max(0, x.valor), 0);
 
       if (gasto > 0) {
         porCategoria[cat].totalGasto                  += gasto;
         porCategoria[cat].materiais[matId].totalGasto += gasto;
-        porCategoria[cat].materiais[matId].qtdGasta   += qtdLiquida;
+        porCategoria[cat].materiais[matId].qtdGasta   += qtdLiquidaTotal;
       }
     }
   }
@@ -226,10 +242,14 @@ async function gastosMensais({ ano } = {}) {
   const inicio  = new Date(`${anoAlvo}-01-01T00:00:00.000Z`);
   const fim     = new Date(`${anoAlvo}-12-31T23:59:59.999Z`);
 
+  // Filtra pela data de CRIAÇÃO da OS (não da movimentação nem do fechamento),
+  // pois o gasto deve ser atribuído ao mês em que a OS foi aberta.
   const movimentacoes = await prisma.movimentacaoEstoque.findMany({
     where: {
-      relacaoOS: { status: 'FECHADA' },
-      criadoEm:  { gte: inicio, lte: fim },
+      relacaoOS: {
+        status: 'FECHADA',
+        criadoEm: { gte: inicio, lte: fim },
+      },
     },
     select: {
       relacaoOSId:      true,
@@ -243,6 +263,7 @@ async function gastosMensais({ ano } = {}) {
       ordemCompraId:    true,
       observacao:       true,
       descricaoItem:    true,
+      relacaoOS: { select: { criadoEm: true } },
     },
     orderBy: { criadoEm: 'asc' },
   });
@@ -257,7 +278,7 @@ async function gastosMensais({ ano } = {}) {
 
   const _grupo = (osId, matId) => {
     const chave = `${osId}-${matId}`;
-    if (!grupos[chave]) grupos[chave] = { movs: [], valorRetalho: 0 };
+    if (!grupos[chave]) grupos[chave] = { movs: [], valorRetalho: 0, osCriadoEm: null };
     return grupos[chave];
   };
 
@@ -266,10 +287,14 @@ async function gastosMensais({ ano } = {}) {
       const pu    = Number(mov.precoUnitario || 0);
       const pm2   = Number(mov.precoM2       || 0);
       const preco = pu > 0 ? pu : pm2;
-      _grupo(mov.relacaoOSId, mov.materialOrigemId).valorRetalho += preco * Number(mov.quantidade);
+      const g = _grupo(mov.relacaoOSId, mov.materialOrigemId);
+      g.valorRetalho += preco * Number(mov.quantidade);
+      g.osCriadoEm = mov.relacaoOS.criadoEm;
       continue;
     }
-    _grupo(mov.relacaoOSId, mov.materialId).movs.push(mov);
+    const g = _grupo(mov.relacaoOSId, mov.materialId);
+    g.movs.push(mov);
+    g.osCriadoEm = mov.relacaoOS.criadoEm;
   }
 
   const _ehEntradaOC = (m) =>
@@ -277,7 +302,7 @@ async function gastosMensais({ ano } = {}) {
     (m.observacao    && m.observacao.includes('via OC')) ||
     (m.descricaoItem && m.descricaoItem.includes('via OC'));
 
-  for (const { movs, valorRetalho } of Object.values(grupos)) {
+  for (const { movs, valorRetalho, osCriadoEm } of Object.values(grupos)) {
     let primeiroSaidaVisto = false;
     let qtdDevolucaoRestante = 0;
 
@@ -306,7 +331,8 @@ async function gastosMensais({ ano } = {}) {
         const pu    = Number(mov.precoUnitario || 0);
         const pm2   = Number(mov.precoM2       || 0);
         const preco = pu > 0 ? pu : pm2;
-        const mes   = mov.criadoEm.getMonth() + 1;
+        // Atribui ao mês de CRIAÇÃO da OS, não ao mês da movimentação em si.
+        const mes   = osCriadoEm.getMonth() + 1;
         saidasLiquidas.push({ mes, valor: preco * qtdLiquida });
       }
     }

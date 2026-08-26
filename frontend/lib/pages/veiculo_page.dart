@@ -7,8 +7,6 @@ import '../providers/veiculo_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 String _brl(double v) =>
     'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
 
@@ -37,10 +35,6 @@ IconData _iconeTipo(String tipo) {
     default:           return Icons.miscellaneous_services_rounded;
   }
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Página principal — grade de veículos (cards)
-// ═════════════════════════════════════════════════════════════════════════════
 
 class VeiculoPage extends StatefulWidget {
   const VeiculoPage({super.key});
@@ -169,7 +163,7 @@ class _VeiculoPageState extends State<VeiculoPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
+
             Row(
               children: [
                 Column(
@@ -253,7 +247,6 @@ class _VeiculoPageState extends State<VeiculoPage> {
             ),
             const SizedBox(height: 24),
 
-            // ── Conteúdo ───────────────────────────────────────────────────
             Expanded(
               child: provider.carregando
                   ? const Center(
@@ -333,10 +326,6 @@ class _VeiculoPageState extends State<VeiculoPage> {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Dialog — Veículos desativados (reativar ou excluir definitivamente)
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _VeiculosDesativadosDialog extends StatelessWidget {
   const _VeiculosDesativadosDialog();
@@ -536,10 +525,6 @@ class _VeiculosDesativadosDialog extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Empty state
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _EmptyState extends StatelessWidget {
   final VoidCallback onAdd;
   const _EmptyState({required this.onAdd});
@@ -569,10 +554,6 @@ class _EmptyState extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Card de veículo (grade, estilo dos cards de categoria do Estoque)
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _VeiculoCardGrid extends StatefulWidget {
   final VeiculoModel  veiculo;
@@ -646,7 +627,7 @@ class _VeiculoCardGridState extends State<_VeiculoCardGrid> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Topo: ícone + ações rápidas ──────────────────────────
+
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -687,7 +668,6 @@ class _VeiculoCardGridState extends State<_VeiculoCardGrid> {
                 ),
                 const SizedBox(height: 12),
 
-                // ── Nome ──────────────────────────────────────────────────
                 Text(
                   v.nome,
                   style: TextStyle(
@@ -700,7 +680,6 @@ class _VeiculoCardGridState extends State<_VeiculoCardGrid> {
                 ),
                 const SizedBox(height: 6),
 
-                // ── Placa ─────────────────────────────────────────────────
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
@@ -721,7 +700,6 @@ class _VeiculoCardGridState extends State<_VeiculoCardGrid> {
 
                 const Spacer(),
 
-                // ── Status / último serviço ──────────────────────────────
                 if (retiradaHoje)
                   _StatusTag(
                     label: 'Pronto p/ retirada',
@@ -758,7 +736,6 @@ class _VeiculoCardGridState extends State<_VeiculoCardGrid> {
   }
 }
 
-/// Pequeno botão de ícone usado nas ações rápidas do card de veículo.
 class _MiniIconBtn extends StatelessWidget {
   final IconData     icon;
   final Color        color;
@@ -795,7 +772,6 @@ class _MiniIconBtn extends StatelessWidget {
   }
 }
 
-/// Pequena etiqueta de status exibida na base do card de veículo.
 class _StatusTag extends StatelessWidget {
   final String   label;
   final Color    color;
@@ -828,10 +804,6 @@ class _StatusTag extends StatelessWidget {
     );
   }
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Página de histórico de serviços de um veículo
-// ═════════════════════════════════════════════════════════════════════════════
 
 class VeiculoServicosPage extends StatefulWidget {
   final int   veiculoId;
@@ -892,7 +864,7 @@ class _VeiculoServicosPageState extends State<VeiculoServicosPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho com botão voltar ──────────────────────────────
+
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -993,7 +965,6 @@ class _VeiculoServicosPageState extends State<VeiculoServicosPage> {
             ),
             const SizedBox(height: 20),
 
-            // ── Conteúdo ──────────────────────────────────────────────────
             Expanded(
               child: carregando
                   ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
@@ -1080,10 +1051,6 @@ class _VeiculoServicosPageState extends State<VeiculoServicosPage> {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Linha de uma manutenção dentro do histórico
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _LinhaManutencao extends StatefulWidget {
   final ManutencaoModel manutencao;
@@ -1203,7 +1170,7 @@ class _LinhaManutencaoState extends State<_LinhaManutencao> {
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
                 child: Row(
                   children: [
-                    // Ícone do tipo
+
                     Container(
                       width: 36, height: 36,
                       decoration: BoxDecoration(
@@ -1214,7 +1181,6 @@ class _LinhaManutencaoState extends State<_LinhaManutencao> {
                     ),
                     const SizedBox(width: 12),
 
-                    // Tipo + descrição + datas
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1262,7 +1228,6 @@ class _LinhaManutencaoState extends State<_LinhaManutencao> {
                       ),
                     ),
 
-                    // Valor
                     Text(
                       _brl(m.valor),
                       style: TextStyle(
@@ -1273,7 +1238,6 @@ class _LinhaManutencaoState extends State<_LinhaManutencao> {
                     ),
                     SizedBox(width: 8),
 
-                    // Ações
                     if (m.emAndamento)
                       _finalizando
                           ? const SizedBox(
@@ -1327,10 +1291,6 @@ class _LinhaManutencaoState extends State<_LinhaManutencao> {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Dialog: criar / editar veículo
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _FormVeiculoDialog extends StatefulWidget {
   final VeiculoModel? veiculo;
@@ -1445,10 +1405,6 @@ class _FormVeiculoDialogState extends State<_FormVeiculoDialog> {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Dialog: criar / editar manutenção
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _FormManutencaoDialog extends StatefulWidget {
   final int              veiculoId;
@@ -1566,7 +1522,7 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Tipo
+
                 Text('Tipo de serviço',
                     style: TextStyle(
                         fontSize: 12,
@@ -1601,7 +1557,6 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
                 ),
                 const SizedBox(height: 16),
 
-                // Descrição
                 _campo(
                   context: context,
                   controller: _descCtrl,
@@ -1609,7 +1564,6 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
                 ),
                 const SizedBox(height: 12),
 
-                // Valor
                 _campo(
                   context: context,
                   controller: _valorCtrl,
@@ -1625,7 +1579,6 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
                 ),
                 const SizedBox(height: 16),
 
-                // Datas
                 Row(
                   children: [
                     Expanded(
@@ -1690,8 +1643,6 @@ class _FormManutencaoDialogState extends State<_FormManutencaoDialog> {
     );
   }
 }
-
-// ── Widgets auxiliares dos dialogs ────────────────────────────────────────────
 
 Widget _campo({
   required BuildContext context,
@@ -1802,8 +1753,7 @@ class _DataBtn extends StatelessWidget {
     );
   }
 }
-// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
-// Mesmo padrão usado no cabeçalho das outras páginas do sistema.
+
 class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;

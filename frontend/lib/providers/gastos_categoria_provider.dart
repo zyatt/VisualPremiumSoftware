@@ -19,8 +19,6 @@ String _mensagemErro(Object e) {
 
 class GastosCategoriaProvider extends ChangeNotifier {
 
-  // ── SEÇÃO 1: Valor em estoque ─────────────────────────────────────────────
-
   List<EstoqueCategoriaModel> _estoque = [];
   List<EstoqueCategoriaModel> get estoque => _estoque;
 
@@ -49,8 +47,6 @@ class GastosCategoriaProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
-
-  // ── SEÇÃO 2: Gastos (OS fechadas, saídas com origem em OC) ───────────────
 
   List<GastoCategoriaModel> _gastos = [];
   List<GastoCategoriaModel> get gastos => _gastos;
@@ -105,8 +101,6 @@ class GastosCategoriaProvider extends ChangeNotifier {
   Future<void> recarregarGastos() =>
       carregarGastos(dataInicio: _dataInicioAtiva, dataFim: _dataFimAtiva);
 
-  // ── SEÇÃO 3: Gráfico mensal ───────────────────────────────────────────────
-
   List<GastoMensalModel> _mensal = [];
   List<GastoMensalModel> get mensal => _mensal;
 
@@ -139,12 +133,11 @@ class GastosCategoriaProvider extends ChangeNotifier {
     }
   }
 
-  // ── Ação unificada: carrega tudo ──────────────────────────────────────────
-
   Future<void> carregarTudo({DateTime? dataInicio, DateTime? dataFim}) async {
     await Future.wait([
       carregarEstoque(),
       carregarGastos(dataInicio: dataInicio, dataFim: dataFim),
+      carregarMensal(ano: _anoMensal),
     ]);
   }
 }

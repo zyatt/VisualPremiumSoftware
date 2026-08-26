@@ -60,7 +60,6 @@ class _LoadingPageState extends State<LoadingPage>
     ).drive(Tween(begin: 0.0, end: 1.0));
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // Pré-carrega ambas as versões do logo
       await Future.wait([
         precacheImage(const AssetImage('assets/images/logoPreta.png'), context),
         precacheImage(const AssetImage('assets/images/logoBranca.png'), context),
@@ -109,7 +108,6 @@ class _LoadingPageState extends State<LoadingPage>
     final hint   = isDark ? AppTheme.darkTextHint   : AppTheme.textHint;
     final track  = isDark ? AppTheme.darkDivider     : AppTheme.divider;
 
-    // No modo claro usa logoPreta; no escuro usa logo (branca/colorida)
     final logoAsset = isDark
         ? 'assets/images/logoBranca.png'
         : 'assets/images/logoPreta.png';
@@ -122,7 +120,6 @@ class _LoadingPageState extends State<LoadingPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // ── Logo ────────────────────────────────────────
               AnimatedBuilder(
                 animation: _logoCtrl,
                 builder: (_, child) => Opacity(
@@ -141,11 +138,10 @@ class _LoadingPageState extends State<LoadingPage>
 
               const SizedBox(height: 40),
 
-              // ── Barra de progresso ───────────────────────────
               AnimatedBuilder(
                 animation: Listenable.merge([_barProgress, _logoOpacity]),
                 builder: (_, __) => Opacity(
-                  opacity: _logoOpacity.value, // aparece junto com o logo
+                  opacity: _logoOpacity.value,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(4),
                     child: SizedBox(
@@ -177,7 +173,6 @@ class _LoadingPageState extends State<LoadingPage>
 
               const SizedBox(height: 20),
 
-              // ── Tagline ──────────────────────────────────────
               AnimatedBuilder(
                 animation: _tagOpacity,
                 builder: (_, child) => Opacity(

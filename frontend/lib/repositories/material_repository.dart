@@ -13,8 +13,6 @@ class MaterialRepository {
     String? largura,
     String? comprimento,
     bool? ativo,
-    /// Limita a quantidade retornada diretamente no banco (ex.: autocomplete).
-    /// Sem isso, a busca trazia a tabela inteira e cortava no client.
     int? limite,
   }) async {
     final params = <String, String>{};
@@ -73,9 +71,6 @@ class MaterialRepository {
     return params;
   }
 
-  /// Busca uma única página de materiais direto do servidor — ordenação e
-  /// corte acontecem no banco (GET /materiais/paginado), então o payload
-  /// fica do tamanho de [porPagina], não da tabela inteira.
   Future<MateriaisPaginadosModel> listarPaginado({
     String? busca,
     String? categoria,
@@ -123,7 +118,7 @@ class MaterialRepository {
     return MateriaisPaginadosModel(itens: itens, total: total);
   }
 
-  Future<List<MaterialModel>> listarParaMovimentacao({
+  Future<MateriaisPaginadosModel> listarParaMovimentacao({
     String? busca,
     String? categoria,
     String? id,
@@ -132,6 +127,8 @@ class MaterialRepository {
     String? espessura,
     String? largura,
     String? comprimento,
+    required int pagina,
+    int porPagina = 50,
   }) async {
     final params = <String, String>{};
     if (busca != null && busca.isNotEmpty)                 params['busca']         = busca;
@@ -146,18 +143,19 @@ class MaterialRepository {
     } else if (categoria != null && categoria.isNotEmpty) {
       params['categoria'] = categoria;
     }
+    params['pagina']    = pagina.toString();
+    params['porPagina'] = porPagina.toString();
 
     final query = params.entries
         .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
         .join('&');
-    final path = query.isEmpty
-        ? '/materiais/para-movimentacao'
-        : '/materiais/para-movimentacao?$query';
+    final data = await ApiClient.get('/materiais/para-movimentacao?$query');
 
-    final list = await ApiClient.getList(path);
-    return list
+    final itens = (data['data'] as List? ?? [])
         .map((e) => MaterialModel.fromJson(e as Map<String, dynamic>))
         .toList();
+    final total = (data['total'] as num?)?.toInt() ?? itens.length;
+    return MateriaisPaginadosModel(itens: itens, total: total);
   }
 
   Future<MaterialModel> buscarPorId(int id) async {
@@ -175,12 +173,10 @@ class MaterialRepository {
     return MaterialModel.fromJson(data);
   }
 
-  /// PATCH /api/materiais/:id/desativar
   Future<void> desativar(int id) async {
     await ApiClient.patch('/materiais/$id/desativar');
   }
 
-  /// PATCH /api/materiais/:id/confirmar
   Future<void> confirmarEstoque(int id) async {
     await ApiClient.patch('/materiais/$id/confirmar');
   }
@@ -199,7 +195,6 @@ class MaterialRepository {
     return MaterialModel.fromJson(data);
   }
 
-  /// Retorna o histórico de custos pagos via OC finalizada para o material.
   Future<List<HistoricoPrecoModel>> listarHistoricoPrecos(int materialId) async {
     final list = await ApiClient.getList('/materiais/$materialId/historico-precos');
     return list
@@ -207,9 +202,6 @@ class MaterialRepository {
         .toList();
   }
 
-  /// PATCH /api/materiais/:id/custo
-  /// Atualiza diretamente o custo de última compra do material (inserção manual).
-  /// Útil quando não há OC registrada mas o custo real precisa ser refletido.
   Future<MaterialModel> atualizarCustoManual(
     int id, {
     double? ultimoValorPago,

@@ -57,6 +57,43 @@ const listar = async (req, res, next) => {
   }
 };
 
+const listarPaginado = async (req, res, next) => {
+  try {
+    res.json(
+      await svc.listarPaginado({
+        busca:     req.query.busca,
+        tipo:      req.query.tipo,
+        id:        req.query.id,
+        pagina:    req.query.pagina,
+        porPagina: req.query.porPagina,
+      }),
+    );
+  } catch (e) {
+    next(e);
+  }
+};
+
+const listarTipos = async (req, res, next) => {
+  try {
+    res.json(await svc.listarTipos());
+  } catch (e) {
+    next(e);
+  }
+};
+
+const verificarSemelhantes = async (req, res, next) => {
+  try {
+    res.json(
+      await svc.verificarSemelhantes(
+        req.query.nomeFantasia,
+        req.query.ignorarId,
+      ),
+    );
+  } catch (e) {
+    next(e);
+  }
+};
+
 const buscarPorId = async (req, res, next) => {
   try {
     res.json(await svc.buscarPorId(+req.params.id));
@@ -161,6 +198,9 @@ const atualizarPreco = async (req, res, next) => {
 module.exports = {
   uploadImagem,
   listar,
+  listarPaginado,
+  listarTipos,
+  verificarSemelhantes,
   buscarParaVinculo,
   buscarPorId,
   criar,

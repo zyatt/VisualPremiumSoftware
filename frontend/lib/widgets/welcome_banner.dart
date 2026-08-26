@@ -1,50 +1,17 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-/// Banner de boas-vindas que desliza da direita para dentro da tela
-/// e depois recua, exibindo o nome completo do usuário.
-///
-/// Uso:
-/// ```dart
-/// WelcomeBanner(nomeUsuario: 'Carlos Souza')
-/// ```
-///
-/// Coloque-o em Stack com Positioned(top: 16, right: 0) ou deixe
-/// o próprio widget se posicionar via [overlay].
 class WelcomeBanner extends StatelessWidget {
   final String nomeUsuario;
 
   const WelcomeBanner({super.key, required this.nomeUsuario});
 
-  /// Exibe o banner como um overlay sobre a tela atual.
-  /// Chame após o login ou logo após navegar para /inicio.
-  ///
-  /// IMPORTANTE: [context] precisa ser um contexto de dentro da árvore do
-  /// Navigator (ex: o context de build() do AppShell), NUNCA
-  /// `navigatorKey.currentContext` — esse é o contexto do próprio widget
-  /// Navigator, e o Overlay que ele gerencia é filho dele na árvore, não
-  /// ancestral. Overlay.maybeOf busca para cima, então usar o contexto do
-  /// Navigator faz a busca falhar silenciosamente (retorna null) e o banner
-  /// nunca aparece. Se precisar de um "contexto estável" que sobreviva a uma
-  /// desmontagem, use [showOnOverlay] com o OverlayState obtido via
-  /// `navigatorKey.currentState?.overlay`.
   static void show(BuildContext context, String nomeUsuario) {
-    // rootOverlay: true força o Overlay do MaterialApp.router (que
-    // sobrevive a qualquer navegação do GoRouter), em vez do Overlay mais
-    // próximo — que pode pertencer a uma parte da árvore sendo desmontada
-    // no exato momento de uma troca de rota/usuário. maybeOf evita lançar
-    // exceção e derrubar o app se, por algum motivo, nenhum Overlay
-    // estiver mais disponível nesse instante.
     final overlay = Overlay.maybeOf(context, rootOverlay: true);
     if (overlay == null) return;
     showOnOverlay(overlay, nomeUsuario);
   }
 
-  /// Mesmo comportamento de [show], mas recebendo o [OverlayState]
-  /// diretamente — sem passar por busca de ancestral via BuildContext.
-  /// Use esta variante quando obtiver o overlay via
-  /// `rootNavigatorKey.currentState?.overlay`, que continua válido mesmo
-  /// que o contexto de onde a chamada partiu já tenha sido desmontado.
   static void showOnOverlay(OverlayState overlay, String nomeUsuario) {
     late OverlayEntry entry;
     entry = OverlayEntry(
@@ -63,8 +30,6 @@ class WelcomeBanner extends StatelessWidget {
       );
 }
 
-// ── Versão overlay (usada pelo show()) ───────────────────────────────────────
-
 class _BannerOverlay extends StatefulWidget {
   final String nomeUsuario;
   final VoidCallback onDone;
@@ -78,19 +43,13 @@ class _BannerOverlayState extends State<_BannerOverlay>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
 
-  // Slide: entra da direita (offset +1) → pousa em 0 → sai de volta (+1)
   late final Animation<Offset> _slide;
-  // Fade: aparece rápido, some rápido
   late final Animation<double> _fade;
 
   @override
   void initState() {
     super.initState();
 
-    // Total: 2.6 s
-    // 0.00 – 0.25 → entra (easeOutCubic)
-    // 0.25 – 0.75 → pausa visível
-    // 0.75 – 1.00 → sai (easeInCubic)
     _ctrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2600),
@@ -128,7 +87,7 @@ class _BannerOverlayState extends State<_BannerOverlay>
         ? 'Bom dia'
         : (hora >= 12 && hora < 18)
             ? 'Boa tarde'
-            : 'Boa noite'; // 18h–23h e 0h–5h
+            : 'Boa noite';
 
     return Positioned(
       top: 20,
@@ -151,8 +110,6 @@ class _BannerOverlayState extends State<_BannerOverlay>
   }
 }
 
-// ── Card visual ───────────────────────────────────────────────────────────────
-
 class _BannerCard extends StatelessWidget {
   final String saudacao;
   final String nomeUsuario;
@@ -160,7 +117,6 @@ class _BannerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Primeiro nome apenas
     final primeiroNome = nomeUsuario.split(' ').first;
 
     final scheme = Theme.of(context).colorScheme;
@@ -200,7 +156,6 @@ class _BannerCard extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // logo da empresa com fundo em destaque
           Container(
             width: 50,
             height: 50,
@@ -228,7 +183,6 @@ class _BannerCard extends StatelessWidget {
             ),
           ),
           SizedBox(width: 16),
-          // textos
           Flexible(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -265,7 +219,6 @@ class _BannerCard extends StatelessWidget {
               ],
             ),
           ),
-          // acento laranja lateral
           const SizedBox(width: 14),
           Container(
             width: 4,
@@ -288,9 +241,6 @@ class _BannerCard extends StatelessWidget {
   }
 }
 
-// ── Tweens customizados ───────────────────────────────────────────────────────
-
-/// Offset: começa fora à direita (+1,0), vai a (0,0), volta a (+1,0).
 class _SlideTween extends Animatable<Offset> {
   final Interval enter;
   final Interval exit;
@@ -299,21 +249,17 @@ class _SlideTween extends Animatable<Offset> {
   @override
   Offset transform(double t) {
     if (t < 0.25) {
-      // Entrada: de +1 → 0
       final p = enter.transform(t);
       return Offset(1.0 - p, 0);
     } else if (t < 0.75) {
-      // Pausa: fica em 0
       return Offset.zero;
     } else {
-      // Saída: de 0 → +1
       final p = exit.transform(t);
       return Offset(p, 0);
     }
   }
 }
 
-/// Opacity: fade-in rápido, fica em 1.0, fade-out rápido.
 class _FadeTween extends Animatable<double> {
   final Interval fadeIn;
   final Interval fadeOut;
@@ -326,9 +272,6 @@ class _FadeTween extends Animatable<double> {
     return 1.0;
   }
 }
-
-// ── Versão inline (alternativa sem overlay) ───────────────────────────────────
-// Caso queira embutir no layout ao invés de usar show()
 
 class WelcomeBannerInline extends StatefulWidget {
   final String nomeUsuario;
@@ -375,7 +318,7 @@ class _WelcomeBannerInlineState extends State<WelcomeBannerInline>
         ? 'Bom dia'
         : (hora >= 12 && hora < 18)
             ? 'Boa tarde'
-            : 'Boa noite'; // 18h–23h e 0h–5h
+            : 'Boa noite';
 
     return AnimatedBuilder(
       animation: _ctrl,

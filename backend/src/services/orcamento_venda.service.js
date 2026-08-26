@@ -1,11 +1,35 @@
 const prisma = require('../utils/prisma');
 const cfgSvc = require('./configuracao.service');
 
-function _calcularPrecoMedio(fornecedorMateriais = []) {
-  const precos   = fornecedorMateriais.map((fm) => Number(fm.preco)).filter((p) => p > 0);
-  const precosM2 = fornecedorMateriais.map((fm) => Number(fm.precoMetroQuadrado)).filter((p) => p > 0);
-  const media    = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
-  return { precoMedio: media(precos), precoMedioM2: media(precosM2) };
+function _calcularPrecoMedio(fornecedorMateriais = [], material = {}) {
+  const refL = material.largura     != null ? Number(material.largura)     : null;
+  const refC = material.comprimento != null ? Number(material.comprimento) : null;
+  const area = (refL && refC && refL > 0 && refC > 0) ? refL * refC : null;
+
+  const precos = fornecedorMateriais.map((fm) => Number(fm.preco)).filter((p) => p > 0);
+
+  const precosM2 = fornecedorMateriais.map((fm) => {
+    const direto = Number(fm.precoMetroQuadrado);
+    if (direto > 0) return direto;
+    const base = Number(fm.preco);
+    if (base > 0 && area) return base / area;
+    return 0;
+  }).filter((p) => p > 0);
+
+  const precosUnidadeMedida = fornecedorMateriais.map((fm) => {
+    const direto = Number(fm.precoUnidadeMedida);
+    if (direto > 0) return direto;
+    const base = Number(fm.preco);
+    if (base > 0 && refC && refC > 0) return base / refC;
+    return 0;
+  }).filter((p) => p > 0);
+
+  const media = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+  return {
+    precoMedio: media(precos),
+    precoMedioM2: media(precosM2),
+    precoUnidadeMedidaMediano: media(precosUnidadeMedida),
+  };
 }
 
 function _calcularSobra(m, custoPorM2) {
@@ -39,8 +63,9 @@ function _serializarItem(item) {
       categoria: item.produto.categoria,
     },
     materiais: item.materiais.map((m) => {
-      const { precoMedio, precoMedioM2 } = _calcularPrecoMedio(
+      const { precoMedio, precoMedioM2, precoUnidadeMedidaMediano } = _calcularPrecoMedio(
         m.material.fornecedorMateriais ?? [],
+        m.material,
       );
       const refL = m.material.largura     != null ? Number(m.material.largura)     : null;
       const refC = m.material.comprimento != null ? Number(m.material.comprimento)  : null;
@@ -77,6 +102,7 @@ function _serializarItem(item) {
           comprimento:       m.material.comprimento != null ? Number(m.material.comprimento) : null,
           precoMedio,
           precoMedioM2,
+          precoUnidadeMedidaMediano,
         },
       };
     }),
@@ -342,9 +368,23 @@ function _decomporCustos(ov) {
 
   for (const item of ov.itens ?? []) {
     for (const m of item.materiais ?? []) {
-      const preco = m.precoUnitario != null
-        ? Number(m.precoUnitario)
-        : (m.precoMedio != null ? Number(m.precoMedio) : 0);
+      const unidade = (m.material?.unidade ?? '').trim().toLowerCase();
+      const vendidoPorUnidadeMedida = unidade !== '' && unidade !== 'unidade';
+
+      let preco;
+      if (m.precoUnitario != null) {
+        preco = Number(m.precoUnitario);
+      } else if (vendidoPorUnidadeMedida) {
+        const { precoUnidadeMedidaMediano } = _calcularPrecoMedio(
+          m.material?.fornecedorMateriais ?? [],
+          m.material ?? {},
+        );
+        preco = precoUnidadeMedidaMediano != null
+          ? Number(precoUnidadeMedidaMediano)
+          : (m.precoMedio != null ? Number(m.precoMedio) : 0);
+      } else {
+        preco = m.precoMedio != null ? Number(m.precoMedio) : 0;
+      }
       custoBase += Number(m.quantidade) * preco;
 
       const refL = m.material?.largura     != null ? Number(m.material.largura)     : null;
@@ -397,6 +437,11 @@ async function _recalcularTotal(orcamentoVendaId) {
                   largura:         true,
                   comprimento:     true,
                   ultimoValorPago: true,
+                  unidade:         true,
+                  fornecedorMateriais: {
+                    where:  { ativo: true },
+                    select: { preco: true, precoMetroQuadrado: true, precoUnidadeMedida: true },
+                  },
                 },
               },
             },

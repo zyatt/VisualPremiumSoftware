@@ -1,49 +1,11 @@
-// historico_material_page.dart
-//
-// Contém:
-//   1. HistoricoMaterialPage  — página completa com filtros, lista e diff
-//   2. Botão "Histórico" para inserir na EstoqueCategoriaPage
-//
-// ─── Como integrar o botão na EstoqueCategoriaPage ───────────────────────────
-// No cabeçalho da EstoqueCategoriaPage, ANTES do Consumer<MaterialProvider>
-// (o botão "Orçar filtrados"), adicione:
-//
-//   OutlinedButton.icon(
-//     onPressed: () => Navigator.of(context).push(
-//       MaterialPageRoute(builder: (_) => const HistoricoMaterialPage()),
-//     ),
-//     icon: const Icon(Icons.history, size: 18),
-//     label: const Text('Histórico'),
-//     style: OutlinedButton.styleFrom(
-//       foregroundColor: const Color(0xFFF59E0B),
-//       side: const BorderSide(color: Color(0xFFF59E0B)),
-//       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-//     ),
-//   ),
-//   const SizedBox(width: 12),
-//
-// ─── Como registrar o provider ───────────────────────────────────────────────
-// No main.dart, dentro do MultiProvider, adicione:
-//   ChangeNotifierProvider(create: (_) => AuditLogProvider()),
-// ─────────────────────────────────────────────────────────────────────────────
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
 import '../models/audit_log_model.dart';
 import '../providers/audit_log_provider.dart';
 import '../theme/app_theme.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// A partir de materialInfoLine, mantém apenas os segmentos que representam
-/// dimensões (medida, espessura, comprimento, largura — sempre contêm algum
-/// número), descartando categoria e unidade (que são apenas texto, ex.:
-/// "unidade", "m²", "RETALHO").
 String _dimensoesDoMaterial(String infoLine) {
   final s = infoLine.trim();
   if (s.isEmpty) return '';
@@ -52,23 +14,17 @@ String _dimensoesDoMaterial(String infoLine) {
       .split(RegExp(r'[·•∙⋅]|(?<=\s)-(?=\s)'))
       .map((p) => p.trim())
       .where((p) => p.isNotEmpty && RegExp(r'\d').hasMatch(p))
-      // Segmento composto só por um número (ex.: "14") representa a
-      // espessura em milímetros — acrescenta o sufixo "mm".
       .map((p) => soNumero.hasMatch(p) ? '${p}mm' : p)
       .toList();
   return partes.join(' · ');
 }
 
-/// Nome do campo exibido na coluna "Campo" do histórico. Quando o campo
-/// alterado for "Espessura", acrescenta "(mm)" ao lado do texto.
 String _nomeCampoExibicao(String? campo) {
   if (campo == null || campo.isEmpty) return '—';
   if (campo.trim().toLowerCase() == 'espessura') return '$campo (mm)';
   return campo;
 }
 
-/// Converte mensagens de erro técnicas em textos legíveis pelo usuário.
-/// Trata especialmente erros de rede (SocketException / ClientException).
 String _mensagemErroAmigavel(String raw) {
   final lower = raw.toLowerCase();
   if (lower.contains('socketexception') ||
@@ -81,17 +37,10 @@ String _mensagemErroAmigavel(String raw) {
   if (lower.contains('timeout') || lower.contains('timed out')) {
     return 'A conexão com o servidor expirou.\nVerifique a rede e tente novamente.';
   }
-  // Remove prefixos técnicos como "Exception:", "HttpException:" etc.
   return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PÁGINA PRINCIPAL
-// ─────────────────────────────────────────────────────────────────────────────
-
 class HistoricoMaterialPage extends StatefulWidget {
-  /// Se não-nulo, filtra automaticamente pelo material informado
-  /// e exibe o nome no cabeçalho.
   final int?    materialIdInicial;
   final String? materialNomeInicial;
 
@@ -163,10 +112,6 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
       lastDate:     DateTime.now().add(const Duration(days: 1)),
       locale:       const Locale('pt', 'BR'),
       builder: (context, child) {
-        // Garante cursor de mão nos botões do diálogo — OK/Cancelar,
-        // alternar modo de entrada (lápis/calendário) e navegação de
-        // mês anterior/próximo — sem alterar cores/estilo já definidos
-        // pelo tema do app.
         final baseTextStyle = Theme.of(context).textButtonTheme.style ?? const ButtonStyle();
         final baseIconStyle = Theme.of(context).iconButtonTheme.style ?? const ButtonStyle();
         return Theme(
@@ -202,7 +147,6 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
       '${dt.month.toString().padLeft(2, '0')}/'
       '${dt.year}';
 
-  // ── BUILD ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -212,7 +156,6 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ────────────────────────────────────────────────────
             Row(
               children: [
                 _BotaoVoltar(
@@ -268,18 +211,16 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
             ),
             const SizedBox(height: 20),
 
-            // ── Filtros ───────────────────────────────────────────────────────
             Row(
               children: [
-                // Busca por nome de material (oculta quando filtra por material fixo)
                 if (widget.materialIdInicial == null) ...[
                   SizedBox(
                     width: 260,
                     child: TextField(
                       controller: _buscaCtrl,
                       decoration: InputDecoration(
-                        hintText:   'Buscar material',
-                        prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
+                        hintText:   'Nome do material',
+                        prefixIcon: Icon(Icons.inventory_2_outlined, color: Theme.of(context).colorScheme.outline, size: 20),
                         isDense:    true,
                         suffixIcon: _buscaCtrl.text.isNotEmpty
                             ? IconButton(
@@ -303,8 +244,6 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                   ),
                   const SizedBox(width: 12),
                 ],
-
-                // Filtro de ação
                 MouseRegion(
                   cursor: SystemMouseCursors.click,
                   onEnter: (_) => setState(() => _acaoHovered = true),
@@ -346,7 +285,6 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                 ),
                 const SizedBox(width: 12),
 
-                // Data início
                 _BotaoData(
                   label: _dataInicio != null
                       ? 'De: ${_formatarData(_dataInicio!)}'
@@ -361,8 +299,6 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                       : null,
                 ),
                 const SizedBox(width: 8),
-
-                // Data fim
                 _BotaoData(
                   label: _dataFim != null
                       ? 'Até: ${_formatarData(_dataFim!)}'
@@ -380,7 +316,6 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
             ),
             SizedBox(height: 16),
 
-            // ── Tabela ────────────────────────────────────────────────────────
             _CabecalhoTabela(mostrarMaterial: widget.materialIdInicial == null),
             Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
 
@@ -481,12 +416,6 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// WIDGETS AUXILIARES
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
-// Mesmo padrão usado no cabeçalho das páginas de estoque (_BotaoVoltar).
 class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;
@@ -614,8 +543,6 @@ class _BotaoData extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _CabecalhoTabela extends StatelessWidget {
   final bool mostrarMaterial;
 
@@ -628,39 +555,32 @@ class _CabecalhoTabela extends StatelessWidget {
       color: Theme.of(context).colorScheme.surface,
       child: Row(
         children: [
-          // Ação
           SizedBox(
             width: 96,
             child: Text('Ação',
                 style: _estiloHeader(context)),
           ),
-          // Material (só quando não está filtrado por material)
           if (mostrarMaterial)
             Expanded(
               flex: 4,
               child: Text('Material', style: _estiloHeader(context)),
             ),
-          // Campo alterado
           SizedBox(
             width: 140,
             child: Text('Campo', style: _estiloHeader(context)),
           ),
-          // Antes
           Expanded(
             flex: 2,
             child: Text('Antes', style: _estiloHeader(context)),
           ),
-          // Depois
           Expanded(
             flex: 2,
             child: Text('Depois', style: _estiloHeader(context)),
           ),
-          // Usuário
           SizedBox(
             width: 130,
             child: Text('Usuário', style: _estiloHeader(context)),
           ),
-          // Data
           SizedBox(
             width: 130,
             child: Text('Data/Hora', style: _estiloHeader(context), textAlign: TextAlign.right),
@@ -678,8 +598,6 @@ class _CabecalhoTabela extends StatelessWidget {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _LinhaLog extends StatelessWidget {
   final AuditLogModel log;
   final bool          mostrarMaterial;
@@ -696,7 +614,6 @@ class _LinhaLog extends StatelessWidget {
         '${dt.hour.toString().padLeft(2, '0')}:'
         '${dt.minute.toString().padLeft(2, '0')}';
 
-    // Converte a string hex da cor em Color
     final corHex = log.acaoCor.replaceFirst('#', '');
     final cor = Color(int.parse('FF$corHex', radix: 16));
 
@@ -705,7 +622,6 @@ class _LinhaLog extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Badge de ação ────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.only(top: 1),
             child: SizedBox(
@@ -714,7 +630,6 @@ class _LinhaLog extends StatelessWidget {
             ),
           ),
 
-          // ── Nome do material ─────────────────────────────────────────────
           if (mostrarMaterial)
             Expanded(
               flex: 4,
@@ -776,7 +691,6 @@ class _LinhaLog extends StatelessWidget {
               ),
             ),
 
-          // ── Campo alterado ───────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: SizedBox(
@@ -793,7 +707,6 @@ class _LinhaLog extends StatelessWidget {
             ),
           ),
 
-          // ── Valor antes ─────────────────────────────────────────────────
           Expanded(
             flex: 2,
             child: Padding(
@@ -809,7 +722,6 @@ class _LinhaLog extends StatelessWidget {
             ),
           ),
 
-          // ── Valor depois ─────────────────────────────────────────────────
           Expanded(
             flex: 2,
             child: Padding(
@@ -825,7 +737,6 @@ class _LinhaLog extends StatelessWidget {
             ),
           ),
 
-          // ── Usuário ──────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: SizedBox(
@@ -838,7 +749,6 @@ class _LinhaLog extends StatelessWidget {
             ),
           ),
 
-          // ── Data ─────────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: SizedBox(
@@ -855,8 +765,6 @@ class _LinhaLog extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _BadgeAcao extends StatelessWidget {
   final String label;
@@ -898,8 +806,6 @@ class _BadgeAcao extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _ValorChip extends StatelessWidget {
   final String valor;
   final Color  cor;
@@ -933,11 +839,6 @@ class _ValorChip extends StatelessWidget {
     );
   }
 }
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PAGINAÇÃO
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _BarraPaginacao extends StatelessWidget {
   final int paginaAtual;

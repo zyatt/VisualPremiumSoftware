@@ -1,14 +1,17 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind, PointerScrollEvent, PointerSignalEvent;
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers/usuario_provider.dart';
 import '../models/usuario_model.dart';
 import '../providers/alertas_estoque_provider.dart';
 import '../providers/orcamento_provider.dart';
 import '../providers/theme_provider.dart';
+import '../providers/nav_layout_provider.dart';
 import '../pages/orcamento_page.dart';
 import '../providers/veiculo_provider.dart';
 import '../providers/solicitacao_material_provider.dart';
@@ -27,7 +30,6 @@ import 'solicitacao_alterada_banner.dart';
 import 'material_critico_banner.dart';
 import 'theme_transition.dart';
 
-/// Controle de estado de sessão para evitar exibir o banner mais de uma vez.
 class SessionState {
   SessionState._();
   static bool welcomeShown = false;
@@ -54,22 +56,13 @@ class AppShell extends StatefulWidget {
   static bool isProducaoRole(String? role) {
     if (role == null) return false;
     final r = role.trim().toUpperCase();
-    // Reconhece tanto o role genérico ('PRODUÇÃO'/'PRODUCAO') quanto os
-    // roles reais usados no sistema, com sufixo de linha ('PRODUCAO1',
-    // 'PRODUCAO2') — ver producao_page.dart, onde usuario.role é comparado
-    // exatamente a 'PRODUCAO1'/'PRODUCAO2'. Antes, esta checagem só batia
-    // com o role sem sufixo, então usuários PRODUCAO1/PRODUCAO2 caíam no
-    // menu completo (COMPRAS e demais roles) em vez do menu restrito de
-    // Início/Produção/Chat.
+
     return r == 'PRODUÇÃO' ||
         r == 'PRODUCAO' ||
         r == 'PRODUCAO1' ||
         r == 'PRODUCAO2';
   }
 
-  /// Somente estes cargos devem ver o banner flutuante de nova solicitação
-  /// de material — o autor da solicitação nunca recebe o evento (o backend
-  /// já o exclui do broadcast), então não é preciso filtrar isso aqui.
   static bool podeReceberNotificacaoSolicitacao(String? role) {
     final r = role?.trim().toUpperCase() ?? '';
     return r == 'ADMIN' || r == 'GERENTE' || r == 'COMPRAS';
@@ -98,10 +91,10 @@ class AppShell extends StatefulWidget {
       const AppMenuItem(icon: Icons.shopping_bag_rounded,            label: 'Produtos',           route: '/produtos',              color: Color(0xFF06B6D4)),
       const AppMenuItem(icon: Icons.people_rounded,                  label: 'Fornecedores',       route: '/fornecedores',          color: Color(0xFF03DAC6)),
       const AppMenuItem(icon: Icons.assignment_rounded,              label: 'Solicitações',       route: '/solicitacoes-material', color: Color(0xFFF59E0B)),
-      const AppMenuItem(icon: Icons.request_quote_rounded,           label: 'Orç. Compras',       route: '/orcamento',             color: Color(0xFFFF9800)),
-      const AppMenuItem(icon: Icons.sell_rounded,                    label: 'Orç. Vendas',        route: '/orcamento-venda',       color: Color(0xFF22C55E)),
+      const AppMenuItem(icon: Icons.request_quote_rounded,           label: 'Orçamento Compras',       route: '/orcamento',             color: Color(0xFFFF9800)),
+      const AppMenuItem(icon: Icons.sell_rounded,                    label: 'Orçamento Vendas',        route: '/orcamento-venda',       color: Color(0xFF22C55E)),
       const AppMenuItem(icon: Icons.shopping_cart_rounded,           label: 'Ordem de Compra',    route: '/ordem-compra',          color: Color(0xFF4CAF50)),
-      const AppMenuItem(icon: Icons.sync_alt_rounded,                label: 'Controle Estoque',   route: '/controle-estoque',      color: Color(0xFFE91E63)),
+      const AppMenuItem(icon: Icons.sync_alt_rounded,                label: 'Controle de Estoque',   route: '/controle-estoque',      color: Color(0xFFE91E63)),
       const AppMenuItem(icon: Icons.description_rounded,             label: 'Relatório OS',       route: '/relatorio-os',          color: Color(0xFF2196F3)),
       const AppMenuItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção',           route: '/producao',              color: Color(0xFF00BCD4)),
       const AppMenuItem(icon: Icons.pie_chart_rounded,               label: 'Gastos',             route: '/gastos-categoria',      color: Color(0xFFFF7043)),
@@ -117,13 +110,12 @@ class AppShell extends StatefulWidget {
     }
 
     if (r == 'GERENTE') {
-      // Gerente não vê: Admin, Gastos, Orç. Vendas e Produtos
+
       return completo
           .where((e) => !['/gastos-categoria', '/orcamento-venda', '/produtos'].contains(e.route))
           .toList();
     }
 
-    // COMPRAS e demais roles
     return completo
         .where((e) => !['/gastos-categoria', '/orcamento-venda', '/produtos'].contains(e.route))
         .toList();
@@ -133,31 +125,12 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-/// Contexto estável para exibir overlays (banners) que precisam sobreviver
-/// a uma possível desmontagem do AppShell entre o momento em que o evento
-/// chega (build atual) e o momento em que o addPostFrameCallback realmente
-/// executa. Isso acontece, por exemplo, quando uma solicitação é
-/// criada/editada e, no mesmo instante, o usuário faz logout/troca de
-/// usuário: o GoRouter redireciona para /login e desmonta toda a árvore do
-/// StatefulShellRoute (incluindo o AppShell) ANTES do callback rodar. Usar
-/// o context capturado no build() do AppShell nesse cenário causa
-/// "Looking up a deactivated widget's ancestor is unsafe" / o assert
-/// '_elements.contains(element)'.
-///
-/// AppRouter.rootNavigatorKey aponta para o Navigator raiz do
-/// MaterialApp.router, que é criado uma única vez em main.dart e nunca é
-/// recriado — logo currentContext dele continua válido mesmo quando o
-/// AppShell (uma sub-árvore) é desmontado por um redirect.
 BuildContext? get _contextEstavel => AppRouter.rootNavigatorKey.currentContext;
 
 class _AppShellState extends State<AppShell> {
-  /// Id do usuário para o qual já conectamos SSE/chat. Usado para detectar
-  /// troca de usuário (via "Trocar para") e reconectar tudo, já que o
-  /// AppShell NUNCA é recriado nesse fluxo — initState() só roda uma vez.
+
   int? _usuarioIdConectado;
 
-  /// Roles com permissão de leitura em /api/alertas-estoque (deve
-  /// espelhar a constante LEITURA de alertas_estoque_route.js no backend).
   static const _rolesComAcessoAlertasEstoque = ['ADMIN', 'GERENTE', 'COMPRAS'];
 
   @override
@@ -165,23 +138,16 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<VeiculoProvider>().carregarVeiculos();
-      _conectarParaUsuarioAtual(); // também inicia/pausa o polling de alertas conforme o role
+      _conectarParaUsuarioAtual();
     });
   }
 
-  /// (Re)conecta o SSE de notificações e inicializa o chat para o usuário
-  /// logado no momento. Chamado tanto no initState quanto sempre que
-  /// detectamos, no build(), que o usuário ativo mudou (troca de usuário
-  /// sem reiniciar o app).
   void _conectarParaUsuarioAtual() {
     final usuario = context.read<UsuarioProvider>().usuarioLogado;
     final token   = context.read<UsuarioProvider>().token;
 
     _usuarioIdConectado = usuario?.id;
 
-    // Reavalia o polling de alertas de estoque conforme o role do usuário
-    // ativo: liga para quem tem permissão, desliga para quem não tem
-    // (relevante na troca de usuário via "Trocar para", sem reiniciar o app).
     final alertasProv = context.read<AlertasEstoqueProvider>();
     if (_rolesComAcessoAlertasEstoque.contains(usuario?.role)) {
       alertasProv.iniciarPolling();
@@ -189,26 +155,14 @@ class _AppShellState extends State<AppShell> {
       alertasProv.pararPolling();
     }
 
-    // Conecta (ou reconecta) ao stream SSE de novas solicitações
     context.read<SolicitacaoMaterialProvider>().conectarNotificacoes();
 
-    // Conecta (ou reconecta) ao stream SSE de atualizações de materiais
     context.read<MaterialProvider>().conectarNotificacoes();
 
-    // Carrega o contador de materiais pendentes de confirmação (transferência
-    // p/ produção) já na inicialização do shell, e não só quando o usuário
-    // abre a página de Controle de Estoque — é esse contador que alimenta o
-    // badge do item "Controle Estoque" no menu lateral, então sem esta
-    // chamada o badge ficava zerado até a página ser visitada ao menos uma
-    // vez na sessão.
     context.read<EstoqueProducaoProvider>().carregarContadorPendentes();
 
-    // Trocar de usuário não deve deixar a conversa do usuário anterior
-    // aberta na tela: recolhe o mini-chat flutuante (se estiver expandido)
-    // antes de inicializar o chat do novo usuário.
     context.read<ChatProvider>().minimizarWidgetFlutuante();
 
-    // Inicializa chat com id e token do usuário logado
     if (usuario != null && token != null) {
       context.read<ChatProvider>().inicializar(usuario.id, token);
     }
@@ -221,89 +175,45 @@ class _AppShellState extends State<AppShell> {
 
     final usuario = context.watch<UsuarioProvider>().usuarioLogado;
 
-    // ── Detecta troca de usuário (via "Trocar para") e reconecta SSE/chat ──
-    // O AppShell não é recriado nesse fluxo, então é aqui que percebemos
-    // que o usuário ativo mudou e disparamos a reconexão.
     if (usuario != null && usuario.id != _usuarioIdConectado) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (context.mounted) _conectarParaUsuarioAtual();
       });
     }
 
-    // ── Visibilidade real da tela de Chat ──────────────────────────────────
-    // O ChatPage vive dentro de um StatefulShellRoute.indexedStack, então ela
-    // NUNCA é destruída ao trocar de aba pela sidebar (fica só escondida no
-    // IndexedStack). Por isso o dispose() da própria página não é confiável
-    // pra saber se o usuário está "olhando" o chat agora — quem sabe disso
-    // de verdade é o AppShell, que reconstrói a cada troca de rota.
     context.read<ChatProvider>().definirPaginaVisivel(location.startsWith('/chat'));
 
-    // ── Visibilidade real da tela de Solicitações de Material ─────────────
-    // Mesmo motivo do Chat: a página vive dentro de um StatefulShellBranch
-    // (IndexedStack) e seu dispose() não é chamado ao trocar de aba, então
-    // quem sabe se ela está realmente visível é o AppShell, não a própria
-    // página.
     context
         .read<SolicitacaoMaterialProvider>()
         .definirPaginaVisivel(location.startsWith('/solicitacoes-material'));
 
-    // ── Visibilidade real da tela de Estoque (Materiais) ───────────────────
-    // Mesmo motivo do Chat e Solicitações: a página vive dentro de um
-    // StatefulShellBranch (IndexedStack) e seu dispose() não é chamado ao
-    // trocar de aba, então quem sabe se ela está realmente visível é o
-    // AppShell, não a própria página.
     context
         .read<MaterialProvider>()
         .definirPaginaVisivel(location.startsWith('/estoque'));
 
-    // ── Notifica o robô assistente sobre a rota atual ─────────────────────
-    // Feito no build (não em initState) para detectar troca de aba sem
-    // desmontar o AppShell (StatefulShellRoute preserva o estado de cada branch).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (context.mounted) {
         context.read<RoboHelperProvider>().notificarRota(location);
       }
     });
 
-    // ── Banner de boas-vindas (global — funciona para qualquer role) ──────
-    // Roda uma única vez por sessão, independente da rota inicial do usuário.
     final nome = usuario?.nome ?? '';
     if (!SessionState.welcomeShown && nome.isNotEmpty) {
       SessionState.welcomeShown = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        // Pega o OverlayState diretamente do NavigatorState, em vez de
-        // passar por Overlay.maybeOf(_contextEstavel). _contextEstavel é o
-        // contexto do PRÓPRIO widget Navigator — e o Overlay que ele
-        // gerencia é filho dele na árvore, não ancestral. Overlay.maybeOf
-        // busca só para cima, então essa combinação sempre retornava null
-        // e o banner nunca era inserido (nem no login, nem na troca de
-        // usuário). currentState?.overlay não depende de busca por
-        // ancestral e continua válido mesmo que algum contexto no meio do
-        // caminho já tenha sido desmontado.
+
         final overlay = AppRouter.rootNavigatorKey.currentState?.overlay;
         if (overlay != null) WelcomeBanner.showOnOverlay(overlay, nome);
       });
     }
 
-    // ── Banner flutuante de nova solicitação de material ──────────────────
-    // Aparece uma única vez por evento SSE recebido, e somente para quem
-    // pode agir sobre solicitações (ADMIN, GERENTE, COMPRAS). O autor da
-    // solicitação nunca chega a receber o evento (o backend já o exclui do
-    // broadcast), então não precisamos checar "é o autor?" aqui.
     final notificacaoSolicitacao =
         context.watch<SolicitacaoMaterialProvider>().notificacaoPendente;
     if (notificacaoSolicitacao != null) {
       final solProvRead = context.read<SolicitacaoMaterialProvider>();
       if (AppShell.podeReceberNotificacaoSolicitacao(usuario?.role)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          // Usa o OverlayState direto do rootNavigator (em vez de
-          // Overlay.maybeOf(_contextEstavel)): _contextEstavel é o contexto
-          // do próprio widget Navigator, e o Overlay dele é filho na
-          // árvore, não ancestral, então a busca por ancestral sempre
-          // falhava (retornava null) e o banner nunca era inserido. Também
-          // usamos AppRouter.rootNavigatorKey.currentContext (via
-          // _contextEstavel) só para o onTap navegar, já que ctx.go()
-          // precisa de um BuildContext válido.
+
           final overlay = AppRouter.rootNavigatorKey.currentState?.overlay;
           final ctx = _contextEstavel;
           if (overlay != null && ctx != null && ctx.mounted) {
@@ -315,25 +225,17 @@ class _AppShellState extends State<AppShell> {
           }
         });
       }
-      // Consome de qualquer forma (mostrando ou não), garantindo exibição
-      // única e evitando reprocessar o mesmo evento em rebuilds futuros.
+
       solProvRead.consumirNotificacaoPendente();
     }
 
-    // ── Banner flutuante de solicitação alterada ───────────────────────────
-    // Mesmo padrão do banner de nova solicitação, mas para edição/adição/
-    // exclusão de materiais ou dados de uma solicitação já existente. O
-    // autor da alteração nunca recebe este evento via SSE (o backend o
-    // exclui do broadcast), então este banner só aparece para outros
-    // usuários com permissão sobre solicitações.
     final notificacaoAlterada =
         context.watch<SolicitacaoMaterialProvider>().notificacaoAlteradaPendente;
     if (notificacaoAlterada != null) {
       final solProvReadAlterada = context.read<SolicitacaoMaterialProvider>();
       if (AppShell.podeReceberNotificacaoSolicitacao(usuario?.role)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          // Ver comentário no banner de nova solicitação acima: overlay
-          // obtido direto do NavigatorState, não via busca ancestral.
+
           final overlay = AppRouter.rootNavigatorKey.currentState?.overlay;
           final ctx = _contextEstavel;
           if (overlay != null && ctx != null && ctx.mounted) {
@@ -348,19 +250,13 @@ class _AppShellState extends State<AppShell> {
       solProvReadAlterada.consumirNotificacaoAlteradaPendente();
     }
 
-    // ── Banner flutuante de material em estoque crítico ────────────────────
-    // Aparece uma única vez por evento SSE 'material_critico', disparado pelo
-    // backend somente na transição para CRITICO (não repete enquanto o
-    // material permanece crítico). Mesmo público-alvo do banner de
-    // solicitações: quem pode agir sobre compras/estoque.
     final notificacaoCritica =
         context.watch<MaterialProvider>().notificacaoCriticaPendente;
     if (notificacaoCritica != null) {
       final matProvRead = context.read<MaterialProvider>();
       if (AppShell.podeReceberNotificacaoSolicitacao(usuario?.role)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          // Ver comentário no banner de nova solicitação acima: overlay
-          // obtido direto do NavigatorState, não via busca ancestral.
+
           final overlay = AppRouter.rootNavigatorKey.currentState?.overlay;
           final ctx = _contextEstavel;
           if (overlay != null && ctx != null && ctx.mounted) {
@@ -368,9 +264,7 @@ class _AppShellState extends State<AppShell> {
               overlay,
               notificacaoCritica,
               onTap: () {
-                // Guarda os dados do material para a EstoquePage abrir
-                // automaticamente a categoria certa já filtrada (nome,
-                // identificador, medida, espessura).
+
                 matProvRead.solicitarNavegacaoParaMaterial(notificacaoCritica);
                 ctx.go('/estoque');
               },
@@ -385,7 +279,6 @@ class _AppShellState extends State<AppShell> {
         .map((m) => _NavItem(icon: m.icon, label: m.label, route: m.route))
         .toList();
 
-    // Adiciona o item Início no topo da sidebar (não aparece nos cards da Home)
     final sidebarItems = [
       const _NavItem(icon: Icons.home_rounded, label: 'Início', route: '/inicio'),
       ...items,
@@ -393,28 +286,28 @@ class _AppShellState extends State<AppShell> {
 
     final mostrarBolhaChat = !location.startsWith('/chat');
 
+    final navLayout = context.watch<NavLayoutProvider>();
+    final usarTopo  = isWide && navLayout.isTopo;
+
     return Scaffold(
       body: Stack(
         children: [
-          Row(
-            children: [
-              if (isWide)
-                _Sidebar(currentRoute: location, items: sidebarItems),
-              Expanded(child: widget.navigationShell),
-            ],
-          ),
-          // O robô assistente vive aqui — dentro do Stack do AppShell — para
-          // nunca aparecer fora dele (loading, login). Fica ANTES do
-          // ChatFloatingWidget na lista de children de propósito: em um
-          // Stack, quem vem depois desenha por cima, então essa ordem
-          // garante que a janela de chat sempre fique acima do ícone do
-          // robô, nunca o contrário.
-          //
-          // Isso por si só reintroduziria o bug de dialogs (ex.: "Novo
-          // Material") cobrindo o balão do tour — mas esse caso é resolvido
-          // à parte, só enquanto o tour está ativo: o próprio
-          // RoboHelperWidget se promove pra um OverlayEntry no Overlay raiz
-          // nesse momento (ver robo_helper_widget.dart).
+          if (usarTopo)
+            Column(
+              children: [
+                _TopBar(currentRoute: location, items: sidebarItems),
+                Expanded(child: widget.navigationShell),
+              ],
+            )
+          else
+            Row(
+              children: [
+                if (isWide)
+                  _Sidebar(currentRoute: location, items: sidebarItems),
+                Expanded(child: widget.navigationShell),
+              ],
+            ),
+
           if (mostrarBolhaChat) const RoboHelperWidget(),
           if (mostrarBolhaChat) const ChatFloatingWidget(),
         ],
@@ -428,8 +321,6 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-// ─── Modelos ─────────────────────────────────
-
 class _NavItem {
   final IconData icon;
   final String label;
@@ -437,27 +328,429 @@ class _NavItem {
   const _NavItem({required this.icon, required this.label, required this.route});
 }
 
-// ─── Sidebar wrapper (largura fixa) ──────────────────────────────────────────
-
-class _Sidebar extends StatelessWidget {
+class _Sidebar extends StatefulWidget {
   final String currentRoute;
   final List<_NavItem> items;
   const _Sidebar({required this.currentRoute, required this.items});
 
   @override
+  State<_Sidebar> createState() => _SidebarState();
+}
+
+class _SidebarState extends State<_Sidebar> {
+  static const double _larguraMin = 160;
+  static const double _larguraMax = 340;
+  static const double _larguraPadrao = 190;
+  static const _chavePrefs = 'sidebar_largura';
+
+  double _largura = _larguraPadrao;
+  bool _arrastando = false;
+  double _larguraAoIniciar = _larguraPadrao;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarLarguraSalva();
+  }
+
+  Future<void> _carregarLarguraSalva() async {
+    final prefs = await SharedPreferences.getInstance();
+    final salva = prefs.getDouble(_chavePrefs);
+    if (salva != null && mounted) {
+      setState(() {
+        _largura = salva.clamp(_larguraMin, _larguraMax);
+      });
+    }
+  }
+
+  Future<void> _salvarLargura(double largura) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_chavePrefs, largura);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 190,
-      child: _SidebarContent(currentRoute: currentRoute, items: items),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final corDivisor = isDark ? Colors.white10 : Colors.black12;
+    final corDivisorAtivo = AppTheme.accent.withValues(alpha: 0.6);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          width: _largura,
+          child: _SidebarContent(
+              currentRoute: widget.currentRoute, items: widget.items),
+        ),
+        MouseRegion(
+          cursor: SystemMouseCursors.resizeLeftRight,
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onHorizontalDragStart: (_) {
+              setState(() {
+                _arrastando = true;
+                _larguraAoIniciar = _largura;
+              });
+            },
+            onHorizontalDragUpdate: (details) {
+              setState(() {
+                _largura = (_larguraAoIniciar + details.localPosition.dx)
+                    .clamp(_larguraMin, _larguraMax);
+              });
+            },
+            onHorizontalDragEnd: (_) {
+              setState(() => _arrastando = false);
+              _salvarLargura(_largura);
+            },
+            child: Container(
+              width: 6,
+              color: Colors.transparent,
+              alignment: Alignment.center,
+              child: Container(
+                width: _arrastando ? 2 : 1,
+                color: _arrastando ? corDivisorAtivo : corDivisor,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
 
-// ─── Conteúdo da sidebar ─────────────────────────────────────────────────────
+class _TopBar extends StatefulWidget {
+  final String currentRoute;
+  final List<_NavItem> items;
+  const _TopBar({required this.currentRoute, required this.items});
 
-/// Logo animada da sidebar: flutua suavemente para cima e para baixo,
-/// com uma leve rotação e um brilho pulsante ao redor — um toque vivo
-/// sem ser exagerado.
+  @override
+  State<_TopBar> createState() => _TopBarState();
+}
+
+class _TopBarState extends State<_TopBar> {
+  String _version = '';
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is PointerScrollEvent) {
+      final delta = event.scrollDelta.dy.abs() > event.scrollDelta.dx.abs()
+          ? event.scrollDelta.dy
+          : event.scrollDelta.dx;
+      final novoOffset = (_scrollController.offset + delta).clamp(
+        _scrollController.position.minScrollExtent,
+        _scrollController.position.maxScrollExtent,
+      );
+      _scrollController.jumpTo(novoOffset);
+    }
+  }
+
+  Future<void> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) setState(() => _version = info.version);
+  }
+
+  void _abrirConfiguracoes(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => const _ConfiguracoesDialog(),
+    );
+  }
+
+  void _abrirTrocaUsuario(BuildContext context) {
+    final usuarioProvider = context.read<UsuarioProvider>();
+    final salvos = usuarioProvider.usuariosSalvos;
+    final atual  = usuarioProvider.usuarioLogado;
+
+    final outros = salvos.where((u) => u.id != atual?.id).toList();
+
+    showDialog(
+      context: context,
+      builder: (_) => _TrocaUsuarioDialog(
+        usuarioAtual: atual,
+        usuariosSalvos: outros,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final usuario = context.watch<UsuarioProvider>().usuarioLogado;
+
+    final solProv       = context.watch<SolicitacaoMaterialProvider>();
+    final nSolicitacoes = solProv.novasSolicitacoes;
+
+    final chatProv = context.watch<ChatProvider>();
+    final nChat    = chatProv.totalNaoLidas;
+
+    final nPendentesProducao =
+        context.watch<EstoqueProducaoProvider>().totalPendentes;
+
+    final alertasProv = context.watch<AlertasEstoqueProvider>();
+    final nAlertasCriticos = alertasProv.totalAlertas;
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final sidebarBg = isDark ? AppTheme.sidebar : const Color.fromARGB(255, 247, 247, 247);
+    final textColor = isDark ? Colors.white : Colors.black;
+    final textColorTertiary = isDark ? const Color.fromARGB(97, 240, 240, 240) : Colors.black54;
+    final dividerColor = isDark ? Colors.white10 : Colors.black26;
+
+    return Container(
+      color: sidebarBg,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              const _AnimatedLogo(),
+              const SizedBox(width: 10),
+              Text(
+                'Visual Premium',
+                style: GoogleFonts.raleway(
+                  color: textColor,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Container(width: 1, height: 24, color: dividerColor),
+              const SizedBox(width: 8),
+
+              Expanded(
+                child: Listener(
+                  onPointerSignal: _handlePointerSignal,
+                  child: ScrollConfiguration(
+                    behavior: ScrollConfiguration.of(context).copyWith(
+                      dragDevices: {
+                        PointerDeviceKind.touch,
+                        PointerDeviceKind.mouse,
+                        PointerDeviceKind.trackpad,
+                      },
+                    ),
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                      children: widget.items.map((item) {
+                        final isActive =
+                            widget.currentRoute == item.route ||
+                            (item.route != '/inicio' &&
+                                widget.currentRoute
+                                    .startsWith('${item.route}/'));
+
+                        final badge = item.route == '/solicitacoes-material' && nSolicitacoes > 0
+                            ? nSolicitacoes
+                            : item.route == '/chat' && nChat > 0
+                                ? nChat
+                                : item.route == '/controle-estoque' && nPendentesProducao > 0
+                                    ? nPendentesProducao
+                                    : 0;
+
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: _TopBarTile(
+                            item: item,
+                            isActive: isActive,
+                            badge: badge,
+                            isDark: isDark,
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    ),
+                  ),
+                ),
+              ),
+
+              if (nAlertasCriticos > 0 && !AppShell.isProducaoRole(usuario?.role)) ...[
+                const SizedBox(width: 8),
+                _AlertasTopBarChip(
+                  totalAlertas: nAlertasCriticos,
+                  onTap: () => _mostrarPainelAlertas(context, alertasProv),
+                ),
+              ],
+
+              const SizedBox(width: 8),
+              Container(width: 1, height: 24, color: dividerColor),
+              const SizedBox(width: 8),
+
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    mouseCursor: SystemMouseCursors.click,
+                    onTap: () => _abrirTrocaUsuario(context),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 4),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 13,
+                            backgroundColor:
+                                AppTheme.accent.withValues(alpha: 0.2),
+                            child: Text(
+                              (usuario?.nome ?? 'U')[0].toUpperCase(),
+                              style: GoogleFonts.nunito(
+                                color: AppTheme.accent,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 110),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                usuario?.nome ?? '',
+                                maxLines: 1,
+                                style: GoogleFonts.nunito(
+                                  color: textColor,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              IconButton(
+                tooltip: 'Configurações',
+                icon: Icon(Icons.settings_rounded,
+                    size: 18, color: textColorTertiary),
+                onPressed: () => _abrirConfiguracoes(context),
+                style: IconButton.styleFrom().copyWith(mouseCursor:
+                    WidgetStateProperty.all(SystemMouseCursors.click)),
+              ),
+
+              if (_version.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Text(
+                    'v$_version',
+                    style: GoogleFonts.nunito(
+                        color: textColorTertiary.withValues(alpha: 0.6),
+                        fontSize: 10),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TopBarTile extends StatelessWidget {
+  final _NavItem item;
+  final bool isActive;
+  final int badge;
+  final bool isDark;
+
+  const _TopBarTile({
+    required this.item,
+    required this.isActive,
+    this.badge = 0,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textColorSecondary = isDark ? Colors.white : Colors.black87;
+    final iconColor = isDark ? Colors.white38 : Colors.black87;
+
+    return Material(
+      color: isActive
+          ? AppTheme.accent.withValues(alpha: 0.15)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        mouseCursor: SystemMouseCursors.click,
+        onTap: () => context.go(item.route),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: isActive
+                ? const Border(
+                    bottom: BorderSide(color: AppTheme.accent, width: 2),
+                  )
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                item.icon,
+                color: isActive ? AppTheme.accent : iconColor,
+                size: 18,
+              ),
+              const SizedBox(width: 7),
+              Text(
+                item.label,
+                style: GoogleFonts.nunito(
+                  color: isActive
+                      ? (isDark ? Colors.white : Colors.black87)
+                      : textColorSecondary,
+                  fontSize: 14,
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+              if (badge > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  constraints: const BoxConstraints(minWidth: 16),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    badge > 99 ? '99+' : '$badge',
+                    style: GoogleFonts.nunito(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _AnimatedLogo extends StatefulWidget {
   const _AnimatedLogo();
 
@@ -573,7 +866,6 @@ class _SidebarContentState extends State<_SidebarContent> {
     final salvos = usuarioProvider.usuariosSalvos;
     final atual  = usuarioProvider.usuarioLogado;
 
-    // Filtra o usuário atual da lista
     final outros = salvos.where((u) => u.id != atual?.id).toList();
 
     showDialog(
@@ -591,27 +883,23 @@ class _SidebarContentState extends State<_SidebarContent> {
     final alertas     = context.watch<AlertasEstoqueProvider>();
     final nAlertas    = alertas.totalAlertas;
     final veiculoProv = context.watch<VeiculoProvider>();
-    // Conta veículos que têm alguma manutenção com retiradaHoje == true
+
     final nRetirada = veiculoProv.veiculos
         .cast<VeiculoModel>()
         .where((v) => v.manutencoes.any((m) => m.retiradaHoje))
         .length;
-    
-    // Badge de novas solicitações
+
     final solProv          = context.watch<SolicitacaoMaterialProvider>();
     final nSolicitacoes    = solProv.novasSolicitacoes;
 
-    // Badge de mensagens não lidas no chat
     final chatProv   = context.watch<ChatProvider>();
     final nChat      = chatProv.totalNaoLidas;
 
-    // Badge de materiais pendentes de confirmação (transferência p/ produção)
     final nPendentesProducao =
         context.watch<EstoqueProducaoProvider>().totalPendentes;
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    // Cores adaptadas ao tema
+
     final sidebarBg = isDark ? AppTheme.sidebar : const Color.fromARGB(255, 247, 247, 247);
     final textColor = isDark ? Colors.white : Colors.black;
     final textColorTertiary = isDark ? const Color.fromARGB(97, 240, 240, 240) : Colors.black54;
@@ -623,24 +911,26 @@ class _SidebarContentState extends State<_SidebarContent> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho / logo ─────────────────────────────────────────
+
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              padding: const EdgeInsets.fromLTRB(12, 20, 8, 8),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   const _AnimatedLogo(),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Visual Premium',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.raleway(
                         color: textColor,
-                        fontSize: 14,
+                        fontSize: 15,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.3,
+                        height: 1.1,
                       ),
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -651,7 +941,6 @@ class _SidebarContentState extends State<_SidebarContent> {
             Divider(color: dividerColor, height: 1),
             const SizedBox(height: 6),
 
-            // ── Status de notificações SSE ────────────────────────────────
             if (!AppShell.isProducaoRole(usuario?.role))
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -660,7 +949,6 @@ class _SidebarContentState extends State<_SidebarContent> {
                 ),
               ),
 
-            // ── Banner de alertas de estoque ─────────────────────────────
             if (nAlertas > 0 && !AppShell.isProducaoRole(usuario?.role))
               Padding(
                 padding:
@@ -671,7 +959,6 @@ class _SidebarContentState extends State<_SidebarContent> {
                 ),
               ),
 
-            // ── Banner de retirada de veículos hoje ──────────────────────
             if (nRetirada > 0 && !AppShell.isProducaoRole(usuario?.role))
               Padding(
                 padding:
@@ -685,7 +972,6 @@ class _SidebarContentState extends State<_SidebarContent> {
 
             const SizedBox(height: 4),
 
-            // ── Itens de navegação ────────────────────────────────────────
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -696,7 +982,6 @@ class _SidebarContentState extends State<_SidebarContent> {
                           widget.currentRoute
                               .startsWith('${item.route}/'));
 
-                  // Badge de notificação: solicitações, chat ou controle de estoque
                   final badge = item.route == '/solicitacoes-material' && nSolicitacoes > 0
                       ? nSolicitacoes
                       : item.route == '/chat' && nChat > 0
@@ -717,10 +1002,9 @@ class _SidebarContentState extends State<_SidebarContent> {
 
             Divider(color: dividerColor, height: 1),
 
-            // ── Usuário + botão de configurações ─────────────────────────
             Padding(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
               child: Row(
                 children: [
                   Expanded(
@@ -739,7 +1023,7 @@ class _SidebarContentState extends State<_SidebarContent> {
                           child: Row(
                             children: [
                               CircleAvatar(
-                                radius: 14,
+                                radius: 13,
                                 backgroundColor:
                                     AppTheme.accent.withValues(alpha: 0.2),
                                 child: Text(
@@ -747,11 +1031,11 @@ class _SidebarContentState extends State<_SidebarContent> {
                                   style: GoogleFonts.nunito(
                                     color: AppTheme.accent,
                                     fontWeight: FontWeight.w700,
-                                    fontSize: 13,
+                                    fontSize: 12,
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: 6),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -759,25 +1043,29 @@ class _SidebarContentState extends State<_SidebarContent> {
                                   children: [
                                     Text(
                                       usuario?.nome ?? '',
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
                                       style: GoogleFonts.nunito(
                                         color: textColor,
-                                        fontSize: 12,
+                                        fontSize: 13,
                                         fontWeight: FontWeight.w600,
+                                        height: 1.15,
                                       ),
-                                      overflow: TextOverflow.ellipsis,
                                     ),
                                     Text(
                                       usuario?.role ?? '',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: GoogleFonts.nunito(
                                         color: textColorTertiary,
-                                        fontSize: 10,
+                                        fontSize: 11,
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
                               Icon(Icons.unfold_more_rounded,
-                                  size: 15, color: textColorTertiary.withValues(alpha: 0.6)),
+                                  size: 13, color: textColorTertiary.withValues(alpha: 0.6)),
                             ],
                           ),
                         ),
@@ -788,8 +1076,10 @@ class _SidebarContentState extends State<_SidebarContent> {
                   IconButton(
                     tooltip: 'Configurações',
                     icon: Icon(Icons.settings_rounded,
-                        size: 18, color: textColorTertiary),
+                        size: 17, color: textColorTertiary),
                     onPressed: () => _abrirConfiguracoes(context),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                     style: IconButton.styleFrom()
                         .copyWith(mouseCursor: WidgetStateProperty.all(
                             SystemMouseCursors.click)),
@@ -798,7 +1088,6 @@ class _SidebarContentState extends State<_SidebarContent> {
               ),
             ),
 
-            // ── Versão ────────────────────────────────────────────────────
             if (_version.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(left: 16, bottom: 12),
@@ -814,14 +1103,6 @@ class _SidebarContentState extends State<_SidebarContent> {
     );
   }
 
-  void _mostrarPainelAlertas(
-      BuildContext context, AlertasEstoqueProvider alertas) {
-    showDialog(
-      context: context,
-      builder: (_) => _PainelAlertasDialog(alertas: alertas),
-    );
-  }
-
   void _mostrarPainelRetirada(
       BuildContext context, VeiculoProvider provider) {
     showDialog(
@@ -830,8 +1111,6 @@ class _SidebarContentState extends State<_SidebarContent> {
     );
   }
 }
-
-// ─── Tile individual ─────────────────────────────────────────────────────────
 
 class _SidebarTile extends StatelessWidget {
   final _NavItem item;
@@ -848,7 +1127,7 @@ class _SidebarTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textColorSecondary = isDark ? Colors.white54 : Colors.black87;
+    final textColorSecondary = isDark ? Colors.white : Colors.black87;
     final iconColor = isDark ? Colors.white38 : Colors.black87;
 
     return Padding(
@@ -882,19 +1161,23 @@ class _SidebarTile extends StatelessWidget {
                 ),
                 const SizedBox(width: 9),
                 Expanded(
-                  child: Text(
-                    item.label,
-                    style: GoogleFonts.nunito(
-                      color: isActive ? (isDark ? Colors.white : Colors.black87) : textColorSecondary,
-                      fontSize: 12,
-                      fontWeight: isActive
-                          ? FontWeight.w700
-                          : FontWeight.w500,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      item.label,
+                      maxLines: 1,
+                      style: GoogleFonts.nunito(
+                        color: isActive ? (isDark ? Colors.white : Colors.black87) : textColorSecondary,
+                        fontSize: 12,
+                        fontWeight: isActive
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
                     ),
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                // ── Badge de notificação ──────────────────────────────
+
                 if (badge > 0)
                   Container(
                     constraints: const BoxConstraints(minWidth: 18),
@@ -922,8 +1205,6 @@ class _SidebarTile extends StatelessWidget {
     );
   }
 }
-
-// ─── Dialog de Configurações ─────────────────────────────────────────────────
 
 class _ConfiguracoesDialog extends StatelessWidget {
   const _ConfiguracoesDialog();
@@ -1117,6 +1398,93 @@ class _ConfiguracoesDialog extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                 child: Text(
+                  'LAYOUT',
+                  style: GoogleFonts.nunito(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Builder(
+                  builder: (rowContext) {
+                    final navLayout = rowContext.watch<NavLayoutProvider>();
+                    final noTopo = navLayout.isTopo;
+
+                    return Material(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        mouseCursor: SystemMouseCursors.click,
+                        onTap: () => rowContext.read<NavLayoutProvider>().alternar(),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          child: Row(
+                            children: [
+                              Icon(
+                                noTopo
+                                    ? Icons.view_agenda_rounded
+                                    : Icons.view_sidebar_rounded,
+                                color: colorScheme.onSurfaceVariant,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Posição do menu',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: colorScheme.onSurface,
+                                      ),
+                                    ),
+                                    Text(
+                                      noTopo ? 'Topo' : 'Lateral',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 11,
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Switch(
+                                value: noTopo,
+                                onChanged: (_) => rowContext
+                                    .read<NavLayoutProvider>()
+                                    .alternar(),
+                                activeThumbColor: AppTheme.primary,
+                                activeTrackColor:
+                                    AppTheme.primary.withValues(alpha: 0.3),
+                                inactiveThumbColor:
+                                    colorScheme.onSurfaceVariant,
+                                inactiveTrackColor: colorScheme.outline
+                                    .withValues(alpha: 0.3),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              Divider(
+                  color: colorScheme.outline.withValues(alpha: 0.4),
+                  height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text(
                   'CONTA',
                   style: GoogleFonts.nunito(
                     fontSize: 10,
@@ -1255,8 +1623,6 @@ class _ConfiguracoesDialog extends StatelessWidget {
   }
 }
 
-// ─── Dialog de troca de usuário ──────────────────────────────────────────────
-
 class _TrocaUsuarioDialog extends StatefulWidget {
   final UsuarioModel? usuarioAtual;
   final List<UsuarioModel> usuariosSalvos;
@@ -1355,7 +1721,7 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── Cabeçalho ────────────────────────────────────────────────
+
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 12, 16),
                 child: Row(
@@ -1398,7 +1764,6 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
                   color: colorScheme.outline.withValues(alpha: 0.4),
                   height: 1),
 
-              // ── Usuário atual ─────────────────────────────────────────────
               if (usuarioAtual != null) ...[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
@@ -1488,7 +1853,6 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
                 ),
               ],
 
-              // ── Outros usuários salvos ────────────────────────────────────
               if (usuariosSalvos.isNotEmpty) ...[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
@@ -1634,7 +1998,6 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
                   color: colorScheme.outline.withValues(alpha: 0.3),
                   height: 1),
 
-              // ── Entrar com outra conta ────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: OutlinedButton.icon(
@@ -1661,7 +2024,58 @@ class _TrocaUsuarioDialogState extends State<_TrocaUsuarioDialog> {
   }
 }
 
-// ─── Banner compacto de alertas de estoque ───────────────────────────────────
+void _mostrarPainelAlertas(
+    BuildContext context, AlertasEstoqueProvider alertas) {
+  showDialog(
+    context: context,
+    builder: (_) => _PainelAlertasDialog(alertas: alertas),
+  );
+}
+
+class _AlertasTopBarChip extends StatelessWidget {
+  final int totalAlertas;
+  final VoidCallback onTap;
+
+  const _AlertasTopBarChip({
+    required this.totalAlertas,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const cor   = Color(0xFFDC2626);
+    const corBg = Color(0x1ADC2626);
+
+    return Material(
+      color: corBg,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        mouseCursor: SystemMouseCursors.click,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline_rounded, size: 14, color: cor),
+              const SizedBox(width: 6),
+              Text(
+                '$totalAlertas crítico${totalAlertas > 1 ? 's' : ''}',
+                style: GoogleFonts.nunito(
+                  color: cor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _AlertasSidebarBanner extends StatelessWidget {
   final int totalAlertas;
@@ -1714,8 +2128,6 @@ class _AlertasSidebarBanner extends StatelessWidget {
   }
 }
 
-// ─── Banner compacto de retirada de veículos ─────────────────────────────────
-
 class _RetiradaVeiculosBanner extends StatelessWidget {
   final int total;
   final VoidCallback onTap;
@@ -1764,8 +2176,6 @@ class _RetiradaVeiculosBanner extends StatelessWidget {
   }
 }
 
-// ─── Indicador de status de notificações SSE ─────────────────────────────────
-
 class _StatusNotificacoesIndicador extends StatelessWidget {
   final bool conectado;
   const _StatusNotificacoesIndicador({required this.conectado});
@@ -1810,8 +2220,6 @@ class _StatusNotificacoesIndicador extends StatelessWidget {
     );
   }
 }
-
-// ─── Painel de alertas ───────────────────────────────────────────────────────
 
 class _PainelAlertasDialog extends StatefulWidget {
   final AlertasEstoqueProvider alertas;
@@ -1929,7 +2337,7 @@ class _PainelAlertasDialogState extends State<_PainelAlertasDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── Cabeçalho ──────────────────────────────────────────────────
+
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 12, 16),
                 child: Row(
@@ -1980,7 +2388,7 @@ class _PainelAlertasDialogState extends State<_PainelAlertasDialog> {
               Divider(
                   color: colorScheme.outline.withValues(alpha: 0.4),
                   height: 1),
-              // ── Barra "selecionar todos" ──────────────────────────────────
+
               if (itens.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
@@ -2030,7 +2438,7 @@ class _PainelAlertasDialogState extends State<_PainelAlertasDialog> {
                     ],
                   ),
                 ),
-              // ── Lista de alertas ────────────────────────────────────────────
+
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
                 child: SizedBox(
@@ -2075,7 +2483,7 @@ class _PainelAlertasDialogState extends State<_PainelAlertasDialog> {
                         ),
                 ),
               ),
-              // ── Rodapé com botões ───────────────────────────────────────────
+
               Divider(
                   color: colorScheme.outline.withValues(alpha: 0.4),
                   height: 1),
@@ -2127,8 +2535,6 @@ class _PainelAlertasDialogState extends State<_PainelAlertasDialog> {
     );
   }
 }
-
-// ─── Painel de retirada de veículos ──────────────────────────────────────────
 
 class _PainelRetiradaDialog extends StatelessWidget {
   final VeiculoProvider provider;
@@ -2201,8 +2607,6 @@ class _PainelRetiradaDialog extends StatelessWidget {
   }
 }
 
-// ─── Seção header de alertas ─────────────────────────────────────────────────
-
 class _AlertaSecaoHeader extends StatelessWidget {
   final String label;
   final int count;
@@ -2251,8 +2655,6 @@ class _AlertaSecaoHeader extends StatelessWidget {
     );
   }
 }
-
-// ─── Item de alerta ──────────────────────────────────────────────────────────
 
 class _AlertaItemTile extends StatelessWidget {
   final dynamic alerta;
@@ -2319,7 +2721,7 @@ class _AlertaItemTile extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Checkbox de seleção
+
               if (onToggle != null) ...[
                 SizedBox(
                   width: 20,

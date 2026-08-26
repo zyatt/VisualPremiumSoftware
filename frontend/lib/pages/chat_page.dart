@@ -1,5 +1,3 @@
-// lib/pages/chat_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -18,7 +16,6 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
-// ─── Indicador de presença (bolinha verde/cinza no avatar) ────────────────────
 class _StatusDot extends StatelessWidget {
   final bool online;
   final double size;
@@ -38,10 +35,6 @@ class _StatusDot extends StatelessWidget {
   }
 }
 
-/// Texto de status exibido junto ao nome do usuário: "Online" quando
-/// conectado agora, ou "Visto por último às HH:mm" (ajustando para "ontem"
-/// ou uma data completa quando aplicável) com base no último momento em
-/// que a conexão SSE dele caiu.
 String _formatarStatusUsuario(UsuarioChat usuario) {
   if (usuario.online) return 'Online';
   final ultimo = usuario.ultimoAcesso;
@@ -63,9 +56,6 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final chatProv = context.read<ChatProvider>();
-      // Se o ChatProvider já foi inicializado (login/restaurarSessao chamou
-      // via UsuarioProvider), só garante que a lista de usuários está
-      // atualizada — não precisa reconectar SSE/heartbeat de novo.
       if (chatProv.meuId != null) {
         chatProv.carregarUsuarios();
         return;
@@ -93,7 +83,6 @@ class _ChatPageState extends State<ChatPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
             Row(
               children: [
                 Column(
@@ -132,8 +121,6 @@ class _ChatPageState extends State<ChatPage> {
               ],
             ),
             const SizedBox(height: 20),
-
-            // ── Corpo (lista de usuários / conversa) ────────────────────────
             Expanded(
               child: Card(
                 clipBehavior: Clip.antiAlias,
@@ -148,8 +135,6 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 }
-
-// ─── Layout para telas largas (split view) ────────────────────────────────────
 
 class _LayoutWide extends StatelessWidget {
   final ChatProvider chat;
@@ -175,8 +160,6 @@ class _LayoutWide extends StatelessWidget {
   }
 }
 
-// ─── Layout mobile (stack view) ──────────────────────────────────────────────
-
 class _LayoutNarrow extends StatelessWidget {
   final ChatProvider chat;
   const _LayoutNarrow({required this.chat});
@@ -195,8 +178,6 @@ class _LayoutNarrow extends StatelessWidget {
     );
   }
 }
-
-// ─── Lista de usuários ────────────────────────────────────────────────────────
 
 class _ListaUsuarios extends StatelessWidget {
   final ChatProvider chat;
@@ -273,9 +254,6 @@ class _ListaUsuarios extends StatelessWidget {
               return _UsuarioTile(
                 usuario:   u,
                 isAtivo:   isAtivo,
-                // Se o usuário clicado já é a conversa ativa, não faz nada.
-                // Evita reabrir/recarregar a mesma conversa (o que fazia o
-                // chat rolar de volta pro topo).
                 onTap:     isAtivo ? () {} : () => onSelecionar(u),
               );
             },
@@ -300,13 +278,6 @@ class _UsuarioTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs     = Theme.of(context).colorScheme;
     final inicial = usuario.nome.isNotEmpty ? usuario.nome[0].toUpperCase() : '?';
-
-    // Cores de texto/ícone adaptadas ao fundo: quando o tile está ativo, o
-    // fundo vira `primaryContainer` (bem saturado neste tema), então o
-    // texto precisa usar `onPrimaryContainer` para manter contraste — usar
-    // `onSurface`/`onSurfaceVariant` (pensadas pro fundo neutro do tile
-    // inativo) deixava "Visto por último..." quase ilegível em cima do
-    // laranja.
     final corNome = isAtivo ? cs.onPrimaryContainer : cs.onSurface;
     final corSubtitulo = isAtivo
         ? cs.onPrimaryContainer.withValues(alpha: 0.85)
@@ -402,8 +373,6 @@ class _UsuarioTile extends StatelessWidget {
   }
 }
 
-// ─── Painel de conversa ───────────────────────────────────────────────────────
-
 class _PainelConversa extends StatefulWidget {
   final ChatProvider chat;
   final bool showBackButton;
@@ -420,18 +389,7 @@ class _PainelConversaState extends State<_PainelConversa> {
 
   int? _conversaAnterior;
   int  _qtdMensagensAnterior = 0;
-
-  // true enquanto esperamos as mensagens de uma conversa recém-aberta (ou
-  // recém-trocada) chegarem, para então dar o salto inicial pro fim. Evita
-  // o bug em que a troca de conversa é "detectada" (e consumida) já no
-  // build de loading — antes das mensagens chegarem — fazendo o salto
-  // instantâneo nunca ser de fato aplicado quando os dados terminam de
-  // carregar (o build seguinte via chegouMensagem então usava animateTo,
-  // que pode não alcançar o fim exato).
   bool _aguardandoSaltoInicial = false;
-
-  // Mensagem selecionada para responder (citar). Fica visível como um
-  // preview acima do campo de digitação até o envio ou cancelamento.
   MensagemChat? _respondendoA;
 
   @override
@@ -491,12 +449,6 @@ class _PainelConversaState extends State<_PainelConversa> {
     }
   }
 
-  // instantaneo=true força um "salto" direto pro fim (jumpTo), garantindo
-  // que sempre chega exatamente no maxScrollExtent mais atual — usado ao
-  // abrir/trocar de conversa. animateTo pode ser interrompido por um novo
-  // build/callback antes de terminar (ex.: mensagens chegando em sequência
-  // via socket), fazendo o scroll parar "quase" no fim, que era a causa da
-  // última mensagem ficar cortada/incompleta na tela.
   void _scrollToBottom({bool instantaneo = false}) {
     void aplicar() {
       if (!_scrollCtrl.hasClients) return;
@@ -514,12 +466,6 @@ class _PainelConversaState extends State<_PainelConversa> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       aplicar();
-      // Segundo salto no frame seguinte: quando a lista acabou de trocar
-      // de conteúdo (nova conversa carregada), o maxScrollExtent do
-      // primeiro frame pode ainda não refletir o layout final de todos os
-      // itens (alturas variáveis, reações, etc). Um jumpTo extra no
-      // próximo frame corrige qualquer resíduo e garante que realmente
-      // pousa no fim.
       if (instantaneo) {
         WidgetsBinding.instance.addPostFrameCallback((_) => aplicar());
       }
@@ -539,11 +485,6 @@ class _PainelConversaState extends State<_PainelConversa> {
 
     final chatKeyChanged = outroId != _conversaAnterior;
     if (chatKeyChanged) {
-      // Conversa trocou (ou é a primeira aberta). Registramos a troca já
-      // aqui, mas só marcamos o salto como "resolvido" quando as mensagens
-      // realmente chegarem — se ainda estiver carregando (mensagens vazia
-      // por estar buscando os dados), fica pendente em
-      // _aguardandoSaltoInicial até o próximo build que já tiver os dados.
       _conversaAnterior     = outroId;
       _qtdMensagensAnterior = mensagens.length;
       _aguardandoSaltoInicial = true;
@@ -551,14 +492,10 @@ class _PainelConversaState extends State<_PainelConversa> {
         _aguardandoSaltoInicial = false;
         _scrollToBottom(instantaneo: true);
       }
-      // Ao trocar de conversa, leva o foco pro campo de digitação
-      // automaticamente, pra já poder digitar sem precisar clicar.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _focusNode.requestFocus();
       });
     } else if (_aguardandoSaltoInicial) {
-      // As mensagens da conversa que acabamos de abrir/trocar terminaram
-      // de carregar agora — dá o salto instantâneo pro fim.
       if (!chat.carregandoMensagens) {
         _qtdMensagensAnterior   = mensagens.length;
         _aguardandoSaltoInicial = false;
@@ -568,14 +505,12 @@ class _PainelConversaState extends State<_PainelConversa> {
       final chegouMensagem = mensagens.length != _qtdMensagensAnterior;
       if (chegouMensagem) {
         _qtdMensagensAnterior = mensagens.length;
-        // Mensagem nova chegando numa conversa já aberta: animação suave.
         _scrollToBottom();
       }
     }
 
     return Column(
       children: [
-        // Header
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
@@ -657,7 +592,6 @@ class _PainelConversaState extends State<_PainelConversa> {
           ),
         ),
 
-        // Mensagens
         Expanded(
           child: chat.carregandoMensagens
               ? const Center(child: CircularProgressIndicator())
@@ -687,10 +621,6 @@ class _PainelConversaState extends State<_PainelConversa> {
                           children: [
                             if (showDate) _DateDivider(data: msg.criadoEm),
                             _EntradaAnimada(
-                              // Só a última mensagem da lista (a mais nova)
-                              // ganha a animação de entrada — reconstruções
-                              // da lista inteira (ex.: troca de conversa)
-                              // não devem fazer todo mundo "surgir" de novo.
                               animar: i == mensagens.length - 1,
                               child: _BubbleMensagem(
                                 mensagem: msg,
@@ -708,7 +638,6 @@ class _PainelConversaState extends State<_PainelConversa> {
                     ),
         ),
 
-        // Input
         Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
           decoration: BoxDecoration(
@@ -776,8 +705,6 @@ class _PainelConversaState extends State<_PainelConversa> {
       a.year == b.year && a.month == b.month && a.day == b.day;
 }
 
-// ─── Bubble de mensagem ───────────────────────────────────────────────────────
-
 class _BubbleMensagem extends StatefulWidget {
   final MensagemChat mensagem;
   final bool isMinha;
@@ -816,8 +743,6 @@ class _BubbleMensagemState extends State<_BubbleMensagem> {
         meuId != null ? mensagem.reacoes[meuId.toString()] : null;
 
     Future<void> abrirSeletor(Offset posicaoGlobal) async {
-      // Mensagens já apagadas não têm mais o que responder/editar/excluir
-      // ou reagir de forma útil, então nem abrimos o menu.
       if (mensagem.apagada) return;
       final escolha = await mostrarSeletorReacao(
         context,
@@ -842,9 +767,6 @@ class _BubbleMensagemState extends State<_BubbleMensagem> {
     }
 
     final corBase = isMinha ? cs.primary : cs.surfaceContainerHighest;
-    // Leve realce no hover: clareia (msg própria) ou escurece de leve
-    // (msg do outro) o suficiente pra sinalizar interatividade sem
-    // chamar atenção demais.
     final corHover = isMinha
         ? Color.lerp(corBase, Colors.white, 0.08)!
         : Color.lerp(corBase, Colors.black, 0.05)!;
@@ -856,8 +778,6 @@ class _BubbleMensagemState extends State<_BubbleMensagem> {
         onEnter: (_) => setState(() => _hover = true),
         onExit:  (_) => setState(() => _hover = false),
         child: GestureDetector(
-          // Toque longo = abre o menu com "Responder" no topo e os emojis
-          // de reação logo abaixo, ancorado na posição exata do toque.
           onLongPressStart: (details) => abrirSeletor(details.globalPosition),
           child: Stack(
             clipBehavior: Clip.none,
@@ -1010,12 +930,6 @@ class _BubbleMensagemState extends State<_BubbleMensagem> {
   }
 }
 
-// ─── Divisor de data ──────────────────────────────────────────────────────────
-
-// ─── Risquinhos de status (estilo WhatsApp) ────────────────────────────────
-// 1 risquinho cinza  -> mensagem enviada, aguardando confirmação do servidor
-// 2 risquinhos cinza -> confirmada pelo servidor, ainda não visualizada
-// 2 risquinhos azuis -> visualizada (lida) pelo destinatário
 class _TicksMensagem extends StatelessWidget {
   final bool pendente;
   final bool lida;
@@ -1031,7 +945,7 @@ class _TicksMensagem extends StatelessWidget {
     if (pendente) {
       return Icon(Icons.done, size: 14, color: corBase);
     }
-    final corLida = const Color(0xFF4FC3F7); // azul estilo WhatsApp
+    final corLida = const Color(0xFF4FC3F7);
     return Icon(
       Icons.done_all,
       size: 14,
@@ -1084,12 +998,6 @@ class _DateDivider extends StatelessWidget {
       a.year == b.year && a.month == b.month && a.day == b.day;
 }
 
-// ─── Entrada animada da mensagem (fade + slide sutil) ─────────────────────────
-// Roda uma única vez, na montagem do widget: como o ListView.builder recria
-// um Element novo pra cada índice novo que aparece no fim da lista, isso
-// naturalmente dispara só pra mensagem que acabou de chegar — mensagens já
-// existentes (reconstruídas por outro motivo, ex.: reação chegando) mantêm
-// seu Element e não reanimam.
 class _EntradaAnimada extends StatefulWidget {
   final Widget child;
   final bool animar;
@@ -1136,8 +1044,6 @@ class _EntradaAnimadaState extends State<_EntradaAnimada>
     );
   }
 }
-
-// ─── Preview da mensagem sendo respondida (acima do campo de digitação) ───────
 
 class _PreviewResposta extends StatelessWidget {
   final MensagemChat mensagem;
@@ -1203,8 +1109,6 @@ class _PreviewResposta extends StatelessWidget {
   }
 }
 
-// ─── Três pontinhos pulsando (indicador de "digitando...") ────────────────────
-
 class _PontinhosDigitando extends StatefulWidget {
   const _PontinhosDigitando();
 
@@ -1237,8 +1141,6 @@ class _PontinhosDigitandoState extends State<_PontinhosDigitando>
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: List.generate(3, (i) {
-              // Cada pontinho tem sua fase defasada dentro do ciclo, criando
-              // o efeito de "onda" clássico de indicador de digitação.
               final fase = (_ctrl.value + i * 0.2) % 1.0;
               final escala = 0.5 + 0.5 * (1 - (fase - 0.5).abs() * 2).clamp(0.0, 1.0);
               return Transform.scale(
@@ -1256,8 +1158,6 @@ class _PontinhosDigitandoState extends State<_PontinhosDigitando>
     );
   }
 }
-
-// ─── Empty state ──────────────────────────────────────────────────────────────
 
 class _EmptyState extends StatelessWidget {
   @override

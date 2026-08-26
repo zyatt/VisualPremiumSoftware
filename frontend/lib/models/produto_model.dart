@@ -1,5 +1,3 @@
-
-// ── Item de material vinculado ao produto ─────────────────────────────────────
 class ProdutoMaterialModel {
   final int id;
   final int produtoId;
@@ -30,7 +28,6 @@ class ProdutoMaterialModel {
   }
 }
 
-// ── Material embutido (snapshot simplificado usado dentro de Produto) ─────────
 class MaterialItemEmbutido {
   final int id;
   final String nome;
@@ -43,9 +40,7 @@ class MaterialItemEmbutido {
   final double? ultimoValorPagoM2;
   final double? precoMedio;
   final double? precoMedioM2;
-  /// Dimensões de referência da chapa/folha (vêm do cadastro do material).
-  /// Quando ambos estão preenchidos, o sistema calcula o custo por m² e
-  /// aplica nas dimensões informadas pelo usuário no orçamento.
+  final double? precoUnidadeMedidaMediano;
   final double? largura;
   final double? comprimento;
 
@@ -61,6 +56,7 @@ class MaterialItemEmbutido {
     this.ultimoValorPagoM2,
     this.precoMedio,
     this.precoMedioM2,
+    this.precoUnidadeMedidaMediano,
     this.largura,
     this.comprimento,
   });
@@ -83,17 +79,17 @@ class MaterialItemEmbutido {
       ultimoValorPagoM2: d(json['ultimoValorPagoM2']),
       precoMedio:       d(json['precoMedio']),
       precoMedioM2:     d(json['precoMedioM2']),
+      precoUnidadeMedidaMediano: d(json['precoUnidadeMedidaMediano']),
       largura:          d(json['largura']),
       comprimento:      d(json['comprimento']),
     );
   }
 
-  /// Preço de referência: prefere último valor pago; cai pro médio; null se nenhum.
   double? get precoRef => ultimoValorPago ?? precoMedio;
   double? get precoRefM2 => ultimoValorPagoM2 ?? precoMedioM2;
+  double? get precoRefUnidadeMedida => precoUnidadeMedidaMediano;
 }
 
-// ── Produto ───────────────────────────────────────────────────────────────────
 class ProdutoModel {
   final int id;
   final String nome;
@@ -115,8 +111,6 @@ class ProdutoModel {
     this.materiais = const [],
   });
 
-  /// Custo estimado total (soma de quantidade × preçoRef de cada material).
-  /// Retorna null se nenhum material tem preço.
   double? get custoEstimado {
     double total = 0;
     bool temAlgum = false;

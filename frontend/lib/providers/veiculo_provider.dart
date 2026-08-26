@@ -18,7 +18,6 @@ String _mensagemErro(Object e) {
 }
 
 class VeiculoProvider extends ChangeNotifier {
-  // ── Lista de veículos ──────────────────────────────────────────────────────
   List<VeiculoModel> _veiculos = [];
   List<VeiculoModel> get veiculos => _veiculos;
 
@@ -27,7 +26,6 @@ class VeiculoProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
-  // ── Veículos desativados ───────────────────────────────────────────────────
   List<VeiculoModel> _veiculosInativos = [];
   List<VeiculoModel> get veiculosInativos => _veiculosInativos;
 
@@ -36,16 +34,12 @@ class VeiculoProvider extends ChangeNotifier {
   String? _erroInativos;
   String? get erroInativos => _erroInativos;
 
-  // ── Veículos com retirada hoje ────────────────────────────────────────────
-  /// Retorna todos os veículos que possuem pelo menos uma manutenção cuja
-  /// dataRetirada é hoje (independentemente de já terem sido retirados ou não).
   List<VeiculoModel> get veiculosComRetiradaHoje => _veiculos
       .where((v) => v.manutencoes.any((m) => m.retiradaHoje))
       .toList();
 
   int get totalRetiradaHoje => veiculosComRetiradaHoje.length;
 
-  // ── Manutenções por veículo ────────────────────────────────────────────────
   final Map<int, List<ManutencaoModel>> _manutencoesPorVeiculo = {};
 
   List<ManutencaoModel> manutencoesDoVeiculo(int veiculoId) =>
@@ -58,7 +52,6 @@ class VeiculoProvider extends ChangeNotifier {
   final Map<int, String?> _erroManPorVeiculo = {};
   String? erroManDoVeiculo(int veiculoId) => _erroManPorVeiculo[veiculoId];
 
-  // ── Gastos por veículo ─────────────────────────────────────────────────────
   List<GastoVeiculoModel> _gastos = [];
   List<GastoVeiculoModel> get gastos => _gastos;
 
@@ -68,16 +61,11 @@ class VeiculoProvider extends ChangeNotifier {
   double get totalGastosGeral =>
       _gastos.fold(0, (s, g) => s + g.totalGasto);
 
-  // ── Resumo anual ───────────────────────────────────────────────────────────
   ResumoAnualVeiculoModel? _resumoAnual;
   ResumoAnualVeiculoModel? get resumoAnual => _resumoAnual;
 
   bool _carregandoResumo = false;
   bool get carregandoResumo => _carregandoResumo;
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Veículos
-  // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> carregarVeiculos() async {
     _carregando = true;
@@ -165,9 +153,6 @@ class VeiculoProvider extends ChangeNotifier {
     }
   }
 
-  /// Exclui o veículo permanentemente, junto com seu histórico de
-  /// manutenções. Ação irreversível — só deve ser chamada a partir da lista
-  /// de veículos desativados, com confirmação explícita do usuário.
   Future<bool> excluirVeiculoDefinitivo(int id) async {
     try {
       await ApiClient.delete('/veiculos/$id/definitivo');
@@ -179,10 +164,6 @@ class VeiculoProvider extends ChangeNotifier {
       return false;
     }
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Manutenções
-  // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> carregarManutencoes(int veiculoId) async {
     _carregandoManPorVeiculo[veiculoId] = true;
@@ -219,7 +200,7 @@ class VeiculoProvider extends ChangeNotifier {
       };
       await ApiClient.post('/veiculos/$veiculoId/manutencoes', body);
       await carregarManutencoes(veiculoId);
-      await carregarVeiculos(); // atualiza última manutenção no card
+      await carregarVeiculos();
       return true;
     } catch (e) {
       _erroManPorVeiculo[veiculoId] = _mensagemErro(e);
@@ -251,7 +232,7 @@ class VeiculoProvider extends ChangeNotifier {
       }
       await ApiClient.put('/veiculos/manutencoes/$manutencaoId', body);
       await carregarManutencoes(veiculoId);
-      await carregarVeiculos(); // atualiza última manutenção no card
+      await carregarVeiculos();
       return true;
     } catch (e) {
       _erroManPorVeiculo[veiculoId] = _mensagemErro(e);
@@ -264,7 +245,7 @@ class VeiculoProvider extends ChangeNotifier {
     try {
       await ApiClient.delete('/veiculos/manutencoes/$manutencaoId');
       await carregarManutencoes(veiculoId);
-      await carregarVeiculos(); // atualiza última manutenção no card
+      await carregarVeiculos();
       return true;
     } catch (e) {
       _erroManPorVeiculo[veiculoId] = _mensagemErro(e);
@@ -272,10 +253,7 @@ class VeiculoProvider extends ChangeNotifier {
       return false;
     }
   }
-
-  /// Marca (ou desmarca) o serviço como finalizado manualmente. Isso remove
-  /// imediatamente o status "Em andamento" e a notificação de retirada, sem
-  /// esperar a data mudar.
+  
   Future<bool> finalizarManutencao(
     int manutencaoId,
     int veiculoId, {
@@ -287,7 +265,7 @@ class VeiculoProvider extends ChangeNotifier {
         {'finalizada': finalizada},
       );
       await carregarManutencoes(veiculoId);
-      await carregarVeiculos(); // atualiza última manutenção no card e badge
+      await carregarVeiculos();
       return true;
     } catch (e) {
       _erroManPorVeiculo[veiculoId] = _mensagemErro(e);
@@ -295,10 +273,6 @@ class VeiculoProvider extends ChangeNotifier {
       return false;
     }
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Gastos
-  // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> carregarGastos({DateTime? dataInicio, DateTime? dataFim}) async {
     _carregandoGastos = true;

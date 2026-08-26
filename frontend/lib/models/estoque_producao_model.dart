@@ -11,9 +11,6 @@ class MaterialEstoqueProducaoModel {
   final double? ultimoValorPago;
   final double? ultimoValorPagoM2;
   final double quantidade;
-  /// Quantidade devolvida ao estoque padrão mas ainda aguardando
-  /// confirmação em Controle de Estoque. Exibida na linha do material
-  /// como "X pendente" enquanto não for resolvida.
   final double quantidadePendente;
   final String producao;
 
@@ -62,13 +59,10 @@ class MaterialEstoqueProducaoModel {
   }
 }
 
-/// Uma entrada aguardando confirmação manual em Controle de Estoque:
-/// RETALHO (sobra gerada por baixa de produção) ou DEVOLUCAO (devolução
-/// da produção para o estoque padrão).
 class EntradaPendenteModel {
   final int id;
-  final String tipo; // 'RETALHO' | 'DEVOLUCAO'
-  final String status; // 'PENDENTE' | 'CONFIRMADA' | 'RECUSADA'
+  final String tipo;
+  final String status;
   final int materialId;
   final String materialNome;
   final String? materialUnidade;

@@ -1,9 +1,9 @@
-// lib/providers/chat_provider.dart
-
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart' as io_client;
 
 import '../models/mensagem_chat_model.dart';
 import '../utils/api_client.dart';
@@ -12,9 +12,7 @@ class ChatProvider extends ChangeNotifier {
   final List<UsuarioChat> _usuarios = [];
   final Map<int, List<MensagemChat>> _conversas = {};
   int? _usuarioAtivoId;
-  // Duas fontes independentes podem fazer o usuário "estar vendo o chat":
-  // a página /chat inteira, ou o mini-chat do widget flutuante. Qualquer
-  // uma das duas, se ativa, conta como "vendo" para fins de badge.
+
   bool _paginaChatVisivel       = false;
   bool _widgetFlutuanteVisivel  = false;
   bool _carregandoUsuarios = false;
@@ -22,13 +20,11 @@ class ChatProvider extends ChangeNotifier {
   int _totalNaoLidas = 0;
   String? _erroUsuarios;
   StreamSubscription<String>? _sseSub;
+  HttpClient? _sseRawClient;
+  bool _disposed = false;
+  int _sseConexaoId = 0;
   int? _meuId;
 
-  // Ping periódico ao backend (POST /chat/heartbeat) enquanto o app está
-  // aberto, independente do estado da conexão SSE — evita que o usuário
-  // fique preso como offline se a reconexão do SSE travar em algum ponto
-  // (rede oscilando etc.), já que o servidor decide online/offline pelo
-  // último heartbeat recebido, não pela conexão SSE em si.
   Timer? _heartbeatTimer;
   static const _heartbeatIntervalo = Duration(seconds: 20);
 
@@ -41,27 +37,12 @@ class ChatProvider extends ChangeNotifier {
   int?             get meuId              => _meuId;
   String?          get erroUsuarios       => _erroUsuarios;
 
-  // Contador incrementado toda vez que algo externo (ex: troca de usuário
-  // logado) precisa forçar o mini-chat flutuante a minimizar. O
-  // ChatFloatingWidget observa esse valor e, ao perceber que mudou,
-  // recolhe-se sozinho — o provider não tem referência direta ao widget.
   int _minimizarTrigger = 0;
   int              get minimizarTrigger   => _minimizarTrigger;
 
-  // Contrapartida do trigger acima: pede para o mini-chat flutuante
-  // EXPANDIR (em vez de recolher) já com uma conversa específica aberta.
-  // Usado após encaminhar uma solicitação/material — a UI
-  // (ChatFloatingWidget) observa `abrirConversaTrigger` e, ao mudar, se
-  // expande e confia em `usuarioAtivoId` (já setado por `abrirConversa`
-  // abaixo) para saber qual conversa mostrar.
   int _abrirConversaTrigger = 0;
   int              get abrirConversaTrigger => _abrirConversaTrigger;
 
-  // ── Indicador de "digitando..." ──────────────────────────────────────
-  // Guarda, por id de usuário, um Timer que expira o indicador se nenhum
-  // novo ping SSE chegar em _digitandoExpira. O evento é só um "ping"
-  // repassado pelo servidor (não fica persistido), então quem decide
-  // quando o indicador some é sempre o lado que recebe.
   static const _digitandoExpira = Duration(seconds: 3);
   final Map<int, Timer> _digitandoTimers = {};
   final Set<int> _usuariosDigitando = {};
@@ -78,10 +59,6 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Throttle do lado de quem digita: evita disparar um POST a cada tecla.
-  // Reenvia o ping no máximo 1x a cada 2s enquanto o campo continua sendo
-  // editado, o que é suficiente pro timer de 3s do lado receptor nunca
-  // expirar entre uma tecla e outra.
   DateTime? _ultimoPingDigitando;
   Future<void> notificarDigitando() async {
     if (_usuarioAtivoId == null) return;
@@ -96,23 +73,16 @@ class ChatProvider extends ChangeNotifier {
         'destinatarioId': _usuarioAtivoId,
       });
     } catch (e) {
-      // Falha aqui é inofensiva (o indicador só deixa de aparecer), então
-      // não vale a pena mostrar erro pro usuário nem tentar de novo.
+
       debugPrint('ChatProvider.notificarDigitando erro: $e');
     }
   }
 
-  /// Pede para o mini-chat flutuante (bolha) recolher, se estiver expandido.
-  /// Usado, por exemplo, ao trocar de usuário logado, para não deixar a
-  /// conversa de um usuário aberta na tela depois da troca.
   void minimizarWidgetFlutuante() {
     _minimizarTrigger++;
     notifyListeners();
   }
 
-  /// Pede para o mini-chat flutuante expandir já com a conversa de
-  /// `usuarioId` aberta (carregando as mensagens, se necessário). Usado após
-  /// encaminhar uma solicitação/material para alguém no chat.
   Future<void> solicitarAberturaConversa(int usuarioId) async {
     await abrirConversa(usuarioId);
     _abrirConversaTrigger++;
@@ -124,17 +94,12 @@ class ChatProvider extends ChangeNotifier {
     return _conversas[_usuarioAtivoId] ?? [];
   }
 
-  /// Busca um usuário da lista pelo id — usado pela UI para exibir o
-  /// indicador de presença (online/offline) do usuário da conversa aberta.
   UsuarioChat? usuarioPorId(int id) {
     for (final u in _usuarios) {
       if (u.id == id) return u;
     }
     return null;
   }
-
-  // ApiClient já injeta o header Authorization a partir do token logado;
-  // não precisamos mais ler o SharedPreferences aqui.
 
   Future<void> inicializar(int meuId, String token) async {
     _meuId = meuId;
@@ -145,7 +110,7 @@ class ChatProvider extends ChangeNotifier {
 
   void _iniciarHeartbeat() {
     _heartbeatTimer?.cancel();
-    _enviarHeartbeat(); // imediato, não espera o primeiro intervalo
+    _enviarHeartbeat();
     _heartbeatTimer = Timer.periodic(
       _heartbeatIntervalo,
       (_) => _enviarHeartbeat(),
@@ -157,8 +122,7 @@ class ChatProvider extends ChangeNotifier {
     try {
       await ApiClient.post('/chat/heartbeat', {});
     } catch (e) {
-      // Falha aqui é inofensiva (o próximo heartbeat tenta de novo em
-      // até _heartbeatIntervalo), então não vale a pena propagar erro.
+
       debugPrint('ChatProvider._enviarHeartbeat erro: $e');
     }
   }
@@ -168,7 +132,7 @@ class ChatProvider extends ChangeNotifier {
     _erroUsuarios = null;
     notifyListeners();
     try {
-      // ApiClient._uri já adiciona o prefixo /api, então aqui usamos só /chat/...
+
       final data = await ApiClient.getList('/chat/usuarios');
       _usuarios
         ..clear()
@@ -188,7 +152,6 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
     await _carregarConversa(outroId);
 
-    // Zera badge local
     final idx = _usuarios.indexWhere((u) => u.id == outroId);
     if (idx != -1) {
       _usuarios[idx].naoLidas = 0;
@@ -202,15 +165,10 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Chamado pelo AppShell a cada troca de rota, com base na localização atual.
-  /// Não confundir com `usuarioAtivoId`: aquele indica qual conversa está
-  /// selecionada e continua valendo mesmo fora da tela; este indica se a
-  /// página /chat de fato está na frente do usuário agora.
   void definirPaginaVisivel(bool visivel) {
     _paginaChatVisivel = visivel;
   }
 
-  /// Chamado pelo widget flutuante quando o mini-chat é expandido/recolhido.
   void definirWidgetFlutuanteVisivel(bool visivel) {
     _widgetFlutuanteVisivel = visivel;
   }
@@ -231,16 +189,11 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  /// Se `respondendoA` for informada, a mensagem é enviada como resposta
-  /// (citação) àquela mensagem — ver feature "responder mensagem".
   Future<void> enviarMensagem(String conteudo, {MensagemChat? respondendoA}) async {
     if (_usuarioAtivoId == null || conteudo.trim().isEmpty) return;
     final destinatarioId = _usuarioAtivoId!;
     final texto = conteudo.trim();
 
-    // Id temporário negativo (nunca colide com ids reais do banco) para
-    // identificar a mensagem otimista e poder trocá-la depois pela
-    // confirmada vinda do servidor.
     final tempId = -DateTime.now().millisecondsSinceEpoch;
     final otimista = MensagemChat(
       id: tempId,
@@ -269,15 +222,11 @@ class ChatProvider extends ChangeNotifier {
       _adicionarMensagem(msg);
     } catch (e) {
       debugPrint('ChatProvider.enviarMensagem erro: $e');
-      // Remove a mensagem otimista que falhou para não ficar presa
-      // mostrando 1 risquinho para sempre.
+
       _removerMensagem(destinatarioId, tempId);
     }
   }
 
-  /// Envia uma solicitação ou material "encaminhado" para `destinatarioId`,
-  /// que não precisa ser a conversa atualmente aberta (diferente de
-  /// `enviarMensagem`, que sempre manda para `_usuarioAtivoId`).
   Future<void> enviarEncaminhamento({
     required int destinatarioId,
     required String tipo,
@@ -319,16 +268,11 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Define (ou remove, passando `emoji: null`) a reação do usuário logado
-  /// a uma mensagem. Atualiza o estado local otimisticamente e também
-  /// recebe a confirmação via SSE (que faz a mesma atualização de forma
-  /// idempotente, então não há problema em aplicar duas vezes).
   Future<void> reagirMensagem(MensagemChat mensagem, String? emoji) async {
     final outroId = mensagem.remetenteId == _meuId
         ? mensagem.destinatarioId
         : mensagem.remetenteId;
 
-    // Atualização otimista: já reflete na tela antes da resposta do servidor.
     final reacoesOtimistas = Map<String, String>.from(mensagem.reacoes);
     if (_meuId != null) {
       if (emoji != null) {
@@ -350,16 +294,11 @@ class ChatProvider extends ChangeNotifier {
       _substituirMensagem(outroId, MensagemChat.fromJson(data));
     } catch (e) {
       debugPrint('ChatProvider.reagirMensagem erro: $e');
-      // Em caso de falha, desfaz a atualização otimista voltando ao
-      // estado original da mensagem.
+
       _substituirMensagem(outroId, mensagem);
     }
   }
 
-  /// Edita o conteúdo de uma mensagem própria já enviada. Assim como
-  /// `reagirMensagem`, atualiza o estado local otimisticamente e desfaz a
-  /// mudança se o servidor rejeitar (ex.: mensagem já apagada, ou não é
-  /// mais do próprio usuário).
   Future<void> editarMensagem(MensagemChat mensagem, String novoConteudo) async {
     final texto = novoConteudo.trim();
     if (texto.isEmpty || texto == mensagem.conteudo) return;
@@ -395,15 +334,12 @@ class ChatProvider extends ChangeNotifier {
       _substituirMensagem(outroId, MensagemChat.fromJson(data));
     } catch (e) {
       debugPrint('ChatProvider.editarMensagem erro: $e');
-      // Falhou: volta ao conteúdo original.
+
       _substituirMensagem(outroId, mensagem);
       rethrow;
     }
   }
 
-  /// Exclui (logicamente) uma mensagem própria. O backend esvazia o
-  /// conteúdo e marca `apagada`; aqui aplicamos o mesmo otimisticamente e
-  /// desfazemos em caso de erro.
   Future<void> excluirMensagem(MensagemChat mensagem) async {
     final outroId = mensagem.remetenteId == _meuId
         ? mensagem.destinatarioId
@@ -429,8 +365,7 @@ class ChatProvider extends ChangeNotifier {
     _substituirMensagem(outroId, otimista);
 
     try {
-      // ApiClient.delete não devolve corpo, então a otimista aplicada
-      // acima já é o resultado final em caso de sucesso.
+
       await ApiClient.delete('/chat/mensagem/${mensagem.id}');
     } catch (e) {
       debugPrint('ChatProvider.excluirMensagem erro: $e');
@@ -455,23 +390,27 @@ class ChatProvider extends ChangeNotifier {
 
     _conversas.putIfAbsent(outroId, () => []);
 
-    // Evita duplicata
     if (_conversas[outroId]!.any((m) => m.id == msg.id)) return;
     _conversas[outroId]!.add(msg);
     notifyListeners();
   }
 
-  // O SSE precisa de uma conexão de stream manual (não cabe no ApiClient,
-  // que é só request/response), então montamos a URL e o token a partir
-  // do próprio ApiClient para garantir que aponta para o mesmo servidor.
   void _conectarSSE() {
+    if (_disposed) return;
     _sseSub?.cancel();
+    _sseRawClient?.close(force: true);
+    _sseRawClient = null;
     final token = ApiClient.token;
     if (token == null) return;
 
+    final meuId = ++_sseConexaoId;
+    debugPrint('[FECHAR][Chat] ${DateTime.now().toIso8601String()} — abrindo nova conexão SSE, geração $meuId');
+
     final uri = Uri.parse('${ApiClient.baseUrl}/api/chat/sse');
 
-    final client = http.Client();
+    final rawClient = HttpClient();
+    _sseRawClient = rawClient;
+    final client = io_client.IOClient(rawClient);
 
     final req = http.Request('GET', uri)
       ..headers['Authorization'] = 'Bearer $token'
@@ -479,6 +418,10 @@ class ChatProvider extends ChangeNotifier {
       ..headers['Cache-Control'] = 'no-cache';
 
     client.send(req).then((streamedResp) {
+      if (_disposed || meuId != _sseConexaoId) {
+        rawClient.close(force: true);
+        return;
+      }
       final stream = streamedResp.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter());
@@ -487,15 +430,21 @@ class ChatProvider extends ChangeNotifier {
         _processarLinhaSSE,
         onError: (e) {
           debugPrint('SSE erro: $e');
-          Future.delayed(const Duration(seconds: 5), _conectarSSE);
+          if (!_disposed && meuId == _sseConexaoId) {
+            Future.delayed(const Duration(seconds: 5), _conectarSSE);
+          }
         },
         onDone: () {
-          Future.delayed(const Duration(seconds: 5), _conectarSSE);
+          if (!_disposed && meuId == _sseConexaoId) {
+            Future.delayed(const Duration(seconds: 5), _conectarSSE);
+          }
         },
       );
     }).catchError((e) {
       debugPrint('SSE connect erro: $e');
-      Future.delayed(const Duration(seconds: 5), _conectarSSE);
+      if (!_disposed && meuId == _sseConexaoId) {
+        Future.delayed(const Duration(seconds: 5), _conectarSSE);
+      }
     });
   }
 
@@ -513,11 +462,6 @@ class ChatProvider extends ChangeNotifier {
               data['mensagem'] as Map<String, dynamic>);
           _adicionarMensagem(msg);
 
-          // Atualiza badge se a mensagem não é da conversa que o usuário
-          // está OLHANDO DE FATO agora (precisa estar com a tela de chat
-          // visível E com essa conversa selecionada — não basta o id estar
-          // "selecionado" no provider, pois isso persiste após navegar
-          // para outra página do app).
           final estaVendoEssaConversa =
               paginaChatVisivel && msg.remetenteId == _usuarioAtivoId;
           if (tipo == 'nova_mensagem' && !estaVendoEssaConversa) {
@@ -574,7 +518,10 @@ class ChatProvider extends ChangeNotifier {
 
   void limparToken() {
     _meuId = null;
+    _sseConexaoId++;
     _sseSub?.cancel();
+    _sseRawClient?.close(force: true);
+    _sseRawClient = null;
     _heartbeatTimer?.cancel();
     _usuarios.clear();
     _conversas.clear();
@@ -585,17 +532,22 @@ class ChatProvider extends ChangeNotifier {
     }
     _digitandoTimers.clear();
     _usuariosDigitando.clear();
-    // Sem isso, quem estiver ouvindo o provider (ex.: ChatFloatingWidget
-    // exibido em qualquer página do app) só descobre que a lista de
-    // usuários/conversas foi zerada na próxima vez que algo mais disparar
-    // notifyListeners() — deixando badges e status "presos" no estado do
-    // usuário anterior até então.
+
     notifyListeners();
+  }
+
+  void encerrarConexaoSSE() {
+    debugPrint('[FECHAR][Chat] ${DateTime.now().toIso8601String()} — encerrarConexaoSSE chamado, geração $_sseConexaoId -> ${_sseConexaoId + 1}');
+    _sseConexaoId++;
+    _sseSub?.cancel();
+    _sseRawClient?.close(force: true);
+    _sseRawClient = null;
   }
 
   @override
   void dispose() {
-    _sseSub?.cancel();
+    _disposed = true;
+    encerrarConexaoSSE();
     _heartbeatTimer?.cancel();
     for (final t in _digitandoTimers.values) {
       t.cancel();

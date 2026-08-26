@@ -20,11 +20,6 @@ import '../theme/app_theme.dart';
 import '../widgets/escolher_usuario_chat_dialog.dart';
 import '../providers/robo_helper_provider.dart';
 
-// ── Formatação de preço: até 6 casas decimais, sem zeros à direita ────────────
-
-/// Formata a unidade para exibição (o valor interno permanece em maiúsculo,
-/// usado para comparações/enum). Ex.: 'UNIDADE' → 'Unidade'; 'M' → 'm';
-/// 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²' → 'm²'; 'KG' → 'Kg'; 'G' → 'g'.
 String formatarUnidadeExibicao(String? unidade) {
   if (unidade == null || unidade.trim().isEmpty) return '—';
   final u = unidade.trim().toUpperCase();
@@ -49,27 +44,17 @@ String formatarUnidadeExibicao(String? unidade) {
   }
 }
 
-/// Monta o label dinâmico do campo/coluna de preço por unidade de medida,
-/// ex.: 'Preço m/l', 'Preço g', 'Preço ml'. Quando a unidade não é
-/// conhecida, cai de volta em 'Preço unidade'.
 String labelPrecoUnidade(String? unidade) {
   final u = formatarUnidadeExibicao(unidade);
   if (u == '—' || u.isEmpty) return 'Preço unidade';
   return 'Preço $u';
 }
 
-/// Indica se o campo/coluna de preço por unidade de medida faz sentido para
-/// este material. Quando a unidade já é "Unidade", o campo seria redundante
-/// com o "Valor"/"Unit." comum, então não deve aparecer.
 bool deveExibirPrecoUnidade(String? unidade) {
   if (unidade == null || unidade.trim().isEmpty) return false;
   return unidade.trim().toUpperCase() != 'UNIDADE';
 }
 
-/// TextEditingController que expõe [notify] publicamente. `notifyListeners()`
-/// é `@protected` em `ChangeNotifier`, então não pode ser chamado de fora da
-/// própria classe/subclasse — usamos essa subclasse só para forçar o
-/// RawAutocomplete a reavaliar as opções ao focar o campo vazio.
 class _NotifiableTextEditingController extends TextEditingController {
   _NotifiableTextEditingController({super.text});
   void notify() => notifyListeners();
@@ -99,7 +84,7 @@ class _UpperCaseFormatter extends TextInputFormatter {
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    // Remove vírgulas antes de qualquer outra transformação
+
     final semVirgula = newValue.text.replaceAll(',', '');
     final texto = _removerAcentos(semVirgula).toUpperCase();
     final sel = newValue.selection.copyWith(
@@ -110,27 +95,17 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
-/// Formatter para os campos Medida e Espessura (cadastro e filtro/busca):
-/// - remove acentuação e força minúsculas
-/// - converte vírgula em ponto
-/// - permite apenas 1 ponto POR NÚMERO (bloqueia pontos repetidos/seguidos
-///   dentro do mesmo número, ex.: "1..5" ou "1.2.3"), mas preserva múltiplos
-///   números na mesma medida, ex.: "2.44x1.22m" (dois números, um ponto cada)
 class _MedidaEspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    // 1) Vírgula -> ponto
+
     var texto = newValue.text.replaceAll(',', '.');
 
-    // 2) Remove acentos e força minúsculas
     texto = _UpperCaseFormatter._removerAcentos(texto).toLowerCase();
 
-    // 3) Para cada bloco de dígitos+pontos (um "número"), permite apenas o
-    //    primeiro ponto e remove os demais. Não mexe no que não é dígito/ponto
-    //    (letras, "x", espaços, etc.), preservando a separação entre números.
     texto = texto.replaceAllMapped(RegExp(r'[\d.]+'), (m) {
       final partes = m.group(0)!.split('.');
       if (partes.length > 2) {
@@ -147,10 +122,6 @@ class _MedidaEspessuraFormatter extends TextInputFormatter {
   }
 }
 
-/// Formatter para o campo Medida no modo Retalho: só permite dígitos e um
-/// único ponto decimal (vírgula é convertida em ponto) antes do sufixo fixo
-/// "m²", que é sempre mantido ao final e não pode ser apagado nem editado
-/// pelo usuário — o texto digitado sempre entra à esquerda do "m²".
 class _MedidaRetalhoFormatter extends TextInputFormatter {
   static const String sufixo = 'm²';
 
@@ -161,17 +132,12 @@ class _MedidaRetalhoFormatter extends TextInputFormatter {
   ) {
     var texto = newValue.text;
 
-    // Remove o sufixo (onde quer que esteja) para trabalhar só com a parte
-    // numérica digitada pelo usuário.
     texto = texto.replaceAll(sufixo, '');
 
-    // Vírgula -> ponto
     texto = texto.replaceAll(',', '.');
 
-    // Mantém apenas dígitos e ponto
     texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
 
-    // Permite apenas 1 ponto decimal
     final partes = texto.split('.');
     if (partes.length > 2) {
       texto = '${partes[0]}.${partes.sublist(1).join('')}';
@@ -179,8 +145,6 @@ class _MedidaRetalhoFormatter extends TextInputFormatter {
 
     final novoTexto = '$texto$sufixo';
 
-    // Cursor sempre logo após a parte numérica digitada (nunca dentro ou
-    // depois do sufixo).
     int cursor = newValue.selection.baseOffset;
     if (cursor < 0 || cursor > texto.length) {
       cursor = texto.length;
@@ -193,22 +157,17 @@ class _MedidaRetalhoFormatter extends TextInputFormatter {
   }
 }
 
-/// Formatter para o campo Espessura: aceita apenas dígitos, ponto e vírgula
-/// (vírgula é convertida em ponto), bloqueando letras e qualquer outro
-/// caractere. Também permite apenas 1 ponto no total (evita "2..5"/"2.5.5").
 class _EspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    // 1) Vírgula -> ponto
+
     var texto = newValue.text.replaceAll(',', '.');
 
-    // 2) Remove tudo que não for dígito ou ponto (bloqueia letras, "mm", etc.)
     texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
 
-    // 3) Permite apenas o primeiro ponto
     final partes = texto.split('.');
     if (partes.length > 2) {
       texto = '${partes[0]}.${partes.sublist(1).join('')}';
@@ -243,15 +202,6 @@ class _DecimalInputFormatter extends TextInputFormatter {
   }
 }
 
-/// Formatter para campos de preço em BRL: aplica separador de milhar (ponto)
-/// na parte inteira em tempo real enquanto o usuário digita, usando vírgula
-/// como separador decimal (padrão brasileiro). Ex.: digitar "1000" exibe
-/// "1.000"; digitar "1000,5" exibe "1.000,5".
-///
-/// O texto exposto ao controller já vem SEM separador de milhar (apenas
-/// dígitos + ponto decimal, ex.: "1000.5") para não quebrar `double.parse`
-/// no restante do código — a exibição com milhar é feita só visualmente
-/// através do `TextEditingValue` retornado aqui.
 class _PrecoInputFormatter extends TextInputFormatter {
   static String _aplicarMilhar(String digitosInteiros) {
     final buffer = StringBuffer();
@@ -271,16 +221,11 @@ class _PrecoInputFormatter extends TextInputFormatter {
   ) {
     var texto = newValue.text;
 
-    // Conta quantos caracteres "digitados" (dígitos/vírgula) existiam antes
-    // do cursor no valor novo, para poder recolocar o cursor no lugar certo
-    // depois de re-formatar.
     final cursorPos = newValue.selection.end.clamp(0, texto.length);
     final antesDoCursor = texto.substring(0, cursorPos);
     final digitosAntesCursor =
         antesDoCursor.replaceAll(RegExp(r'[^\d,]'), '').length;
 
-    // Aceita apenas dígitos e vírgula (o ponto de milhar é recalculado, não
-    // digitado pelo usuário).
     texto = texto.replaceAll(RegExp(r'[^\d,]'), '');
 
     final partes = texto.split(',');
@@ -290,7 +235,6 @@ class _PrecoInputFormatter extends TextInputFormatter {
       decimais = decimais.substring(0, 2);
     }
 
-    // Remove zeros à esquerda supérfluos, mantendo pelo menos um dígito.
     inteiro = inteiro.replaceFirst(RegExp(r'^0+(?=\d)'), '');
 
     final inteiroFormatado = _aplicarMilhar(inteiro);
@@ -298,9 +242,6 @@ class _PrecoInputFormatter extends TextInputFormatter {
         ? '$inteiroFormatado,$decimais'
         : (texto.contains(',') ? '$inteiroFormatado,' : inteiroFormatado);
 
-    // Reposiciona o cursor: conta dígitos+vírgula até atingir a mesma
-    // quantidade que havia antes do cursor original, pulando os pontos de
-    // milhar (que não contam como "digitados" pelo usuário).
     int novoOffset = 0;
     int contador = 0;
     for (int i = 0; i < textoFormatado.length; i++) {
@@ -317,9 +258,6 @@ class _PrecoInputFormatter extends TextInputFormatter {
   }
 }
 
-/// Converte o texto de um campo formatado com [_PrecoInputFormatter]
-/// (ex.: "1.000,50") para um double (1000.5), para uso em cálculos/envio
-/// ao backend.
 double? _parsePreco(String texto) {
   final v = texto.trim();
   if (v.isEmpty) return null;
@@ -327,11 +265,6 @@ double? _parsePreco(String texto) {
   return double.tryParse(semMilhar);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Converte exceções técnicas de rede em mensagens legíveis pelo usuário.
 String _mensagemErroAmigavelPdf(Object e) {
   final raw   = e.toString();
   final lower = raw.toLowerCase();
@@ -345,15 +278,10 @@ String _mensagemErroAmigavelPdf(Object e) {
   if (lower.contains('timeout') || lower.contains('timed out')) {
     return 'Conexão com o servidor expirou. Verifique a rede e tente novamente.';
   }
-  // Remove prefixos técnicos
+
   return raw.replaceFirst(RegExp(r'^[\w]*[Ee]xception:\s*'), '').trim();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TELA PRINCIPAL: busca + grade de categorias + tabela inline
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Sentinel para cards especiais
 const _kCategoriaGeral       = '__GERAL__';
 const _kCategoriaSemCategoria = '__SEM_CATEGORIA__';
 
@@ -366,31 +294,16 @@ class EstoquePage extends StatefulWidget {
 }
 
 class _EstoquePageState extends State<EstoquePage> {
-  // ── Filtro de categorias ───────────────────────────────────────────────────
+
   final _filtroCategoriaCtrl = TextEditingController();
   String _filtroCategoria    = '';
 
-  // ── Pontos de interesse para o tour guiado do robô assistente ───────────
-  // ("Como selecionar uma categoria"): card "Geral" → card de categoria
-  // específica → campo de busca.
   final _tourKeyCardGeral       = GlobalKey();
   final _tourKeyCardEspecifica  = GlobalKey();
   final _tourKeyCampoBusca      = GlobalKey();
 
-  /// Registra no RoboHelperProvider a(s) opção(ões) de ajuda contextual
-  /// desta página. Chamado sempre que o build ocorre com as categorias já
-  /// carregadas (as keys do tour só existem depois que os cards estão na
-  /// árvore). Repetir o registro em cada build é barato (é só uma
-  /// atribuição de lista) e garante que a opção sempre aponte para as
-  /// keys corretas mesmo se a página for reconstruída.
   void _registrarAjudaRobo() {
-    // A página de categorias continua "montada" (só escondida) quando o
-    // usuário navega pra dentro de uma categoria, histórico, etc. (o
-    // Navigator.push é interno, não muda a rota do GoRouter). Se ela
-    // rebuildar em segundo plano nesse estado (por causa de outro
-    // provider notificando, por exemplo), NÃO deve re-registrar a dica —
-    // senão ela reaparece por cima da tela que empurramos, mesmo depois
-    // de já termos limpado antes do push.
+
     final rota = ModalRoute.of(context);
     if (rota != null && !rota.isCurrent) return;
 
@@ -404,10 +317,7 @@ class _EstoquePageState extends State<EstoquePage> {
             texto: 'Este é o card "Geral" — toque nele para ver materiais '
                 'de todas as categorias misturados.',
             aoEntrar: () async {
-              // Limpa o campo de busca de categorias antes do tour: se
-              // houver um filtro digitado (ex.: "AA"), os cards podem
-              // estar todos escondidos ("Nenhuma categoria encontrada"),
-              // e o robô não teria nada para destacar.
+
               if (_filtroCategoriaCtrl.text.isNotEmpty) {
                 _filtroCategoriaCtrl.clear();
                 setState(() => _filtroCategoria = '');
@@ -430,7 +340,6 @@ class _EstoquePageState extends State<EstoquePage> {
     ]);
   }
 
-  // ── Ícones e cores ─────────────────────────────────────────────────────────
   static IconData _iconePara(String categoria) {
     return Icons.inventory_2;
   }
@@ -454,8 +363,7 @@ class _EstoquePageState extends State<EstoquePage> {
   @override
   void dispose() {
     _filtroCategoriaCtrl.dispose();
-    // Evita que o robô continue oferecendo "Como selecionar uma
-    // categoria?" em outra página depois que o usuário sai do Estoque.
+
     try {
       context.read<RoboHelperProvider>().encerrarTour();
     context.read<RoboHelperProvider>().limparOpcoes('/estoque');
@@ -469,18 +377,11 @@ class _EstoquePageState extends State<EstoquePage> {
     required Color cor,
     required IconData icone,
   }) {
-    // Geral e Sem categoria não possuem tela de identificadores —
-    // navegam diretamente para a listagem de materiais.
+
     final pularIdentificadores =
         categoriaId == _kCategoriaGeral ||
         categoriaId == _kCategoriaSemCategoria;
 
-    // A dica de "como selecionar uma categoria" só faz sentido na própria
-    // lista de categorias. Como esta navegação é um Navigator.push interno
-    // (a rota do GoRouter continua sendo '/estoque' o tempo todo), o
-    // provider nunca é avisado de que "saímos" da lista — por isso
-    // limpamos aqui manualmente. Ao voltar, carregarCategorias() (chamado
-    // no .then abaixo) reconstrói a lista e re-registra a dica sozinho.
     context.read<RoboHelperProvider>().encerrarTour();
     context.read<RoboHelperProvider>().limparOpcoes('/estoque');
 
@@ -503,15 +404,11 @@ class _EstoquePageState extends State<EstoquePage> {
               ),
       ),
     ).then((_) {
-      // Recarrega categorias ao voltar (pode ter sido criada/removida alguma)
+
       if (mounted) context.read<MaterialProvider>().carregarCategorias();
     });
   }
 
-  /// Abre a listagem de materiais direto na categoria do material informado,
-  /// já com nome/identificador/medida/espessura preenchidos — usado quando a
-  /// página é aberta a partir do MaterialCriticoBanner (SSE 'material_critico').
-  /// Pula a tela de identificadores porque já sabemos exatamente qual é.
   void _abrirParaNotificacaoCritica(MaterialCriticoNotificacao n) {
     final temCategoria = n.categoria != null && n.categoria!.trim().isNotEmpty;
     final categoriaId    = temCategoria ? n.categoria! : _kCategoriaSemCategoria;
@@ -541,20 +438,8 @@ class _EstoquePageState extends State<EstoquePage> {
     });
   }
 
-  /// Abre a listagem de materiais direto na categoria do material informado,
-  /// já com nome/identificador/medida/espessura preenchidos — usado quando o
-  /// usuário toca no card de um material "solto" encaminhado no chat (ver
-  /// EncaminhamentoChatCard). Mesmo comportamento de
-  /// `_abrirParaNotificacaoCritica`, mas a partir de um FiltroMaterialChat.
   Future<void> _abrirParaFiltroChat(FiltroMaterialChat f) async {
-    // O card de encaminhamento guarda um "retrato" dos dados do material no
-    // momento do envio (nome/identificador/medida/espessura/categoria). Se o
-    // material for editado depois, esse retrato fica desatualizado e filtrar
-    // por ele pode não encontrar mais o material (ou encontrar o errado).
-    // Por isso, quando temos o materialId (mensagens encaminhadas após essa
-    // correção), buscamos os dados atuais do material antes de montar os
-    // filtros — só caindo para o retrato antigo se a busca falhar (ex.:
-    // material excluído, ou mensagem antiga sem materialId).
+
     var nome         = f.nome;
     var identificador = f.identificador;
     var medida        = f.medida;
@@ -581,21 +466,9 @@ class _EstoquePageState extends State<EstoquePage> {
     context.read<RoboHelperProvider>().encerrarTour();
     context.read<RoboHelperProvider>().limparOpcoes('/estoque');
 
-    // Sempre abre na aba "Geral" (todas as categorias misturadas) em vez de
-    // tentar acertar a categoria específica do material: nem sempre bate
-    // exatamente com o categoriaId esperado, e como os demais filtros
-    // (busca/identificador/medida/espessura) já são suficientes para achar
-    // o material certo, não há necessidade de acertar a categoria de
-    // antemão.
     final identificadorTrim = identificador?.trim();
     final temIdentificador = identificadorTrim != null && identificadorTrim.isNotEmpty;
 
-    // Remove todas as rotas empilhadas acima da EstoquePage raiz antes de
-    // empilhar a nova página filtrada. Sem isso, cada clique num material
-    // encaminhado no chat empilhava mais uma EstoqueCategoriaPage por cima
-    // da anterior — o botão "Categorias" só desempilhava um nível por vez,
-    // então voltava para o material clicado antes, e não para a lista de
-    // categorias, até desempilhar todas de uma por uma.
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(
         builder: (_) => EstoqueCategoriaPage(
@@ -616,9 +489,6 @@ class _EstoquePageState extends State<EstoquePage> {
     });
   }
 
-  /// Abre a listagem "Geral" (todas as categorias) já filtrada por status —
-  /// usado quando a página é aberta a partir do diálogo de Alertas de
-  /// Estoque, clicando em "Ir para Estoque".
   void _abrirGeralComStatus(String status) {
     context.read<RoboHelperProvider>().encerrarTour();
     context.read<RoboHelperProvider>().limparOpcoes('/estoque');
@@ -638,13 +508,9 @@ class _EstoquePageState extends State<EstoquePage> {
     });
   }
 
-  // ── BUILD ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    // ── Navegação pendente vinda do MaterialCriticoBanner ────────────────────
-    // Ao tocar no banner, o AppShell guarda os dados do material no
-    // MaterialProvider e navega para /estoque. Aqui detectamos isso e abrimos
-    // automaticamente a categoria certa já filtrada.
+
     final filtroPendente =
         context.watch<MaterialProvider>().filtroNavegacaoPendente;
     if (filtroPendente != null) {
@@ -655,11 +521,6 @@ class _EstoquePageState extends State<EstoquePage> {
       });
     }
 
-    // ── Navegação pendente vinda do diálogo "Alertas de Estoque" ─────────────
-    // Ao clicar em "Ir para Estoque" no diálogo aberto pelo sino de
-    // notificações, o AppShell guarda o status desejado (ex.: 'CRITICO') no
-    // MaterialProvider e navega para /estoque. Aqui abrimos a tela "Geral"
-    // já com esse status ativo no filtro.
     final statusPendente =
         context.watch<MaterialProvider>().filtroStatusPendente;
     if (statusPendente != null) {
@@ -670,10 +531,6 @@ class _EstoquePageState extends State<EstoquePage> {
       });
     }
 
-    // ── Navegação pendente vinda de um encaminhamento de material no chat ───
-    // Ao tocar no card de um material "solto" encaminhado no chat, o
-    // MaterialProvider guarda os dados do material para abrirmos a
-    // categoria certa já filtrada, assim que esta página ficar visível.
     final filtroChatPendente =
         context.watch<MaterialProvider>().filtroChatPendente;
     if (filtroChatPendente != null) {
@@ -691,7 +548,7 @@ class _EstoquePageState extends State<EstoquePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
+
             Row(
               children: [
                 Column(
@@ -735,7 +592,6 @@ class _EstoquePageState extends State<EstoquePage> {
             ),
             const SizedBox(height: 20),
 
-            // ── Banner de alertas de estoque ───────────────────────────────
             Consumer<AlertasEstoqueProvider>(
               builder: (_, alertasProv, __) {
                 if (alertasProv.totalAlertas == 0) return const SizedBox.shrink();
@@ -746,7 +602,6 @@ class _EstoquePageState extends State<EstoquePage> {
               },
             ),
 
-            // ── Campo de busca de categorias ───────────────────────────────
             SizedBox(
               key: _tourKeyCampoBusca,
               width: 360,
@@ -772,7 +627,6 @@ class _EstoquePageState extends State<EstoquePage> {
             ),
             const SizedBox(height: 20),
 
-            // ── Grid de categorias ─────────────────────────────────────────
             Expanded(
               child: SingleChildScrollView(
                 child: Consumer<MaterialProvider>(
@@ -785,8 +639,7 @@ class _EstoquePageState extends State<EstoquePage> {
                     }
 
                     if (provider.erro != null) {
-                      // A mensagem vem como "Erro ao carregar categorias: Verifique..."
-                      // Extrai só a parte após o primeiro ": " para evitar duplicação.
+
                       final partes = provider.erro!.split(': ');
                       final subtitulo = partes.length > 1
                           ? partes.sublist(1).join(': ')
@@ -833,9 +686,6 @@ class _EstoquePageState extends State<EstoquePage> {
                       );
                     }
 
-                    // Só exibe os cards se o servidor respondeu com sucesso
-                    // pelo menos uma vez. Evita mostrar "Geral" e "Sem categoria"
-                    // com o servidor offline (quando categorias ainda não foram carregadas).
                     if (!provider.categoriasCarregadas) {
                       return const SizedBox(
                         height: 200,
@@ -864,10 +714,6 @@ class _EstoquePageState extends State<EstoquePage> {
                         _filtroCategoria.isEmpty ||
                         label.toLowerCase().contains(_filtroCategoria);
 
-                    // Índice do primeiro card a ser exibido (após filtro),
-                    // usado para saber qual é o "primeiro" (card Geral, se
-                    // visível) e o "segundo" (a próxima opção logo depois),
-                    // que são os dois pontos do tour de ajuda do robô.
                     int indiceCardMontado = 0;
 
                     Widget cardComTourKey(Widget card) {
@@ -915,10 +761,6 @@ class _EstoquePageState extends State<EstoquePage> {
                           ),
                     ];
 
-                    // Só depois que os cards e o campo de busca já foram
-                    // descritos é que registramos a opção de ajuda do robô
-                    // (as GlobalKeys precisam estar associadas a widgets
-                    // que serão de fato montados neste frame).
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (mounted) _registrarAjudaRobo();
                     });
@@ -968,19 +810,21 @@ class _EstoquePageState extends State<EstoquePage> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DIALOG DE SELEÇÃO DE STATUS PARA EXPORTAR PDF
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _ExportarPdfDialog extends StatefulWidget {
   final bool         mostrarSeletorCategoria;
   final List<String> categorias;
   final String       categoriaInicial;
+  final GlobalKey?   tourKeyCategoria;
+  final GlobalKey?   tourKeyStatus;
+  final GlobalKey?   tourKeyBotaoExportar;
 
   const _ExportarPdfDialog({
     this.mostrarSeletorCategoria = false,
     this.categorias = const [],
     this.categoriaInicial = '',
+    this.tourKeyCategoria,
+    this.tourKeyStatus,
+    this.tourKeyBotaoExportar,
   });
 
   @override
@@ -1001,11 +845,18 @@ class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Row(
+      title: Row(
         children: [
-          Icon(Icons.picture_as_pdf, color: AppTheme.primary, size: 22),
-          SizedBox(width: 10),
-          Text('Exportar PDF de Estoque'),
+          const Icon(Icons.picture_as_pdf, color: AppTheme.primary, size: 22),
+          const SizedBox(width: 10),
+          const Expanded(child: Text('Exportar PDF de Estoque')),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
         ],
       ),
       content: SizedBox(
@@ -1015,18 +866,26 @@ class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (widget.mostrarSeletorCategoria) ...[
-              Text(
-                'Categoria a exportar:',
-                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: 8),
-              _CategoriaFiltroDropdown(
-                categorias: widget.categorias,
-                valorSelecionado: _categoriaSelecionada.isEmpty ||
-                        widget.categorias.contains(_categoriaSelecionada)
-                    ? _categoriaSelecionada
-                    : '',
-                onSelecionar: (v) => setState(() => _categoriaSelecionada = v),
+              KeyedSubtree(
+                key: widget.tourKeyCategoria,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Categoria a exportar:',
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 8),
+                    _CategoriaFiltroDropdown(
+                      categorias: widget.categorias,
+                      valorSelecionado: _categoriaSelecionada.isEmpty ||
+                              widget.categorias.contains(_categoriaSelecionada)
+                          ? _categoriaSelecionada
+                          : '',
+                      onSelecionar: (v) => setState(() => _categoriaSelecionada = v),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 18),
             ],
@@ -1035,79 +894,87 @@ class _ExportarPdfDialogState extends State<_ExportarPdfDialog> {
               style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
-            ..._opcoes.map((opcao) {
-              final (valor, label, icone, cor) = opcao;
-              final selecionado = _statusSelecionado == valor;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(10),
-                  onTap: () => setState(() => _statusSelecionado = valor),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 120),
-                    padding: EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                    decoration: BoxDecoration(
-                      color: selecionado
-                          ? cor.withValues(alpha: 0.10)
-                          : Colors.transparent,
+            KeyedSubtree(
+              key: widget.tourKeyStatus,
+              child: Column(
+                children: _opcoes.map((opcao) {
+                  final (valor, label, icone, cor) = opcao;
+                  final selecionado = _statusSelecionado == valor;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: InkWell(
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: selecionado
-                            ? cor
-                            : Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
-                        width: selecionado ? 1.5 : 1,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(icone, size: 18, color: selecionado ? cor : Theme.of(context).colorScheme.onSurfaceVariant),
-                        SizedBox(width: 10),
-                        Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: selecionado ? FontWeight.w700 : FontWeight.w400,
-                            color: selecionado ? cor : Theme.of(context).colorScheme.onSurface,
+                      onTap: () => setState(() => _statusSelecionado = valor),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 120),
+                        padding: EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                        decoration: BoxDecoration(
+                          color: selecionado
+                              ? cor.withValues(alpha: 0.10)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: selecionado
+                                ? cor
+                                : Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
+                            width: selecionado ? 1.5 : 1,
                           ),
                         ),
-                        const Spacer(),
-                        if (selecionado)
-                          Icon(Icons.check, size: 16, color: cor),
-                      ],
+                        child: Row(
+                          children: [
+                            Icon(icone, size: 18, color: selecionado ? cor : Theme.of(context).colorScheme.onSurfaceVariant),
+                            SizedBox(width: 10),
+                            Text(
+                              label,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: selecionado ? FontWeight.w700 : FontWeight.w400,
+                                color: selecionado ? cor : Theme.of(context).colorScheme.onSurface,
+                              ),
+                            ),
+                            const Spacer(),
+                            if (selecionado)
+                              Icon(Icons.check, size: 16, color: cor),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              );
-            }),
+                  );
+                }).toList(),
+              ),
+            ),
           ],
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(null),
-          style: TextButton.styleFrom()
-              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton.icon(
-          onPressed: () => Navigator.of(context).pop(
-            (status: _statusSelecionado, categoria: _categoriaSelecionada),
+        Tooltip(
+          message: 'Fechar sem exportar',
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(null),
+            style: TextButton.styleFrom()
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: const Text('Cancelar'),
           ),
-          icon: const Icon(Icons.download, size: 16),
-          label: const Text('Exportar'),
-          style: FilledButton.styleFrom(
-            backgroundColor: AppTheme.primary,
-            foregroundColor: Colors.white,
-          ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+        ),
+        Tooltip(
+          message: 'Gerar o PDF com os filtros selecionados',
+          child: FilledButton.icon(
+            key: widget.tourKeyBotaoExportar,
+            onPressed: () => Navigator.of(context).pop(
+              (status: _statusSelecionado, categoria: _categoriaSelecionada),
+            ),
+            icon: const Icon(Icons.download, size: 16),
+            label: const Text('Exportar'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+            ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
         ),
       ],
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PÁGINA DE IDENTIFICADORES (nível 2 da hierarquia: categoria → identificador)
-// ─────────────────────────────────────────────────────────────────────────────
 
 const _kIdentificadorTodos       = '__TODOS__';
 const _kIdentificadorSemIdentificador = '__SEM_IDENTIFICADOR__';
@@ -1138,15 +1005,9 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
   bool _carregando = true;
   List<MaterialModel> _materiais = [];
 
-  // ── Pontos de interesse para o tour guiado do robô assistente ───────────
-  // ("Como selecionar um identificador"): card "Todos" → card de
-  // identificador específico.
   final _tourKeyCardTodos      = GlobalKey();
   final _tourKeyCardEspecifico = GlobalKey();
 
-  /// Registra no RoboHelperProvider a dica desta página. Chamado a cada
-  /// build (é barato) para garantir que aponte para as keys corretas mesmo
-  /// após reconstruções — seguindo o mesmo padrão de EstoquePage.
   void _registrarAjudaRobo() {
     final rota = ModalRoute.of(context);
     if (rota != null && !rota.isCurrent) return;
@@ -1178,7 +1039,6 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
     ]);
   }
 
-  // ── Helpers de ícone / cor para identificadores ──────────────────────────
   static const _cores = [
     Color(0xFF1E88E5), Color(0xFF00897B), Color(0xFFE53935),
     Color(0xFFF4511E), Color(0xFF8E24AA), Color(0xFF039BE5),
@@ -1204,8 +1064,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
   @override
   void dispose() {
     _filtroCtrl.dispose();
-    // Evita que o robô continue oferecendo "Como selecionar um
-    // identificador?" em outra página depois que o usuário sai daqui.
+
     try {
       context.read<RoboHelperProvider>().encerrarTour();
       context.read<RoboHelperProvider>().limparOpcoes('/estoque');
@@ -1220,11 +1079,9 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
         '',
         limite: 9999,
       );
-      // buscarSugestoes não filtra por categoria; fazemos aqui no client:
-      // Melhor usar o repo diretamente via provider.carregar e capturar o resultado.
-      // Mas como não temos acesso direto, usamos o provider normalmente.
+
       if (!mounted) return;
-      // Carrega tudo da categoria no provider para extrair identificadores
+
       await context.read<MaterialProvider>().carregar(
         categoria: _categoriaParaProvider(),
       );
@@ -1233,15 +1090,13 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
         _materiais = context.read<MaterialProvider>().materiais;
         _carregando = false;
       });
-      // Registra a dica só depois que os identificadores foram carregados —
-      // é quando os cards (e suas GlobalKeys) já existem na árvore.
+
       if (mounted) _registrarAjudaRobo();
     } catch (_) {
       if (mounted) setState(() => _carregando = false);
     }
   }
 
-  /// Extrai identificadores únicos dos materiais (null → sem identificador).
   List<String?> _identificadoresUnicos() {
     final set = <String?>{};
     for (final m in _materiais) {
@@ -1270,8 +1125,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
     required String identificadorId,
     required String? identificadorReal,
   }) {
-    // A dica "Como selecionar um identificador" só faz sentido nesta
-    // própria página — limpamos antes de navegar para dentro dela.
+
     context.read<RoboHelperProvider>().encerrarTour();
     context.read<RoboHelperProvider>().limparOpcoes('/estoque');
 
@@ -1304,7 +1158,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ────────────────────────────────────────────────────
+
             Row(
               children: [
                 _BotaoVoltar(
@@ -1358,7 +1212,6 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
             ),
             SizedBox(height: 20),
 
-            // ── Campo de busca ────────────────────────────────────────────────
             SizedBox(
               width: 360,
               child: TextField(
@@ -1383,7 +1236,6 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
             ),
             const SizedBox(height: 20),
 
-            // ── Grid de identificadores ───────────────────────────────────────
             Expanded(
               child: _carregando
                   ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
@@ -1403,7 +1255,6 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
 
     final cards = <Widget>[];
 
-    // Card "Todos"
     if (corresponde('todos')) {
       cards.add(_IdentificadorCard(
         key:         _tourKeyCardTodos,
@@ -1413,12 +1264,11 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
         icone:       Icons.grid_view_rounded,
         onTap: () => _navegarParaIdentificador(
           identificadorId:   _kIdentificadorTodos,
-          identificadorReal: null, // sem filtro de identificador
+          identificadorReal: null,
         ),
       ));
     }
 
-    // Identificadores reais
     for (int i = 0; i < identificadores.length; i++) {
       final ident = identificadores[i];
       final label = ident ?? 'Sem identificador';
@@ -1426,8 +1276,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
       final cor = ident == null
           ? const Color(0xFF546E7A)
           : _cores[i % _cores.length];
-      // Só o primeiro card de identificador específico ganha a tour key
-      // (é o único destacado nesta parada da dica).
+
       final ehPrimeiro = cards.length == (corresponde('todos') ? 1 : 0);
       cards.add(_IdentificadorCard(
         key:         ehPrimeiro ? _tourKeyCardEspecifico : null,
@@ -1437,7 +1286,7 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
         icone:       ident == null ? Icons.help_outline : Icons.qr_code,
         onTap: () => _navegarParaIdentificador(
           identificadorId:   ident ?? _kIdentificadorSemIdentificador,
-          identificadorReal: ident, // null = sem identificador
+          identificadorReal: ident,
         ),
       ));
     }
@@ -1475,13 +1324,6 @@ class _EstoqueIdentificadorPageState extends State<EstoqueIdentificadorPage> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CARD DE IDENTIFICADOR
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
-// Usado no cabeçalho das páginas de identificadores/materiais para voltar
-// à tela anterior (categorias ou identificadores).
 class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;
@@ -1657,14 +1499,6 @@ class _IdentificadorCardState extends State<_IdentificadorCard> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PÁGINA DE MATERIAIS POR CATEGORIA
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Chaves usadas pelo tour "Como cadastrar um material?" pra destacar cada
-/// campo do dialog de cadastro. Ficam guardadas na página (não no dialog em
-/// si), porque o dialog é recriado do zero toda vez que é aberto, mas o tour
-/// referencia essas chaves antes mesmo do dialog existir.
 class _MaterialFormTourKeys {
   final nome           = GlobalKey();
   final identificador  = GlobalKey();
@@ -1677,15 +1511,11 @@ class _MaterialFormTourKeys {
   final quantidade     = GlobalKey();
   final estoqueMinimo  = GlobalKey();
   final estoqueConfirmado = GlobalKey();
+  final cadastrar      = GlobalKey();
 
-  /// True quando [key] é uma das keys deste formulário — usado pelo
-  /// PopScope do dialog para distinguir um Esc/fechamento manual real (a
-  /// parada do tour ainda está dentro deste formulário) de um pop
-  /// disparado pelo próprio tour navegando "Anterior" para um passo fora
-  /// dele (ex.: o botão "Novo Material" na página).
   bool contemParada(GlobalKey key) => [
         nome, identificador, categoria, unidade, medida, comprimento, largura,
-        espessura, quantidade, estoqueMinimo, estoqueConfirmado,
+        espessura, quantidade, estoqueMinimo, estoqueConfirmado, cadastrar,
       ].contains(key);
 }
 
@@ -1695,22 +1525,16 @@ class EstoqueCategoriaPage extends StatefulWidget {
   final Color    cor;
   final IconData icone;
   final String?  buscaInicial;
-  /// Pré-preenchem os filtros de medida/espessura — usados quando a página é
-  /// aberta a partir do MaterialCriticoBanner, que já sabe exatamente qual
-  /// medida/espessura do material crítico.
+
   final String?  medidaInicial;
   final String?  espessuraInicial;
-  /// Pré-preenche o filtro de status (ex.: 'CRITICO') — usado quando a
-  /// página é aberta a partir do diálogo de Alertas de Estoque, clicando em
-  /// "Ir para Estoque".
+
   final String?  statusInicial;
-  /// Quando não-null, filtra automaticamente pelo identificador escolhido na
-  /// página anterior (EstoqueIdentificadorPage). String vazia = sem identificador.
-  /// null especial vindo de _kIdentificadorTodos = sem filtro de identificador.
+
   final String?  identificadorFiltro;
-  /// Rótulo do identificador para exibir no breadcrumb (null = sem filtro).
+
   final String?  identificadorLabel;
-  /// Se true, exibe breadcrumb de volta à tela de identificadores.
+
   final bool     mostrarBotaoIdentificadores;
   final String   roleUsuario;
 
@@ -1734,14 +1558,9 @@ class EstoqueCategoriaPage extends StatefulWidget {
   State<EstoqueCategoriaPage> createState() => _EstoqueCategoriaPageState();
 }
 
-// ── Dropdown de categoria com busca embutida no próprio menu ────────────────
-// Diferente de um DropdownButtonFormField comum: ao abrir, mostra um campo de
-// texto no topo do próprio dropdown para filtrar a lista em tempo real. O
-// controle fechado se parece com os demais filtros (label "Categoria" +
-// valor selecionado).
 class _CategoriaFiltroDropdown extends StatefulWidget {
   final List<String> categorias;
-  final String valorSelecionado; // '' = TODAS
+  final String valorSelecionado;
   final ValueChanged<String> onSelecionar;
   const _CategoriaFiltroDropdown({
     required this.categorias,
@@ -1792,8 +1611,7 @@ class _CategoriaFiltroDropdownState extends State<_CategoriaFiltroDropdown> {
       menuChildren: [
         StatefulBuilder(
           builder: (context, setMenuState) {
-            // Recalculado a cada setMenuState (ex.: ao digitar na busca),
-            // já que _busca pode ter mudado desde o último build externo.
+
             final filtradas = _busca.trim().isEmpty
                 ? widget.categorias
                 : widget.categorias
@@ -1905,13 +1723,9 @@ class _CategoriaFiltroDropdownState extends State<_CategoriaFiltroDropdown> {
   }
 }
 
-// ── Dropdown de status (OK / LIMITE / CRITICO / INATIVO) ────────────────────
-// Lista curta e fixa, então sem campo de busca — apenas um MenuAnchor simples
-// com um indicador de cor por status, no mesmo padrão visual do
-// _CategoriaFiltroDropdown.
 class _StatusFiltroDropdown extends StatefulWidget {
   final MenuController menuController;
-  final String valorSelecionado; // '' = TODOS
+  final String valorSelecionado;
   final ValueChanged<String> onSelecionar;
   const _StatusFiltroDropdown({
     required this.menuController,
@@ -2040,17 +1854,19 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   final _larguraCtrl       = TextEditingController();
   final _comprimentoCtrl   = TextEditingController();
   String _statusFiltro         = '';
-  String _categoriaFiltro      = ''; // só usado quando widget.categoriaId == _kCategoriaGeral
+  String _categoriaFiltro      = '';
   bool   _somenteFornecedor    = false;
   Timer? _debounceTimer;
   final MenuController _statusMenuController = MenuController();
 
-  // ── Ajuda do robô ────────────────────────────────────────────────────────
   final _tourKeyHistorico     = GlobalKey();
   final _tourKeyOrcar         = GlobalKey();
   final _tourKeyExportar      = GlobalKey();
+  final _tourKeyExportarCategoria = GlobalKey();
+  final _tourKeyExportarStatus    = GlobalKey();
+  final _tourKeyExportarBotao     = GlobalKey();
   final _tourKeyNovoMaterial  = GlobalKey();
-  // ── Ajuda do robô: busca/filtro de materiais ─────────────────────────────
+
   final _tourKeyBusca            = GlobalKey();
   final _tourKeyFiltroIdent      = GlobalKey();
   final _tourKeyFiltroMedida     = GlobalKey();
@@ -2061,9 +1877,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   final _tourKeyFiltroStatus     = GlobalKey();
   final _tourKeyFiltroFornecedor = GlobalKey();
   final _materialTourKeys     = _MaterialFormTourKeys();
-  // true enquanto o dialog de "Novo Material" estiver aberto POR CAUSA do
-  // tour — usado pra fechá-lo de novo se o usuário clicar "Anterior" e
-  // voltar pro passo do botão (que fica escondido atrás do dialog).
+
   bool _dialogTourAberto = false;
 
   static const int _itensPorPagina = 50;
@@ -2073,9 +1887,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
 
   String? _categoriaParaProvider() {
     if (widget.categoriaId == _kCategoriaGeral) {
-      // Na página "Geral" (todas as categorias misturadas), o dropdown
-      // de Categoria permite restringir a uma categoria específica sem
-      // sair da tela; vazio = todas.
+
       return _categoriaFiltro.isEmpty ? null : _categoriaFiltro;
     }
     if (widget.categoriaId == _kCategoriaSemCategoria) return '';
@@ -2086,7 +1898,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   void initState() {
     super.initState();
     _buscaCtrl = TextEditingController(text: widget.buscaInicial ?? '');
-    // Pré-preenche o filtro de identificador vindo da página anterior
+
     if (widget.identificadorFiltro != null) {
       _identificadorCtrl.text = widget.identificadorFiltro!;
     }
@@ -2124,15 +1936,10 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     _carregarPaginaAtual(irParaPagina: 0);
   }
 
-  /// Recarrega a página atual do servidor (mantém _paginaAtual, ordenação
-  /// e filtros). Usar após editar/desativar/reativar/excluir um material.
   void _recarregarSemResetarPagina() {
     _carregarPaginaAtual(irParaPagina: _paginaAtual);
   }
 
-  /// Busca a página [irParaPagina] do servidor já ordenada/filtrada.
-  /// Se a página vier vazia mas ainda existirem itens (ex.: acabou de
-  /// excluir o último item da última página), volta uma página.
   Future<void> _carregarPaginaAtual({required int irParaPagina}) async {
     final provider = context.read<MaterialProvider>();
     await provider.carregarPaginado(
@@ -2145,7 +1952,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
       largura:       _larguraCtrl.text.trim(),
       comprimento:   _comprimentoCtrl.text.trim(),
       comFornecedor: _somenteFornecedor,
-      pagina:        irParaPagina + 1, // backend é 1-indexado
+      pagina:        irParaPagina + 1,
       porPagina:     _itensPorPagina,
       ordenarPor:    _colunaOrdem,
       direcao:       _crescente ? 'asc' : 'desc',
@@ -2170,11 +1977,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         _crescente   = true;
       }
     });
-    // A ordenação agora acontece no servidor — volta pra primeira página.
+
     _carregarPaginaAtual(irParaPagina: 0);
   }
-
-  // ── Ações de material ──────────────────────────────────────────────────────
 
   void _abrirHistoricoPrecos(MaterialModel material) {
     final materialProvider = context.read<MaterialProvider>();
@@ -2187,11 +1992,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     );
   }
 
-  /// Registra as dicas desta página (materiais de uma categoria) sob a
-  /// mesma rota '/estoque'. Só escreve de fato se esta página for a rota
-  /// visível no topo — evita que uma rebuild em segundo plano (ex.: esta
-  /// tela escondida atrás do dialog "Novo Material" ou de "Histórico")
-  /// sobrescreva as opções enquanto não é ela que está sendo mostrada.
   void _registrarAjudaRoboCategoria() {
     final rota = ModalRoute.of(context);
     if (rota != null && !rota.isCurrent) return;
@@ -2209,12 +2009,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
             texto: 'Toque aqui para abrir o formulário de cadastro de um '
                 'novo material.',
             aoEntrar: () async {
-              // Se estivermos voltando pra este passo (botão "Anterior"
-              // vindo de dentro do dialog), fecha o dialog que o tour
-              // tinha aberto — senão o botão fica escondido atrás dele.
-              // IMPORTANTE: usa rootNavigator:true porque showDialog abre
-              // no Navigator raiz; sem isso maybePop() poppa a rota da
-              // página de estoque em vez do dialog.
+
               if (_dialogTourAberto) {
                 _dialogTourAberto = false;
                 await Navigator.of(context, rootNavigator: true).maybePop();
@@ -2231,8 +2026,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                 _abrirFormMaterial().then((_) {
                   if (mounted) _dialogTourAberto = false;
                 });
-                // Aguarda um frame para que o dialog comece a montar antes
-                // de o provider tentar medir a key em destaque.
+
                 await Future<void>.delayed(const Duration(milliseconds: 80));
               }
             },
@@ -2287,6 +2081,11 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
             key: () => _materialTourKeys.estoqueConfirmado,
             texto: 'Marque aqui quando a quantidade cadastrada já foi '
                 'conferida fisicamente no estoque.',
+          ),
+          RoboTourStop(
+            key: () => _materialTourKeys.cadastrar,
+            texto: 'Por fim, toque em "Cadastrar" para salvar o novo '
+                'material.',
           ),
         ],
       ),
@@ -2360,35 +2159,70 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         paradas: [
           RoboTourStop(
             key: () => _tourKeyExportar,
-            texto: 'Toque aqui para exportar a lista de materiais '
-                'filtrada em um arquivo PDF.',
+            texto: 'Toque aqui para abrir a exportação do estoque em PDF.',
+            aoEntrar: () async {
+              if (_dialogTourAberto) {
+                _dialogTourAberto = false;
+                await Navigator.of(context, rootNavigator: true).maybePop();
+                await Future<void>.delayed(const Duration(milliseconds: 50));
+              }
+            },
+          ),
+          if (widget.categoriaId == _kCategoriaGeral)
+            RoboTourStop(
+              key: () => _tourKeyExportarCategoria,
+              texto: 'Escolha a categoria que deseja exportar, ou deixe '
+                  'em "Todas" para exportar de todas as categorias.',
+              aoEntrar: () async {
+                if (!_dialogTourAberto) {
+                  _dialogTourAberto = true;
+                  _exportarPdf().then((_) {
+                    if (mounted) _dialogTourAberto = false;
+                  });
+
+                  await Future<void>.delayed(const Duration(milliseconds: 80));
+                }
+              },
+            ),
+          RoboTourStop(
+            key: () => _tourKeyExportarStatus,
+            texto: 'Selecione quais materiais deseja incluir no relatório: '
+                'todos os status, ou apenas OK, Limite ou Crítico.',
+            aoEntrar: widget.categoriaId == _kCategoriaGeral
+                ? null
+                : () async {
+                    if (!_dialogTourAberto) {
+                      _dialogTourAberto = true;
+                      _exportarPdf().then((_) {
+                        if (mounted) _dialogTourAberto = false;
+                      });
+
+                      await Future<void>.delayed(const Duration(milliseconds: 80));
+                    }
+                  },
+          ),
+          RoboTourStop(
+            key: () => _tourKeyExportarBotao,
+            texto: 'Por fim, toque em "Exportar" para gerar o PDF.',
           ),
         ],
+        aoEncerrar: () async {
+          if (_dialogTourAberto) {
+            _dialogTourAberto = false;
+            await Navigator.of(context, rootNavigator: true).maybePop();
+          }
+        },
       ),
     ]);
   }
 
   Future<void> _abrirFormMaterial([MaterialModel? material]) async {
-    // Lê o role sempre do UsuarioProvider (fonte da verdade), e não de
-    // widget.roleUsuario: esta página pode ter sido aberta via
-    // Navigator.push antes de uma troca de usuário ("Trocar para"), e nesse
-    // caso o valor recebido no construtor fica desatualizado — o
-    // Navigator.push não reconstrói a página quando o usuário muda.
+
     final roleAtual = context.read<UsuarioProvider>().usuarioLogado?.role;
     final isCompras = roleAtual == 'COMPRAS';
     final salvou = await showDialog(
       context: context,
-      // true: precisa estar habilitado para que o Esc e o clique fora do
-      // barrier disparem uma tentativa de fechamento — é essa tentativa que
-      // o PopScope dentro de _MaterialFormDialog intercepta (canPop: false)
-      // para decidir se confirma alterações não salvas antes de fechar.
-      // Se ficasse false, o Flutter nem chegaria a acionar o PopScope.
-      //
-      // Exceção: enquanto o tour do robô estiver guiando este formulário,
-      // o balão de dica fica fora do dialog (numa camada abaixo dele), e
-      // qualquer clique do usuário tentando interagir com a dica cairia
-      // no barrier e fecharia o formulário sem querer. Por isso, nesse
-      // caso o barrier fica não-dismissible — só X/Cancelar/Esc fecham.
+
       barrierDismissible: !_dialogTourAberto,
       builder: (_) => _MaterialFormDialog(
         material:    material,
@@ -2529,7 +2363,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   Future<void> _exportarPdf() async {
     final mostrarSeletorCategoria = widget.categoriaId == _kCategoriaGeral;
 
-    // ── 1. Pedir ao usuário qual status (e, na tela Geral, qual categoria) ──
     final escolha = await showDialog<({String status, String categoria})>(
       context: context,
       builder: (ctx) {
@@ -2537,12 +2370,14 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
           mostrarSeletorCategoria: mostrarSeletorCategoria,
           categorias:              context.read<MaterialProvider>().categorias,
           categoriaInicial:        _categoriaFiltro,
+          tourKeyCategoria:        _tourKeyExportarCategoria,
+          tourKeyStatus:           _tourKeyExportarStatus,
+          tourKeyBotaoExportar:    _tourKeyExportarBotao,
         );
       },
     );
-    if (escolha == null) return; // cancelou
+    if (escolha == null) return;
 
-    // ── 2. Mostrar progresso ────────────────────────────────────────────────
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -2552,17 +2387,12 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
       ),
     );
 
-    // Na tela "Geral", a categoria vem da escolha feita no diálogo
-    // (pré-preenchida com o filtro já aplicado na tela, mas o usuário
-    // pode trocar sem precisar sair do diálogo). Nas demais telas, a
-    // categoria já é fixa (a da própria página).
     final String? catParam = mostrarSeletorCategoria
         ? (escolha.categoria.isEmpty ? null : escolha.categoria)
         : widget.categoriaId == _kCategoriaSemCategoria
             ? ''
             : widget.categoriaId;
 
-    // 'TODOS' → não passa status (backend interpreta como sem filtro)
     final String? statusParam =
         escolha.status == 'TODOS' ? null : escolha.status;
 
@@ -2572,7 +2402,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         status:    statusParam,
       );
 
-      // Valida que a resposta é realmente um PDF
       if (bytes.length < 4 ||
           bytes[0] != 0x25 || bytes[1] != 0x50 ||
           bytes[2] != 0x44 || bytes[3] != 0x46) {
@@ -2592,7 +2421,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
       await file.writeAsBytes(bytes, flush: true);
 
       if (Platform.isWindows) {
-        // 'start' abre com o programa padrão associado ao .pdf no Windows
+
         await Process.run('cmd', ['/c', 'start', '', file.path]);
       } else if (Platform.isMacOS) {
         await Process.run('open', [file.path]);
@@ -2610,14 +2439,9 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     }
   }
 
-  // ── Orçar materiais filtrados ──────────────────────────────────────────────
   Future<void> _orcarFiltrados() async {
     final provider = context.read<MaterialProvider>();
 
-    // Confirmação antes de disparar a busca completa + navegação: usa a
-    // contagem já calculada pelo servidor para a página atual (mesma exibida
-    // no botão "Orçar filtrados (X)"), sem precisar buscar a lista inteira
-    // só pra mostrar o número no dialog.
     final totalFiltrado = provider.totalItensPagina;
     final confirmar = await showDialog<bool>(
       context: context,
@@ -2627,26 +2451,29 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
           'Deseja orçar os $totalFiltrado material${totalFiltrado == 1 ? '' : 'is'} filtrado${totalFiltrado == 1 ? '' : 's'}?',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(false),
-            style: TextButton.styleFrom()
-                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-            child: const Text('Cancelar'),
+          Tooltip(
+            message: 'Fechar sem orçar',
+            child: TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(false),
+              style: TextButton.styleFrom()
+                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              child: const Text('Cancelar'),
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
-                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-            child: const Text('Orçar'),
+          Tooltip(
+            message: 'Criar orçamento com os materiais filtrados',
+            child: FilledButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(true),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                  .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              child: const Text('Orçar'),
+            ),
           ),
         ],
       ),
     );
     if (confirmar != true || !mounted) return;
 
-    // Esta função só roda sob demanda (clique em "Orçar filtrados"), então
-    // busca a lista completa que bate no filtro atual aqui — a tela em si
-    // usa carregarPaginado() e não mantém mais a tabela inteira em memória.
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text('Carregando materiais...'),
       duration: Duration(seconds: 2),
@@ -2669,7 +2496,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         : todos;
     if (materiais.isEmpty) return;
 
-    // Monta os itens para o orçamento com os dados de preço de cada material
     final itens = materiais.map((m) {
       final precos = <int, PrecoFornecedorData>{};
       for (final fm in m.fornecedorMateriais) {
@@ -2694,7 +2520,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
       );
     }).toList();
 
-    // Monta um título descritivo baseado nos filtros ativos
     final partes = <String>[];
     if (widget.categoriaId != _kCategoriaGeral &&
         widget.categoriaId != _kCategoriaSemCategoria) {
@@ -2718,13 +2543,164 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
     if (!mounted) return;
     context.read<OrcamentoProvider>().adicionarItensEmLote(titulo, itens);
 
-    // Ao entrar em /orcamento, abre direto no editor (aba "abertos") com
-    // este orçamento recém-criado, em vez da lista de aprovação.
     OrcamentoPage.abrirEditorAoEntrar = true;
     context.go('/orcamento');
   }
 
-  // ── BUILD ──────────────────────────────────────────────────────────────────
+  Widget _botaoHistorico({
+    required bool compacto,
+    required double iconSize,
+    required double fontSize,
+    required double padH,
+    required double padV,
+  }) {
+    return Container(
+      key: _tourKeyHistorico,
+      child: Tooltip(
+        message: 'Ver histórico de movimentações do estoque',
+        child: OutlinedButton.icon(
+          onPressed: () {
+            context.read<RoboHelperProvider>().encerrarTour();
+            context.read<RoboHelperProvider>().limparOpcoes('/estoque');
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const HistoricoMaterialPage(),
+              ),
+            ).then((_) {
+              if (mounted) _registrarAjudaRoboCategoria();
+            });
+          },
+          icon: Icon(Icons.history, size: iconSize),
+          label: Text('Histórico', style: TextStyle(fontSize: fontSize)),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Theme.of(context).colorScheme.onSurface,
+            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+            padding: EdgeInsets.symmetric(
+                horizontal: padH, vertical: padV),
+          ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+        ),
+      ),
+    );
+  }
+
+  Widget _botaoOrcarFiltrados({
+    required bool compacto,
+    required bool muitoCompacto,
+    required double iconSize,
+    required double fontSize,
+    required double padH,
+    required double padV,
+  }) {
+    return Container(
+      key: _tourKeyOrcar,
+      child: Consumer<MaterialProvider>(
+        builder: (_, mp, __) {
+          final total = mp.totalItensPagina;
+          final temMateriais = !mp.carregandoPagina && total > 0;
+          return Tooltip(
+            message: temMateriais
+                ? 'Criar orçamento com os $total material(is) filtrado(s)'
+                : 'Nenhum material filtrado',
+            child: OutlinedButton.icon(
+              onPressed: temMateriais ? _orcarFiltrados : null,
+              icon: Icon(Icons.request_quote, size: iconSize),
+              label: Text(
+                muitoCompacto
+                    ? (temMateriais ? 'Orçar ($total)' : 'Orçar')
+                    : (temMateriais ? 'Orçar filtrados ($total)' : 'Orçar filtrados'),
+                style: TextStyle(fontSize: fontSize),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Color(0xFF1E88E5),
+                side: BorderSide(
+                  color: temMateriais
+                      ? Color(0xFF1E88E5)
+                      : Theme.of(context).colorScheme.outline,
+                ),
+                padding: EdgeInsets.symmetric(
+                    horizontal: padH, vertical: padV),
+              ).copyWith(
+                mouseCursor: WidgetStateProperty.resolveWith(
+                  (states) => states.contains(WidgetState.disabled)
+                      ? SystemMouseCursors.forbidden
+                      : SystemMouseCursors.click,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _botaoExportarPdf({
+    required bool compacto,
+    required bool muitoCompacto,
+    required double iconSize,
+    required double fontSize,
+    required double padH,
+    required double padV,
+  }) {
+    return Container(
+      key: _tourKeyExportar,
+      child: Tooltip(
+        message: 'Exportar lista de materiais em PDF',
+        child: OutlinedButton.icon(
+          onPressed: _exportarPdf,
+          icon: Icon(Icons.picture_as_pdf, size: iconSize),
+          label: Text(
+            muitoCompacto ? 'Exportar (PDF)' : 'Exportar Estoque (PDF)',
+            style: TextStyle(fontSize: fontSize),
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFFE85D04),
+            side: const BorderSide(color: Color(0xFFE85D04)),
+            padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
+          ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+        ),
+      ),
+    );
+  }
+
+  Widget _botaoNovoMaterial({
+    required bool compacto,
+    required bool muitoCompacto,
+    required double iconSize,
+    required double fontSize,
+    required double padHPrimario,
+    required double padV,
+  }) {
+    return Container(
+      key: _tourKeyNovoMaterial,
+      child: Tooltip(
+        message: 'Cadastrar novo material no estoque',
+        child: FilledButton.icon(
+          onPressed: () => _abrirFormMaterial(),
+          icon: Icon(Icons.add, size: iconSize),
+          label: Text(muitoCompacto ? 'Novo' : 'Novo Material', style: TextStyle(fontSize: fontSize)),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+            padding: EdgeInsets.symmetric(horizontal: padHPrimario, vertical: padV),
+          ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+        ),
+      ),
+    );
+  }
+
+  Widget _botaoRefresh({required double iconSize}) {
+    return IconButton(
+      onPressed: _aplicarFiltros,
+      icon: Icon(Icons.refresh, size: iconSize, color: Theme.of(context).colorScheme.onSurfaceVariant),
+      tooltip: 'Atualizar',
+      style: IconButton.styleFrom(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -2741,207 +2717,107 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho com botão voltar ──────────────────────────────────
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Botão voltar
-                _BotaoVoltar(
-                  label: widget.mostrarBotaoIdentificadores
-                      ? widget.categoriaLabel
-                      : 'Categorias',
-                  tooltip: widget.mostrarBotaoIdentificadores
-                      ? 'Voltar para ${widget.categoriaLabel}'
-                      : 'Voltar para categorias',
-                  onTap: () => Navigator.of(context).pop(),
-                ),
-                const SizedBox(width: 16),
-                // Ícone da categoria
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: cor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(widget.icone, color: cor, size: 20),
-                ),
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final compacto = constraints.maxWidth < 1150;
+                final muitoCompacto = constraints.maxWidth < 750;
+
+                final iconSize = muitoCompacto ? 13.0 : (compacto ? 15.0 : 18.0);
+                final fontSize = muitoCompacto ? 11.0 : (compacto ? 12.0 : 14.0);
+                final padH = muitoCompacto ? 8.0 : (compacto ? 12.0 : 16.0);
+                final padHPrimario = muitoCompacto ? 8.0 : (compacto ? 12.0 : 20.0);
+                final padV = muitoCompacto ? 6.0 : (compacto ? 8.0 : 12.0);
+                final espacamento = muitoCompacto ? 4.0 : (compacto ? 6.0 : 12.0);
+
+                return Row(
                   children: [
-                    // Breadcrumb: Categoria › Identificador (se veio da tela de identificadores)
-                    if (widget.mostrarBotaoIdentificadores && widget.identificadorLabel != null)
-                      Row(
-                        children: [
-                          Text(
-                            widget.categoriaLabel,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: Theme.of(context).colorScheme.outline),
-                          ),
-                          Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 4),
-                            child: Icon(Icons.chevron_right, size: 14, color: Theme.of(context).colorScheme.outline),
-                          ),
-                          Text(
-                            widget.identificadorLabel!,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: cor,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                        ],
-                      ),
-                    Text(
-                      widget.mostrarBotaoIdentificadores && widget.identificadorLabel != null
-                          ? widget.identificadorLabel!
-                          : widget.categoriaLabel,
-                      style: Theme.of(context)
-                          .textTheme
-                          .headlineMedium
-                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                    _BotaoVoltar(
+                      label: widget.mostrarBotaoIdentificadores
+                          ? widget.categoriaLabel
+                          : 'Categorias',
+                      tooltip: widget.mostrarBotaoIdentificadores
+                          ? 'Voltar para ${widget.categoriaLabel}'
+                          : 'Voltar para categorias',
+                      onTap: () => Navigator.of(context).pop(),
                     ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Materiais desta categoria',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                // Botões de ação — Wrap evita overflow quando a janela estreita
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
+                    const SizedBox(width: 16),
+
                     Container(
-                      key: _tourKeyHistorico,
-                      child: Tooltip(
-                      message: 'Ver histórico de movimentações do estoque',
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          context.read<RoboHelperProvider>().encerrarTour();
-                          context.read<RoboHelperProvider>().limparOpcoes('/estoque');
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const HistoricoMaterialPage(),
-                            ),
-                          ).then((_) {
-                            if (mounted) _registrarAjudaRoboCategoria();
-                          });
-                        },
-                        icon: const Icon(Icons.history, size: 18),
-                        label: const Text('Histórico'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFF59E0B),
-                          side: const BorderSide(color: Color(0xFFF59E0B)),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                        ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: cor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      ),
+                      child: Icon(widget.icone, color: cor, size: 20),
                     ),
-                    Container(
-                      key: _tourKeyOrcar,
-                      child: Consumer<MaterialProvider>(
-                      builder: (_, mp, __) {
-                        // O contador usa o total já calculado no servidor pela
-                        // página atual (respeita busca/status/comFornecedor).
-                        // A lista completa só é buscada de fato ao clicar,
-                        // dentro de _orcarFiltrados — não fica pré-carregada.
-                        final total = mp.totalItensPagina;
-                        final temMateriais = !mp.carregandoPagina && total > 0;
-                        return Tooltip(
-                          message: temMateriais
-                              ? 'Criar orçamento com os $total material(is) filtrado(s)'
-                              : 'Nenhum material filtrado',
-                          child: OutlinedButton.icon(
-                            onPressed: temMateriais ? _orcarFiltrados : null,
-                            icon: const Icon(Icons.request_quote, size: 18),
-                            label: Text(
-                              temMateriais
-                                  ? 'Orçar filtrados ($total)'
-                                  : 'Orçar filtrados',
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Color(0xFF1E88E5),
-                              side: BorderSide(
-                                color: temMateriais
-                                    ? Color(0xFF1E88E5)
-                                    : Theme.of(context).colorScheme.outline,
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+
+                        if (widget.mostrarBotaoIdentificadores && widget.identificadorLabel != null)
+                          Row(
+                            children: [
+                              Text(
+                                widget.categoriaLabel,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: Theme.of(context).colorScheme.outline),
                               ),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 12),
-                            ).copyWith(
-                              mouseCursor: WidgetStateProperty.resolveWith(
-                                (states) => states.contains(WidgetState.disabled)
-                                    ? SystemMouseCursors.forbidden
-                                    : SystemMouseCursors.click,
+                              Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 4),
+                                child: Icon(Icons.chevron_right, size: 14, color: Theme.of(context).colorScheme.outline),
                               ),
-                            ),
+                              Text(
+                                widget.identificadorLabel!,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: cor,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            ],
                           ),
-                        );
-                      },
-                      ),
+                        Text(
+                          widget.mostrarBotaoIdentificadores && widget.identificadorLabel != null
+                              ? widget.identificadorLabel!
+                              : widget.categoriaLabel,
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineMedium
+                              ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Materiais desta categoria',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        ),
+                      ],
                     ),
-                    Container(
-                      key: _tourKeyExportar,
-                      child: Tooltip(
-                      message: 'Exportar lista de materiais em PDF',
-                      child: OutlinedButton.icon(
-                        onPressed: _exportarPdf,
-                        icon: const Icon(Icons.picture_as_pdf, size: 18),
-                        label: const Text('Exportar Estoque (PDF)'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFE85D04),
-                          side: const BorderSide(color: Color(0xFFE85D04)),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-                      ),
-                      ),
-                    ),
-                    Container(
-                      key: _tourKeyNovoMaterial,
-                      child: Tooltip(
-                      message: 'Cadastrar novo material no estoque',
-                      child: FilledButton.icon(
-                        onPressed: () => _abrirFormMaterial(),
-                        icon: const Icon(Icons.add, size: 18),
-                        label: Text('Novo Material'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          foregroundColor: Colors.white,
-                          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-                      ),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: _aplicarFiltros,
-                      icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      tooltip: 'Atualizar',
-                      style: IconButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.surface,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-                    ),
+                    const Spacer(),
+                    _botaoHistorico(compacto: compacto, iconSize: iconSize, fontSize: fontSize, padH: padH, padV: padV),
+                    SizedBox(width: espacamento),
+                    _botaoOrcarFiltrados(compacto: compacto, muitoCompacto: muitoCompacto, iconSize: iconSize, fontSize: fontSize, padH: padH, padV: padV),
+                    SizedBox(width: espacamento),
+                    _botaoExportarPdf(compacto: compacto, muitoCompacto: muitoCompacto, iconSize: iconSize, fontSize: fontSize, padH: padH, padV: padV),
+                    SizedBox(width: espacamento),
+                    _botaoNovoMaterial(compacto: compacto, muitoCompacto: muitoCompacto, iconSize: iconSize, fontSize: fontSize, padHPrimario: padHPrimario, padV: padV),
+                    SizedBox(width: espacamento),
+                    _botaoRefresh(iconSize: iconSize),
                   ],
-                ),
-              ],
+                );
+              },
             ),
             SizedBox(height: 20),
 
-            // ── Filtros linha 1 ────────────────────────────────────────────
             Row(
               children: [
                 Expanded(
@@ -2953,7 +2829,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     inputFormatters: [_UpperCaseFormatter()],
                     decoration: InputDecoration(
                       hintText:   'Nome do material',
-                      prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.outline, size: 20),
+                      prefixIcon: Icon(Icons.inventory_2_outlined, color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense:    true,
                     ),
                     onChanged: (_) {
@@ -2975,8 +2851,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
                     child: Consumer<MaterialProvider>(
                       builder: (_, provider, __) {
                         final categorias = provider.categorias;
-                        // Garante que o valor selecionado ainda exista na lista
-                        // (ex.: categoria removida enquanto o filtro estava ativo).
+
                         final valorValido = _categoriaFiltro.isEmpty ||
                             categorias.contains(_categoriaFiltro);
                         return _CategoriaFiltroDropdown(
@@ -3088,7 +2963,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
             ),
             SizedBox(height: 10),
 
-            // ── Filtros linha 2 ────────────────────────────────────────────
             Row(
               children: [
                 Expanded(
@@ -3211,7 +3085,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
             ),
             const SizedBox(height: 16),
 
-            // ── Tabela ─────────────────────────────────────────────────────
             Expanded(
               child: Consumer<MaterialProvider>(
                 builder: (_, provider, __) {
@@ -3334,7 +3207,6 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   }
 }
 
-// Dados de um card especial (Geral / Sem categoria)
 class _CardEspecialData {
   final String id;
   final String label;
@@ -3347,10 +3219,6 @@ class _CardEspecialData {
     required this.cor,
   });
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CARD COMPACTO DE CATEGORIA (horizontal scroll)
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _CategoriaCardCompact extends StatefulWidget {
   final String categoria;
@@ -3444,8 +3312,6 @@ class _CategoriaCardCompactState extends State<_CategoriaCardCompact> {
     );
   }
 }
-
-
 
 class _BarraPaginacao extends StatelessWidget {
   final int paginaAtual;
@@ -3701,7 +3567,7 @@ class _TabelaMateriais extends StatefulWidget {
   final String? colunaOrdem;
   final bool crescente;
   final void Function(String sortKey) onToggleOrdem;
- 
+
   const _TabelaMateriais({
     required this.materiais,
     required this.onEditar,
@@ -3786,14 +3652,11 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
         ),
       );
 
-
-  
   @override
   Widget build(BuildContext context) {
     final confirmados = widget.materiais.where((m) =>  m.estoqueConfirmado).toList();
     final naoConfirm  = widget.materiais.where((m) => !m.estoqueConfirmado).toList();
 
-    // Corpo rolável (sem o cabeçalho — ele fica fixo acima)
     Widget corpoRolavel = SingleChildScrollView(
       controller: _scrollCtrl,
       child: Column(
@@ -3853,16 +3716,13 @@ class _TabelaMateriaisState extends State<_TabelaMateriais> {
       ),
     );
 
-    // A tabela sempre ocupa exatamente a largura disponível — as colunas
-    // encolhem proporcionalmente (via Expanded/flex) e o texto que não
-    // couber é cortado com reticências, em vez de forçar scroll horizontal.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Cabeçalho fixo — não entra no scroll vertical
+
         _cabecalho(),
         Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
-        // Corpo rolável (verticalmente) ocupa o espaço restante
+
         Expanded(child: corpoRolavel),
       ],
     );
@@ -3873,13 +3733,9 @@ class _ColDef {
   final String  label;
   final double? fixed;
   final double? flex;
-  /// Largura mínima em pixels — garante que o texto da coluna (cabeçalho e
-  /// células) nunca quebre em mais de uma linha nem seja cortado, mesmo em
-  /// telas estreitas. Quando a soma das larguras mínimas ultrapassa a largura
-  /// disponível, a tabela passa a rolar horizontalmente em vez de espremer
-  /// as colunas.
+
   final double  minWidth;
-  /// Identificador de ordenação; null = coluna não ordenável
+
   final String? sortKey;
   const _ColDef({
     required this.label,
@@ -3889,10 +3745,6 @@ class _ColDef {
     this.sortKey,
   });
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CABEÇALHO ORDENÁVEL
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _CabecalhoOrdenavel extends StatelessWidget {
   final String label;
@@ -3909,7 +3761,7 @@ class _CabecalhoOrdenavel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Layout idêntico ao cabeçalho original — só adiciona clique e ícone de seta
+
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
@@ -3928,7 +3780,7 @@ class _CabecalhoOrdenavel extends StatelessWidget {
                   color: ativo ? AppTheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-              // Ícone pequeno no canto superior direito, sem afetar o layout do texto
+
               Positioned(
                 top: 0,
                 right: 0,
@@ -3957,7 +3809,7 @@ class _LinhaMateria extends StatefulWidget {
   final void Function(MaterialModel) onVerFornecedores;
   final void Function(MaterialModel) onVerHistoricoPrecos;
   final bool mostrarCategoria;
- 
+
   const _LinhaMateria({
     required this.material,
     required this.cols,
@@ -3966,29 +3818,29 @@ class _LinhaMateria extends StatefulWidget {
     required this.onVerHistoricoPrecos,
     this.mostrarCategoria = true,
   });
- 
+
   @override
   State<_LinhaMateria> createState() => _LinhaMateriaState();
 }
- 
+
 class _LinhaMateriaState extends State<_LinhaMateria> {
   bool _hovered  = false;
- 
+
   void _onHover(PointerHoverEvent _) {
     if (!_hovered) setState(() => _hovered = true);
   }
- 
+
   void _onExit(PointerExitEvent _) {
     if (_hovered) setState(() => _hovered = false);
   }
- 
+
   static Widget _colWrap(_ColDef col, Widget child) => col.fixed != null
       ? SizedBox(width: col.fixed, child: child)
       : Expanded(
           flex: (col.flex! * 10).round(),
           child: child,
         );
- 
+
   static Widget _cell(String text, BuildContext context, {bool inativo = false}) => Padding(
         padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         child: Text(
@@ -4000,22 +3852,21 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
           ),
         ),
       );
- 
-  // ── Linha principal (pai) ──────────────────────────────────────────────────
+
   Widget _buildLinhaRaiz(BuildContext context) {
     final m       = widget.material;
     final inativo = !m.ativo;
     final cols    = widget.cols;
- 
+
     final bgColor = _hovered
         ? Color(0xFFFF9800).withValues(alpha: 0.10)
         : inativo
             ? Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4)
             : Theme.of(context).colorScheme.surface;
- 
+
     Widget maybeOpacity(Widget child) =>
         inativo ? Opacity(opacity: 0.45, child: child) : child;
- 
+
     Widget estoqueAtualCell() {
       return maybeOpacity(_cell(
         formatarQuantidadeExibicao(m.quantidade),
@@ -4023,7 +3874,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
         inativo: inativo,
       ));
     }
- 
+
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onHover: _onHover,
@@ -4038,7 +3889,7 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // ID
+
                 _colWrap(cols[0], maybeOpacity(Padding(
                   padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
@@ -4053,12 +3904,10 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                   ),
                 ))),
                 _vDivider(context),
- 
-                // Identificador
+
                 _colWrap(cols[1], maybeOpacity(_cell(m.identificador ?? '—', context, inativo: inativo))),
                 _vDivider(context),
- 
-                // Nome
+
                 _colWrap(cols[2], maybeOpacity(Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Row(
@@ -4080,62 +3929,51 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                   ),
                 ))),
                 _vDivider(context),
- 
-                // Categoria (apenas em Geral / Sem categoria)
+
                 if (widget.mostrarCategoria) ...[
                   _colWrap(cols[3], maybeOpacity(_cell(m.categoria ?? '—', context, inativo: inativo))),
                   _vDivider(context),
                 ],
- 
-                // Medida
+
                 _colWrap(cols[widget.mostrarCategoria ? 4 : 3], maybeOpacity(_cell(m.medida ?? '—', context, inativo: inativo))),
                 _vDivider(context),
- 
-                // Espessura
+
                 _colWrap(cols[widget.mostrarCategoria ? 5 : 4], maybeOpacity(_cell(m.espessura != null && m.espessura!.trim().isNotEmpty ? '${m.espessura!.trim().replaceAll(RegExp("mm\\s*\$", caseSensitive: false), '').trim()}mm' : '—', context, inativo: inativo))),
                 _vDivider(context),
- 
-                // Comprimento
+
                 _colWrap(cols[widget.mostrarCategoria ? 6 : 5], maybeOpacity(_cell(m.comprimento != null ? formatarQuantidade(m.comprimento!) : '—', context, inativo: inativo))),
                 _vDivider(context),
- 
-                // Largura
+
                 _colWrap(cols[widget.mostrarCategoria ? 7 : 6], maybeOpacity(_cell(m.largura != null ? formatarQuantidade(m.largura!) : '—', context, inativo: inativo))),
                 _vDivider(context),
- 
-                // Estoque atual (com lógica especial para específico)
+
                 _colWrap(cols[widget.mostrarCategoria ? 8 : 7], estoqueAtualCell()),
                 _vDivider(context),
- 
-                // Estoque mínimo
+
                 _colWrap(cols[widget.mostrarCategoria ? 9 : 8], maybeOpacity(_cell(
                   formatarQuantidadeExibicao(m.estoqueMinimo),
                   context,
                   inativo: inativo,
                 ))),
                 _vDivider(context),
- 
-                // Unidade
+
                 _colWrap(cols[widget.mostrarCategoria ? 10 : 9], maybeOpacity(_cell(formatarUnidadeExibicao(m.unidade), context, inativo: inativo))),
                 _vDivider(context),
- 
-                // Custo última compra
+
                 _colWrap(cols[widget.mostrarCategoria ? 11 : 10], maybeOpacity(_CustoCell(
                   valor:       m.ultimoValorPago,
                   temHistorico: true,
                   onTap:       () => widget.onVerHistoricoPrecos(m),
                 ))),
                 _vDivider(context),
- 
-                // Custo m² última compra
+
                 _colWrap(cols[widget.mostrarCategoria ? 12 : 11], maybeOpacity(_CustoCell(
                   valor:       m.ultimoValorPagoM2,
                   temHistorico: true,
                   onTap:       () => widget.onVerHistoricoPrecos(m),
                 ))),
                 _vDivider(context),
- 
-                // Status
+
                 _colWrap(cols[widget.mostrarCategoria ? 13 : 12], maybeOpacity(Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
@@ -4143,7 +3981,6 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
                   ),
                 ))),
 
-                // botão Histórico de audit por material
                 _colWrap(
                   cols[widget.mostrarCategoria ? 14 : 13],
                   Center(
@@ -4179,17 +4016,16 @@ class _LinhaMateriaState extends State<_LinhaMateria> {
       ),
     );
   }
- 
+
   @override
   Widget build(BuildContext context) {
     return _buildLinhaRaiz(context);
   }
- 
+
   static Widget _vDivider(BuildContext context) => VerticalDivider(
     width: 1, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant,
   );
 }
-
 
 class _MaterialFormDialog extends StatefulWidget {
   final MaterialModel? material;
@@ -4197,15 +4033,9 @@ class _MaterialFormDialog extends StatefulWidget {
   final void Function(MaterialModel)? onReativar;
   final void Function(MaterialModel)? onExcluir;
   final String? roleUsuario;
-  /// Quando true, o formulário é exibido apenas para consulta: todos os
-  /// campos ficam bloqueados e as ações de salvar/desativar/reativar/excluir
-  /// ficam ocultas. Usado para permitir que o usuário COMPRAS visualize os
-  /// dados de um material já cadastrado sem poder alterá-los.
+
   final bool somenteLeitura;
-  /// Chaves opcionais usadas pelo tour de ajuda do robô, pra destacar cada
-  /// campo deste formulário passo a passo. Null quando o dialog é aberto
-  /// normalmente (fora do tour) — nesse caso as chaves simplesmente não
-  /// fazem nada.
+
   final _MaterialFormTourKeys? tourKeys;
   const _MaterialFormDialog({this.material, this.onDesativar, this.onReativar, this.onExcluir, this.roleUsuario, this.somenteLeitura = false, this.tourKeys});
 
@@ -4218,20 +4048,10 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   bool _salvando = false;
   String? _erroDialog;
 
-  // ── Fechamento automático quando o tour do robô termina ────────────────
-  // Só relevante quando widget.tourKeys != null, ou seja, quando ESTE
-  // dialog foi aberto pelo próprio tour (via aoEntrar do passo "Nome").
-  // Nesse caso, quando o usuário concluir o tour (botão "Concluir" na
-  // última parada) ou encerrá-lo de outra forma (Esc, X do robô), o
-  // dialog deve fechar junto — sem isso ele ficaria aberto sozinho depois
-  // do tour acabar. Guardamos a referência ao provider (não ao context)
-  // pra poder remover o listener no dispose com segurança.
   RoboHelperProvider? _roboHelper;
 
   void _aoMudarRoboHelper() {
-    // dispara só na transição tourAtivo:true → false, evitando fechar o
-    // dialog no frame em que ele mesmo acabou de ser aberto pelo tour
-    // (nesse momento tourAtivo já é true).
+
     if (widget.tourKeys != null &&
         !(_roboHelper?.tourAtivo ?? false) &&
         mounted) {
@@ -4239,15 +4059,10 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     }
   }
 
-  // ── Detecção de possível material duplicado ───────────────────────────
-  // Compara nome/identificador/medida/espessura digitados contra os
-  // materiais já cadastrados (via busca no backend), avisando o usuário
-  // antes de submeter — não bloqueia o salvamento, apenas alerta.
   Timer? _debounceDuplicata;
   bool _verificandoDuplicata = false;
   List<_PossivelDuplicata> _possiveisDuplicatas = [];
 
-  // ── Modo Retalho (apenas no cadastro de material novo) ────────────────
   bool _modoRetalho = false;
   bool _hoverRetalho = false;
 
@@ -4267,40 +4082,20 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   late bool _estoqueConfirmado;
   bool _fornecedoresExpandido = false;
 
-  /// COMPRAS não pode definir a quantidade no cadastro — a entrada de
-  /// estoque deve ser feita pela página de Controle de Estoque (movimentação
-  /// de ENTRADA vinculada a uma OS), garantindo rastreabilidade.
-  /// Lê o role sempre do UsuarioProvider (fonte da verdade) em vez de
-  /// widget.roleUsuario, que pode estar desatualizado se esta tela foi
-  /// aberta antes de uma troca de usuário ("Trocar para").
   bool get _bloquearQuantidade =>
       (context.watch<UsuarioProvider>().usuarioLogado?.role ?? widget.roleUsuario) ==
           'COMPRAS' &&
       !_editando;
 
-  /// Mesma regra de [_bloquearQuantidade], mas usando `context.read` em vez
-  /// de `context.watch`. Use esta versão fora do método build (por exemplo,
-  /// dentro de handlers de evento como `_salvar`), já que `watch` só pode
-  /// ser chamado durante a construção da árvore de widgets.
   bool get _bloquearQuantidadeAtual =>
       (context.read<UsuarioProvider>().usuarioLogado?.role ?? widget.roleUsuario) ==
           'COMPRAS' &&
       !_editando;
 
-  /// Mesma regra de [_bloquearEstoqueMinimo]: COMPRAS também não pode definir o
-  /// estoque mínimo no cadastro — ambos ficam a cargo de quem faz a entrada
-  /// real de estoque (Controle de Estoque / OS).
   bool get _bloquearEstoqueMinimo => _bloquearQuantidade;
 
-  /// Versão `context.read` de [_bloquearEstoqueMinimo], para uso fora do build.
   bool get _bloquearEstoqueMinimoAtual => _bloquearQuantidadeAtual;
 
-  /// COMPRAS, ao editar um material já existente, só pode alterar a
-  /// Categoria e confirmar o Estoque — os demais campos (nome, identificador,
-  /// unidade, medida, dimensões etc.) continuam bloqueados, pois seguem
-  /// sendo de responsabilidade de quem cadastra/movimenta o material.
-  /// Usa o mesmo padrão watch/read de [_bloquearQuantidade] pelos mesmos
-  /// motivos (reagir a troca de usuário durante o build vs. em handlers).
   bool get _bloqueadoParaCompras =>
       (context.watch<UsuarioProvider>().usuarioLogado?.role ?? widget.roleUsuario) ==
           'COMPRAS' &&
@@ -4311,8 +4106,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
           'COMPRAS' &&
       _editando;
 
-  /// Normaliza valores de unidade salvos com grafia antiga no banco de dados.
-  /// Ex.: "M2" (sem símbolo Unicode) → "M²"
   static const _unidadesValidas = {
     'UNIDADE', 'M/L', 'M', 'ML', 'M²', 'G',
   };
@@ -4325,18 +4118,9 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     if (v == null || v.isEmpty) return null;
     final norm = v.trim().toUpperCase();
     if (_unidadesValidas.contains(norm)) return norm;
-    return _aliasUnidade[norm] ?? norm; // preserva desconhecidos sem crash
+    return _aliasUnidade[norm] ?? norm;
   }
 
-  /// Detecta se o texto contém a palavra "RETALHO" (ou variações próximas
-  /// como "RETALHOS", "RETALH", "RETALHOO", "RETALHP" etc.) em qualquer
-  /// palavra do texto. Usado para impedir que o usuário digite isso no campo
-  /// Nome — retalhos devem ser identificados pelo campo Identificador, não
-  /// pelo nome do material.
-  ///
-  /// A detecção usa distância de edição (Levenshtein) em vez de apenas uma
-  /// regex exata, para pegar erros de digitação comuns (letra faltando,
-  /// duplicada ou trocada), sem disparar em palavras muito diferentes.
   static const _palavraRetalho = 'RETALHO';
 
   static int _distanciaEdicao(String a, String b) {
@@ -4363,9 +4147,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
   static bool _pareceRetalho(String palavra) {
     final p = palavra.toUpperCase();
-    if (p.length < 5) return false; // evita falso-positivo em palavras curtas
-    // Compara contra a raiz "RETALHO" e também contra "RETALHOS" (plural),
-    // tolerando até 2 edições de diferença (insere/remove/troca letra).
+    if (p.length < 5) return false;
+
     final distBase   = _distanciaEdicao(p, _palavraRetalho);
     final distPlural = _distanciaEdicao(p, '${_palavraRetalho}S');
     final tolerancia = p.length <= 7 ? 2 : 3;
@@ -4381,11 +4164,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   void initState() {
     super.initState();
     if (widget.tourKeys != null) {
-      // addPostFrameCallback: evita ler o provider antes do primeiro frame
-      // deste dialog terminar de montar (context ainda instável no meio
-      // do initState), e garante que _roboHelper já reflita tourAtivo:true
-      // (o passo "Nome" que abriu este dialog) antes de começarmos a
-      // ouvir mudanças — senão o listener poderia disparar cedo demais.
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _roboHelper = context.read<RoboHelperProvider>();
@@ -4397,23 +4176,17 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     _nome          = TextEditingController(text: m?.nome ?? '');
     _identificador = TextEditingController(text: m?.identificador ?? '');
     _unidade       = _normalizarUnidade(m?.unidade);
-    // Se o material sendo editado já é um retalho (identificador "RETALHO"),
-    // o formulário deve abrir com o modo Retalho já ativado.
+
     _modoRetalho   = (m?.identificador?.trim().toUpperCase() == _palavraRetalho);
     _categoria     = _NotifiableTextEditingController(text: m?.categoria ?? '');
-    // Ao focar o campo vazio, força o RawAutocomplete a reavaliar as opções
-    // (ele só reage a mudanças no texto do controller, não ao foco).
+
     _categoriaFocusNode.addListener(() {
       if (_categoriaFocusNode.hasFocus) {
-        // Ao focar o campo (mesmo vazio), força o RawAutocomplete a
-        // reavaliar as opções, para que a lista de categorias já apareça
-        // antes mesmo do usuário digitar algo.
+
         _categoria.notify();
       }
     });
-    // No modo Retalho o campo Medida sempre deve conter o sufixo fixo "m²";
-    // se o material salvo já tiver um valor (ex.: "0.69m²"), preserva-o,
-    // senão parte só do sufixo.
+
     final medidaInicialTexto = m?.medida ?? '';
     _medida        = TextEditingController(
       text: _modoRetalho
@@ -4430,24 +4203,15 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     _estoqueMinimo = TextEditingController(
         text: m != null ? m.estoqueMinimo.toString() : '0');
 
-    // Campos que entram na comparação de duplicidade: qualquer alteração
-    // reagenda a verificação (debounced).
     for (final c in [_nome, _identificador, _medida, _espessura, _largura, _comprimento]) {
       c.addListener(_agendarVerificacaoDuplicata);
     }
-    // Roda uma verificação inicial (ex.: ao editar um material que já
-    // tenha sido cadastrado em duplicidade por alguma falha anterior).
+
     WidgetsBinding.instance.addPostFrameCallback((_) => _agendarVerificacaoDuplicata());
 
-    // ── Snapshot inicial para detectar alterações não salvas ──────────────
-    // Usado para decidir se, ao tentar fechar o diálogo (X, "Cancelar",
-    // clique fora ou tecla Esc), é preciso confirmar com o usuário antes de
-    // descartar o que foi digitado.
     _snapshotInicial = _capturarEstadoAtual();
   }
 
-  /// Estado "assinatura" de todos os campos editáveis do formulário, usado
-  /// para comparar com o estado atual e saber se houve alguma alteração.
   late String _snapshotInicial;
 
   String _capturarEstadoAtual() => [
@@ -4465,15 +4229,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         _modoRetalho.toString(),
       ].join('␟');
 
-  /// true se algum campo foi alterado em relação ao estado com que o
-  /// diálogo foi aberto.
   bool get _temAlteracoesNaoSalvas => _capturarEstadoAtual() != _snapshotInicial;
 
-  /// Verifica se há alterações não salvas e, em caso positivo, pergunta ao
-  /// usuário se deseja descartá-las antes de fechar o diálogo. Retorna
-  /// `true` quando o diálogo pode ser fechado (sem alterações, ou usuário
-  /// confirmou o descarte / optou por salvar), e `false` quando o
-  /// fechamento deve ser cancelado.
   Future<bool> _confirmarFechamento() async {
     if (widget.somenteLeitura || !_temAlteracoesNaoSalvas) return true;
 
@@ -4518,9 +4275,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       case 'descartar':
         return true;
       case 'salvar':
-        // _salvar() já cuida de dar Navigator.pop(context, true) quando
-        // a operação for concluída com sucesso; se falhar, o diálogo de
-        // edição permanece aberto para o usuário corrigir/tentar de novo.
+
         await _salvar();
         return false;
       case 'continuar':
@@ -4529,9 +4284,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     }
   }
 
-  /// Tenta fechar o diálogo, passando pela confirmação de alterações não
-  /// salvas quando necessário. Usado pelo botão "X", pelo botão
-  /// "Cancelar"/"Fechar" e pelo PopScope (Esc / clique fora / botão voltar).
   Future<void> _tentarFechar() async {
     if (_salvando) return;
     final podeFechar = await _confirmarFechamento();
@@ -4560,11 +4312,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     _debounceDuplicata = Timer(const Duration(milliseconds: 450), _verificarDuplicatas);
   }
 
-  /// Busca materiais com nome parecido no backend e classifica os
-  /// resultados como "exato" (mesma combinação nome+identificador+medida+
-  /// espessura — o backend bloquearia com 409) ou "similar" (nome muito
-  /// parecido, ou mesmo identificador com nome diferente — possível erro
-  /// de digitação ou duplicidade não intencional).
   Future<void> _verificarDuplicatas() async {
     if (!mounted) return;
     final nomeNorm = _normalizarTextoComparacao(_nome.text);
@@ -4583,26 +4330,14 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
     final provider = context.read<MaterialProvider>();
 
-    // O backend faz busca por AND entre as palavras digitadas (todas as
-    // palavras precisam estar contidas no nome). Isso significa que buscar
-    // pela frase inteira falha em achar duplicatas quando o nome digitado
-    // tem uma palavra a mais/a menos/diferente do material já cadastrado
-    // (ex.: "ABS ACO ESCOVADO PRATA 2" não encontra "ABS ACO ESCOVADO
-    // PRATA", pois nenhum material tem a palavra "2" no nome). Por isso
-    // buscamos por cada palavra do nome separadamente (OR) e unificamos os
-    // resultados — a similaridade real é decidida depois, via Levenshtein,
-    // então um candidato a mais aqui não causa falso-positivo, só amplia
-    // a chance de achar o material realmente parecido.
     final tokensUnicos = _nome.text
         .trim()
         .split(RegExp(r'\s+'))
         .where((t) => t.isNotEmpty)
         .toSet()
         .toList()
-      ..sort((a, b) => b.length.compareTo(a.length)); // palavras mais longas (mais distintivas) primeiro
+      ..sort((a, b) => b.length.compareTo(a.length));
 
-    // Limita a 5 palavras para não disparar buscas demais em nomes longos;
-    // ignora tokens de 1 char (pouco distintivos, geram excesso de ruído).
     final termosBusca = tokensUnicos.where((t) => t.length >= 2).take(5).toList();
     if (termosBusca.isEmpty && _nome.text.trim().isNotEmpty) {
       termosBusca.add(_nome.text.trim());
@@ -4625,11 +4360,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     final medidaNorm        = _normalizarTextoComparacao(_medida.text);
     final espessuraNorm     = _normalizarTextoComparacao(_espessura.text);
 
-    // Dimensões digitadas: usa os campos numéricos Comprimento/Largura/
-    // Espessura como fonte principal e, quando algum deles estiver vazio,
-    // cai para o que der pra extrair do texto livre "medida" (que pode
-    // trazer tudo junto, em qualquer grafia: com ou sem "m"/"mm", com ou
-    // sem casas decimais, com ou sem um terceiro "x" pra espessura).
     final medidaDigitadaExtraida = _extrairDimensoesMedida(_medida.text);
     final comprimentoDigitado = double.tryParse(_comprimento.text.trim().replaceAll(',', '.'))
         ?? medidaDigitadaExtraida.comprimento;
@@ -4645,7 +4375,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
     final encontrados = <_PossivelDuplicata>[];
     for (final m in candidatos) {
-      // Ignora o próprio material ao editar.
+
       if (_editando && m.id == widget.material!.id) continue;
 
       final mNomeNorm          = _normalizarTextoComparacao(m.nome);
@@ -4653,86 +4383,48 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       final mMedidaNorm        = _normalizarTextoComparacao(m.medida);
       final mEspessuraNorm     = _normalizarTextoComparacao(m.espessura);
 
-      // Mesma lógica de fallback do lado do material cadastrado: prioriza os
-      // campos numéricos e, na falta deles, extrai do texto "medida" salvo.
       final mMedidaExtraida = _extrairDimensoesMedida(m.medida);
       final mComprimentoFinal = m.comprimento ?? mMedidaExtraida.comprimento;
       final mLarguraFinal     = m.largura ?? mMedidaExtraida.largura;
       final mEspessuraFinal   = _extrairNumeroDeTexto(m.espessura) ?? mMedidaExtraida.espessura;
 
-      // Comprimento/largura batem se os valores numéricos coincidirem,
-      // não importa como cada lado escreveu a medida (com/sem "m", com/sem
-      // decimais, com/sem espessura embutida no texto).
       final dimensoesBatem = dimensaoBate(comprimentoDigitado, mComprimentoFinal) &&
           dimensaoBate(larguraDigitada, mLarguraFinal);
       final medidaOuDimensaoBate = mMedidaNorm == medidaNorm || dimensoesBatem;
 
-      // Espessura: compara numericamente (ignorando "mm" e formatação) e só
-      // cai para comparação de texto puro quando nenhum lado tem número
-      // reconhecível (ex.: valor não numérico digitado por engano). Quando
-      // ambos os lados estão vazios, conta como igual.
       final espessuraBate = (espessuraNorm.isEmpty && mEspessuraNorm.isEmpty)
           ? true
           : (espessuraDigitadaNum != null && mEspessuraFinal != null)
               ? dimensaoBate(espessuraDigitadaNum, mEspessuraFinal)
               : mEspessuraNorm == espessuraNorm;
 
-      // Mesma regra de unicidade usada no backend (nome + identificador +
-      // medida + espessura, normalizados): se bater, o cadastro será
-      // rejeitado com 409 ao salvar.
       final exata = mNomeNorm == nomeNorm &&
           mIdentificadorNorm == identificadorNorm &&
           medidaOuDimensaoBate &&
           espessuraBate;
 
       final similaridadeNome = _similaridadeTexto(nomeNorm, mNomeNorm);
-      // Similaridade que ignora a ordem das palavras (ex.: "TINTA DUPLA
-      // FUNCAO PRETO FOSCO" vs "TINTA PRETO FOSCO DUPLA FUNCAO"), pra pegar
-      // casos em que o texto inteiro mudou de posição mas as palavras são
-      // as mesmas. Usa o maior dos dois scores como similaridade "efetiva".
+
       final similaridadePalavras = _similaridadePalavras(nomeNorm, mNomeNorm);
       final similaridadeEfetiva =
           similaridadeNome > similaridadePalavras ? similaridadeNome : similaridadePalavras;
       final mesmoIdentificador =
           identificadorNorm.isNotEmpty && identificadorNorm == mIdentificadorNorm;
 
-      // Detecta se um nome é prefixo/trecho do outro. Importante para quando
-      // o usuário ainda está no início da digitação (ex.: "ABS ACO" digitado
-      // com "ABS ACO ESCOVADO DOURADO" já cadastrado): a similaridade
-      // Levenshtein do texto inteiro fica baixa (o nome cadastrado é bem mais
-      // longo), mas o texto digitado é claramente o começo de um nome já
-      // existente, então isso também conta como "similar". Exige um mínimo
-      // de 4 caracteres no texto mais curto pra não disparar em prefixos
-      // genéricos demais (ex.: "AB").
       final curto = nomeNorm.length <= mNomeNorm.length ? nomeNorm : mNomeNorm;
       final longo = nomeNorm.length <= mNomeNorm.length ? mNomeNorm : nomeNorm;
       final contido = curto.length >= 4 && curto.isNotEmpty && longo.contains(curto);
 
-      // Quantas palavras (>=2 chars, pra ignorar conectivos irrelevantes)
-      // coincidem exatamente entre os dois nomes, não importa a ordem. Serve
-      // como sinal adicional e explícito: "se 1, 2, 3 palavras coincidirem,
-      // já vai acusando" — quanto mais palavras em comum, mais forte o
-      // indício de duplicidade, mesmo com nome final bem diferente.
       final palavrasDigitadas = nomeNorm.split(RegExp(r'\s+')).where((t) => t.length >= 2).toSet();
       final palavrasCadastro  = mNomeNorm.split(RegExp(r'\s+')).where((t) => t.length >= 2).toSet();
       final palavrasComuns = palavrasDigitadas.intersection(palavrasCadastro).length;
-      // Exige pelo menos 2 palavras em comum (1 palavra só é fraco demais e
-      // gera excesso de falso-positivo com termos genéricos), e que essas
-      // palavras comuns cubram uma fração razoável do nome mais curto — pra
-      // não acusar "TINTA PRETO" (2 palavras) contra "TINTA VERMELHA PRETO
-      // FOSCO BRILHANTE ACETINADA" (5 palavras) só porque 2 bateram.
+
       final menorQtdPalavras =
           palavrasDigitadas.length < palavrasCadastro.length ? palavrasDigitadas.length : palavrasCadastro.length;
       final cobreParcialPalavras = palavrasComuns >= 2 &&
           menorQtdPalavras > 0 &&
           (palavrasComuns / menorQtdPalavras) >= 0.6;
 
-      // "Similar": nome muito parecido em sequência (>=72%), muito parecido
-      // ignorando a ordem das palavras (>=72%), mesmo identificador com
-      // alguma semelhança (evita falso-positivo de identificadores genéricos
-      // reutilizados em materiais bem diferentes), um nome é prefixo/trecho
-      // do outro (digitação em andamento), ou várias palavras batem
-      // independente da ordem (>=2 palavras cobrindo >=60% do nome menor).
       final similar = !exata &&
           (similaridadeNome >= 0.72 ||
               similaridadePalavras >= 0.72 ||
@@ -4763,9 +4455,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     });
   }
 
-  /// Considera o campo Medida "vazio" quando não há valor digitado — seja
-  /// porque o campo está realmente vazio (modo normal), seja porque no modo
-  /// Retalho só contém o sufixo fixo "m²" sem número à esquerda.
   bool _medidaRetalhoEstaVazia() {
     final texto = _medida.text.trim();
     if (!_modoRetalho) return texto.isEmpty;
@@ -4801,10 +4490,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       setState(() => _erroDialog = 'Selecione uma unidade antes de salvar.');
       return;
     }
-    // Garante que a verificação de duplicidade mais recente já foi
-    // concluída antes de decidir se pode salvar (evita salvar durante o
-    // debounce, quando _possiveisDuplicatas ainda reflete o texto anterior
-    // digitado, permitindo escapar da validação por timing).
+
     _debounceDuplicata?.cancel();
     await _verificarDuplicatas();
     if (!mounted) return;
@@ -4817,12 +4503,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     }
     setState(() { _salvando = true; _erroDialog = null; });
 
-    // Defesa em profundidade: além do readOnly na UI, garante que COMPRAS
-    // editando um material existente não consiga enviar alterações para os
-    // campos que não são de sua responsabilidade — preserva os valores
-    // originais do material nesse caso. Categoria e Estoque confirmado
-    // ficam de fora dessa lista propositalmente: são os únicos campos que
-    // COMPRAS pode alterar.
     final material = widget.material;
     final bloqueado = _bloqueadoParaComprasAtual && material != null;
 
@@ -4868,7 +4548,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     final fornecedores  = material?.fornecedorMateriais ?? <FornecedorMaterialModel>[];
     final temFornecedor = _editando && fornecedores.isNotEmpty;
 
-    // ── Painel de formulário (sempre presente) ────────────────────────────
     Widget formPanel = Form(
       key: _formKey,
       child: SingleChildScrollView(
@@ -4911,7 +4590,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               key: widget.tourKeys?.nome,
               child: TextFormField(
               controller: _nome,
-              autofocus: !_editando,
+              autofocus: !_editando && widget.tourKeys == null,
               readOnly: _bloqueadoParaCompras,
               decoration: const InputDecoration(labelText: 'Nome *'),
               textCapitalization: TextCapitalization.characters,
@@ -4934,9 +4613,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               controller: _identificador,
               readOnly: _modoRetalho || _bloqueadoParaCompras,
               onChanged: (v) {
-                // Ativa o modo Retalho automaticamente ao digitar essa
-                // palavra no Identificador, travando os campos como se o
-                // usuário tivesse clicado no botão "Modo Retalho".
+
                 if (!_modoRetalho && _contemRetalho(v)) {
                   _ativarModoRetalho();
                 }
@@ -5127,7 +4804,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
               ),
             ),
-            ], // end if not ML/G (medida)
+            ],
             if (_unidade != 'ML' && _unidade != 'G') ...[
             const SizedBox(height: 10),
             Row(children: [
@@ -5198,7 +4875,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 ),
               ),
             ]),
-            ], // end if not ML/G
+            ],
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
@@ -5300,7 +4977,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       ),
     );
 
-    // Formata um valor monetário com separador de milhar (ex.: 1.000,00)
     String formatarMoeda(double valor) {
       final partes = valor.toStringAsFixed(2).split('.');
       final inteiro = partes[0];
@@ -5316,7 +4992,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       return 'R\$ ${buffer.toString()},$decimal';
     }
 
-    // ── Painel lateral de possíveis duplicatas (esquerda, sempre visível) ─
     final Widget avisoPanel = Container(
       width: 260,
       decoration: BoxDecoration(
@@ -5367,13 +5042,11 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       ),
     );
 
-    // ── Painel lateral de fornecedores (apenas no modo edição) ────────────
     Widget? fornecedorPanel;
     if (temFornecedor) {
       final ordenados = [...fornecedores]
         ..sort((a, b) => a.preco.compareTo(b.preco));
 
-      // ── Preços médios entre fornecedores (considera apenas valores > 0) ──
       double media(Iterable<double> valores) {
         final validos = valores.where((v) => v > 0).toList();
         if (validos.isEmpty) return 0;
@@ -5403,7 +5076,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Cabeçalho do painel (clicável para expandir/recolher)
+
             MouseRegion(
               cursor: SystemMouseCursors.click,
               child: InkWell(
@@ -5443,7 +5116,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             if (_fornecedoresExpandido) ...[
             Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
 
-            // Cabeçalho das colunas
             Padding(
               padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               child: Row(
@@ -5491,7 +5163,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             ),
             Divider(height: 0, thickness: 0.5, color: Theme.of(context).colorScheme.outlineVariant),
 
-            // Lista de fornecedores clicáveis
             Flexible(
               child: SingleChildScrollView(
                 child: Column(
@@ -5556,7 +5227,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
             ),
 
-            // Linha de preço médio entre os fornecedores
             Divider(height: 0, thickness: 0.8, color: Theme.of(context).colorScheme.outlineVariant),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -5619,39 +5289,12 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       );
     }
 
-    // ── Dialog com layout condicional ─────────────────────────────────────
     return PopScope(
-      // Intercepta qualquer tentativa de fechar o diálogo que não passe
-      // pelos botões (X/Cancelar), como a tecla Esc ou o gesto/botão
-      // "voltar": sempre barra o pop automático e decide via
-      // _confirmarFechamento se deve realmente fechar.
+
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        // Quando este dialog foi aberto pelo tour do robô (tourKeys não
-        // nulo) e o tour ainda está no ar, o Esc chega até aqui ANTES do
-        // KeyboardListener do robô conseguir tratá-lo (o foco está dentro
-        // do dialog). Se deixássemos cair em _confirmarFechamento, o
-        // dialog fecharia mas o tour continuaria "ativo" apontando pra um
-        // campo que não existe mais — daí a dica sumir e o dialog ficar
-        // aberto, ou vice-versa, dependendo da corrida entre os dois
-        // listeners. Em vez disso, tratamos Esc aqui como "sair do tour":
-        // encerra o tour e fecha o dialog junto, de forma consistente.
-        // (O listener _aoMudarRoboHelper cobre os demais jeitos de encerrar
-        // o tour — ex.: "Concluir" na última parada — fechando o dialog
-        // quando tourAtivo virar false por qualquer motivo.)
-        //
-        // IMPORTANTE: este handler também é acionado programaticamente
-        // pelo próprio tour quando o usuário clica "Anterior" saindo de um
-        // passo dentro deste dialog de volta pro passo do botão "Novo
-        // Material" (fora dele) — nesse caso tourAtivo continua true, só
-        // muda a parada. Tratar isso como a condição acima faria o
-        // "Anterior" encerrar o tour inteiro em vez de só voltar um passo.
-        // Distinguimos checando se a parada atual do tour ainda aponta pra
-        // uma key deste dialog: se sim, é um Esc/fechamento manual de
-        // verdade; se não (a parada já é a do botão "Novo Material", fora
-        // do dialog), é o próprio tour navegando pra trás — só deixamos o
-        // pop acontecer, sem encerrar o tour.
+
         final roboHelper =
             context.mounted ? context.read<RoboHelperProvider>() : null;
         final tourNavegandoParaFora = widget.tourKeys != null &&
@@ -5686,7 +5329,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         height: 680,
         child: Column(
           children: [
-            // ── Título ────────────────────────────────────────────────────
+
             Padding(
               padding: EdgeInsets.fromLTRB(24, 20, 16, 0),
               child: Row(
@@ -5699,7 +5342,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   ),
                   if (!_editando) ...[
                     const SizedBox(width: 12),
-                    // ── Atalho RETALHO ────────────────────────────────────
+
                     Tooltip(
                       message: _modoRetalho
                           ? 'Desmarcar como retalho'
@@ -5810,27 +5453,25 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             const SizedBox(height: 8),
             const Divider(height: 0),
 
-            // ── Corpo: formulário + painel lateral ────────────────────────
             Expanded(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Painel lateral (possíveis duplicatas), à esquerda — sempre visível
+
                   avisoPanel,
-                  // Formulário
+
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
                       child: formPanel,
                     ),
                   ),
-                  // Painel lateral (se houver fornecedores)
+
                   if (fornecedorPanel != null) fornecedorPanel,
                 ],
               ),
             ),
 
-            // ── Ações ─────────────────────────────────────────────────────
             const Divider(height: 0),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -5914,6 +5555,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   if (!widget.somenteLeitura) ...[
                   const SizedBox(width: 8),
                   Tooltip(
+                    key: widget.tourKeys?.cadastrar,
                     message: _editando ? 'Salvar alterações' : 'Cadastrar este material',
                     child: MouseRegion(
                       cursor: SystemMouseCursors.click,
@@ -5944,10 +5586,6 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   }
 }
 
-/// Extrai o primeiro número de um texto, aceitando vírgula ou ponto como
-/// separador decimal e ignorando qualquer sufixo de unidade colado nele
-/// (ex.: "1.22m" -> 1.22, "3mm" -> 3, "2,00" -> 2.0). Retorna null se não
-/// houver número reconhecível.
 double? _extrairNumeroDeTexto(String? s) {
   if (s == null) return null;
   final match = RegExp(r'[-+]?\d+(?:[.,]\d+)?').firstMatch(s.trim());
@@ -5955,7 +5593,6 @@ double? _extrairNumeroDeTexto(String? s) {
   return double.tryParse(match.group(0)!.replaceAll(',', '.'));
 }
 
-/// Dimensões numéricas extraídas do texto livre "medida".
 class _DimensoesMedida {
   final double? comprimento;
   final double? largura;
@@ -5963,12 +5600,6 @@ class _DimensoesMedida {
   const _DimensoesMedida({this.comprimento, this.largura, this.espessura});
 }
 
-/// Faz o parse do campo "medida" (texto livre) em até 3 números separados
-/// por "x"/"X"/"×", tolerando qualquer combinação de: presença ou não do
-/// sufixo de unidade ("m", "mm"), formatação decimal (2 vs 2.00 vs 2,00), e
-/// um terceiro segmento opcional com a espessura embutida (ex.: "5x1.22x3mm",
-/// "2x1x2mm", "2.00x1.00m", "2x1"). Todas essas grafias devem ser
-/// reconhecidas como a mesma medida física.
 _DimensoesMedida _extrairDimensoesMedida(String? medida) {
   if (medida == null || medida.trim().isEmpty) return const _DimensoesMedida();
   final partes = medida.trim().split(RegExp(r'[xX×]'));
@@ -5980,17 +5611,12 @@ _DimensoesMedida _extrairDimensoesMedida(String? medida) {
   );
 }
 
-/// Normaliza texto para comparação de duplicidade: maiúsculas, sem acentos,
-/// espaços colapsados. Espelha a normalização usada no backend (nome,
-/// identificador, medida, espessura comparados case-insensitive).
 String _normalizarTextoComparacao(String? v) {
   if (v == null) return '';
   final upper = _UpperCaseFormatter._removerAcentos(v.trim().toUpperCase());
   return upper.replaceAll(RegExp(r'\s+'), ' ');
 }
 
-/// Distância de Levenshtein clássica (número mínimo de inserções, remoções
-/// e substituições para transformar [a] em [b]).
 int _levenshteinDistance(String a, String b) {
   if (a == b) return 0;
   if (a.isEmpty) return b.length;
@@ -6015,11 +5641,6 @@ int _levenshteinDistance(String a, String b) {
   return anterior[b.length];
 }
 
-/// Similaridade entre 0 (totalmente diferentes) e 1 (idênticos), baseada na
-/// distância de Levenshtein normalizada pelo tamanho do maior texto.
-///
-/// Sensível à ORDEM das palavras: "TINTA PRETO FOSCO" x "PRETO FOSCO TINTA"
-/// tem similaridade baixa aqui, mesmo contendo as mesmas palavras.
 double _similaridadeTexto(String a, String b) {
   if (a.isEmpty && b.isEmpty) return 1;
   if (a.isEmpty || b.isEmpty) return 0;
@@ -6028,27 +5649,12 @@ double _similaridadeTexto(String a, String b) {
   return 1 - (distancia / maiorTamanho);
 }
 
-/// Similaridade por CONJUNTO DE PALAVRAS, ignorando a ordem em que aparecem.
-///
-/// Resolve o caso de nomes com as mesmas palavras escritas em ordem
-/// diferente (ex.: "TINTA DUPLA FUNCAO PRETO FOSCO" vs "TINTA PRETO FOSCO
-/// DUPLA FUNCAO"), que teriam distância de Levenshtein alta (o texto inteiro
-/// muda de posição) apesar de serem, na prática, o mesmo material.
-///
-/// Cada palavra do texto mais curto é casada com a melhor correspondente
-/// ainda não usada no texto mais longo (permitindo pequenas diferenças de
-/// grafia por palavra, via Levenshtein por palavra), e o resultado é a
-/// fração de palavras casadas ponderada pelo tamanho combinado dos dois
-/// textos — combinação equivalente a um Jaccard/overlap tolerante a erros
-/// de digitação em cada palavra individual.
 double _similaridadePalavras(String a, String b) {
   final palavrasA = a.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
   final palavrasB = b.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
   if (palavrasA.isEmpty && palavrasB.isEmpty) return 1;
   if (palavrasA.isEmpty || palavrasB.isEmpty) return 0;
 
-  // Garante que iteramos sobre a lista menor (menos comparações) e usa a
-  // maior como "disponível" para casar.
   final menor = palavrasA.length <= palavrasB.length ? palavrasA : palavrasB;
   final maior = palavrasA.length <= palavrasB.length ? palavrasB : palavrasA;
   final usados = List<bool>.filled(maior.length, false);
@@ -6060,19 +5666,16 @@ double _similaridadePalavras(String a, String b) {
     for (var i = 0; i < maior.length; i++) {
       if (usados[i]) continue;
       if (palavra == maior[i]) {
-        // Palavra idêntica: casamento perfeito, não precisa procurar mais.
+
         melhorIdx = i;
         melhorScore = 1.0;
         break;
       }
-      // Palavras de 1-2 letras são pouco distintivas (ex.: "DE", "M2"):
-      // só aceita casamento parcial entre elas se muito parecidas, pra não
-      // gerar falso-positivo (ex.: "DE" casando com "SE").
+
       final tamMin = palavra.length < maior[i].length ? palavra.length : maior[i].length;
       if (tamMin <= 2 && palavra != maior[i]) continue;
       final score = _similaridadeTexto(palavra, maior[i]);
-      // Só considera casamento parcial (palavra diferente, mas parecida —
-      // ex.: singular/plural, erro de digitação) acima de um limiar alto.
+
       if (score >= 0.75 && score > melhorScore) {
         melhorScore = score;
         melhorIdx = i;
@@ -6086,23 +5689,16 @@ double _similaridadePalavras(String a, String b) {
 
   final pesoTotal = (palavrasA + palavrasB).fold<int>(0, (soma, p) => soma + p.length);
   if (pesoTotal == 0) return 0;
-  // Multiplica por 2 porque cada palavra casada contribui peso de um lado
-  // só (pesoCasado é somado a partir da lista "menor"), mas representa a
-  // correspondência dos dois lados ao mesmo tempo.
+
   return (pesoCasado * 2) / pesoTotal;
 }
 
-/// Resultado de uma possível duplicata encontrada ao comparar os campos do
-/// formulário com materiais já cadastrados.
 class _PossivelDuplicata {
   final MaterialModel material;
-  /// true quando nome + identificador + medida + espessura (normalizados)
-  /// coincidem exatamente — o backend rejeitaria esse cadastro com 409.
+
   final bool exata;
   final double similaridade;
-  /// true quando o nome digitado é um prefixo/trecho do nome já cadastrado
-  /// (ou vice-versa) — sinal forte de duplicata mesmo no início da digitação,
-  /// quando a similaridade Levenshtein do texto inteiro ainda é baixa.
+
   final bool contido;
 
   _PossivelDuplicata({
@@ -6113,9 +5709,6 @@ class _PossivelDuplicata {
   });
 }
 
-/// Banner exibido no formulário de cadastro/edição de material quando o
-/// algoritmo de comparação encontra materiais já cadastrados com nome,
-/// identificador, medida ou espessura parecidos com os campos digitados.
 class _AvisoPossivelDuplicata extends StatelessWidget {
   final bool carregando;
   final List<_PossivelDuplicata> duplicatas;
@@ -6195,10 +5788,6 @@ class _AvisoPossivelDuplicata extends StatelessWidget {
           ...duplicatas.map((d) {
             final m = d.material;
 
-            // Formata comprimento x largura (ex.: "2x1m") quando ambos os
-            // valores numéricos estiverem disponíveis. Nesse caso, o texto
-            // livre "medida" é omitido (evita repetir a mesma informação em
-            // formatos diferentes, ex.: "2x1m" e "2.00x1.00x2").
             String? dimensaoFormatada;
             if (m.comprimento != null && m.largura != null &&
                 m.comprimento! > 0 && m.largura! > 0) {
@@ -6270,9 +5859,6 @@ class _AvisoPossivelDuplicata extends StatelessWidget {
   }
 }
 
-/// Substitui o campo "Quantidade" no cadastro quando o usuário é COMPRAS.
-/// Indica que a entrada de estoque deve ser feita pela página de Controle
-/// de Estoque, garantindo que toda entrada fique vinculada a uma OS.
 class _QuantidadeBloqueadaInfo extends StatelessWidget {
   const _QuantidadeBloqueadaInfo();
 
@@ -6306,9 +5892,6 @@ class _QuantidadeBloqueadaInfo extends StatelessWidget {
   }
 }
 
-/// Substitui o campo "Estoque mínimo" no cadastro quando o usuário é COMPRAS.
-/// Mesma lógica de [_QuantidadeBloqueadaInfo]: a definição do estoque mínimo
-/// deve ser feita por quem tem acesso à entrada real de estoque.
 class _EstoqueMinimoBloqueadoInfo extends StatelessWidget {
   const _EstoqueMinimoBloqueadoInfo();
 
@@ -6341,10 +5924,6 @@ class _EstoqueMinimoBloqueadoInfo extends StatelessWidget {
   }
 }
 
-/// Formata um valor monetário APENAS para exibição visual: sempre 2 casas
-/// decimais, com separador de milhar '.' e decimal ',' (padrão BR).
-/// Não altera o valor real do dado, apenas a string exibida na tela.
-/// Ex: 1000 → "1.000,00" | 152.638889 → "152,64" | 1234567.8 → "1.234.567,80"
 String _formatarCustoVisual(double valor) {
   final fixo = valor.toStringAsFixed(2);
   final partes = fixo.split('.');
@@ -6361,28 +5940,12 @@ String _formatarCustoVisual(double valor) {
   return '${buffer.toString()},$decimal';
 }
 
-/// Formata uma quantidade de material SEM arredondar/truncar o valor real.
-/// Diferente de `qtd.toStringAsFixed(2)` (que corta a precisão real do
-/// estoque, ex.: 3.696 exibido como "3.70"), esta função mostra o número
-/// exatamente como ele é: inteiro sem casas decimais, ou com o número de
-/// casas necessário para representá-lo por completo (sem zeros à direita).
-/// Mantida sem separador de milhar pois também é usada para inicializar/
-/// parsear campos editáveis de largura/comprimento (dimensões em metros,
-/// tipicamente pequenas), onde um ponto de milhar quebraria a edição.
-/// Ex.: 3.696 → "3.696" | 3.70 → "3.7" | 4 → "4"
 String formatarQuantidade(double valor) {
   if (valor == valor.truncateToDouble()) return valor.toStringAsFixed(0);
-  // toString() do Dart já imprime a representação decimal completa e mínima
-  // de um double (sem zeros à direita além do necessário), preservando a
-  // precisão real do valor armazenado.
+
   return valor.toString();
 }
 
-/// Formata uma quantidade de estoque para EXIBIÇÃO como texto — com
-/// separador de milhar (ponto) na parte inteira e vírgula como separador
-/// decimal (padrão brasileiro). Diferente de [formatarQuantidade], que é
-/// usada em campos editáveis de dimensão e por isso não pode ter milhar.
-/// Ex.: 1000 → "1.000"; 3.696 → "3,696"; 4.0 → "4".
 String formatarQuantidadeExibicao(double v) {
   final bool isInteiro = v == v.truncateToDouble();
   final String bruto = isInteiro ? v.toStringAsFixed(0) : v.toString();
@@ -6498,7 +6061,6 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
   bool _carregando = true;
   String? _erro;
 
-  // ── Inserção manual de custo ──────────────────────────────────────────────
   bool _mostrarFormCusto = false;
   bool _salvandoCusto    = false;
   final _ctrlUnit = TextEditingController();
@@ -6662,18 +6224,12 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
     final m = widget.material;
     final ultimoHistorico = _historico.isNotEmpty ? _historico.first : null;
     final ultimoUsarM2    = ultimoHistorico?.usarM2 ?? false;
-    // Usa o valor do próprio registro de histórico (já ordenado por criadoEm desc),
-    // evitando depender de material.ultimoValorPago que pode ficar desatualizado.
+
     final ultimoCusto   = ultimoHistorico?.precoUnitario;
     final ultimoCustoM2 = ultimoHistorico?.precoM2;
     final temCusto   = !ultimoUsarM2 && ultimoCusto   != null && ultimoCusto   > 0;
     final temCustoM2 =  ultimoUsarM2 && ultimoCustoM2 != null && ultimoCustoM2 > 0;
 
-    // ⚠️ Usamos Dialog (não AlertDialog) para evitar o bug em release mode onde
-    // o content fica cinza/em branco. Em release, AlertDialog com SizedBox de
-    // altura fixa no content não consegue resolver constraints corretamente.
-    // Com Dialog direto controlamos o layout via Column + Flexible, que funciona
-    // identicamente em debug e release.
     return Dialog(
       backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -6687,7 +6243,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Título ──────────────────────────────────────────────────────
+
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
               child: Row(
@@ -6700,11 +6256,19 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close, size: 20),
+                    tooltip: 'Fechar',
+                    style: IconButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
+                  ),
                 ],
               ),
             ),
             const SizedBox(height: 12),
-            // ── Conteúdo scrollável ─────────────────────────────────────────
+
             Flexible(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
@@ -7069,7 +6633,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
               ),
             ),
             ),
-            // ── Actions ────────────────────────────────────────────────────
+
             const Divider(height: 1),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -7101,9 +6665,6 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
     );
   }
 }
-// ─────────────────────────────────────────────────────────────────────────────
-// BANNER INLINE DE ALERTAS — exibido no topo da EstoquePage
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _AlertasBannerEstoque extends StatefulWidget {
   final AlertasEstoqueProvider provider;
@@ -7114,9 +6675,7 @@ class _AlertasBannerEstoque extends StatefulWidget {
 }
 
 class _AlertasBannerEstoqueState extends State<_AlertasBannerEstoque> {
-  // Seleção por referência: os objetos de alerta vêm sempre da mesma lista
-  // do provider entre rebuilds (só mudam quando chega um novo evento SSE),
-  // então usar o próprio objeto como chave do Set é seguro aqui.
+
   final Set<dynamic> _selecionados = {};
 
   void _toggle(dynamic alerta) {
@@ -7129,7 +6688,6 @@ class _AlertasBannerEstoqueState extends State<_AlertasBannerEstoque> {
     });
   }
 
-  /// Lê um campo dinâmico do alerta sem quebrar caso o modelo não o possua.
   T? _campo<T>(dynamic obj, T Function() getter) {
     try {
       return getter();
@@ -7141,7 +6699,7 @@ class _AlertasBannerEstoqueState extends State<_AlertasBannerEstoque> {
   bool _mesmo(String? a, String? b) {
     final ta = (a ?? '').trim().toUpperCase();
     final tb = (b ?? '').trim().toUpperCase();
-    if (ta.isEmpty || tb.isEmpty) return true; // campo não informado → não restringe
+    if (ta.isEmpty || tb.isEmpty) return true;
     return ta == tb;
   }
 
@@ -7232,8 +6790,6 @@ class _AlertasBannerEstoqueState extends State<_AlertasBannerEstoque> {
 
     setState(() => _selecionados.clear());
 
-    // Ao entrar em /orcamento, abre direto no editor (aba "abertos") com
-    // este orçamento recém-criado, em vez da lista de aprovação.
     OrcamentoPage.abrirEditorAoEntrar = true;
     context.go('/orcamento');
   }
@@ -7428,8 +6984,6 @@ class _BannerSecao extends StatelessWidget {
   }
 }
 
-// ── _StatusBadgeEstoque ──────────────────────────────────────────────────────
-// Badge de status de material (OK / LIMITE / CRITICO / INATIVO).
 class _StatusBadgeEstoque extends StatelessWidget {
   final String status;
   const _StatusBadgeEstoque({required this.status});

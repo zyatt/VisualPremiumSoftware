@@ -51,14 +51,12 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       body: Stack(
         children: [
-          // ── Botão de tema (canto superior direito) ─────────────
           Positioned(
             top: 16,
             right: 16,
             child: _ThemeToggleButton(isDark: isDark, themeProvider: themeProvider),
           ),
 
-          // ── Formulário centralizado ─────────────────────────────
           Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 400),
@@ -86,7 +84,6 @@ class _LoginPageState extends State<LoginPage> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Logo
                         Image.asset(
                           logoAsset,
                           height: 52,
@@ -104,7 +101,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(height: 32),
 
-                        // Erro
                         if (erro != null) ...[
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -136,7 +132,6 @@ class _LoginPageState extends State<LoginPage> {
                           const SizedBox(height: 16),
                         ],
 
-                        // Campo usuário
                         TextFormField(
                           controller: _userCtrl,
                           decoration: const InputDecoration(
@@ -153,7 +148,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(height: 14),
 
-                        // Campo senha
                         TextFormField(
                           controller: _senhaCtrl,
                           focusNode: _senhaFocus,
@@ -184,7 +178,6 @@ class _LoginPageState extends State<LoginPage> {
 
                         const SizedBox(height: 28),
 
-                        // Botão entrar
                         SizedBox(
                           width: double.infinity,
                           height: 48,
@@ -222,8 +215,6 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
-
-// ── Botão de toggle de tema ───────────────────────────────────────────────────
 
 class _ThemeToggleButton extends StatelessWidget {
   final bool isDark;

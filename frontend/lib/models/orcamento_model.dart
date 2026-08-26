@@ -66,12 +66,7 @@ class OrcamentoModel {
   final DateTime? aprovadoEm;
   final String? motivoRejeicao;
   final DateTime criadoEm;
-
   final List<int> fornecedoresOcultos;
-
-  /// Id do usuário que está com este orçamento aberto no editor agora
-  /// (null = ninguém editando). Usado pela seção "Orçamentos em Aberto"
-  /// e pelo editor para saber se deve entrar em modo somente-leitura.
   final int? travaUsuarioId;
   final String? travaUsuarioNome;
   final int? criadorId;

@@ -1,7 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Modelos de Veículo e Manutenção
-// ─────────────────────────────────────────────────────────────────────────────
-
 const tiposManutencao = ['MANUTENCAO', 'LIMPEZA', 'REVISAO', 'PNEU', 'OUTRO'];
 
 String labelTipo(String tipo) {
@@ -58,8 +54,6 @@ class ManutencaoModel {
             : null,
       );
 
-  /// Em andamento enquanto não for finalizada manualmente E (não houver data
-  /// de retirada OU a retirada ainda não tiver chegado).
   bool get emAndamento {
     if (finalizada) return false;
     if (dataRetirada == null) return true;
@@ -68,9 +62,6 @@ class ManutencaoModel {
     return !dataRetirada!.isBefore(inicioDiaHoje);
   }
 
-  /// Verdadeiro apenas quando a data de retirada é exatamente hoje e o
-  /// serviço ainda não foi finalizado manualmente (usado para mostrar a
-  /// notificação de "pronto para retirar").
   bool get retiradaHoje {
     if (finalizada) return false;
     if (dataRetirada == null) return false;
@@ -86,8 +77,8 @@ class VeiculoModel {
   final String               nome;
   final String               placa;
   final bool                 ativo;
-  final List<ManutencaoModel> manutencoes; // última manutenção (do endpoint de lista)
-  final int?                 qtdManutencoes; // total de manutenções (só preenchido na listagem de inativos)
+  final List<ManutencaoModel> manutencoes;
+  final int?                 qtdManutencoes;
 
   const VeiculoModel({
     required this.id,
@@ -114,8 +105,6 @@ class VeiculoModel {
   ManutencaoModel? get ultimaManutencao =>
       manutencoes.isEmpty ? null : manutencoes.first;
 }
-
-// ── Gasto por veículo (para a página de gastos) ──────────────────────────────
 
 class GastoServicoModel {
   final int       id;

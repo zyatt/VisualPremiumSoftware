@@ -1,52 +1,16 @@
-// lib/widgets/reacao_mensagem_picker.dart
-//
-// Widgets compartilhados de reação/resposta a mensagens (estilo
-// WhatsApp/Messenger):
-// - mostrarSeletorReacao: abre, ao segurar uma mensagem (long-press), um
-//   menu compacto na posição do toque com a opção "Responder" no topo e os
-//   emojis de reação logo abaixo.
-// - ReacoesBadge: pequeno "chip" com os emojis já usados na mensagem,
-//   agrupados com contagem, sobreposto ao canto inferior da bolha.
-//
-// Usado tanto pela página /chat (chat_page.dart) quanto pelo mini-chat do
-// widget flutuante (chat_floating_widget.dart) para manter o mesmo
-// comportamento e visual em ambos os lugares.
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Sentinela retornada por [mostrarSeletorReacao] quando o usuário toca no
-/// botão de remover a própria reação (ao invés de escolher um emoji novo).
 const String removerReacaoSentinela = '__remover__';
-
-/// Sentinela retornada por [mostrarSeletorReacao] quando o usuário toca na
-/// opção "Responder", exibida no topo do menu (acima dos emojis).
 const String responderSentinela = '__responder__';
-
-/// Sentinela retornada por [mostrarSeletorReacao] quando o usuário toca na
-/// opção "Editar". Só aparece para mensagens próprias (ver `souAutor`).
 const String editarSentinela = '__editar__';
-
-/// Sentinela retornada por [mostrarSeletorReacao] quando o usuário toca na
-/// opção "Excluir". Só aparece para mensagens próprias (ver `souAutor`).
 const String excluirSentinela = '__excluir__';
-
 const List<String> kEmojisReacao = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
-/// Mostra o seletor de emojis ancorado na posição [posicaoGlobal] (em geral
-/// vinda de `LongPressStartDetails.globalPosition`). Retorna o emoji
-/// escolhido, [removerReacaoSentinela] se o usuário quis remover a reação
-/// atual, ou `null` se fechou sem escolher nada.
 Future<String?> mostrarSeletorReacao(
   BuildContext context,
   Offset posicaoGlobal, {
   required bool jaReagiu,
-  // Quando true (mensagem enviada pelo próprio usuário logado), o menu
-  // ganha também as opções "Editar" e "Excluir" logo abaixo de
-  // "Responder" — reações e resposta continuam disponíveis para
-  // mensagens de qualquer autor, mas editar/excluir é restrito ao dono
-  // da mensagem (o backend também valida isso, então esta é só a
-  // camada de UI).
   bool souAutor = false,
 }) {
   final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
@@ -62,7 +26,6 @@ Future<String?> mostrarSeletorReacao(
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     elevation: 6,
     items: [
-      // ── Opção "Responder", em destaque no topo do menu ───────────────────
       PopupMenuItem<String>(
         value: responderSentinela,
         height: 40,
@@ -125,9 +88,6 @@ Future<String?> mostrarSeletorReacao(
       const PopupMenuDivider(height: 8),
       PopupMenuItem<String>(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        // Item único contendo todos os emojis numa linha — assim o menu
-        // inteiro vira uma "barrinha" horizontal de reações, igual ao
-        // padrão visual de apps de mensagem.
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -159,8 +119,6 @@ Future<String?> mostrarSeletorReacao(
   );
 }
 
-/// Mostra um diálogo de confirmação antes de excluir uma mensagem.
-/// Retorna `true` se o usuário confirmou.
 Future<bool> confirmarExclusaoMensagem(BuildContext context) async {
   final cs = Theme.of(context).colorScheme;
   final resultado = await showDialog<bool>(
@@ -191,19 +149,6 @@ Future<bool> confirmarExclusaoMensagem(BuildContext context) async {
   return resultado ?? false;
 }
 
-/// Diálogo de edição de mensagem, com [TextEditingController] próprio e
-/// ciclo de vida corretamente gerenciado pelo próprio State — evita o bug
-/// de "TextEditingController usado após dispose" que ocorre quando o
-/// controller é criado no widget PAI (que sobrevive à navegação) e apenas
-/// emprestado ao TextField do diálogo: ao fechar o diálogo via Esc, botão,
-/// ou toque fora, a transição de saída da rota pode reconstruir a árvore
-/// numa ordem em que o controller "emprestado" já foi descartado por outro
-/// caminho, ou nunca é descartado corretamente e fica pendurado após o
-/// diálogo sumir. Aqui o controller nasce e morre junto com o diálogo.
-///
-/// Retorna o novo texto se o usuário confirmou com "Salvar" (e o texto
-/// mudou), ou `null` se cancelou/fechou sem alterar nada (Esc, tocar fora,
-/// ou "Cancelar").
 Future<String?> mostrarDialogoEditarMensagem(
   BuildContext context, {
   required String textoAtual,
@@ -228,9 +173,6 @@ class _EditarMensagemDialogState extends State<_EditarMensagemDialog> {
 
   @override
   void dispose() {
-    // Dono do controller é este State, então é aqui — e só aqui — que ele
-    // deve ser descartado, garantindo que isso só acontece quando o
-    // próprio diálogo está sendo definitivamente removido da árvore.
     _controller.dispose();
     super.dispose();
   }
@@ -248,7 +190,6 @@ class _EditarMensagemDialogState extends State<_EditarMensagemDialog> {
         maxLines: 4,
         minLines: 1,
         decoration: const InputDecoration(border: OutlineInputBorder()),
-        // Enter confirma, igual ao campo de envio normal.
         onSubmitted: (_) => _salvar(),
       ),
       actions: [
@@ -271,12 +212,8 @@ class _EditarMensagemDialogState extends State<_EditarMensagemDialog> {
   }
 }
 
-/// Chip com os emojis já usados na mensagem, agrupados por emoji com
-/// contagem (ex.: "👍2"). Pensado para ficar posicionado sobre o canto
-/// inferior da bolha, levemente sobreposto — por isso o fundo opaco e a
-/// borda, para se destacar bem por cima da bolha por baixo.
 class ReacoesBadge extends StatelessWidget {
-  final Map<String, String> reacoes; // idUsuario -> emoji
+  final Map<String, String> reacoes;
   final bool isMinha;
   const ReacoesBadge({super.key, required this.reacoes, required this.isMinha});
 

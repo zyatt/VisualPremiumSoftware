@@ -1,17 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart' as io_client;
 import '../models/material_model.dart';
 import '../repositories/material_repository.dart';
 import '../utils/api_client.dart';
 
-/// Dados de um material encaminhado via chat (ver EncaminhamentoChatCard),
-/// usados pela EstoquePage para abrir automaticamente a categoria certa já
-/// filtrada — mesmo papel que MaterialCriticoNotificacao cumpre para o
-/// MaterialCriticoBanner, mas alimentado por um encaminhamento de chat em
-/// vez de um evento SSE.
 class FiltroMaterialChat {
   final int? materialId;
   final String? nome;
@@ -29,13 +26,6 @@ class FiltroMaterialChat {
   });
 }
 
-/// Remove prefixos como "Exception:", "HttpException:" que o Dart
-/// adiciona automaticamente ao fazer e.toString() em exceções.
-///
-/// Quando o erro é de conexão (sem internet / servidor fora do ar), retorna
-/// uma mensagem amigável contextualizada com a ação que estava sendo feita
-/// (ex: "Erro ao carregar materiais"). Quando é um erro específico vindo do
-/// backend (ex: validação), retorna a mensagem original já tratada.
 String _mensagemErro(Object e, {required String acao}) {
   final raw = e.toString();
   if (raw.contains('SocketException') ||
@@ -48,10 +38,7 @@ String _mensagemErro(Object e, {required String acao}) {
       raw.contains('Network is unreachable')) {
     return 'Erro ao $acao: Verifique a conexão com o servidor.';
   }
-  // Erro bruto de violação de chave estrangeira (ex.: Postgres/Prisma
-  // "violates RESTRICT setting of foreign key constraint..."), caso vaze
-  // do backend sem ser traduzido antes. Evita expor detalhes técnicos do
-  // banco de dados ao usuário final.
+
   if (raw.contains('foreign key constraint') ||
       raw.contains('violates RESTRICT') ||
       raw.contains('P2003')) {
@@ -71,19 +58,12 @@ class MaterialProvider extends ChangeNotifier {
   List<String> _categorias = [];
   List<String> get categorias => _categorias;
 
-  /// true somente após ao menos um carregamento bem-sucedido de categorias.
-  /// Usado para evitar exibir cards hardcoded ("Geral", "Sem categoria")
-  /// enquanto o servidor está offline.
   bool _categoriasCarregadas = false;
   bool get categoriasCarregadas => _categoriasCarregadas;
 
   bool _carregando = false;
   bool get carregando => _carregando;
 
-  // ─── Página atual (tabela com paginação real no servidor) ─────────────────
-  /// Diferente de [_materiais] (lista completa, usada por PDF/orçamento em
-  /// lote), isto guarda só os itens da página pedida — o payload fica do
-  /// tamanho de [porPagina], não da tabela inteira.
   List<MaterialModel> _materiaisPagina = [];
   List<MaterialModel> get materiaisPagina => _materiaisPagina;
 
@@ -93,11 +73,6 @@ class MaterialProvider extends ChangeNotifier {
   bool _carregandoPagina = false;
   bool get carregandoPagina => _carregandoPagina;
 
-  // ─── Materiais recentes (página inicial) ──────────────────────────────────
-  /// Lista separada de [_materiaisPagina] — usada exclusivamente pela
-  /// InicioPage para exibir os 10 materiais mais recentes (ordenados por
-  /// id desc). Nunca é sobrescrita pela EstoquePage, evitando que a
-  /// ordenação da tabela principal contamine o painel inicial.
   List<MaterialModel> _materiaisRecentes = [];
   List<MaterialModel> get materiaisRecentes => _materiaisRecentes;
 
@@ -107,9 +82,8 @@ class MaterialProvider extends ChangeNotifier {
   String? _erro;
   String? get erro => _erro;
 
-  // Filtros ativos
   String _busca = '';
-  String? _categoriaFiltro;   // null = todos, '' = sem categoria
+  String? _categoriaFiltro;
   String _statusFiltro = '';
   String _idFiltro = '';
   String _identificadorFiltro = '';
@@ -118,31 +92,23 @@ class MaterialProvider extends ChangeNotifier {
   String _larguraFiltro = '';
   String _comprimentoFiltro = '';
 
-  // ─── SSE ──────────────────────────────────────────────────────────────────
   bool _paginaAberta = false;
   bool _notificacoesConectadas = false;
   bool get notificacoesConectadas => _notificacoesConectadas;
 
   http.Client? _sseClient;
+  HttpClient? _sseRawClient;
   StreamSubscription<String>? _sseSub;
   Timer? _reconnectTimer;
   Timer? _pollingTimer;
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 5;
+  int _sseGeracao = 0;
 
-  // ─── Notificação para diálogos com busca local (fora do fluxo normal) ────
-  /// Emite sempre que um material é criado/editado via SSE, independente de
-  /// _paginaAberta. Diálogos com busca própria (ex: seleção de material em
-  /// Entrada/Saída) escutam este stream pra se atualizarem enquanto estão
-  /// abertos, sem precisar poluir/disparar o estado global de _materiais.
   final _materialAtualizadoController = StreamController<void>.broadcast();
   Stream<void> get materialAtualizadoStream =>
       _materialAtualizadoController.stream;
 
-  // ─── Notificação de estoque crítico (banner flutuante) ────────────────────
-  /// Preenchido quando o SSE recebe um evento 'material_critico' (disparado
-  /// pelo backend apenas na transição para CRITICO). Consumido uma única vez
-  /// pelo AppShell, no mesmo padrão do SolicitacaoMaterialProvider.
   MaterialCriticoNotificacao? _notificacaoCriticaPendente;
   MaterialCriticoNotificacao? get notificacaoCriticaPendente =>
       _notificacaoCriticaPendente;
@@ -151,11 +117,6 @@ class MaterialProvider extends ChangeNotifier {
     _notificacaoCriticaPendente = null;
   }
 
-  // ─── Navegação a partir do banner de crítico ───────────────────────────────
-  /// Guardado quando o usuário toca no MaterialCriticoBanner: carrega os
-  /// dados do material para que a EstoquePage, assim que ficar visível,
-  /// abra automaticamente a categoria certa já com nome/identificador/
-  /// medida/espessura preenchidos nos filtros.
   MaterialCriticoNotificacao? _filtroNavegacaoPendente;
   MaterialCriticoNotificacao? get filtroNavegacaoPendente =>
       _filtroNavegacaoPendente;
@@ -169,13 +130,6 @@ class MaterialProvider extends ChangeNotifier {
     _filtroNavegacaoPendente = null;
   }
 
-  // ─── Navegação a partir de um encaminhamento de material no chat ──────────
-  /// Guardado quando o usuário toca no card de encaminhamento de um material
-  /// "solto" do estoque (ver EncaminhamentoChatCard._abrirOrigem): carrega os
-  /// dados do material para que a EstoquePage, assim que ficar visível, abra
-  /// automaticamente a categoria certa já com nome/identificador/medida/
-  /// espessura preenchidos nos filtros. Mesmo mecanismo de
-  /// `_filtroNavegacaoPendente`, mas alimentado pelo chat em vez de SSE.
   FiltroMaterialChat? _filtroChatPendente;
   FiltroMaterialChat? get filtroChatPendente => _filtroChatPendente;
 
@@ -188,11 +142,6 @@ class MaterialProvider extends ChangeNotifier {
     _filtroChatPendente = null;
   }
 
-  // ─── Navegação a partir do diálogo "Alertas de Estoque" ────────────────────
-  /// Guardado quando o usuário clica em "Ir para Estoque" no diálogo aberto
-  /// pelo sino de notificações: carrega apenas o status desejado (ex.:
-  /// 'CRITICO') para que a EstoquePage, assim que ficar visível, abra
-  /// automaticamente a tela "Geral" já com esse status ativo no filtro.
   String? _filtroStatusPendente;
   String? get filtroStatusPendente => _filtroStatusPendente;
 
@@ -209,8 +158,12 @@ class MaterialProvider extends ChangeNotifier {
     await _sseSub?.cancel();
     _sseSub = null;
     _reconnectTimer?.cancel();
-    _sseClient?.close();
+    _sseRawClient?.close(force: true);
+    _sseRawClient = null;
     _sseClient = null;
+
+    final meuId = ++_sseGeracao;
+    debugPrint('[FECHAR][Materiais] ${DateTime.now().toIso8601String()} — abrindo nova conexão SSE, geração $meuId');
 
     try {
       final uri = Uri.parse('${ApiClient.baseUrl}/api/materiais/notificacoes');
@@ -219,11 +172,13 @@ class MaterialProvider extends ChangeNotifier {
       final token = ApiClient.token;
       if (token == null) {
         debugPrint('⚠️ [Materiais] Token não disponível para SSE');
-        _scheduleReconnect();
+        _scheduleReconnect(meuId);
         return;
       }
 
-      _sseClient = http.Client();
+      final rawClient = HttpClient();
+      _sseRawClient = rawClient;
+      _sseClient = io_client.IOClient(rawClient);
 
       final req = http.Request('GET', uri)
         ..headers['Authorization'] = 'Bearer $token'
@@ -233,9 +188,13 @@ class MaterialProvider extends ChangeNotifier {
 
       final streamedResp = await _sseClient!.send(req);
 
+      if (meuId != _sseGeracao) {
+        return;
+      }
+
       if (streamedResp.statusCode != 200) {
         debugPrint('❌ [Materiais] SSE falhou com status ${streamedResp.statusCode}');
-        _scheduleReconnect();
+        _scheduleReconnect(meuId);
         return;
       }
 
@@ -252,15 +211,17 @@ class MaterialProvider extends ChangeNotifier {
         _processarLinhaSSE,
         onError: (error) {
           debugPrint('❌ [Materiais] Erro no SSE: $error');
+          if (meuId != _sseGeracao) return;
           _notificacoesConectadas = false;
           notifyListeners();
-          _scheduleReconnect();
+          _scheduleReconnect(meuId);
         },
         onDone: () {
           debugPrint('⚠️ [Materiais] SSE stream encerrado');
+          if (meuId != _sseGeracao) return;
           _notificacoesConectadas = false;
           notifyListeners();
-          _scheduleReconnect();
+          _scheduleReconnect(meuId);
         },
         cancelOnError: true,
       );
@@ -269,9 +230,10 @@ class MaterialProvider extends ChangeNotifier {
       _pollingTimer = null;
     } catch (e) {
       debugPrint('❌ [Materiais] Erro ao conectar SSE: $e');
+      if (meuId != _sseGeracao) return;
       _notificacoesConectadas = false;
       notifyListeners();
-      _scheduleReconnect();
+      _scheduleReconnect(meuId);
     }
   }
 
@@ -302,9 +264,7 @@ class MaterialProvider extends ChangeNotifier {
 
         if (tipo == 'material_atualizado') {
           debugPrint('🔔 [Materiais] Atualização recebida: motivo=${data['motivo']}');
-          // Notifica quem estiver escutando (ex: diálogo de Entrada/Saída
-          // com busca própria), independente da página de catálogo estar
-          // visível ou não.
+
           _materialAtualizadoController.add(null);
           if (_paginaAberta) {
             recarregar();
@@ -316,7 +276,8 @@ class MaterialProvider extends ChangeNotifier {
     }
   }
 
-  void _scheduleReconnect() {
+  void _scheduleReconnect(int meuId) {
+    if (meuId != _sseGeracao) return;
     if (_reconnectAttempts >= _maxReconnectAttempts) {
       debugPrint('⚠️ [Materiais] Máximo de tentativas atingido. Usando polling.');
       _iniciarPolling();
@@ -340,15 +301,13 @@ class MaterialProvider extends ChangeNotifier {
     });
   }
 
-  /// Chamado pelo AppShell (mesmo esquema usado por Solicitações e Chat) —
-  /// a página vive num StatefulShellBranch, então dispose() não é confiável
-  /// pra saber se a tela realmente está visível.
   void definirPaginaVisivel(bool visivel) {
     if (visivel == _paginaAberta) return;
     _paginaAberta = visivel;
   }
 
   Future<void> resetarConexao() async {
+    _sseGeracao++;
     _reconnectAttempts = 0;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
@@ -356,26 +315,41 @@ class MaterialProvider extends ChangeNotifier {
     _pollingTimer = null;
     await _sseSub?.cancel();
     _sseSub = null;
-    _sseClient?.close();
+    _sseRawClient?.close(force: true);
+    _sseRawClient = null;
     _sseClient = null;
     _notificacoesConectadas = false;
     _paginaAberta = false;
     notifyListeners();
   }
 
-  @override
-  void dispose() {
+  void encerrarConexaoSSE() {
+    debugPrint('[FECHAR][Materiais] ${DateTime.now().toIso8601String()} — encerrarConexaoSSE chamado, geração $_sseGeracao -> ${_sseGeracao + 1}');
+    _sseGeracao++;
     _reconnectTimer?.cancel();
     _pollingTimer?.cancel();
     _sseSub?.cancel();
-    _sseClient?.close();
+    _sseRawClient?.close(force: true);
+    _sseRawClient = null;
+    _sseClient = null;
+  }
+
+  @override
+  void dispose() {
+    _sseGeracao++;
+    _reconnectTimer?.cancel();
+    _pollingTimer?.cancel();
+    _sseSub?.cancel();
+    _sseRawClient?.close(force: true);
+    _sseRawClient = null;
+    _sseClient = null;
     _materialAtualizadoController.close();
     super.dispose();
   }
 
   Future<void> carregar({
     String busca = '',
-    String? categoria,         // null = todos, '' = sem categoria
+    String? categoria,
     String status = '',
     String id = '',
     String identificador = '',
@@ -432,9 +406,6 @@ class MaterialProvider extends ChangeNotifier {
     );
   }
 
-  /// Busca só a página pedida, ordenada no servidor — usar na tabela
-  /// principal de listagem. Não mexe em [_materiais] (lista completa),
-  /// que continua servindo PDF e orçamento em lote.
   Future<void> carregarPaginado({
     String busca = '',
     String? categoria,
@@ -493,7 +464,7 @@ class MaterialProvider extends ChangeNotifier {
       );
       _materiaisRecentes = resultado.itens;
     } catch (_) {
-      // Falha silenciosa — não afeta o estado de erro da EstoquePage.
+
     } finally {
       _carregandoRecentes = false;
       notifyListeners();
@@ -509,7 +480,7 @@ class MaterialProvider extends ChangeNotifier {
       _categoriasCarregadas = true;
     } catch (e) {
       _erro = _mensagemErro(e, acao: 'carregar categorias');
-      // _categoriasCarregadas permanece false enquanto nunca houver sucesso
+
     } finally {
       _carregando = false;
       notifyListeners();
@@ -526,7 +497,16 @@ class MaterialProvider extends ChangeNotifier {
     }
   }
 
-  Future<List<MaterialModel>> buscarParaMovimentacao({
+  List<MaterialModel> _materiaisMovimentacao = [];
+  List<MaterialModel> get materiaisMovimentacao => _materiaisMovimentacao;
+
+  int _totalItensMovimentacao = 0;
+  int get totalItensMovimentacao => _totalItensMovimentacao;
+
+  bool _carregandoMovimentacao = false;
+  bool get carregandoMovimentacao => _carregandoMovimentacao;
+
+  Future<MateriaisPaginadosModel> buscarParaMovimentacao({
     String busca = '',
     String? categoria,
     String id = '',
@@ -535,9 +515,13 @@ class MaterialProvider extends ChangeNotifier {
     String espessura = '',
     String largura = '',
     String comprimento = '',
+    required int pagina,
+    int porPagina = 50,
   }) async {
+    _carregandoMovimentacao = true;
+    notifyListeners();
     try {
-      return await _repo.listarParaMovimentacao(
+      final resultado = await _repo.listarParaMovimentacao(
         busca:         busca.isEmpty         ? null : busca,
         id:            id.isEmpty            ? null : id,
         identificador: identificador.isEmpty ? null : identificador,
@@ -546,16 +530,22 @@ class MaterialProvider extends ChangeNotifier {
         largura:       largura.isEmpty       ? null : largura,
         comprimento:   comprimento.isEmpty   ? null : comprimento,
         categoria:     categoria,
+        pagina:        pagina,
+        porPagina:     porPagina,
       );
+      _materiaisMovimentacao  = resultado.itens;
+      _totalItensMovimentacao = resultado.total;
+      return resultado;
     } catch (_) {
-      return [];
+      _materiaisMovimentacao  = [];
+      _totalItensMovimentacao = 0;
+      return const MateriaisPaginadosModel(itens: [], total: 0);
+    } finally {
+      _carregandoMovimentacao = false;
+      notifyListeners();
     }
   }
 
-  // Trava reentrância no próprio provider — mesmo que alguma tela (atual ou
-  // futura) chame criar() sem controlar seu próprio estado de "salvando",
-  // um segundo clique/chamada concorrente é ignorado aqui em vez de gerar
-  // um material duplicado no backend.
   bool _criando = false;
 
   Future<bool> criar(Map<String, dynamic> dados) async {
@@ -634,11 +624,6 @@ class MaterialProvider extends ChangeNotifier {
     }
   }
 
-  /// Busca rápida para autocomplete — retorna até [limite] materiais sem
-  /// alterar o estado da lista principal nem disparar notifyListeners.
-  /// O corte agora acontece no banco (`limite` vira `take` no Prisma),
-  /// em vez de trazer a tabela inteira e truncar aqui no client — antes
-  /// disso cada tecla digitada disparava uma busca completa (~800KB).
   Future<List<MaterialModel>> buscarSugestoes(String busca, {int limite = 10, bool apenasAtivos = false}) async {
     try {
       return await _repo.listar(
@@ -651,9 +636,6 @@ class MaterialProvider extends ChangeNotifier {
     }
   }
 
-  /// Busca histórico de custos pagos via OC para o material informado.
-  /// Retorna lista vazia em caso de erro (não expõe _erro para não interferir
-  /// com o estado geral da página de estoque).
   Future<List<HistoricoPrecoModel>> listarHistoricoPrecos(int materialId) async {
     try {
       return await _repo.listarHistoricoPrecos(materialId);
@@ -662,7 +644,6 @@ class MaterialProvider extends ChangeNotifier {
     }
   }
 
-  /// Atualiza diretamente o custo de última compra do material sem OC.
   Future<bool> atualizarCustoManual(
     int id, {
     double? ultimoValorPago,

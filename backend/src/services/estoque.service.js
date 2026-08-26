@@ -54,19 +54,6 @@ async function buscarPorNumeroOS(numeroOS) {
   });
 }
 
-/**
- * Resolve (ou cria) uma RelacaoOS para OS descritivas (não-numéricas, sem sufixo
- * #OC/#S/#E). Aplica data automática no nome: "NOME-DD-MM-YYYY".
- *
- * Regras:
- *  - Se já existir uma relação EM_ANDAMENTO com esse nome-base ou nome-base+hoje,
- *    reutiliza ela (acumula movimentações do dia).
- *  - Se não existir, cria "NOME-DD-MM-YYYY". Se já estiver FECHADA, acrescenta
- *    sufixo sequencial: "NOME-DD-MM-YYYY-2", "-3", etc.
- *
- * Exportada para que outros serviços (ex: estoqueProducao.service.js) possam
- * reutilizar a mesma lógica sem duplicação.
- */
 async function resolverRelacaoOSDescritiva(nomeBase) {
   const _d   = new Date();
   const hoje = `${String(_d.getDate()).padStart(2,'0')}-${String(_d.getMonth()+1).padStart(2,'0')}-${_d.getFullYear()}`;
@@ -151,9 +138,6 @@ async function registrarMovimentacao({
     relacao = await resolverRelacaoOSDescritiva(numeroOS);
   }
 
-  // Só grava o cliente informado se a relação ainda não tiver um vinculado —
-  // não sobrescreve um cliente já salvo por causa de uma movimentação
-  // subsequente que veio sem esse campo preenchido.
   if (clienteTrim && !relacao.cliente) {
     relacao = await prisma.relacaoOS.update({
       where: { id: relacao.id },
@@ -616,10 +600,38 @@ async function excluirRelacaoOS(relacaoOSId) {
 }
 
 async function fecharOS(relacaoOSId, fechadoPorNome) {
-  const relacao = await prisma.relacaoOS.findUnique({ where: { id: relacaoOSId } });
+  const relacao = await prisma.relacaoOS.findUnique({
+    where:   { id: relacaoOSId },
+    include: { movimentacoes: { include: { material: { select: { nome: true } } } } },
+  });
   if (!relacao) throw { status: 404, message: 'Relação OS não encontrada' };
   if (relacao.status === 'FECHADA') {
     throw { status: 400, message: 'Esta OS já está fechada' };
+  }
+
+  const osEhNumerica = /^\d+$/.test(relacao.numeroOS);
+
+  if (osEhNumerica) {
+    const saldosPorMaterial = new Map();
+    for (const mov of relacao.movimentacoes) {
+      if (mov.tipo === 'ENTRADA' && mov.ordemCompraId != null) {
+        const atual = saldosPorMaterial.get(mov.materialId) ?? { nome: mov.material?.nome ?? 'Material', saldo: 0 };
+        atual.saldo += Number(mov.quantidade);
+        saldosPorMaterial.set(mov.materialId, atual);
+      } else if (mov.tipo === 'SAIDA' && saldosPorMaterial.has(mov.materialId)) {
+        const atual = saldosPorMaterial.get(mov.materialId);
+        atual.saldo -= Number(mov.quantidade);
+      }
+    }
+
+    const pendentes = [...saldosPorMaterial.values()].filter((m) => m.saldo > 0.0001);
+    if (pendentes.length > 0) {
+      const listaNomes = pendentes.map((m) => m.nome).join(', ');
+      throw {
+        status: 400,
+        message: `Não é possível finalizar: os materiais a seguir vieram de uma ordem de compra e ainda não tiveram saída registrada: ${listaNomes}. Dê baixa nesses materiais antes de finalizar a OS.`,
+      };
+    }
   }
 
   return prisma.relacaoOS.update({
@@ -638,15 +650,124 @@ function _calcularStatus(quantidade, estoqueMinimo, ativo) {
   return 'CRITICO';
 }
 
-async function listarTodas(busca) {
-  const where = {};
-  if (busca) where.numeroOS = { contains: busca, mode: 'insensitive' };
+async function listarTodas(filtros = {}) {
+  const {
+    busca, status, cliente,
+    material, identificador, medida, comprimento, largura, espessura,
+    dataInicio, dataFim,
+    ordenarPor, direcao,
+    apenasNumericas, apenasTextuais,
+    pagina = 1, porPagina = 50,
+  } = filtros;
 
-  return prisma.relacaoOS.findMany({
-    where,
-    include: _includeMovimentacoes,
-    orderBy: { atualizadoEm: 'desc' },
-  });
+  const where = {};
+  if (busca)  where.numeroOS = { contains: busca, mode: 'insensitive' };
+  if (status === 'EM_ANDAMENTO' || status === 'FECHADA') where.status = status;
+  if (cliente) where.cliente = { contains: cliente, mode: 'insensitive' };
+
+  if (dataInicio || dataFim) {
+    where.criadoEm = {};
+    if (dataInicio) where.criadoEm.gte = new Date(`${dataInicio}T00:00:00`);
+    if (dataFim)    where.criadoEm.lte = new Date(`${dataFim}T23:59:59.999`);
+  }
+
+  const materialWhere = {};
+  if (material)      materialWhere.nome         = { contains: material, mode: 'insensitive' };
+  if (identificador)  materialWhere.identificador = { contains: identificador, mode: 'insensitive' };
+  if (medida)         materialWhere.medida        = { contains: medida, mode: 'insensitive' };
+  if (espessura)       materialWhere.espessura     = { contains: espessura, mode: 'insensitive' };
+  if (comprimento)     materialWhere.comprimento   = { equals: Number(comprimento) };
+  if (largura)          materialWhere.largura       = { equals: Number(largura) };
+  if (Object.keys(materialWhere).length > 0) {
+    where.movimentacoes = { some: { material: { is: materialWhere } } };
+  }
+
+  const orderBy =
+    ordenarPor === 'criacao' ? { criadoEm: direcao === 'asc' ? 'asc' : 'desc' } :
+    ordenarPor === 'numero'  ? { numeroOS: direcao === 'asc' ? 'asc' : 'desc' } :
+    { atualizadoEm: direcao === 'asc' ? 'asc' : 'desc' };
+
+  if (apenasNumericas || apenasTextuais) {
+    const todos = await prisma.relacaoOS.findMany({ where, include: _includeMovimentacoes, orderBy });
+    const numericoRegex = /^\s*\d+\s*$/;
+    const filtrados = todos.filter((r) =>
+      apenasNumericas ? numericoRegex.test(r.numeroOS) : !numericoRegex.test(r.numeroOS));
+    const total = filtrados.length;
+    const take = Number(porPagina) || 50;
+    const skip = (Number(pagina) - 1) * take;
+    const data = apenasTextuais ? filtrados : filtrados.slice(skip, skip + take);
+    return { data, total };
+  }
+
+  const take = Number(porPagina) || 50;
+  const skip = (Number(pagina) - 1) * take;
+
+  const [data, total] = await Promise.all([
+    prisma.relacaoOS.findMany({
+      where,
+      include: _includeMovimentacoes,
+      orderBy,
+      take,
+      skip,
+    }),
+    prisma.relacaoOS.count({ where }),
+  ]);
+
+  return { data, total };
+}
+
+async function listarMovimentacoes(filtros = {}) {
+  const {
+    numeroOS, material, identificador, medida, comprimento, largura, espessura,
+    tipo, dataInicio, dataFim,
+    pagina = 1, porPagina = 100,
+  } = filtros;
+
+  const where = {};
+
+  if (numeroOS) where.numeroOS = { contains: numeroOS, mode: 'insensitive' };
+  if (tipo === 'ENTRADA' || tipo === 'SAIDA') where.tipo = tipo;
+
+  if (dataInicio || dataFim) {
+    where.criadoEm = {};
+    if (dataInicio) where.criadoEm.gte = new Date(`${dataInicio}T00:00:00`);
+    if (dataFim)    where.criadoEm.lte = new Date(`${dataFim}T23:59:59.999`);
+  }
+
+  const materialWhere = {};
+  if (material)       materialWhere.nome           = { contains: material, mode: 'insensitive' };
+  if (identificador)  materialWhere.identificador   = { contains: identificador, mode: 'insensitive' };
+  if (medida)         materialWhere.medida          = { contains: medida, mode: 'insensitive' };
+  if (espessura)      materialWhere.espessura       = { contains: espessura, mode: 'insensitive' };
+  if (comprimento)    materialWhere.comprimento     = { equals: Number(comprimento) };
+  if (largura)        materialWhere.largura         = { equals: Number(largura) };
+  if (Object.keys(materialWhere).length > 0) where.material = { is: materialWhere };
+
+  const take = Number(porPagina) || 100;
+  const skip = (Number(pagina) - 1) * take;
+
+  const [data, total] = await Promise.all([
+    prisma.movimentacaoEstoque.findMany({
+      where,
+      include: {
+        material: {
+          select: {
+            id: true, nome: true, unidade: true,
+            identificador: true, medida: true, espessura: true,
+            largura: true, comprimento: true,
+          },
+        },
+        materialOrigem: { select: { id: true, nome: true } },
+        relacaoOS:       { select: { id: true, numeroOS: true, cliente: true, status: true } },
+      },
+      orderBy: { criadoEm: 'desc' },
+      take,
+      skip,
+    }),
+    prisma.movimentacaoEstoque.count({ where }),
+  ]);
+
+  return { data, total };
 }
 
 async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, precoM2 }, usuario) {
@@ -730,8 +851,6 @@ async function renomearOS(id, novoNumeroOS, novoCliente) {
     throw { status: 409, message: `Já existe uma OS com o nome "${novoNome}"` };
   }
 
-  // novoCliente undefined = campo não enviado, não altera; string vazia =
-  // remove o cliente vinculado; string preenchida = atualiza.
   const clienteData = novoCliente === undefined
     ? {}
     : { cliente: novoCliente.trim() === '' ? null : novoCliente.trim() };
@@ -750,11 +869,6 @@ async function renomearOS(id, novoNumeroOS, novoCliente) {
   return atualizada;
 }
 
-/**
- * Busca o cliente vinculado a um número de OS já existente (qualquer
- * status), usado para autofill ao digitar o número da OS nas telas de
- * entrada/saída. Retorna null se a OS não existir ou não tiver cliente.
- */
 async function buscarClientePorNumeroOS(numeroOS) {
   const relacao = await prisma.relacaoOS.findFirst({
     where:   { numeroOS },
@@ -772,6 +886,7 @@ module.exports = {
   excluirRelacaoOS,
   fecharOS,
   listarTodas,
+  listarMovimentacoes,
   renomearOS,
   atualizarPrecoMovimentacao,
   resolverRelacaoOSDescritiva,

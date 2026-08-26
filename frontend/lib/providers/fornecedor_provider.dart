@@ -28,20 +28,38 @@ class FornecedorProvider extends ChangeNotifier {
   bool _carregando = false;
   bool get carregando => _carregando;
 
+  List<FornecedorModel> _fornecedoresPagina = [];
+  List<FornecedorModel> get fornecedoresPagina => _fornecedoresPagina;
+
+  int _totalItensPagina = 0;
+  int get totalItensPagina => _totalItensPagina;
+
+  bool _carregandoPagina = false;
+  bool get carregandoPagina => _carregandoPagina;
+
   String? _erro;
   String? get erro => _erro;
+
+  // Erro específico de ações (criar/atualizar/remover/vincular etc).
+  // Separado de `_erro` para não derrubar a listagem da página quando
+  // uma ação feita dentro de um diálogo falha — nesse caso o erro deve
+  // aparecer só no diálogo, não substituir a tela de fornecedores.
+  String? _erroAcao;
+  String? get erroAcao => _erroAcao;
 
   String _busca = '';
   String _tipo = '';
   String _id = '';
 
-  /// Retorna os tipoFornecedor distintos (não nulos/vazios) dos fornecedores carregados.
-  List<String> get tipos {
-    final set = <String>{};
-    for (final f in _fornecedores) {
-      if (f.tipoFornecedor != null && f.tipoFornecedor!.isNotEmpty) set.add(f.tipoFornecedor!);
+  List<String> _tipos = [];
+  List<String> get tipos => _tipos;
+
+  Future<void> carregarTipos() async {
+    try {
+      _tipos = await _repo.listarTipos();
+      notifyListeners();
+    } catch (_) {
     }
-    return set.toList()..sort();
   }
 
   Future<void> carregar({
@@ -76,22 +94,56 @@ class FornecedorProvider extends ChangeNotifier {
         tipo: _tipo,
         id: _id,
       );
+
+  Future<void> carregarPaginado({
+    String busca = '',
+    String tipo = '',
+    String id = '',
+    required int pagina,
+    int porPagina = 40,
+  }) async {
+    _busca = busca;
+    _tipo = tipo;
+    _id = id;
+
+    _carregandoPagina = true;
+    _erro = null;
+    notifyListeners();
+
+    try {
+      final resultado = await _repo.listarPaginado(
+        busca: busca,
+        tipo: tipo,
+        id: id,
+        pagina: pagina,
+        porPagina: porPagina,
+      );
+      _fornecedoresPagina = resultado.itens;
+      _totalItensPagina    = resultado.total;
+    } catch (e) {
+      _erro = _mensagemErro(e);
+    } finally {
+      _carregandoPagina = false;
+      notifyListeners();
+    }
+  }
+
   Future<FornecedorModel?> buscarPorId(int id) async {
     try {
       return await _repo.buscarPorId(id);
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroAcao = _mensagemErro(e);
       notifyListeners();
       return null;
     }
   }
 
-  /// [imagem] é o arquivo local escolhido pelo usuário no PC (opcional).
   Future<bool> criar(Map<String, dynamic> dados, {File? imagem}) async {
+    _erroAcao = null;
     try {
       await _repo.criar(dados, imagem: imagem);
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroAcao = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -99,13 +151,12 @@ class FornecedorProvider extends ChangeNotifier {
     return true;
   }
 
-  /// [imagem] é o arquivo local escolhido pelo usuário no PC (opcional).
-  /// Quando informado, substitui a imagem atual do fornecedor.
   Future<bool> atualizar(int id, Map<String, dynamic> dados, {File? imagem}) async {
+    _erroAcao = null;
     try {
       await _repo.atualizar(id, dados, imagem: imagem);
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroAcao = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -114,10 +165,11 @@ class FornecedorProvider extends ChangeNotifier {
   }
 
   Future<bool> remover(int id) async {
+    _erroAcao = null;
     try {
       await _repo.remover(id);
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroAcao = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -126,10 +178,11 @@ class FornecedorProvider extends ChangeNotifier {
   }
 
   Future<bool> vincularMaterial(int fornecedorId, Map<String, dynamic> dados) async {
+    _erroAcao = null;
     try {
       await _repo.vincularMaterial(fornecedorId, dados);
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroAcao = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -138,10 +191,11 @@ class FornecedorProvider extends ChangeNotifier {
   }
 
   Future<bool> desvincularMaterial(int fornecedorId, int materialId) async {
+    _erroAcao = null;
     try {
       await _repo.desvincularMaterial(fornecedorId, materialId);
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroAcao = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -150,10 +204,11 @@ class FornecedorProvider extends ChangeNotifier {
   }
 
   Future<bool> atualizarPreco(int fornecedorId, int materialId, Map<String, dynamic> dados) async {
+    _erroAcao = null;
     try {
       await _repo.atualizarPreco(fornecedorId, materialId, dados);
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroAcao = _mensagemErro(e);
       notifyListeners();
       return false;
     }
@@ -161,13 +216,27 @@ class FornecedorProvider extends ChangeNotifier {
     return true;
   }
 
-  /// Busca rápida para o overlay de vínculo — usa endpoint dedicado (/fornecedores/buscar)
-  /// que não carrega materiais e limita a 50 resultados, evitando payload pesado.
+  Future<List<FornecedorSemelhanteModel>> verificarSemelhantes({
+    required String nomeFantasia,
+    int? ignorarId,
+  }) async {
+    try {
+      return await _repo.verificarSemelhantes(
+        nomeFantasia: nomeFantasia,
+        ignorarId: ignorarId,
+      );
+    } catch (_) {
+      // Falha nessa checagem é apenas um aviso auxiliar — não deve
+      // atrapalhar o preenchimento do formulário.
+      return [];
+    }
+  }
+
   Future<List<FornecedorModel>> buscarFornecedores({String? busca}) async {
     try {
       return await _repo.buscarParaVinculo(busca: busca);
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroAcao = _mensagemErro(e);
       notifyListeners();
       return [];
     }
@@ -177,7 +246,7 @@ class FornecedorProvider extends ChangeNotifier {
     try {
       return await _repo.listarPorMaterial(materialId);
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroAcao = _mensagemErro(e);
       notifyListeners();
       return [];
     }
@@ -199,7 +268,7 @@ class FornecedorProvider extends ChangeNotifier {
         espessura:     espessura,
       );
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroAcao = _mensagemErro(e);
       notifyListeners();
       return [];
     }

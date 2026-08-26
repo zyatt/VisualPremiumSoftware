@@ -6,8 +6,6 @@ import '../models/estoque_model.dart';
 import '../providers/estoque_provider.dart';
 import '../theme/app_theme.dart';
 
-// ── Formatação de data/hora ────────────────────────────────────────────────
-
 String _fmtData(DateTime? dt) {
   if (dt == null) return '—';
   return '${dt.day.toString().padLeft(2, '0')}/'
@@ -21,17 +19,9 @@ String _fmtHora(DateTime? dt) {
       '${dt.minute.toString().padLeft(2, '0')}';
 }
 
-/// Formata um valor de dimensão (metros) sem casas decimais desnecessárias.
-/// Ex.: 1.0 → "1"; 0.5 → "0.5".
 String _fmtDim(double v) =>
     v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
 
-/// Formata uma quantidade sem arredondar/cortar a precisão real do valor,
-/// aplicando separador de milhar (ponto) na parte inteira e vírgula como
-/// separador decimal (padrão brasileiro).
-/// Diferente de `toStringAsFixed(2)`, que exibia apenas 2 casas mesmo quando
-/// o valor real tinha mais precisão (ex.: 3.696 aparecia como "3.70").
-/// Ex.: 3.696 → "3,696"; 4.0 → "4"; 1000 → "1.000"; 1000.5 → "1.000,5".
 String _formatarQuantidade(double v) {
   final bool isInteiro = v == v.truncateToDouble();
   final String bruto = isInteiro ? v.toStringAsFixed(0) : v.toString();
@@ -57,11 +47,6 @@ String _formatarQuantidade(double v) {
   return negativo ? '-$resultado' : resultado;
 }
 
-/// Retorna a exibição de medida de um material: usa o campo [medida] quando
-/// preenchido; caso contrário, monta a partir de [largura]/[comprimento]
-/// cadastrados diretamente no material.
-/// Exemplos: comprimento=50 e largura=1.22 → "50x1.22m"; só comprimento=50 → "50m";
-/// só largura=1.22 → "1.22m". Retorna null se nada estiver disponível.
 String? _formatarMedidaOuDimensoes({
   required String? medida,
   required double? largura,
@@ -80,9 +65,6 @@ String? _formatarMedidaOuDimensoes({
   return null;
 }
 
-/// Formata a unidade para exibição (o valor interno permanece em maiúsculo,
-/// usado para comparações/enum). Ex.: 'UNIDADE' → 'Unidade'; 'M' → 'm';
-/// 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²' → 'm²'; 'KG' → 'Kg'; 'G' → 'g'.
 String formatarUnidadeExibicao(String? unidade) {
   if (unidade == null || unidade.trim().isEmpty) return '';
   final u = unidade.trim().toUpperCase();
@@ -117,10 +99,6 @@ String _fmtDataCompleta(DateTime dt) {
   return '${_fmtData(dt)} • ${dias[dt.weekday]}';
 }
 
-// ── Extrai "quem fez" e observação extra do campo observacao ──────────────
-// O backend grava automaticamente: "Entrada/Saída via controle de estoque – {nome}"
-// seguido opcionalmente de uma quebra de linha com a observação digitada pelo usuário.
-
 String? _extrairUsuario(String? obs) {
   if (obs == null || obs.isEmpty) return null;
   final primeiraLinha = obs.split('\n').first;
@@ -137,8 +115,6 @@ String? _extrairObsExtra(String? obs) {
   final extra = linhas.sublist(1).join('\n').trim();
   return extra.isEmpty ? null : extra;
 }
-
-// ── Formatter: maiúsculas sem acentos (mesmo padrão das outras telas) ─────
 
 class _UpperCaseFormatter extends TextInputFormatter {
   static final _acentos = {
@@ -172,8 +148,6 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
-// ── Formatter: medida (vírgula -> ponto, minúsculas, 1 ponto por número) ──
-
 class _MedidaEspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -197,7 +171,6 @@ class _MedidaEspessuraFormatter extends TextInputFormatter {
   }
 }
 
-/// Formata um valor de espessura garantindo o sufixo "mm" sem duplicar.
 String? formatarEspessuraComSufixo(String? valor) {
   final v = valor?.trim();
   if (v == null || v.isEmpty) return null;
@@ -225,16 +198,6 @@ class _EspessuraFormatter extends TextInputFormatter {
     return newValue.copyWith(text: texto, selection: sel);
   }
 }
-
-// ── Origem da movimentação ─────────────────────────────────────────────────
-// Fonte primária: o campo estruturado mov.origemProducao ('TRANSFERENCIA' /
-// 'BAIXA'), preenchido pelo backend sempre que a movimentação faz parte do
-// fluxo de produção — mais confiável que ler texto livre.
-// Fallback (movimentações antigas sem esse campo): prefixo gravado
-// automaticamente no campo observacao:
-//   "Entrada/Saída via controle de estoque – {nome}"  → estoque
-//   "Saída via produção – {nome}"                     → producao
-//   "Entrada via OC #{id} – {nome}"                   → ordemCompra
 
 enum _OrigemMov { estoque, producao, ordemCompra, desconhecida }
 
@@ -271,24 +234,14 @@ _OrigemMov _detectarOrigem(String? obs) {
   }
 }
 
-// ── Filtro por tipo de movimentação ────────────────────────────────────────
-
 enum _FiltroTipo { todos, entrada, saida }
 
-// ── Item flatten: uma movimentação + a OS a que ela pertence ──────────────
-
 class _ItemHistorico {
-  final RelacaoOSModel relacao;
-  final MovimentacaoModel mov;
-  _ItemHistorico(this.relacao, this.mov);
+  final MovimentacaoComOSModel origem;
+  MovimentacaoModel get mov => origem.movimentacao;
+  String get numeroOS => origem.numeroOS;
+  _ItemHistorico(this.origem);
 }
-
-const _corEmAndamento = Color(0xFF2196F3); // ignore: unused_element
-const _corFechada     = Color(0xFF4CAF50); // ignore: unused_element
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Página principal
-// ═════════════════════════════════════════════════════════════════════════════
 
 class HistoricoMovimentacoesPage extends StatefulWidget {
   const HistoricoMovimentacoesPage({super.key});
@@ -311,16 +264,17 @@ class _HistoricoMovimentacoesPageState
   Timer? _debounceTimer;
 
   _FiltroTipo _filtroTipo   = _FiltroTipo.todos;
-  _OrigemMov? _filtroOrigem; // null = todas as origens
+  _OrigemMov? _filtroOrigem;
   DateTime? _dataInicio;
   DateTime? _dataFim;
+
+  static const int _itensPorPagina = 100;
+  int _paginaAtual = 0;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<EstoqueProvider>().carregarRelacoesOS();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _carregarPagina(irParaPagina: 0));
   }
 
   @override
@@ -340,7 +294,7 @@ class _HistoricoMovimentacoesPageState
   void _onFiltroDigitado(String _) {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 300), () {
-      if (mounted) setState(() {});
+      if (mounted) _carregarPagina(irParaPagina: 0);
     });
   }
 
@@ -359,67 +313,43 @@ class _HistoricoMovimentacoesPageState
       _dataInicio   = null;
       _dataFim      = null;
     });
+    _carregarPagina(irParaPagina: 0);
   }
 
-  List<_ItemHistorico> _itensFiltrados(List<RelacaoOSModel> relacoes) {
-    final os             = _buscaOSCtrl.text.trim().toUpperCase();
-    final material       = _buscaMaterialCtrl.text.trim().toLowerCase();
-    final usuario        = _buscaUsuarioCtrl.text.trim().toLowerCase();
-    final identificador  = _identificadorCtrl.text.trim().toLowerCase();
-    final medida         = _medidaCtrl.text.trim().toLowerCase();
-    final comprimento    = _comprimentoCtrl.text.trim().toUpperCase();
-    final largura        = _larguraCtrl.text.trim().toUpperCase();
-    final espessura      = _espessuraCtrl.text.trim().toLowerCase();
+  Future<void> _carregarPagina({required int irParaPagina}) async {
+    setState(() => _paginaAtual = irParaPagina);
+    final tipoBackend = switch (_filtroTipo) {
+      _FiltroTipo.entrada => 'ENTRADA',
+      _FiltroTipo.saida   => 'SAIDA',
+      _FiltroTipo.todos   => null,
+    };
+    await context.read<EstoqueProvider>().carregarMovimentacoesPagina(
+          numeroOS:      _buscaOSCtrl.text.trim().isEmpty ? null : _buscaOSCtrl.text.trim(),
+          material:      _buscaMaterialCtrl.text.trim().isEmpty ? null : _buscaMaterialCtrl.text.trim(),
+          identificador: _identificadorCtrl.text.trim().isEmpty ? null : _identificadorCtrl.text.trim(),
+          medida:        _medidaCtrl.text.trim().isEmpty ? null : _medidaCtrl.text.trim(),
+          comprimento:   _comprimentoCtrl.text.trim().isEmpty ? null : _comprimentoCtrl.text.trim(),
+          largura:       _larguraCtrl.text.trim().isEmpty ? null : _larguraCtrl.text.trim(),
+          espessura:     _espessuraCtrl.text.trim().isEmpty ? null : _espessuraCtrl.text.trim(),
+          tipo:          tipoBackend,
+          dataInicio:    _dataInicio,
+          dataFim:       _dataFim,
+          pagina:        irParaPagina + 1,
+          porPagina:     _itensPorPagina,
+        );
+  }
 
+  List<_ItemHistorico> _itensDaPagina(List<MovimentacaoComOSModel> pagina) {
+    final usuario = _buscaUsuarioCtrl.text.trim().toLowerCase();
     final itens = <_ItemHistorico>[];
-    for (final r in relacoes) {
-      for (final m in r.movimentacoes) {
-        if (_filtroTipo == _FiltroTipo.entrada && m.tipo != 'ENTRADA') continue;
-        if (_filtroTipo == _FiltroTipo.saida && m.tipo != 'SAIDA') continue;
-        if (_filtroOrigem != null && _detectarOrigemMov(m) != _filtroOrigem) continue;
-        if (os.isNotEmpty && !r.numeroOS.toUpperCase().contains(os)) continue;
-        if (material.isNotEmpty &&
-            !m.materialNome.toLowerCase().contains(material)) {
-          continue;
-        }
-        if (identificador.isNotEmpty) {
-          final v = (m.materialIdentificador ?? '').toLowerCase();
-          if (!v.contains(identificador)) continue;
-        }
-        if (medida.isNotEmpty) {
-          final medidaFmt = _formatarMedidaOuDimensoes(
-                medida:      m.materialMedida,
-                largura:     m.materialLargura,
-                comprimento: m.materialComprimento,
-              ) ??
-              '';
-          if (!medidaFmt.toLowerCase().contains(medida)) continue;
-        }
-        if (comprimento.isNotEmpty) {
-          final v = (m.materialComprimento?.toString() ?? '').toUpperCase();
-          if (!v.contains(comprimento)) continue;
-        }
-        if (largura.isNotEmpty) {
-          final v = (m.materialLargura?.toString() ?? '').toUpperCase();
-          if (!v.contains(largura)) continue;
-        }
-        if (espessura.isNotEmpty) {
-          final v = (m.materialEspessura ?? '').toLowerCase();
-          if (!v.contains(espessura)) continue;
-        }
-        if (usuario.isNotEmpty) {
-          final nomeUsuario = (_extrairUsuario(m.observacao) ?? '').toLowerCase();
-          if (!nomeUsuario.contains(usuario)) continue;
-        }
-        if (_dataInicio != null && m.criadoEm.isBefore(_dataInicio!)) continue;
-        if (_dataFim != null) {
-          final fimDoDia = DateTime(_dataFim!.year, _dataFim!.month, _dataFim!.day, 23, 59, 59);
-          if (m.criadoEm.isAfter(fimDoDia)) continue;
-        }
-        itens.add(_ItemHistorico(r, m));
+    for (final m in pagina) {
+      if (_filtroOrigem != null && _detectarOrigemMov(m.movimentacao) != _filtroOrigem) continue;
+      if (usuario.isNotEmpty) {
+        final nomeUsuario = (_extrairUsuario(m.movimentacao.observacao) ?? '').toLowerCase();
+        if (!nomeUsuario.contains(usuario)) continue;
       }
+      itens.add(_ItemHistorico(m));
     }
-    itens.sort((a, b) => b.mov.criadoEm.compareTo(a.mov.criadoEm));
     return itens;
   }
 
@@ -448,18 +378,19 @@ class _HistoricoMovimentacoesPageState
           _dataFim = picked;
         }
       });
+      _carregarPagina(irParaPagina: 0);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<EstoqueProvider>();
-    final itens = _itensFiltrados(provider.relacoesOS);
+    final itens = _itensDaPagina(provider.movimentacoesPagina);
     final grupos = _agruparPorDia(itens);
-    final chavesOrdenadas = grupos.keys.toList(); // já vem em ordem desc pois itens estão ordenados
-
+    final chavesOrdenadas = grupos.keys.toList();
     final totalEntradas = itens.where((i) => i.mov.tipo == 'ENTRADA').length;
     final totalSaidas    = itens.where((i) => i.mov.tipo == 'SAIDA').length;
+    final totalGeral     = provider.totalMovimentacoesPagina;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -468,7 +399,6 @@ class _HistoricoMovimentacoesPageState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ──────────────────────────────────────────────────
             Row(
               children: [
                 _BotaoVoltar(
@@ -499,8 +429,7 @@ class _HistoricoMovimentacoesPageState
                 ),
                 const Spacer(),
                 IconButton(
-                  onPressed: () =>
-                      context.read<EstoqueProvider>().carregarRelacoesOS(),
+                  onPressed: () => _carregarPagina(irParaPagina: _paginaAtual),
                   icon: Icon(Icons.refresh,
                       size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Atualizar',
@@ -516,7 +445,6 @@ class _HistoricoMovimentacoesPageState
             ),
             const SizedBox(height: 20),
 
-            // ── Filtros de texto ──────────────────────────────────────────
             Row(
               children: [
                 Expanded(
@@ -541,7 +469,7 @@ class _HistoricoMovimentacoesPageState
                     inputFormatters: [_UpperCaseFormatter()],
                     onChanged: _onFiltroDigitado,
                     decoration: InputDecoration(
-                      hintText: 'Filtrar por material',
+                      hintText: 'Nome do material',
                       prefixIcon: Icon(Icons.inventory_2_outlined,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
@@ -598,7 +526,6 @@ class _HistoricoMovimentacoesPageState
             ),
             const SizedBox(height: 10),
 
-            // ── Filtros de material: identificador, medida, espessura ────
             Row(
               children: [
                 Expanded(
@@ -680,7 +607,6 @@ class _HistoricoMovimentacoesPageState
             ),
             const SizedBox(height: 10),
 
-            // ── Tipo + período + contadores ───────────────────────────────
             Row(
               children: [
                 SegmentedButton<_FiltroTipo>(
@@ -702,7 +628,10 @@ class _HistoricoMovimentacoesPageState
                     ),
                   ],
                   selected: {_filtroTipo},
-                  onSelectionChanged: (s) => setState(() => _filtroTipo = s.first),
+                  onSelectionChanged: (s) {
+                    setState(() => _filtroTipo = s.first);
+                    _carregarPagina(irParaPagina: 0);
+                  },
                   style: ButtonStyle(
                     visualDensity: VisualDensity.compact,
                     mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
@@ -738,10 +667,13 @@ class _HistoricoMovimentacoesPageState
                   IconButton(
                     icon: const Icon(Icons.close, size: 16),
                     tooltip: 'Limpar período',
-                    onPressed: () => setState(() {
-                      _dataInicio = null;
-                      _dataFim = null;
-                    }),
+                    onPressed: () {
+                      setState(() {
+                        _dataInicio = null;
+                        _dataFim = null;
+                      });
+                      _carregarPagina(irParaPagina: 0);
+                    },
                     style: IconButton.styleFrom().copyWith(
                       mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                     ),
@@ -749,6 +681,7 @@ class _HistoricoMovimentacoesPageState
                 const Spacer(),
                 Row(
                   children: [
+                    Text('página: ', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline)),
                     Icon(Icons.arrow_upward, size: 14, color: AppTheme.success),
                     const SizedBox(width: 4),
                     Text('$totalEntradas entradas',
@@ -764,7 +697,6 @@ class _HistoricoMovimentacoesPageState
             ),
             const SizedBox(height: 8),
 
-            // ── Filtro de origem ──────────────────────────────────────────
             Row(
               children: [
                 Text('Origem:',
@@ -824,9 +756,8 @@ class _HistoricoMovimentacoesPageState
             ),
             const SizedBox(height: 16),
 
-            // ── Lista ──────────────────────────────────────────────────────
             Expanded(
-              child: provider.carregando
+              child: provider.carregandoMovimentacoes
                   ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
                   : provider.erro != null
                       ? Center(
@@ -839,7 +770,7 @@ class _HistoricoMovimentacoesPageState
                                   style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                               const SizedBox(height: 16),
                               FilledButton.icon(
-                                onPressed: () => context.read<EstoqueProvider>().carregarRelacoesOS(),
+                                onPressed: () => _carregarPagina(irParaPagina: _paginaAtual),
                                 icon: const Icon(Icons.refresh, size: 18),
                                 label: const Text('Tentar novamente'),
                                 style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
@@ -862,7 +793,10 @@ class _HistoricoMovimentacoesPageState
                                 ],
                               ),
                             )
-                          : ListView.builder(
+                          : Column(
+                              children: [
+                                Expanded(
+                                  child: ListView.builder(
                               itemCount: chavesOrdenadas.length,
                               itemBuilder: (context, i) {
                                 final chave = chavesOrdenadas[i];
@@ -885,11 +819,23 @@ class _HistoricoMovimentacoesPageState
                                     ),
                                     ...itensDoDia.map((item) => _LinhaHistorico(
                                           item: item,
-                                          onTapOS: () => _abrirOS(item.relacao),
+                                          onTapOS: () => _abrirOS(item.numeroOS),
                                         )),
                                   ],
                                 );
                               },
+                                  ),
+                                ),
+                                if (totalGeral > _itensPorPagina) ...[
+                                  const SizedBox(height: 12),
+                                  _RodapePaginacaoHistorico(
+                                    paginaAtual: _paginaAtual,
+                                    itensPorPagina: _itensPorPagina,
+                                    totalItens: totalGeral,
+                                    onPaginaChanged: (p) => _carregarPagina(irParaPagina: p),
+                                  ),
+                                ],
+                              ],
                             ),
             ),
           ],
@@ -898,14 +844,10 @@ class _HistoricoMovimentacoesPageState
     );
   }
 
-  void _abrirOS(RelacaoOSModel relacao) {
-    Navigator.of(context).pop(relacao.numeroOS);
+  void _abrirOS(String numeroOS) {
+    Navigator.of(context).pop(numeroOS);
   }
 }
-
-// ── Linha de movimentação ───────────────────────────────────────────────────
-// O card inteiro é clicável (abre a OS), com hover e cursor de mão,
-// seguindo o mesmo padrão visual do botão "Voltar" no cabeçalho.
 
 class _LinhaHistorico extends StatefulWidget {
   final _ItemHistorico item;
@@ -922,7 +864,7 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
   @override
   Widget build(BuildContext context) {
     final mov = widget.item.mov;
-    final relacao = widget.item.relacao;
+    final numeroOS = widget.item.numeroOS;
     final isEntrada = mov.tipo == 'ENTRADA';
     final cor = isEntrada ? AppTheme.success : AppTheme.error;
     final icon = isEntrada ? Icons.arrow_upward : Icons.arrow_downward;
@@ -977,7 +919,6 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
                 child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Ícone entrada/saída (32px fixo) ─────────────────────────────
           SizedBox(
             width: 32,
             child: Center(
@@ -993,7 +934,6 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
           ),
           const SizedBox(width: 10),
 
-          // ── Material (flexível, com bastante espaço para o nome) ─────────
           Expanded(
             flex: 3,
             child: Column(
@@ -1029,7 +969,6 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
           ),
           const SizedBox(width: 10),
 
-          // ── Quantidade (150px fixo) ──────────────────────────────────────
           SizedBox(
             width: 150,
             child: Text(
@@ -1039,11 +978,10 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
             ),
           ),
 
-          // ── OS (160px fixo) ──────────────────────────────────────────────
           SizedBox(
             width: 160,
             child: Tooltip(
-              message: 'Abrir OS ${relacao.numeroOS}',
+              message: 'Abrir OS $numeroOS',
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1052,7 +990,7 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
                   const SizedBox(width: 4),
                   Flexible(
                     child: Text(
-                      relacao.numeroOS,
+                      numeroOS,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 12.5,
@@ -1068,7 +1006,6 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
             ),
           ),
 
-          // ── Usuário (130px fixo) ─────────────────────────────────────────
           SizedBox(
             width: 130,
             child: Row(
@@ -1089,7 +1026,6 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
             ),
           ),
 
-          // ── Badge de origem (140px fixo) ─────────────────────────────────
           SizedBox(
             width: 140,
             child: Align(
@@ -1119,7 +1055,6 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
             ),
           ),
 
-          // ── Hora (50px fixo) ─────────────────────────────────────────────
           SizedBox(
             width: 50,
             child: Text(
@@ -1139,8 +1074,7 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
     );
   }
 }
-// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
-// Mesmo padrão usado no cabeçalho das outras páginas do sistema.
+
 class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;
@@ -1203,6 +1137,167 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+class _RodapePaginacaoHistorico extends StatelessWidget {
+  final int paginaAtual;
+  final int itensPorPagina;
+  final int totalItens;
+  final ValueChanged<int> onPaginaChanged;
+
+  const _RodapePaginacaoHistorico({
+    required this.paginaAtual,
+    required this.itensPorPagina,
+    required this.totalItens,
+    required this.onPaginaChanged,
+  });
+
+  List<int> _paginas(int totalPaginas, int paginaAtual) {
+    if (totalPaginas <= 7) return List.generate(totalPaginas, (i) => i);
+    final Set<int> vis = {0, totalPaginas - 1, paginaAtual};
+    if (paginaAtual > 0) vis.add(paginaAtual - 1);
+    if (paginaAtual < totalPaginas - 1) vis.add(paginaAtual + 1);
+    final sorted = vis.toList()..sort();
+    final List<int> result = [];
+    for (int i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.add(-1);
+      result.add(sorted[i]);
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final totalPaginas = (totalItens / itensPorPagina).ceil().clamp(1, 999999999);
+    final pagina = paginaAtual.clamp(0, totalPaginas - 1);
+    final inicio = pagina * itensPorPagina + 1;
+    final fim    = ((pagina + 1) * itensPorPagina).clamp(0, totalItens);
+    final scheme = Theme.of(context).colorScheme;
+    final paginas = _paginas(totalPaginas, pagina);
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          'Exibindo $inicio–$fim de $totalItens movimentações',
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _BotaoPaginaHistorico(
+              icon: Icons.chevron_left,
+              tooltip: 'Página anterior',
+              enabled: pagina > 0,
+              onTap: () => onPaginaChanged(pagina - 1),
+            ),
+            SizedBox(width: 4),
+            for (final p in paginas) ...[
+              if (p == -1)
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  child: Text('…', style: TextStyle(color: scheme.outline)),
+                )
+              else
+                _BotaoNumeroPaginaHistorico(
+                  numero: p,
+                  ativa: p == pagina,
+                  onTap: () => onPaginaChanged(p),
+                ),
+              const SizedBox(width: 4),
+            ],
+            _BotaoPaginaHistorico(
+              icon: Icons.chevron_right,
+              tooltip: 'Próxima página',
+              enabled: pagina < totalPaginas - 1,
+              onTap: () => onPaginaChanged(pagina + 1),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _BotaoPaginaHistorico extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _BotaoPaginaHistorico({
+    required this.icon,
+    required this.tooltip,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: enabled ? Theme.of(context).colorScheme.outlineVariant : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
+            ),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BotaoNumeroPaginaHistorico extends StatelessWidget {
+  final int numero;
+  final bool ativa;
+  final VoidCallback onTap;
+
+  const _BotaoNumeroPaginaHistorico({
+    required this.numero,
+    required this.ativa,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: ativa ? null : onTap,
+      mouseCursor: ativa ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: ativa ? AppTheme.primary : Colors.transparent,
+          border: Border.all(
+            color: ativa ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '${numero + 1}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
+            color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
       ),

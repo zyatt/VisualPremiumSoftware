@@ -8,10 +8,6 @@ import '../providers/orcamento_provider.dart';
 import '../repositories/orcamento_repository.dart';
 import '../theme/app_theme.dart';
 
-/// Remove prefixos como "Exception:", "HttpException:" que o Dart adiciona
-/// automaticamente ao fazer e.toString() em exceções. Quando o erro é de
-/// conexão (sem internet / servidor fora do ar), retorna uma mensagem
-/// amigável contextualizada com a ação que estava sendo feita.
 String _mensagemErro(Object e, {required String acao}) {
   final raw = e.toString();
   if (raw.contains('SocketException') ||
@@ -28,19 +24,23 @@ String _mensagemErro(Object e, {required String acao}) {
   return 'Erro ao $acao: $msg';
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 String _brl(double? v) {
   if (v == null || v == 0) return '—';
   return 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
 }
 
+DateTime _paraBrasilia(DateTime dt) {
+  final utc = dt.isUtc ? dt : dt.toUtc();
+  return utc.subtract(const Duration(hours: 3));
+}
+
 String _dataFormatada(DateTime dt) {
-  final d = dt.day.toString().padLeft(2, '0');
-  final m = dt.month.toString().padLeft(2, '0');
-  final a = dt.year;
-  final h = dt.hour.toString().padLeft(2, '0');
-  final min = dt.minute.toString().padLeft(2, '0');
+  final local = _paraBrasilia(dt);
+  final d = local.day.toString().padLeft(2, '0');
+  final m = local.month.toString().padLeft(2, '0');
+  final a = local.year;
+  final h = local.hour.toString().padLeft(2, '0');
+  final min = local.minute.toString().padLeft(2, '0');
   return '$d/$m/$a às $h:$min';
 }
 
@@ -82,8 +82,6 @@ Color _statusColor(BuildContext context, String status) {
   }
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
 class OrcamentoHistoricoPage extends StatefulWidget {
   const OrcamentoHistoricoPage({super.key});
 
@@ -104,7 +102,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
   List<dynamic> _cancelados = [];
   List<dynamic> _convertidos = [];
 
-  // ── Busca por material ────────────────────────────────────────────────────
   final TextEditingController _buscaController = TextEditingController();
   String _buscaMaterial = '';
 
@@ -171,7 +168,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
     }
   }
 
-  // Reabrir orçamento salvo (ABERTO) para edição
   Future<void> _reabrirOrcamento(Map<String, dynamic> orc) async {
     setState(() => _carregando = true);
     try {
@@ -249,8 +245,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
     }
   }
 
-
-  // ── Excluir orçamento (cancelado / rejeitado / convertido) ───────────────
   Future<void> _excluirOrcamento(Map<String, dynamic> orc) async {
     final id = orc['id'] as int;
     final titulo = orc['titulo'] as String? ?? 'Orçamento #$id';
@@ -302,20 +296,12 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
     }
   }
 
-  // ── PDF para orçamento convertido ────────────────────────────────────────
   Future<void> _exportarPdfConvertido(Map<String, dynamic> orc) async {
     setState(() => _carregando = true);
     try {
       final repo = OrcamentoRepository();
       final completo = await repo.buscarPorId(orc['id'] as int);
 
-      // Monta payload idêntico ao do editor.
-      // IMPORTANTE: no banco, cada fornecedor cotado pra um material vira
-      // uma linha própria em `itens` (constraint orcamentoId+materialId+
-      // fornecedorId). Se não agrupar por materialId aqui, o mesmo material
-      // aparece duplicado/triplicado no PDF — uma vez por fornecedor, cada
-      // uma com só 1 preço preenchido — em vez de uma linha só com todos os
-      // fornecedores comparados lado a lado.
       final itensRaw = (completo['itens'] as List? ?? []);
       final Map<int, Map<String, dynamic>> itensPorMaterial = {};
 
@@ -417,7 +403,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Cabeçalho ────────────────────────────────────────────────────
+
             Row(
               children: [
                 _BotaoVoltar(
@@ -465,15 +451,14 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
             ),
             const SizedBox(height: 16),
 
-            // ── Busca por material ────────────────────────────────────────
             TextField(
               controller: _buscaController,
               onChanged: (v) => setState(() => _buscaMaterial = v),
               style: TextStyle(fontSize: 13, color: cs.onSurface),
               decoration: InputDecoration(
-                hintText: 'Buscar por nome do material...',
+                hintText: 'Nome do material',
                 hintStyle: TextStyle(fontSize: 13, color: cs.outline),
-                prefixIcon: Icon(Icons.search, size: 18, color: cs.outline),
+                prefixIcon: Icon(Icons.inventory_2_outlined, size: 18, color: cs.outline),
                 suffixIcon: _buscaMaterial.isNotEmpty
                     ? IconButton(
                         icon: Icon(Icons.close, size: 16, color: cs.outline),
@@ -504,7 +489,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
             ),
             const SizedBox(height: 16),
 
-            // ── Abas ─────────────────────────────────────────────────────────
             Container(
               decoration: BoxDecoration(
                 color: cs.surface,
@@ -529,7 +513,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
               ),
             ),
 
-            // ── Conteúdo ──────────────────────────────────────────────────────
             Expanded(
               child: _carregando
                   ? const Center(
@@ -576,7 +559,7 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                       : TabBarView(
                           controller: _tabController,
                           children: [
-                            // ── Salvos ────────────────────────────────────
+
                             _buildLista(
                               lista: _salvosFiltered,
                               emptyMessage: _buscaMaterial.isNotEmpty
@@ -593,7 +576,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                               ),
                             ),
 
-                            // ── Aprovados ─────────────────────────────────
                             _buildLista(
                               lista: _aprovadosFiltered,
                               emptyMessage: _buscaMaterial.isNotEmpty
@@ -609,7 +591,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                               ),
                             ),
 
-                            // ── Rejeitados ────────────────────────────────
                             _buildLista(
                               lista: _rejeitadosFiltered,
                               emptyMessage: _buscaMaterial.isNotEmpty
@@ -626,7 +607,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                               ),
                             ),
 
-                            // ── Cancelados ────────────────────────────────
                             _buildLista(
                               lista: _canceladosFiltered,
                               emptyMessage: _buscaMaterial.isNotEmpty
@@ -643,7 +623,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
                               ),
                             ),
 
-                            // ── Convertidos ───────────────────────────────
                             _buildLista(
                               lista: _convertidosFiltered,
                               emptyMessage: _buscaMaterial.isNotEmpty
@@ -744,8 +723,6 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
   }
 }
 
-// ─── Card do histórico ────────────────────────────────────────────────────────
-
 class _OrcamentoHistoricoCard extends StatefulWidget {
   final Map<String, dynamic> orcamento;
   final VoidCallback? onReabrir;
@@ -773,7 +750,7 @@ class _OrcamentoHistoricoCardState
   @override
   void initState() {
     super.initState();
-    // Auto-expande se há busca ativa (mostra logo os materiais encontrados)
+
     if (widget.buscaMaterial.isNotEmpty) _expandido = true;
   }
 
@@ -785,7 +762,6 @@ class _OrcamentoHistoricoCardState
     }
   }
 
-  // Verifica se o nome do material do grupo contém a busca
   bool _grupoCorresponde(List<Map<String, dynamic>> grupo) {
     final q = widget.buscaMaterial.trim().toLowerCase();
     if (q.isEmpty) return false;
@@ -793,9 +769,6 @@ class _OrcamentoHistoricoCardState
     return nome.contains(q);
   }
 
-  // Agrupa os itens por material (mesmo material com múltiplos fornecedores
-  // vira um único grupo). Retorna lista de grupos onde cada grupo contém
-  // as linhas do servidor referentes ao mesmo material.
   List<List<Map<String, dynamic>>> _agruparItensPorMaterial(
       List<dynamic> itens) {
     final Map<String, List<Map<String, dynamic>>> grupos = {};
@@ -818,7 +791,6 @@ class _OrcamentoHistoricoCardState
     final itens = (orc['itens'] as List? ?? []);
     final motivoRejeicao = orc['motivoRejeicao'] as String?;
 
-    // Conta materiais únicos (não duplicados por fornecedor)
     final grupos = _agruparItensPorMaterial(itens);
     final totalMateriais = grupos.length;
     final cs = Theme.of(context).colorScheme;
@@ -833,7 +805,7 @@ class _OrcamentoHistoricoCardState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Cabeçalho do card ───────────────────────────────────────────
+
           InkWell(
             onTap: () => setState(() => _expandido = !_expandido),
             mouseCursor: SystemMouseCursors.click,
@@ -844,7 +816,7 @@ class _OrcamentoHistoricoCardState
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
-                  // Ícone de status
+
                   Container(
                     width: 40,
                     height: 40,
@@ -928,7 +900,7 @@ class _OrcamentoHistoricoCardState
                             ],
                           ],
                         ),
-                        // Motivo de cancelamento / rejeição
+
                         if ((status == 'CANCELADO' || status == 'NAO_APROVADO') &&
                             motivoRejeicao != null &&
                             motivoRejeicao.isNotEmpty) ...[
@@ -956,7 +928,7 @@ class _OrcamentoHistoricoCardState
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Botão reabrir (só para salvos/abertos)
+
                   if (widget.onReabrir != null) ...[
                     FilledButton.icon(
                       onPressed: widget.onReabrir,
@@ -972,7 +944,7 @@ class _OrcamentoHistoricoCardState
                     ),
                     const SizedBox(width: 8),
                   ],
-                  // Botão PDF (só para convertidos)
+
                   if (widget.onVerPdf != null) ...[
                     OutlinedButton.icon(
                       onPressed: widget.onVerPdf,
@@ -989,7 +961,7 @@ class _OrcamentoHistoricoCardState
                     ),
                     const SizedBox(width: 8),
                   ],
-                  // Botão excluir (cancelados, rejeitados, convertidos)
+
                   if (widget.onExcluir != null) ...[
                     IconButton(
                       onPressed: widget.onExcluir,
@@ -1009,7 +981,7 @@ class _OrcamentoHistoricoCardState
                     ),
                     const SizedBox(width: 8),
                   ],
-                  // Chevron expandir
+
                   AnimatedRotation(
                     turns: _expandido ? 0.5 : 0,
                     duration: const Duration(milliseconds: 200),
@@ -1021,7 +993,6 @@ class _OrcamentoHistoricoCardState
             ),
           ),
 
-          // ── Itens expandidos (agrupados por material) ───────────────────
           if (_expandido && grupos.isNotEmpty) ...[
             Divider(height: 1, color: cs.outlineVariant),
             Padding(
@@ -1081,9 +1052,6 @@ class _OrcamentoHistoricoCardState
     );
   }
 
-  /// Constrói o card de um grupo de material (similar ao visual da página principal).
-  /// Um grupo = mesmo material com N linhas de fornecedores.
-  /// [destacado] indica se este grupo corresponde ao filtro de busca atual.
   Widget _buildGrupoMaterial(List<Map<String, dynamic>> grupo, {bool destacado = false}) {
     final primeiroItem = grupo.first;
     final materialData =
@@ -1094,7 +1062,6 @@ class _OrcamentoHistoricoCardState
     final quantidade =
         double.tryParse(primeiroItem['quantidade']?.toString() ?? '1') ?? 1;
 
-    // Calcula média de preços unitários (excluindo nulos)
     final precos = grupo
         .map((i) => i['precoUnitario'] != null
             ? double.tryParse(i['precoUnitario'].toString())
@@ -1122,7 +1089,7 @@ class _OrcamentoHistoricoCardState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Cabeçalho do material ──────────────────────────────────────
+
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
             child: Row(
@@ -1187,7 +1154,6 @@ class _OrcamentoHistoricoCardState
             ),
           ),
 
-          // ── Tabela de fornecedores ────────────────────────────────────────
           if (grupo.any((i) => i['fornecedor'] != null)) ...[
             Divider(height: 1, color: cs.outlineVariant),
             Padding(
@@ -1321,12 +1287,7 @@ class _OrcamentoHistoricoCardState
     );
   }
 }
-// ─────────────────────────────────────────────────────────────────────────────
-// WIDGETS AUXILIARES
-// ─────────────────────────────────────────────────────────────────────────────
 
-// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
-// Mesmo padrão usado no cabeçalho das páginas de estoque / histórico de material.
 class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;

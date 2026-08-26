@@ -12,8 +12,6 @@ import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 import 'historico_movimentacoes_page.dart';
 
-// ── Formatação de preço: até 6 casas decimais, sem zeros à direita ────────────
-
 String _fmtData(DateTime? dt) {
   if (dt == null) return '—';
   return '${dt.day.toString().padLeft(2, '0')}/'
@@ -21,16 +19,10 @@ String _fmtData(DateTime? dt) {
       '${dt.year}';
 }
 
-/// Formata um valor monetário com até 6 casas decimais, removendo zeros
-/// à direita desnecessários (mínimo 2 casas), com separador de milhar (ponto)
-/// na parte inteira. Ex.: 1.5 → "R$ 1,50"; 0.000125 → "R$ 0,000125";
-/// 1000 → "R$ 1.000,00"; 1234560.5 → "R$ 1.234.560,50".
 String _brl6(double v) {
-  final s6 = v.toStringAsFixed(6);
-  final trimmed = s6.replaceAll(RegExp(r'0+$'), '');
-  final partes = trimmed.split('.');
-  final dec = partes.length > 1 ? partes[1] : '';
-  final decFinal = dec.length < 2 ? dec.padRight(2, '0') : dec;
+  final s2 = v.toStringAsFixed(2);
+  final partes = s2.split('.');
+  final decFinal = partes.length > 1 ? partes[1] : '00';
 
   final inteiro = partes[0];
   final negativo = inteiro.startsWith('-');
@@ -45,33 +37,11 @@ String _brl6(double v) {
   return 'R\$ $inteiroFormatado,$decFinal';
 }
 
-/// Formata um valor de dimensão/quantidade sem arredondar ou cortar a
-/// precisão real do valor. Antes usava `toStringAsFixed(2)`, que exibia
-/// apenas 2 casas decimais mesmo quando o valor real tinha mais precisão
-/// (ex.: 3.696 aparecia como "3.70" na tela, escondendo o valor exato
-/// armazenado). Agora: inteiro sem casas quando não há parte decimal, ou
-/// a representação decimal completa e mínima do double (via toString())
-/// quando há.
-/// Ex.: 1.0 → "1"; 0.5 → "0.5"; 3.696 → "3.696".
 String _fmtDim(double v) =>
     v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toString();
 
-/// Formata uma quantidade de material sem arredondar/cortar a precisão
-/// real do valor (mesma lógica de _fmtDim, exposta com nome mais claro
-/// para os pontos que exibem quantidade em estoque, não dimensão).
-/// Mantida sem separador de milhar pois também é usada para inicializar/
-/// parsear campos editáveis de largura/comprimento (dimensões em metros,
-/// tipicamente pequenas — ex. "1.22"), onde um ponto de milhar quebraria
-/// a edição/leitura do valor.
-/// Ex.: 3.696 → "3.696"; 4.0 → "4".
 String formatarQuantidade(double v) => _fmtDim(v);
 
-/// Formata uma quantidade de estoque (unidades, m², m/l etc.) para
-/// EXIBIÇÃO como texto — com separador de milhar (ponto) na parte inteira
-/// e vírgula como separador decimal (padrão brasileiro). Diferente de
-/// [formatarQuantidade], que é usada em campos editáveis de dimensão e por
-/// isso não pode ter milhar.
-/// Ex.: 1000 → "1.000"; 3.696 → "3,696"; 4.0 → "4".
 String formatarQuantidadeExibicao(double v) {
   final bool isInteiro = v == v.truncateToDouble();
   final String bruto = isInteiro ? v.toStringAsFixed(0) : v.toString();
@@ -97,11 +67,6 @@ String formatarQuantidadeExibicao(double v) {
   return negativo ? '-$resultado' : resultado;
 }
 
-/// Retorna a exibição de medida de um material: usa o campo [medida] quando
-/// preenchido; caso contrário, monta a partir de [largura]/[comprimento]
-/// cadastrados diretamente no material.
-/// Exemplos: comprimento=50 e largura=1.22 → "50x1.22m"; só comprimento=50 → "50m";
-/// só largura=1.22 → "1.22m". Retorna null se nada estiver disponível.
 String? formatarMedidaOuDimensoes({
   required String? medida,
   required double? largura,
@@ -120,9 +85,6 @@ String? formatarMedidaOuDimensoes({
   return null;
 }
 
-/// Formata a unidade para exibição (o valor interno permanece em maiúsculo,
-/// usado para comparações/enum). Ex.: 'UNIDADE' → 'Unidade'; 'M' → 'm';
-/// 'M/L' → 'm/l'; 'ML' → 'ml'; 'M²' → 'm²'; 'KG' → 'Kg'; 'G' → 'g'.
 String formatarUnidadeExibicao(String? unidade) {
   if (unidade == null || unidade.trim().isEmpty) return '';
   final u = unidade.trim().toUpperCase();
@@ -147,12 +109,6 @@ String formatarUnidadeExibicao(String? unidade) {
   }
 }
 
-// ── Formatter: maiúsculas sem acentos ─────────────────────────────────────────
-
-/// TextEditingController que expõe [notify] publicamente. `notifyListeners()`
-/// é `@protected` em `ChangeNotifier`, então não pode ser chamado de fora da
-/// própria classe/subclasse — usamos essa subclasse só para forçar o
-/// RawAutocomplete a reavaliar as opções ao focar o campo vazio.
 class _NotifiableTextEditingController extends TextEditingController {
   _NotifiableTextEditingController();
   void notify() => notifyListeners();
@@ -190,11 +146,6 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
-// ── Diálogo: Renomear OS ───────────────────────────────────────────────────
-// Controller próprio gerenciado pelo ciclo de vida do State, evitando o uso
-// do controller após dispose quando o diálogo é fechado via ESC (a
-// animação de saída ainda reconstrói o TextField por um frame a mais do
-// que o Future de showDialog leva para completar).
 class _RenomearOSDialog extends StatefulWidget {
   final String nomeAtual;
   final String? clienteAtual;
@@ -250,7 +201,14 @@ class _RenomearOSDialogState extends State<_RenomearOSDialog> {
                 color: AppTheme.primary, size: 20),
           ),
           const SizedBox(width: 12),
-          const Text('Renomear OS'),
+          const Expanded(child: Text('Renomear OS')),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
         ],
       ),
       content: Column(
@@ -323,35 +281,23 @@ class _RenomearOSDialogState extends State<_RenomearOSDialog> {
   }
 }
 
-/// Resultado do diálogo de renomear OS: novo número/nome e novo cliente
-/// (string vazia significa "remover cliente vinculado").
 class _RenomearOSResultado {
   final String numeroOS;
   final String cliente;
   const _RenomearOSResultado({required this.numeroOS, required this.cliente});
 }
 
-// ── Formatter: medida/espessura (vírgula -> ponto, minúsculas, 1 ponto por número) ─────
-/// - remove acentuação e força minúsculas
-/// - converte vírgula em ponto
-/// - permite apenas 1 ponto POR NÚMERO (bloqueia pontos repetidos/seguidos
-///   dentro do mesmo número, ex.: "1..5" ou "1.2.3"), mas preserva múltiplos
-///   números na mesma medida, ex.: "2.44x1.22m" (dois números, um ponto cada)
 class _MedidaEspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    // 1) Vírgula -> ponto
+
     var texto = newValue.text.replaceAll(',', '.');
 
-    // 2) Remove acentos e força minúsculas
     texto = _UpperCaseFormatter._removerAcentos(texto).toLowerCase();
 
-    // 3) Para cada bloco de dígitos+pontos (um "número"), permite apenas o
-    //    primeiro ponto e remove os demais. Não mexe no que não é dígito/ponto
-    //    (letras, "x", espaços, etc.), preservando a separação entre números.
     texto = texto.replaceAllMapped(RegExp(r'[\d.]+'), (m) {
       final partes = m.group(0)!.split('.');
       if (partes.length > 2) {
@@ -368,10 +314,6 @@ class _MedidaEspessuraFormatter extends TextInputFormatter {
   }
 }
 
-/// Formatter para o campo Medida no modo Retalho: só permite dígitos e um
-/// único ponto decimal (vírgula é convertida em ponto) antes do sufixo fixo
-/// "m²", que é sempre mantido ao final e não pode ser apagado nem editado
-/// pelo usuário — o texto digitado sempre entra à esquerda do "m²".
 class _MedidaRetalhoFormatter extends TextInputFormatter {
   static const String sufixo = 'm²';
 
@@ -382,17 +324,12 @@ class _MedidaRetalhoFormatter extends TextInputFormatter {
   ) {
     var texto = newValue.text;
 
-    // Remove o sufixo (onde quer que esteja) para trabalhar só com a parte
-    // numérica digitada pelo usuário.
     texto = texto.replaceAll(sufixo, '');
 
-    // Vírgula -> ponto
     texto = texto.replaceAll(',', '.');
 
-    // Mantém apenas dígitos e ponto
     texto = texto.replaceAll(RegExp(r'[^\d.]'), '');
 
-    // Permite apenas 1 ponto decimal
     final partes = texto.split('.');
     if (partes.length > 2) {
       texto = '${partes[0]}.${partes.sublist(1).join('')}';
@@ -400,8 +337,6 @@ class _MedidaRetalhoFormatter extends TextInputFormatter {
 
     final novoTexto = '$texto$sufixo';
 
-    // Cursor sempre logo após a parte numérica digitada (nunca dentro ou
-    // depois do sufixo).
     int cursor = newValue.selection.baseOffset;
     if (cursor < 0 || cursor > texto.length) {
       cursor = texto.length;
@@ -414,9 +349,6 @@ class _MedidaRetalhoFormatter extends TextInputFormatter {
   }
 }
 
-/// Formata um valor de espessura garantindo o sufixo "mm" sem duplicar.
-/// Dados antigos podem já ter sido salvos com "mm"/"MM" digitado manualmente
-/// (ex.: "2MM", "2 mm"); removemos esse sufixo antes de reanexar o nosso.
 String? formatarEspessuraComSufixo(String? valor) {
   final v = valor?.trim();
   if (v == null || v.isEmpty) return null;
@@ -425,9 +357,6 @@ String? formatarEspessuraComSufixo(String? valor) {
   return '${numero}mm';
 }
 
-/// Formatter para o campo Espessura: aceita apenas dígitos, ponto e vírgula
-/// (vírgula é convertida em ponto), bloqueando letras e qualquer outro
-/// caractere.
 class _EspessuraFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -447,8 +376,6 @@ class _EspessuraFormatter extends TextInputFormatter {
     return newValue.copyWith(text: texto, selection: sel);
   }
 }
-
-// ── Formatter: números decimais (aceita vírgula ou ponto) ─────────────────────
 
 class _DecimalInputFormatter extends TextInputFormatter {
   @override
@@ -470,10 +397,6 @@ class _DecimalInputFormatter extends TextInputFormatter {
   }
 }
 
-/// Formatter para campos numéricos com separador de milhar (ponto) e vírgula
-/// decimal (padrão brasileiro), aplicado em tempo real enquanto o usuário
-/// digita. Ex.: digitar "1000" exibe "1.000"; digitar "1000,5" exibe
-/// "1.000,5". Usado tanto para preços/custos quanto para quantidades grandes.
 class _MilharInputFormatter extends TextInputFormatter {
   static String _aplicarMilhar(String digitosInteiros) {
     final buffer = StringBuffer();
@@ -503,7 +426,6 @@ class _MilharInputFormatter extends TextInputFormatter {
     final partes = texto.split(',');
     String inteiro = partes[0];
     String? decimais = partes.length > 1 ? partes.sublist(1).join('') : null;
-    // Sem limite de casas decimais: o usuário pode digitar quantas quiser.
 
     inteiro = inteiro.replaceFirst(RegExp(r'^0+(?=\d)'), '');
 
@@ -528,16 +450,12 @@ class _MilharInputFormatter extends TextInputFormatter {
   }
 }
 
-/// Converte o texto de um campo formatado com [_MilharInputFormatter]
-/// (ex.: "1.000,50") para um double (1000.5).
 double? _parseMilhar(String texto) {
   final v = texto.trim();
   if (v.isEmpty) return null;
   final semMilhar = v.replaceAll('.', '').replaceAll(',', '.');
   return double.tryParse(semMilhar);
 }
-
-// ── Ordenação da listagem de OS ────────────────────────────────────────────────
 
 enum _OrdenacaoOS { recente, criacao, numero }
 
@@ -555,10 +473,8 @@ extension on _OrdenacaoOS {
       };
 }
 
-// ── Cores do status da OS ──────────────────────────────────────────────────────
-
-const _corEmAndamento = Color(0xFF2196F3); // azul
-const _corFechada     = Color(0xFF4CAF50); // verde
+const _corEmAndamento = Color(0xFF2196F3);
+const _corFechada     = Color(0xFF4CAF50);
 
 Color _corStatus(String status) =>
     status == 'FECHADA' ? _corFechada : _corEmAndamento;
@@ -584,10 +500,6 @@ Widget _badgeContagem(int contagem) {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Página principal
-// ═════════════════════════════════════════════════════════════════════════════
-
 class ControleEstoquePage extends StatefulWidget {
   const ControleEstoquePage({super.key});
 
@@ -609,11 +521,14 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
   Timer? _timerFechamentoAutomatico;
   Timer? _debounceTimer;
 
-  // ── Ordenação e filtro de período ───────────────────────────────────────
   _OrdenacaoOS _ordenacao = _OrdenacaoOS.recente;
   bool _decrescente = true;
   DateTime? _dataInicio;
   DateTime? _dataFim;
+
+  static const int _itensPorPagina = 50;
+  int _paginaEmAndamento = 0;
+  int _paginaFechada     = 0;
 
   Duration get _duracaoAteMeiaNoite {
     final agora = DateTime.now();
@@ -654,8 +569,6 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     if (!mounted) return;
     final provider = context.read<EstoqueProvider>();
 
-    // Busca o estado mais recente em silêncio (sem acionar o spinner de
-    // tela cheia) antes de decidir quais OS fechar.
     await provider.recarregarRelacoesOSSilencioso();
     if (!mounted) return;
 
@@ -694,6 +607,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
       await _fecharOSTextuaisAtrasadas();
       _agendarFechamentoAutomatico();
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _carregarPaginaAtual());
   }
 
   @override
@@ -712,11 +626,96 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     super.dispose();
   }
 
-  void _buscar(String v) {
-    context
-        .read<EstoqueProvider>()
-        .carregarRelacoesOS(busca: v.trim().isEmpty ? null : v.trim());
+  void _setPaginaAbaAtual(int p) {
+    setState(() {
+      if (_tabController.index == 0) {
+        _paginaEmAndamento = p;
+      } else {
+        _paginaFechada = p;
+      }
+    });
   }
+
+  (String? ordenarPor, String? direcao) get _ordenacaoBackend {
+    final campo = switch (_ordenacao) {
+      _OrdenacaoOS.recente => 'recente',
+      _OrdenacaoOS.criacao => 'criacao',
+      _OrdenacaoOS.numero  => 'numero',
+    };
+    return (campo, _decrescente ? 'desc' : 'asc');
+  }
+
+  Future<void> _carregarPaginaAtual({bool resetarPagina = false}) async {
+    if (resetarPagina) {
+      _setPaginaAbaAtual(0);
+    }
+    final (ordenarPor, direcao) = _ordenacaoBackend;
+    final provider = context.read<EstoqueProvider>();
+
+    Map<String, dynamic> filtrosComuns(String status) => {
+          'busca':         _buscaCtrl.text.trim().isEmpty ? null : _buscaCtrl.text.trim(),
+          'status':        status,
+          'cliente':       _buscaClienteCtrl.text.trim().isEmpty ? null : _buscaClienteCtrl.text.trim(),
+          'material':      _buscaNomeCtrl.text.trim().isEmpty ? null : _buscaNomeCtrl.text.trim(),
+          'identificador': _identificadorCtrl.text.trim().isEmpty ? null : _identificadorCtrl.text.trim(),
+          'medida':        _medidaCtrl.text.trim().isEmpty ? null : _medidaCtrl.text.trim(),
+          'comprimento':   _comprimentoCtrl.text.trim().isEmpty ? null : _comprimentoCtrl.text.trim(),
+          'largura':       _larguraCtrl.text.trim().isEmpty ? null : _larguraCtrl.text.trim(),
+          'espessura':     _espessuraCtrl.text.trim().isEmpty ? null : _espessuraCtrl.text.trim(),
+          'dataInicio':    _dataInicio,
+          'dataFim':       _dataFim,
+          'ordenarPor':    ordenarPor,
+          'direcao':       direcao,
+        };
+
+    await Future.wait([
+      for (final status in ['EM_ANDAMENTO', 'FECHADA']) ...() {
+        final f = filtrosComuns(status);
+        return [
+          provider.carregarRelacoesOSPagina(
+            busca:         f['busca'],
+            status:        status,
+            cliente:       f['cliente'],
+            material:      f['material'],
+            identificador: f['identificador'],
+            medida:        f['medida'],
+            comprimento:   f['comprimento'],
+            largura:       f['largura'],
+            espessura:     f['espessura'],
+            dataInicio:    f['dataInicio'],
+            dataFim:       f['dataFim'],
+            ordenarPor:    f['ordenarPor'],
+            direcao:       f['direcao'],
+            apenasNumericas: true,
+            pagina:        status == 'EM_ANDAMENTO' ? _paginaEmAndamento + 1 : _paginaFechada + 1,
+            porPagina:     _itensPorPagina,
+          ),
+          provider.carregarRelacoesOSPagina(
+            busca:         f['busca'],
+            status:        status,
+            cliente:       f['cliente'],
+            material:      f['material'],
+            identificador: f['identificador'],
+            medida:        f['medida'],
+            comprimento:   f['comprimento'],
+            largura:       f['largura'],
+            espessura:     f['espessura'],
+            dataInicio:    f['dataInicio'],
+            dataFim:       f['dataFim'],
+            ordenarPor:    f['ordenarPor'],
+            direcao:       f['direcao'],
+            apenasTextuais: true,
+            pagina:        1,
+            porPagina:     100000,
+          ),
+        ];
+      }(),
+    ]);
+  }
+
+  void _aplicarFiltros() => _carregarPaginaAtual(resetarPagina: true);
+
+  void _buscar(String v) => _aplicarFiltros();
 
   void _abrirMovimentacaoGlobal(String tipo) {
     showDialog(
@@ -746,121 +745,16 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
 
   bool get _temFiltroData => _dataInicio != null || _dataFim != null;
 
-  /// Filtra pela data de criação da OS, igual ao filtro de período usado
-  /// na página de Relatórios.
-  List<RelacaoOSModel> _filtrarPorData(List<RelacaoOSModel> lista) {
-    if (!_temFiltroData) return lista;
-    return lista.where((r) {
-      final criacao = r.criadoEm;
-      if (criacao == null) return false;
-      final dia = DateTime(criacao.year, criacao.month, criacao.day);
-      if (_dataInicio != null) {
-        final ini = DateTime(_dataInicio!.year, _dataInicio!.month, _dataInicio!.day);
-        if (dia.isBefore(ini)) return false;
-      }
-      if (_dataFim != null) {
-        final fim = DateTime(_dataFim!.year, _dataFim!.month, _dataFim!.day);
-        if (dia.isAfter(fim)) return false;
-      }
-      return true;
-    }).toList();
-  }
-
-  /// Ordena a lista conforme a opção selecionada. "Última alteração" usa
-  /// atualizadoEm (com fallback para criadoEm), para que uma OS criada há
-  /// dias mas com uma saída registrada agora apareça no topo — evitando
-  /// esquecer qual foi a movimentação mais recente.
-  List<RelacaoOSModel> _ordenarRelacoes(List<RelacaoOSModel> lista) {
-    final ordenada = [...lista];
-    int cmp(RelacaoOSModel a, RelacaoOSModel b) {
-      switch (_ordenacao) {
-        case _OrdenacaoOS.recente:
-          final da = a.atualizadoEm ?? a.criadoEm ?? DateTime(1970);
-          final db = b.atualizadoEm ?? b.criadoEm ?? DateTime(1970);
-          return da.compareTo(db);
-        case _OrdenacaoOS.criacao:
-          final da = a.criadoEm ?? DateTime(1970);
-          final db = b.criadoEm ?? DateTime(1970);
-          return da.compareTo(db);
-        case _OrdenacaoOS.numero:
-          final na = int.tryParse(a.numeroOS.trim());
-          final nb = int.tryParse(b.numeroOS.trim());
-          if (na != null && nb != null) return na.compareTo(nb);
-          if (na != null) return -1;
-          if (nb != null) return 1;
-          return a.numeroOS.toLowerCase().compareTo(b.numeroOS.toLowerCase());
-      }
-    }
-    ordenada.sort(_decrescente ? (a, b) => cmp(b, a) : cmp);
-    return ordenada;
-  }
-
-  List<RelacaoOSModel> _filtrarPorCliente(List<RelacaoOSModel> lista) {
-    final cliente = _UpperCaseFormatter._removerAcentos(_buscaClienteCtrl.text.trim()).toUpperCase();
-    if (cliente.isEmpty) return lista;
-    return lista
-        .where((r) => _UpperCaseFormatter._removerAcentos(r.cliente ?? '').toUpperCase().contains(cliente))
-        .toList();
-  }
-
-  List<RelacaoOSModel> _filtrarPorMaterial(List<RelacaoOSModel> lista) {
-    final nome          = _buscaNomeCtrl.text.trim().toLowerCase();
-    final identificador = _identificadorCtrl.text.trim().toUpperCase();
-    final medida        = _medidaCtrl.text.trim().toUpperCase();
-    final comprimento   = _comprimentoCtrl.text.trim().toUpperCase();
-    final largura       = _larguraCtrl.text.trim().toUpperCase();
-    final espessura     = _espessuraCtrl.text.trim().toUpperCase();
-
-    final temFiltro = nome.isNotEmpty ||
-        identificador.isNotEmpty ||
-        medida.isNotEmpty ||
-        comprimento.isNotEmpty ||
-        largura.isNotEmpty ||
-        espessura.isNotEmpty;
-
-    if (!temFiltro) return lista;
-
-    return lista.where((r) {
-      return r.movimentacoes.any((m) {
-        if (nome.isNotEmpty &&
-            !m.materialNome.toLowerCase().contains(nome)) {
-          return false;
-        }
-        if (identificador.isNotEmpty) {
-          final v = (m.materialIdentificador ?? '').toUpperCase();
-          if (!v.contains(identificador)) return false;
-        }
-        if (medida.isNotEmpty) {
-          final v = (m.materialMedida ?? '').toUpperCase();
-          if (!v.contains(medida)) return false;
-        }
-        if (comprimento.isNotEmpty) {
-          final v = (m.materialComprimento?.toString() ?? '').toUpperCase();
-          if (!v.contains(comprimento)) return false;
-        }
-        if (largura.isNotEmpty) {
-          final v = (m.materialLargura?.toString() ?? '').toUpperCase();
-          if (!v.contains(largura)) return false;
-        }
-        if (espessura.isNotEmpty) {
-          final v = (m.materialEspessura ?? '').toUpperCase();
-          if (!v.contains(espessura)) return false;
-        }
-        return true;
-      });
-    }).toList();
-  }
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<EstoqueProvider>();
-
-    final emAndamento = _ordenarRelacoes(_filtrarPorData(_filtrarPorMaterial(_filtrarPorCliente(
-      provider.relacoesOS.where((r) => r.status == 'EM_ANDAMENTO').toList(),
-    ))));
-    final fechadas = _ordenarRelacoes(_filtrarPorData(_filtrarPorMaterial(_filtrarPorCliente(
-      provider.relacoesOS.where((r) => r.status == 'FECHADA').toList(),
-    ))));
+    final numEmAndamento = provider.relacoesOSPaginaDoStatus('EM_ANDAMENTO', numericas: true);
+    final totalNumEmAndamento = provider.totalRelacoesOSPaginaDoStatus('EM_ANDAMENTO', numericas: true);
+    final txtEmAndamento = provider.relacoesOSPaginaDoStatus('EM_ANDAMENTO', textuais: true);
+    final numFechadas = provider.relacoesOSPaginaDoStatus('FECHADA', numericas: true);
+    final totalNumFechadas = provider.totalRelacoesOSPaginaDoStatus('FECHADA', numericas: true);
+    final txtFechadas = provider.relacoesOSPaginaDoStatus('FECHADA', textuais: true);
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -869,43 +763,31 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Controle de Estoque',
-                      style: Theme.of(context)
-                          .textTheme
-                          .headlineMedium
-                          ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Movimentações por Ordem de Serviço',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Tooltip(
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final compacto = constraints.maxWidth < 850;
+                final muitoCompacto = constraints.maxWidth < 620;
+
+                final iconSize = muitoCompacto ? 13.0 : (compacto ? 15.0 : 18.0);
+                final fontSize = muitoCompacto ? 11.0 : (compacto ? 12.0 : 14.0);
+                final padH = muitoCompacto ? 8.0 : (compacto ? 12.0 : 20.0);
+                final padV = muitoCompacto ? 6.0 : (compacto ? 8.0 : 12.0);
+                final padHistorico = muitoCompacto ? 6.0 : (compacto ? 10.0 : 16.0);
+
+                Widget botaoProducao = Tooltip(
                   message: 'Transferir material do estoque normal para o estoque de produção',
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
                       FilledButton.icon(
                         onPressed: _abrirTransferenciaProducao,
-                        icon: const Icon(Icons.factory_outlined, size: 18),
-                        label: const Text('Produção'),
+                        icon: Icon(Icons.factory_outlined, size: iconSize),
+                        label: Text('Produção', style: TextStyle(fontSize: fontSize)),
                         style: FilledButton.styleFrom(
                           backgroundColor: AppTheme.warning,
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 12),
+                          padding: EdgeInsets.symmetric(
+                              horizontal: padH, vertical: padV),
                         ).copyWith(
                           mouseCursor:
                               WidgetStateProperty.all(SystemMouseCursors.click),
@@ -936,84 +818,85 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                         ),
                     ],
                   ),
-                ),
-                const SizedBox(width: 10),
-                Tooltip(
+                );
+
+                Widget botaoNovoMaterial = Tooltip(
                   message: 'Cadastrar um novo material no estoque',
                   child: FilledButton.icon(
                     onPressed: _abrirCadastroMaterial,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Novo Material'),
+                    icon: Icon(Icons.add, size: iconSize),
+                    label: Text('Novo Material', style: TextStyle(fontSize: fontSize)),
                     style: FilledButton.styleFrom(
                       backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 12),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: padH, vertical: padV),
                     ).copyWith(
                       mouseCursor:
                           WidgetStateProperty.all(SystemMouseCursors.click),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Tooltip(
+                );
+
+                Widget botaoEntrada = Tooltip(
                   message: 'Registrar entrada ou reentrada de material no estoque',
                   child: FilledButton.icon(
                     onPressed: () => _abrirMovimentacaoGlobal('ENTRADA'),
-                    icon: const Icon(Icons.add_circle_outline, size: 18),
-                    label: const Text('Entrada/Reentrada'),
+                    icon: Icon(Icons.add_circle_outline, size: iconSize),
+                    label: Text(muitoCompacto ? 'Entrada' : 'Entrada/Reentrada', style: TextStyle(fontSize: fontSize)),
                     style: FilledButton.styleFrom(
                       backgroundColor: AppTheme.success,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 12),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: padH, vertical: padV),
                     ).copyWith(
                       mouseCursor:
                           WidgetStateProperty.all(SystemMouseCursors.click),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Tooltip(
+                );
+
+                Widget botaoSaida = Tooltip(
                   message: 'Registrar saída de material do estoque',
                   child: FilledButton.icon(
                     onPressed: () => _abrirMovimentacaoGlobal('SAIDA'),
-                    icon: const Icon(Icons.remove_circle_outline, size: 18),
-                    label: const Text('Saída'),
+                    icon: Icon(Icons.remove_circle_outline, size: iconSize),
+                    label: Text('Saída', style: TextStyle(fontSize: fontSize)),
                     style: FilledButton.styleFrom(
                       backgroundColor: AppTheme.error,
                       foregroundColor: Colors.white,
                       padding: EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 12),
+                          horizontal: padH, vertical: padV),
                     ).copyWith(
                       mouseCursor:
                           WidgetStateProperty.all(SystemMouseCursors.click),
                     ),
                   ),
-                ),
-                SizedBox(width: 10),
-                Tooltip(
+                );
+
+                Widget botaoHistorico = Tooltip(
                   message: 'Ver histórico de movimentações',
                   child: OutlinedButton.icon(
                     onPressed: _abrirHistoricoMovimentacoes,
-                    icon: const Icon(Icons.history, size: 18),
-                    label: const Text('Histórico'),
+                    icon: Icon(Icons.history, size: iconSize),
+                    label: Text('Histórico', style: TextStyle(fontSize: fontSize)),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Theme.of(context).colorScheme.onSurface,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: padHistorico, vertical: padV),
                       side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                     ).copyWith(
                       mouseCursor:
                           WidgetStateProperty.all(SystemMouseCursors.click),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Tooltip(
+                );
+
+                Widget botaoRefresh = Tooltip(
                   message: 'Atualizar lista de ordens de serviço',
                   child: IconButton(
                     onPressed: () => context.read<EstoqueProvider>().carregarRelacoesOS(),
-                    icon: Icon(Icons.refresh, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    icon: Icon(Icons.refresh, size: iconSize, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     style: IconButton.styleFrom(
                       backgroundColor: Theme.of(context).colorScheme.surface,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -1023,8 +906,47 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                           WidgetStateProperty.all(SystemMouseCursors.click),
                     ),
                   ),
-                ),
-              ],
+                );
+
+                final espacamento = muitoCompacto ? 4.0 : (compacto ? 6.0 : 10.0);
+
+                return Row(
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Controle de Estoque',
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineMedium
+                              ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Movimentações por Ordem de Serviço',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    botaoHistorico,
+                    SizedBox(width: espacamento),
+                    botaoProducao,
+                    SizedBox(width: espacamento),
+                    botaoNovoMaterial,
+                    SizedBox(width: espacamento),
+                    botaoEntrada,
+                    SizedBox(width: espacamento),
+                    botaoSaida,
+                    SizedBox(width: espacamento),
+                    botaoRefresh,
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 20),
 
@@ -1066,7 +988,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                         Duration(milliseconds: 300),
-                        () => setState(() {}),
+                        _aplicarFiltros,
                       );
                     },
                   ),
@@ -1080,7 +1002,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                     inputFormatters: [_UpperCaseFormatter()],
                     decoration: InputDecoration(
                       hintText: 'Nome do material',
-                      prefixIcon: Icon(Icons.filter_alt_outlined,
+                      prefixIcon: Icon(Icons.inventory_2_outlined,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
                     ),
@@ -1088,7 +1010,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                         Duration(milliseconds: 300),
-                        () => setState(() {}),
+                        _aplicarFiltros,
                       );
                     },
                   ),
@@ -1127,6 +1049,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                                 _ordenacao  = _OrdenacaoOS.recente;
                                 _decrescente = true;
                               });
+                              _aplicarFiltros();
                               context.read<EstoqueProvider>().carregarRelacoesOS();
                             }
                           : null,
@@ -1150,7 +1073,6 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
             Row(
               children: [
                 Expanded(
-                  flex: 3,
                   child: TextField(
                     controller: _identificadorCtrl,
                     decoration: InputDecoration(
@@ -1165,14 +1087,13 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                         const Duration(milliseconds: 300),
-                        () => setState(() {}),
+                        _aplicarFiltros,
                       );
                     },
                   ),
                 ),
                 SizedBox(width: 10),
                 Expanded(
-                  flex: 3,
                   child: TextField(
                     controller: _medidaCtrl,
                     decoration: InputDecoration(
@@ -1186,14 +1107,13 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                         const Duration(milliseconds: 300),
-                        () => setState(() {}),
+                        _aplicarFiltros,
                       );
                     },
                   ),
                 ),
                 SizedBox(width: 10),
                 Expanded(
-                  flex: 2,
                   child: TextField(
                     controller: _comprimentoCtrl,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -1209,14 +1129,13 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                         const Duration(milliseconds: 300),
-                        () => setState(() {}),
+                        _aplicarFiltros,
                       );
                     },
                   ),
                 ),
                 SizedBox(width: 10),
                 Expanded(
-                  flex: 2,
                   child: TextField(
                     controller: _larguraCtrl,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -1232,14 +1151,13 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                         const Duration(milliseconds: 300),
-                        () => setState(() {}),
+                        _aplicarFiltros,
                       );
                     },
                   ),
                 ),
                 SizedBox(width: 10),
                 Expanded(
-                  flex: 2,
                   child: TextField(
                     controller: _espessuraCtrl,
                     decoration: InputDecoration(
@@ -1254,7 +1172,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       _debounceTimer?.cancel();
                       _debounceTimer = Timer(
                         Duration(milliseconds: 300),
-                        () => setState(() {}),
+                        _aplicarFiltros,
                       );
                     },
                   ),
@@ -1263,7 +1181,6 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
             ),
             SizedBox(height: 16),
 
-            // ── Filtro por período de criação + ordenação ────────────────────
             Row(
               children: [
                 _DatePickerField(
@@ -1271,8 +1188,8 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   value: _dataInicio,
                   firstDate: DateTime(2020),
                   lastDate: _dataFim ?? DateTime.now(),
-                  onPicked: (d) => setState(() => _dataInicio = d),
-                  onCleared: () => setState(() => _dataInicio = null),
+                  onPicked: (d) { setState(() => _dataInicio = d); _aplicarFiltros(); },
+                  onCleared: () { setState(() => _dataInicio = null); _aplicarFiltros(); },
                 ),
                 const SizedBox(width: 12),
                 _DatePickerField(
@@ -1280,16 +1197,18 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   value: _dataFim,
                   firstDate: _dataInicio ?? DateTime(2020),
                   lastDate: DateTime.now(),
-                  onPicked: (d) => setState(() => _dataFim = d),
-                  onCleared: () => setState(() => _dataFim = null),
+                  onPicked: (d) { setState(() => _dataFim = d); _aplicarFiltros(); },
+                  onCleared: () { setState(() => _dataFim = null); _aplicarFiltros(); },
                 ),
                 const Spacer(),
                 _OrdenacaoControl(
                   ordenacao: _ordenacao,
                   decrescente: _decrescente,
-                  onOrdenacaoChanged: (o) => setState(() => _ordenacao = o),
-                  onDirecaoToggled: () =>
-                      setState(() => _decrescente = !_decrescente),
+                  onOrdenacaoChanged: (o) { setState(() => _ordenacao = o); _aplicarFiltros(); },
+                  onDirecaoToggled: () {
+                    setState(() => _decrescente = !_decrescente);
+                    _aplicarFiltros();
+                  },
                 ),
               ],
             ),
@@ -1315,7 +1234,9 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       children: [
                         const Text('Em Andamento'),
                         const SizedBox(width: 6),
-                        _badgeContagem(provider.carregando ? 0 : emAndamento.length),
+                        _badgeContagem(provider.carregando ? 0 :
+                            provider.totalRelacoesOSPaginaDoStatus('EM_ANDAMENTO', numericas: true) +
+                            provider.totalRelacoesOSPaginaDoStatus('EM_ANDAMENTO', textuais: true)),
                       ],
                     ),
                   ),
@@ -1325,7 +1246,9 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                       children: [
                         const Text('Fechadas'),
                         const SizedBox(width: 6),
-                        _badgeContagem(provider.carregando ? 0 : fechadas.length),
+                        _badgeContagem(provider.carregando ? 0 :
+                            provider.totalRelacoesOSPaginaDoStatus('FECHADA', numericas: true) +
+                            provider.totalRelacoesOSPaginaDoStatus('FECHADA', textuais: true)),
                       ],
                     ),
                   ),
@@ -1338,7 +1261,7 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                   ? const Center(
                       child: CircularProgressIndicator(
                           color: AppTheme.primary))
-                  : provider.erro != null
+                  : provider.erroLista != null
                       ? SizedBox(
                           height: 300,
                           child: Center(
@@ -1360,10 +1283,10 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                                 const SizedBox(height: 4),
                                 Text(
                                   () {
-                                    final partes = provider.erro!.split(': ');
+                                    final partes = provider.erroLista!.split(': ');
                                     return partes.length > 1
                                         ? partes.sublist(1).join(': ')
-                                        : provider.erro!;
+                                        : provider.erroLista!;
                                   }(),
                                   style: TextStyle(
                                       color: Theme.of(context).colorScheme.onSurfaceVariant),
@@ -1388,12 +1311,28 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
                           controller: _tabController,
                           children: [
                             _OsGrid(
-                              relacoes: emAndamento,
+                              textuaisCompletas: txtEmAndamento,
+                              numericasPagina:   numEmAndamento,
+                              totalNumericas:    totalNumEmAndamento,
+                              paginaAtual:       _paginaEmAndamento,
+                              itensPorPagina:    _itensPorPagina,
+                              onPaginaChanged: (p) {
+                                setState(() => _paginaEmAndamento = p);
+                                _carregarPaginaAtual();
+                              },
                               emptyMessage: 'Nenhuma OS em andamento',
                               onTap: _abrirDetalhe,
                             ),
                             _OsGrid(
-                              relacoes: fechadas,
+                              textuaisCompletas: txtFechadas,
+                              numericasPagina:   numFechadas,
+                              totalNumericas:    totalNumFechadas,
+                              paginaAtual:       _paginaFechada,
+                              itensPorPagina:    _itensPorPagina,
+                              onPaginaChanged: (p) {
+                                setState(() => _paginaFechada = p);
+                                _carregarPaginaAtual();
+                              },
                               emptyMessage: 'Nenhuma OS fechada',
                               onTap: _abrirDetalhe,
                             ),
@@ -1415,9 +1354,6 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     );
   }
 
-  /// Abre a página de histórico geral de movimentações (todas as OS, em
-  /// ordem cronológica). Se o usuário tocar no número de uma OS dentro do
-  /// histórico, a página retorna esse numeroOS e abrimos o detalhe dela aqui.
   Future<void> _abrirHistoricoMovimentacoes() async {
     final numeroOS = await Navigator.of(context).push<String>(
       MaterialPageRoute(builder: (_) => const HistoricoMovimentacoesPage()),
@@ -1430,8 +1366,6 @@ class _ControleEstoquePageState extends State<ControleEstoquePage>
     if (rel.id != 0) _abrirDetalhe(rel);
   }
 }
-
-// ─── Seletor de período (mesmo padrão usado em Relatórios) ───────────────────
 
 class _DatePickerField extends StatelessWidget {
   final String    label;
@@ -1547,8 +1481,6 @@ class _DatePickerField extends StatelessWidget {
   }
 }
 
-// ─── Controle de ordenação (dropdown + toggle asc/desc) ──────────────────────
-
 class _OrdenacaoControl extends StatelessWidget {
   final _OrdenacaoOS ordenacao;
   final bool decrescente;
@@ -1634,18 +1566,176 @@ class _OrdenacaoControl extends StatelessWidget {
   }
 }
 
-// ─── Grid de OS (widget auxiliar para as abas) ────────────────────────────────
 
-bool _osEhNumerica(String numeroOS) => int.tryParse(numeroOS.trim()) != null;
-
-/// Classifica uma OS textual em uma das categorias grandes exibidas dentro
-/// de "Empresa": "EMPRESA-(DATA)" → EMPRESA, "INVESTIMENTO-(DATA)" →
-/// INVESTIMENTO, qualquer outra coisa → OUTROS.
 String _categoriaEmpresa(String numeroOS) {
   final upper = numeroOS.trim().toUpperCase();
   if (upper.startsWith('EMPRESA-') || upper == 'EMPRESA') return 'EMPRESA';
   if (upper.startsWith('INVESTIMENTO-') || upper == 'INVESTIMENTO') return 'INVESTIMENTO';
   return 'OUTROS';
+}
+
+class _BarraPaginacaoOS extends StatelessWidget {
+  final int paginaAtual;
+  final int totalPaginas;
+  final int totalItens;
+  final int itensPorPagina;
+  final void Function(int) onPaginaChanged;
+
+  const _BarraPaginacaoOS({
+    required this.paginaAtual,
+    required this.totalPaginas,
+    required this.totalItens,
+    required this.itensPorPagina,
+    required this.onPaginaChanged,
+  });
+
+  List<int> _paginas() {
+    if (totalPaginas <= 7) return List.generate(totalPaginas, (i) => i);
+    final Set<int> vis = {0, totalPaginas - 1, paginaAtual};
+    if (paginaAtual > 0) vis.add(paginaAtual - 1);
+    if (paginaAtual < totalPaginas - 1) vis.add(paginaAtual + 1);
+    final sorted = vis.toList()..sort();
+    final List<int> result = [];
+    for (int i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.add(-1);
+      result.add(sorted[i]);
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inicio  = paginaAtual * itensPorPagina + 1;
+    final fim     = ((paginaAtual + 1) * itensPorPagina).clamp(0, totalItens);
+    final paginas = _paginas();
+
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'Exibindo $inicio–$fim de $totalItens OS',
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _BotaoPaginaOS(
+                icon: Icons.chevron_left,
+                tooltip: 'Página anterior',
+                enabled: paginaAtual > 0,
+                onTap: () => onPaginaChanged(paginaAtual - 1),
+              ),
+              SizedBox(width: 4),
+              for (final p in paginas) ...[
+                if (p == -1)
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Text('…', style: TextStyle(color: Theme.of(context).colorScheme.outline)),
+                  )
+                else
+                  _BotaoNumeroPaginaOS(
+                    numero: p,
+                    ativa: p == paginaAtual,
+                    onTap: () => onPaginaChanged(p),
+                  ),
+                const SizedBox(width: 4),
+              ],
+              _BotaoPaginaOS(
+                icon: Icons.chevron_right,
+                tooltip: 'Próxima página',
+                enabled: paginaAtual < totalPaginas - 1,
+                onTap: () => onPaginaChanged(paginaAtual + 1),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BotaoPaginaOS extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _BotaoPaginaOS({
+    required this.icon,
+    required this.tooltip,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: enabled ? Theme.of(context).colorScheme.outlineVariant : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
+            ),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BotaoNumeroPaginaOS extends StatelessWidget {
+  final int numero;
+  final bool ativa;
+  final VoidCallback onTap;
+
+  const _BotaoNumeroPaginaOS({
+    required this.numero,
+    required this.ativa,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: ativa ? null : onTap,
+      mouseCursor: ativa ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: ativa ? AppTheme.primary : Colors.transparent,
+          border: Border.all(
+            color: ativa ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '${numero + 1}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: ativa ? FontWeight.w700 : FontWeight.w400,
+            color: ativa ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _CategoriaEmpresaInfo {
@@ -1663,12 +1753,24 @@ final _categoriasEmpresa = <_CategoriaEmpresaInfo>[
 ];
 
 class _OsGrid extends StatefulWidget {
-  final List<RelacaoOSModel> relacoes;
+  final List<RelacaoOSModel> textuaisCompletas;
+
+  final List<RelacaoOSModel> numericasPagina;
+  final int totalNumericas;
+  final int paginaAtual;
+  final int itensPorPagina;
+  final ValueChanged<int> onPaginaChanged;
+
   final String emptyMessage;
   final void Function(RelacaoOSModel) onTap;
 
   const _OsGrid({
-    required this.relacoes,
+    required this.textuaisCompletas,
+    required this.numericasPagina,
+    required this.totalNumericas,
+    required this.paginaAtual,
+    required this.itensPorPagina,
+    required this.onPaginaChanged,
     required this.emptyMessage,
     required this.onTap,
   });
@@ -1678,14 +1780,11 @@ class _OsGrid extends StatefulWidget {
 }
 
 class _OsGridState extends State<_OsGrid> {
-  /// Categoria de "Empresa" atualmente aberta (null = mostra os 3 cards grandes).
   String? _categoriaAberta;
 
-  // Chaves usadas para rolar automaticamente a tela: ao expandir uma
-  // categoria, rola até o conteúdo expandido (mini-cards); ao recolher,
-  // rola de volta até o topo dos 3 cards grandes.
   final GlobalKey _cardsCategoriaKey = GlobalKey();
   final GlobalKey _conteudoExpandidoKey = GlobalKey();
+  final GlobalKey _topoListaKey = GlobalKey();
 
   void _alternarCategoria(String chave, bool estaSelecionada) {
     final abrindo = !estaSelecionada;
@@ -1699,6 +1798,21 @@ class _OsGridState extends State<_OsGrid> {
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeInOut,
           alignment: abrindo ? 1.0 : 0.0,
+        );
+      }
+    });
+  }
+
+  void _irParaPagina(int p) {
+    widget.onPaginaChanged(p);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _topoListaKey.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          alignment: 0.0,
         );
       }
     });
@@ -1745,12 +1859,10 @@ class _OsGridState extends State<_OsGrid> {
   @override
   void didUpdateWidget(covariant _OsGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Se a categoria aberta deixou de ter itens nos dados atuais (ex.: a
-    // última OS dela foi fechada/excluída), volta para os 3 cards grandes.
+
     if (_categoriaAberta != null) {
-      final aindaExiste = widget.relacoes.any((r) =>
-          !_osEhNumerica(r.numeroOS) &&
-          _categoriaEmpresa(r.numeroOS) == _categoriaAberta);
+      final aindaExiste = widget.textuaisCompletas
+          .any((r) => _categoriaEmpresa(r.numeroOS) == _categoriaAberta);
       if (!aindaExiste) {
         _categoriaAberta = null;
       }
@@ -1759,7 +1871,10 @@ class _OsGridState extends State<_OsGrid> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.relacoes.isEmpty) {
+    final textuais = widget.textuaisCompletas;
+    final numericasPagina = widget.numericasPagina;
+
+    if (textuais.isEmpty && widget.totalNumericas == 0) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1777,9 +1892,6 @@ class _OsGridState extends State<_OsGrid> {
       );
     }
 
-    final numericas = widget.relacoes.where((r) => _osEhNumerica(r.numeroOS)).toList();
-    final textuais  = widget.relacoes.where((r) => !_osEhNumerica(r.numeroOS)).toList();
-
     const gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
       maxCrossAxisExtent: 200,
       crossAxisSpacing: 12,
@@ -1787,7 +1899,6 @@ class _OsGridState extends State<_OsGrid> {
       childAspectRatio: 1,
     );
 
-    // Agrupa as OS textuais por categoria (EMPRESA / INVESTIMENTO / OUTROS).
     final porCategoria = <String, List<RelacaoOSModel>>{
       for (final c in _categoriasEmpresa) c.chave: <RelacaoOSModel>[],
     };
@@ -1801,103 +1912,120 @@ class _OsGridState extends State<_OsGrid> {
     final itensCategoria =
         _categoriaAberta == null ? const <RelacaoOSModel>[] : porCategoria[_categoriaAberta]!;
 
-    return CustomScrollView(
-      slivers: [
-        if (numericas.isNotEmpty) ...[
-          _cabecalho('Ordens de Serviço', numericas.length, context),
-          SliverGrid(
-            delegate: SliverChildBuilderDelegate(
-              (ctx, i) {
-                final rel = numericas[i];
-                return _RelacaoOSCard(relacao: rel, onTap: () => widget.onTap(rel));
-              },
-              childCount: numericas.length,
-            ),
-            gridDelegate: gridDelegate,
-          ),
-        ],
-        if (textuais.isNotEmpty) ...[
-          _cabecalho('Outros', textuais.length, context),
-          SliverToBoxAdapter(
-            child: LayoutBuilder(
-              builder: (ctx, constraints) {
-                final largura = constraints.maxWidth;
-                final colunas = largura >= 640 ? 3 : (largura >= 420 ? 2 : 1);
-                return Container(
-                  key: _cardsCategoriaKey,
-                  child: GridView.count(
-                    crossAxisCount: colunas,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    childAspectRatio: 1.9,
-                    children: _categoriasEmpresa.map((cat) {
-                      final itens = porCategoria[cat.chave]!;
-                      final selecionado = _categoriaAberta == cat.chave;
-                      return _CategoriaEmpresaCard(
-                        info: cat,
-                        count: itens.length,
-                        selecionado: selecionado,
-                        onTap: itens.isEmpty
-                            ? null
-                            : () => _alternarCategoria(cat.chave, selecionado),
+    final totalPaginas = (widget.totalNumericas / widget.itensPorPagina).ceil().clamp(1, 999999999);
+    final paginaAtual  = widget.paginaAtual.clamp(0, totalPaginas - 1);
+
+    return Column(
+      children: [
+        Expanded(
+          child: CustomScrollView(
+            slivers: [
+              if (textuais.isNotEmpty) ...[
+                _cabecalho('Outros', textuais.length, context),
+                SliverToBoxAdapter(
+                  child: LayoutBuilder(
+                    builder: (ctx, constraints) {
+                      final largura = constraints.maxWidth;
+                      final colunas = largura >= 640 ? 3 : (largura >= 420 ? 2 : 1);
+                      return Container(
+                        key: _cardsCategoriaKey,
+                        child: GridView.count(
+                          crossAxisCount: colunas,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: 1.9,
+                          children: _categoriasEmpresa.map((cat) {
+                            final itens = porCategoria[cat.chave]!;
+                            final selecionado = _categoriaAberta == cat.chave;
+                            return _CategoriaEmpresaCard(
+                              info: cat,
+                              count: itens.length,
+                              selecionado: selecionado,
+                              onTap: itens.isEmpty
+                                  ? null
+                                  : () => _alternarCategoria(cat.chave, selecionado),
+                            );
+                          }).toList(),
+                        ),
                       );
-                    }).toList(),
+                    },
                   ),
-                );
-              },
-            ),
-          ),
-          if (_categoriaAberta != null) ...[
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 16, bottom: 4),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 3,
-                      height: 14,
-                      decoration: BoxDecoration(
-                        color: categoriaInfo!.cor,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'OS em ${categoriaInfo.label}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
                 ),
-              ),
-            ),
-            SliverGrid(
-              delegate: SliverChildBuilderDelegate(
-                (ctx, i) {
-                  final rel = itensCategoria[i];
-                  final card = _RelacaoOSCard(relacao: rel, onTap: () => widget.onTap(rel));
-                  // A chave fica no primeiro card da linha para que o auto-scroll
-                  // role até a linha de mini-cards realmente aparecer, não só o rótulo.
-                  return i == 0 ? KeyedSubtree(key: _conteudoExpandidoKey, child: card) : card;
-                },
-                childCount: itensCategoria.length,
-              ),
-              gridDelegate: gridDelegate,
-            ),
-          ],
+                if (_categoriaAberta != null) ...[
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 16, bottom: 4),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 3,
+                            height: 14,
+                            decoration: BoxDecoration(
+                              color: categoriaInfo!.cor,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'OS em ${categoriaInfo.label}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  SliverGrid(
+                    delegate: SliverChildBuilderDelegate(
+                      (ctx, i) {
+                        final rel = itensCategoria[i];
+                        final card = _RelacaoOSCard(relacao: rel, onTap: () => widget.onTap(rel));
+
+                        return i == 0 ? KeyedSubtree(key: _conteudoExpandidoKey, child: card) : card;
+                      },
+                      childCount: itensCategoria.length,
+                    ),
+                    gridDelegate: gridDelegate,
+                  ),
+                ],
+              ],
+              if (widget.totalNumericas > 0) ...[
+                SliverToBoxAdapter(child: SizedBox(key: _topoListaKey)),
+                _cabecalho('Ordens de Serviço', widget.totalNumericas, context),
+                SliverGrid(
+                  delegate: SliverChildBuilderDelegate(
+                    (ctx, i) {
+                      final rel = numericasPagina[i];
+                      return _RelacaoOSCard(relacao: rel, onTap: () => widget.onTap(rel));
+                    },
+                    childCount: numericasPagina.length,
+                  ),
+                  gridDelegate: gridDelegate,
+                ),
+              ],
+              const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            ],
+          ),
+        ),
+        if (widget.totalNumericas > 0 && totalPaginas > 1) ...[
+          const SizedBox(height: 12),
+          _BarraPaginacaoOS(
+            paginaAtual:     paginaAtual,
+            totalPaginas:    totalPaginas,
+            totalItens:      widget.totalNumericas,
+            itensPorPagina:  widget.itensPorPagina,
+            onPaginaChanged: _irParaPagina,
+          ),
         ],
-        const SliverToBoxAdapter(child: SizedBox(height: 16)),
       ],
     );
   }
 }
-
-// ─── Card grande de categoria (Empresa / Investimento / Outros) ──────────────
 
 class _CategoriaEmpresaCard extends StatelessWidget {
   final _CategoriaEmpresaInfo info;
@@ -1992,8 +2120,6 @@ class _CategoriaEmpresaCard extends StatelessWidget {
   }
 }
 
-// ─── Card de OS ────────────────────────────────────────────────────────────────
-
 class _RelacaoOSCard extends StatelessWidget {
   final RelacaoOSModel relacao;
   final VoidCallback onTap;
@@ -2002,7 +2128,7 @@ class _RelacaoOSCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Remove sufixo interno "#OCx" / "#Sx" / "#Ex" de OS textuais antes de exibir
+
     final numeroOSRaw = relacao.numeroOS;
     final idxSufixo   = [
       numeroOSRaw.indexOf('#OC'),
@@ -2034,7 +2160,7 @@ class _RelacaoOSCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Ícone + badge de status
+
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -2049,7 +2175,7 @@ class _RelacaoOSCard extends StatelessWidget {
                         color: AppTheme.primary, size: 20),
                   ),
                   const Spacer(),
-                  // Badge status
+
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 6, vertical: 2),
@@ -2070,7 +2196,7 @@ class _RelacaoOSCard extends StatelessWidget {
                   ),
                 ],
               ),
-              // Título + contagem + data
+
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -2117,8 +2243,6 @@ class _RelacaoOSCard extends StatelessWidget {
   }
 }
 
-// ─── Tela de detalhe da OS ────────────────────────────────────────────────────
-
 class _RelacaoDetalhe extends StatefulWidget {
   final int relacaoOSId;
   final String numeroOS;
@@ -2131,7 +2255,6 @@ class _RelacaoDetalhe extends StatefulWidget {
 class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
   bool _revertendo = false;
 
-  /// Remove sufixo interno "#OCx" / "#Sx" / "#Ex" usado para distinguir OS textuais no banco.
   String get _numeroOSDisplay {
     final n = widget.numeroOS;
     final candidates = [n.indexOf('#OC'), n.indexOf('#S'), n.indexOf('#E')]
@@ -2154,7 +2277,6 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
     });
   }
 
-  // ── Reverter OS ────────────────────────────────────────────────────────────
   Future<void> _confirmarReverterOS() async {
     const corReverter = Color(0xFFED6C02);
 
@@ -2243,7 +2365,6 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
     }
   }
 
-  // ── Fechar OS ──────────────────────────────────────────────────────────────
   Future<void> _confirmarFecharOS(BuildContext context) async {
     final provider  = context.read<EstoqueProvider>();
     final navigator = Navigator.of(context);
@@ -2346,7 +2467,6 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
     }
   }
 
-  // ── Excluir OS ─────────────────────────────────────────────────────────────
   Future<void> _confirmarExcluirOS(BuildContext context) async {
     final provider  = context.read<EstoqueProvider>();
     final navigator = Navigator.of(context);
@@ -2409,12 +2529,10 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
     }
   }
 
-  // ── Renomear OS ────────────────────────────────────────────────────────────
   Future<void> _abrirRenomearOS(BuildContext context, RelacaoOSModel rel) async {
     final provider  = context.read<EstoqueProvider>();
     final messenger = ScaffoldMessenger.of(context);
 
-    // Remove sufixo interno antes de exibir no campo
     final nomeAtual = _numeroOSDisplay;
 
     final resultado = await showDialog<_RenomearOSResultado>(
@@ -2496,7 +2614,7 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
           ],
         ),
         actions: [
-          // Botão Reverter OS (só para OS fechadas)
+
           if (rel != null && rel.estaFechada)
             _revertendo
                 ? const Padding(
@@ -2527,11 +2645,7 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
                       ),
                     ),
                   ),
-          // Botões Entrada / Saída por OS foram removidos deste local: o
-          // registro de movimentação agora é feito sempre a partir do card
-          // do material (ver diálogo do material), evitando ambiguidade
-          // sobre a que estoque/OS a ação se refere.
-          // Botão Fechar OS (só exibe se EM_ANDAMENTO)
+
           if (rel != null && !rel.estaFechada)
             Tooltip(
               message: 'Finalizar e fechar esta ordem de serviço',
@@ -2562,7 +2676,7 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
                 ),
               ),
             ),
-          // Botão renomear (só para OS em andamento)
+
           if (rel != null && !rel.estaFechada)
             Tooltip(
               message: 'Renomear esta ordem de serviço',
@@ -2574,7 +2688,7 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
                 ),
               ),
             ),
-          // Botão excluir (só para OS em andamento)
+
           if (rel != null && !rel.estaFechada)
             Tooltip(
               message: 'Excluir esta ordem de serviço',
@@ -2606,8 +2720,6 @@ class _RelacaoDetalheState extends State<_RelacaoDetalhe> {
   }
 }
 
-// ─── Badge de status da OS ────────────────────────────────────────────────────
-
 class _StatusBadgeOS extends StatelessWidget {
   final String status;
   const _StatusBadgeOS({required this.status});
@@ -2634,10 +2746,6 @@ class _StatusBadgeOS extends StatelessWidget {
     );
   }
 }
-
-// ─── Corpo do detalhe ─────────────────────────────────────────────────────────
-
-// ─── Card de resumo (materiais / datas) ──────────────────────────────────────
 
 class _SummaryCard extends StatelessWidget {
   final IconData icon;
@@ -2719,7 +2827,7 @@ class _RelacaoDetalheBody extends StatefulWidget {
 }
 
 class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
-  // Chave: materialId
+
   String _chaveGrupo(MovimentacaoModel mov) => '${mov.materialId}';
 
   final TextEditingController _nomeCtrl          = TextEditingController();
@@ -2897,7 +3005,7 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
                       onChanged: _onFiltroDigitado,
                       decoration: InputDecoration(
                         hintText: 'Nome do material',
-                        prefixIcon: Icon(Icons.filter_alt_outlined,
+                        prefixIcon: Icon(Icons.inventory_2_outlined,
                             color: Theme.of(context).colorScheme.outline, size: 20),
                         isDense: true,
                       ),
@@ -3033,7 +3141,7 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
                       key: ValueKey(entry.key),
                       movimentacoes: movs,
                       numeroOS: widget.rel.numeroOS,
-                      // OS fechada: bloqueia ações de movimentação/remoção
+
                       somenteLeitura: widget.rel.estaFechada,
                     );
                   },
@@ -3043,8 +3151,6 @@ class _RelacaoDetalheBodyState extends State<_RelacaoDetalheBody> {
     );
   }
 }
-
-// ─── Card de material em grid ──────────────────────────────────────────────────
 
 class _MaterialGridCard extends StatefulWidget {
   final List<MovimentacaoModel> movimentacoes;
@@ -3065,9 +3171,6 @@ class _MaterialGridCard extends StatefulWidget {
 class _MaterialGridCardState extends State<_MaterialGridCard> {
   MovimentacaoModel get _primeira => widget.movimentacoes.first;
 
-  /// True quando o material desta movimentação foi excluído do cadastro.
-  /// Ações que dependem do cadastro (nova movimentação, retalho, atualizar custo)
-  /// ficam desabilitadas para evitar erros.
   bool get _materialFoiExcluido =>
       _primeira.materialNome == '(material excluído)' ||
       _primeira.materialNome.isEmpty;
@@ -3112,8 +3215,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       ));
       return;
     }
-    // Busca último preço registrado nas movimentações desta OS,
-    // ou recorre ao último valor pago do material.
+
     final ultimaMovOS = widget.movimentacoes
         .where((m) =>
             m.materialId == _primeira.materialId &&
@@ -3159,15 +3261,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
 
   Future<void> _confirmarRemoverMovimentacao(
       BuildContext context, MovimentacaoModel mov) async {
-    // Captura tudo que será necessário ANTES do await que dispara
-    // notifyListeners(). O `context` recebido aqui é o do _MaterialGridCard
-    // que disparou a ação (vindo do painel de detalhe do material); se essa
-    // for a última movimentação do material, o rebuild causado por
-    // removerMovimentacao() remove esse card da árvore (e fecha o painel)
-    // ENQUANTO ainda estamos no meio deste método. Qualquer uso de
-    // `context`/`messenger` depois do await pode então operar sobre um
-    // widget já desativado, daí os erros de "deactivated widget" e
-    // "setState() called during build".
+
     final provider  = context.read<EstoqueProvider>();
     final messenger = ScaffoldMessenger.maybeOf(context);
     final rootContext =
@@ -3204,9 +3298,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       numeroOS: widget.numeroOS,
     );
 
-    // Não usa mais o `context` original (pode ter sido desativado pelo
-    // rebuild acima). Usa o messenger já capturado e, como fallback, exibe
-    // via o context raiz do app — que nunca é desmontado por esse fluxo.
     final feedback = SnackBar(
       content: Text(ok ? 'Movimentação removida' : (provider.erro ?? 'Erro')),
       backgroundColor: ok ? AppTheme.success : AppTheme.error,
@@ -3218,8 +3309,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
     }
   }
 
-
-  // ── Atualizar custo da última compra em todas as movimentações do card ──────
   Future<void> _abrirAtualizarCusto(BuildContext context) async {
     if (_materialFoiExcluido) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -3232,7 +3321,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
     final estoqueProvider  = context.read<EstoqueProvider>();
     final messenger        = ScaffoldMessenger.of(context);
 
-    // Busca o material para obter o último valor pago
     final mat = await materialProvider.buscarPorId(_primeira.materialId);
     if (!context.mounted) return;
 
@@ -3318,7 +3406,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                       children: [
                         if (temPrecoUnit)
                           Text(
-                            'Unit.: ${brl(mat.ultimoValorPago!)}',
+                            'Unidade: ${brl(mat.ultimoValorPago!)}',
                             style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
@@ -3326,7 +3414,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                           ),
                         if (temPrecoM2)
                           Text(
-                            'M²: ${brl(mat.ultimoValorPagoM2!)}',
+                            'm²: ${brl(mat.ultimoValorPagoM2!)}',
                             style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
@@ -3363,7 +3451,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
     if (confirmar != true) return;
     if (!context.mounted) return;
 
-    // Atualiza todas as movimentações do card em sequência
     int sucessos = 0;
     int falhas   = 0;
     for (final mov in widget.movimentacoes) {
@@ -3381,7 +3468,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
 
     if (!context.mounted) return;
 
-    // Recarrega o detalhe da OS para refletir os novos preços
     await estoqueProvider.selecionarRelacaoOS(widget.numeroOS);
 
     messenger.showSnackBar(
@@ -3410,14 +3496,12 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
     final estoqueProvider = context.read<EstoqueProvider>();
     final materialProvider = context.read<MaterialProvider>();
 
-    // Busca dados do material (dimensões e custo m²)
     final mat = await materialProvider.buscarPorId(material.materialId);
     if (!context.mounted) return;
 
     final largura     = mat?.largura;
     final comprimento = mat?.comprimento;
 
-    // Se não há dimensões, não é possível calcular área — avisa e sai.
     if (largura == null || comprimento == null || largura <= 0 || comprimento <= 0) {
       messenger.showSnackBar(const SnackBar(
         content: Text(
@@ -3429,19 +3513,15 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       return;
     }
 
-    // Custo m²: prioriza o valor real das movimentações de saída desta OS
-    // (para refletir o custo que foi realmente lançado), com fallback no
-    // cadastro do material.
     final custoM2 = () {
-      // Pega o precoM2 da movimentação de saída mais recente que tenha valor
+
       final ultimaSaidaComPreco = widget.movimentacoes
           .where((m) => m.tipo == 'SAIDA' && m.precoM2 != null && m.precoM2! > 0)
           .fold<MovimentacaoModel?>(
               null,
               (prev, m) => prev == null || m.criadoEm.isAfter(prev.criadoEm) ? m : prev);
       if (ultimaSaidaComPreco != null) {
-        // precoM2 nas saídas com modo dimensional é o custo proporcional da área
-        // usada (não o custo/m²). Recalculamos o custo/m² dividindo pela área usada.
+
         if (ultimaSaidaComPreco.usouModoDimensional) {
           final lu = ultimaSaidaComPreco.larguraUsada!;
           final cu = ultimaSaidaComPreco.comprimentoUsado!;
@@ -3450,7 +3530,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
         }
         return ultimaSaidaComPreco.precoM2;
       }
-      // Fallback: custo unitário ÷ área da chapa
+
       if (mat?.ultimoValorPago != null && mat!.ultimoValorPago! > 0) {
         final areaChapa = largura * comprimento;
         return areaChapa > 0 ? mat.ultimoValorPago! / areaChapa : null;
@@ -3460,20 +3540,17 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
 
     final areaUnitaria = largura * comprimento;
 
-    // Calcula área total das saídas desta OS para este material
     final totalSaidasUnid = widget.movimentacoes
         .where((m) => m.tipo == 'SAIDA')
         .fold<double>(0, (s, m) => s + m.quantidade);
 
     final areaTotalSaida = totalSaidasUnid * areaUnitaria;
 
-    // Custo total registrado nas saídas desta OS (soma dos precoUnitario ou
-    // precoM2 reais de cada movimentação, independente do custo/m² atual).
     final custoTotalSaidas = widget.movimentacoes
         .where((m) => m.tipo == 'SAIDA')
         .fold<double>(0, (s, m) {
           if (m.usouModoDimensional && m.precoM2 != null) {
-            // precoM2 aqui já é o custo proporcional total da área usada
+
             return s + m.precoM2!;
           }
           if (m.precoUnitario != null && m.precoUnitario! > 0) {
@@ -3498,12 +3575,10 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
           final m2TextoRaw = m2Ctrl.text.replaceAll(',', '.');
           final m2Retalho  = double.tryParse(m2TextoRaw);
 
-          // M² líquido = total saído − retalho de volta (mín. 0)
           final liquidoM2 = (m2Retalho != null && m2Retalho > 0)
               ? (areaTotalSaida - m2Retalho).clamp(0.0, double.infinity).toDouble()
               : null;
 
-          // Custo líquido proporcional: custoTotal × (liquidoM2 / areaTotalSaida)
           final custoLiquido = (liquidoM2 != null && areaTotalSaida > 0 && custoTotalSaidas > 0)
               ? custoTotalSaidas * (liquidoM2 / areaTotalSaida)
               : (liquidoM2 != null && custoM2 != null && custoM2 > 0)
@@ -3522,7 +3597,14 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                   child: const Icon(Icons.content_cut, color: AppTheme.success, size: 20),
                 ),
                 const SizedBox(width: 12),
-                const Text('Reentrada de Retalho'),
+                const Expanded(child: Text('Reentrada de Retalho')),
+                IconButton(
+                  onPressed: () => Navigator.of(dlgCtx).pop(),
+                  icon: const Icon(Icons.close, size: 20),
+                  tooltip: 'Fechar',
+                  style: IconButton.styleFrom().copyWith(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                ),
               ],
             ),
             content: SizedBox(
@@ -3542,7 +3624,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                     ),
                   const SizedBox(height: 12),
 
-                  // ── Resumo das saídas ──────────────────────────────────────
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
@@ -3593,14 +3674,13 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [_DecimalInputFormatter()],
                     decoration: const InputDecoration(
-                      labelText: 'M² de retalho que sobrou *',
+                      labelText: 'm² de retalho que sobrou',
                       suffixText: 'm²',
                       isDense: true,
                     ),
                     onChanged: (_) => setDlg(() {}),
                   ),
 
-                  // ── Preview do cálculo líquido ─────────────────────────────
                   if (liquidoM2 != null) ...[
                     const SizedBox(height: 12),
                     Container(
@@ -3687,16 +3767,10 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
 
     final m2Retalho = resultado;
 
-    // ── Busca ou cria o material RETALHO ──────────────────────────────────────
-    // Nome padrão: usa literalmente o nome do material original (sem sufixo).
-    // Mesma espessura e categoria, unidade M², identificador RETALHO,
-    // custo/m² do original.
-
     final nomeRetalho = material.materialNome;
     final espessura   = material.materialEspessura;
     final categoria   = mat?.categoria;
 
-    // Tenta encontrar o retalho existente pelo nome + espessura + identificador
     final sugestoes = await materialProvider.buscarSugestoes(
       nomeRetalho,
       limite: 20,
@@ -3724,7 +3798,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
     if (retalhoExistente != null) {
       retalhoMaterialId = retalhoExistente.id;
     } else {
-      // Cria o material RETALHO
+
       final ok = await materialProvider.criar({
         'nome':              nomeRetalho,
         'identificador':     'RETALHO',
@@ -3744,7 +3818,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
         ));
         return;
       }
-      // Busca o material recém-criado
+
       final lista = await materialProvider.buscarSugestoes(nomeRetalho, limite: 5);
       if (!context.mounted) return;
       final criado = lista.firstWhere(
@@ -3757,12 +3831,8 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       retalhoMaterialId = criado.id;
     }
 
-    // ── Custo proporcional do retalho ─────────────────────────────────────────
-    // precoM2 na entrada do RETALHO = custo/m² do material original,
-    // de forma que: quantidade(m²) × precoM2 = custo proporcional no relatório.
     final custoM2Retalho = custoM2;
 
-    // ── Registra ENTRADA do retalho vinculada a esta OS ───────────────────────
     final entradaOk = await estoqueProvider.registrarMovimentacaoSilencioso(
       materialId:       retalhoMaterialId,
       tipo:             'ENTRADA',
@@ -3783,13 +3853,11 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       return;
     }
 
-    // Recarrega a OS para refletir a nova movimentação
     await estoqueProvider.carregarRelacoesOS();
     if (!context.mounted) return;
     await estoqueProvider.selecionarRelacaoOS(widget.numeroOS);
     if (!context.mounted) return;
 
-    // Custo líquido final para o snackbar (mesmo cálculo do preview)
     final liquidoM2Final = (areaTotalSaida - m2Retalho).clamp(0.0, double.infinity).toDouble();
     final custoLiquidoFinal = custoTotalSaidas > 0 && areaTotalSaida > 0
         ? custoTotalSaidas * (liquidoM2Final / areaTotalSaida)
@@ -3873,7 +3941,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
   }
 
   Future<void> _mostrarPainel(BuildContext context) async {
-    // Dados estáticos do card (nome, subtítulo) — não mudam
+
     final materialNome   = _primeira.materialNome;
     final subtitulo      = _subtitulo;
     final unidade        = _primeira.materialUnidade;
@@ -3887,7 +3955,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
       barrierColor: Colors.black26,
       builder: (ctx) => Consumer<EstoqueProvider>(
         builder: (ctx, provider, _) {
-          // Busca as movimentações atualizadas do provider
+
           final rel = provider.relacaoSelecionada;
           final movsAtuais = rel == null
               ? <MovimentacaoModel>[]
@@ -3896,13 +3964,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                   .toList()
             ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
 
-          // Se todas as movimentações foram removidas, fecha o dialog.
-          // Verifica ctx.mounted (não apenas canPop()) porque, quando esta
-          // era a última movimentação do material, o MESMO notifyListeners()
-          // que zerou `movsAtuais` também remove o _MaterialGridCard (pai)
-          // da árvore no GridView. Os dois rebuilds (deste Consumer e o do
-          // pai) podem ser processados no mesmo frame; sem essa checagem,
-          // o Navigator.of(ctx) pode operar sobre um elemento já desativado.
           if (movsAtuais.isEmpty && rel != null) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!ctx.mounted) return;
@@ -3952,7 +4013,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                         Tooltip(
                           message: 'Fechar',
                           child: IconButton(
-                            icon: const Icon(Icons.close),
+                            icon: const Icon(Icons.close, size: 20),
                             onPressed: () {
                               Navigator.of(ctx).pop();
                             },
@@ -3978,7 +4039,6 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Botões entrada / saída (ocultados se somente leitura)
                     if (!somenteLeitura) ...[
                       Row(
                         children: [
@@ -4034,7 +4094,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      // ── Atualizar custo da última compra ─────────────────
+
                       SizedBox(
                         width: double.infinity,
                         child: Tooltip(
@@ -4061,9 +4121,7 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
                           ),
                         ),
                       ),
-                      // ── Reentrada de Retalho (só para UNIDADE) ───────────────────────────
-                      // A verificação de dimensão (largura × comprimento) é feita
-                      // dentro de _abrirReentradaRetalho, com feedback adequado ao usuário.
+
                       if (_primeira.materialUnidade?.toUpperCase() == 'UNIDADE')
                         SizedBox(
                           width: double.infinity,
@@ -4161,15 +4219,11 @@ class _MaterialGridCardState extends State<_MaterialGridCard> {
   }
 }
 
-// ─── Último preço do material (unit. e/ou m²) ────────────────────────────────
-// Lê o preço mais recente das movimentações passadas para exibir no card.
-
 class _UltimoPrecoRow extends StatelessWidget {
   final List<MovimentacaoModel> movimentacoes;
-  /// Unidade do material (ex: 'M/L', 'm', 'UNIDADE', 'M2'…).
-  /// Usado para escolher o label correto nos badges de custo.
+
   final String? unidade;
-  /// [expanded] = true no painel popup (layout horizontal mais largo).
+
   final bool expanded;
 
   const _UltimoPrecoRow({
@@ -4190,7 +4244,7 @@ class _UltimoPrecoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Pega a movimentação mais recente com preço (ENTRADA ou SAIDA)
+
     final todas = List<MovimentacaoModel>.from(movimentacoes)
       ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
 
@@ -4208,29 +4262,20 @@ class _UltimoPrecoRow extends StatelessWidget {
 
     if (pu == null && pm2 == null) return const SizedBox.shrink();
 
-    // Para metro linear:
-    //   • precoUnitario = custo por metro linear (R$/m) → badge "M/L"
-    //   • precoM2 gravado = custo por metro linear também (mesmo valor)
-    //     → não exibir separado; mostrar o verdadeiro custo/m² do material
-    //       que é precoM2 / largura — mas como não temos largura aqui,
-    //       exibimos apenas o badge M/L e omitimos o badge M² redundante.
-    // Para materiais UNIDADE (chapa):
-    //   • precoUnitario → badge "Unit."
-    //   • precoM2 → badge "M²"
     final chips = <Widget>[];
     if (_eMetroLinear) {
-      // Prefere precoUnitario (custo/metro linear); fallback para precoM2
+
       final valorML = pu ?? pm2;
       if (valorML != null) {
         chips.add(_PrecoBadge(label: 'm/l', valor: _brl(valorML)));
       }
     } else {
       if (pu != null) {
-        chips.add(_PrecoBadge(label: 'Unit.', valor: _brl(pu)));
+        chips.add(_PrecoBadge(label: 'Unidade', valor: _brl(pu)));
       }
       if (pm2 != null) {
         if (chips.isNotEmpty) chips.add(const SizedBox(width: 4));
-        chips.add(_PrecoBadge(label: 'M²', valor: _brl(pm2)));
+        chips.add(_PrecoBadge(label: 'm²', valor: _brl(pm2)));
       }
     }
 
@@ -4278,33 +4323,57 @@ class _PrecoBadge extends StatelessWidget {
   }
 }
 
-// ─── Totais de entrada/saída ──────────────────────────────────────────────────
-
 class _TotaisMovimentacao {
   final double qtdEntrada;
   final double qtdSaida;
   final double valorEntrada;
   final double valorSaida;
+  final double qtdEntradaInteira;
+  final double qtdEntradaParcial;
+  final double qtdSaidaInteira;
+  final double qtdSaidaParcial;
 
   const _TotaisMovimentacao({
     required this.qtdEntrada,
     required this.qtdSaida,
     required this.valorEntrada,
     required this.valorSaida,
+    this.qtdEntradaInteira = 0,
+    this.qtdEntradaParcial = 0,
+    this.qtdSaidaInteira = 0,
+    this.qtdSaidaParcial = 0,
   });
 
   static String _brl(double v) =>
       _brl6(v);
 
   String get qtdEntradaStr => formatarQuantidadeExibicao(qtdEntrada);
-
   String get qtdSaidaStr => formatarQuantidadeExibicao(qtdSaida);
-
   String get valorEntradaStr => _brl(valorEntrada);
   String get valorSaidaStr   => _brl(valorSaida);
 
+  static String _qtdComParciaisStr(double inteira, double parcial, String unStr) {
+    final inteiraStr = formatarQuantidadeExibicao(inteira);
+    final unLower = unStr.toLowerCase();
+    final unExibicao =
+        (unLower == 'unidade' && inteira != 1) ? 'unidades' : unStr;
+    if (parcial <= 0) {
+      return unExibicao.isNotEmpty ? '$inteiraStr $unExibicao' : inteiraStr;
+    }
+    final parcialStr = formatarQuantidadeExibicao(parcial);
+    final sufixoInteira = unExibicao.isNotEmpty ? ' $unExibicao' : '';
+    return '$inteiraStr$sufixoInteira e $parcialStr parciais';
+  }
+
+  String qtdEntradaComParciaisStr(String unStr) =>
+      _qtdComParciaisStr(qtdEntradaInteira, qtdEntradaParcial, unStr);
+
+  String qtdSaidaComParciaisStr(String unStr) =>
+      _qtdComParciaisStr(qtdSaidaInteira, qtdSaidaParcial, unStr);
+
   static _TotaisMovimentacao calcular(List<MovimentacaoModel> movs) {
     double qtdE = 0, qtdS = 0, valE = 0, valS = 0;
+    double qtdEInt = 0, qtdEParc = 0, qtdSInt = 0, qtdSParc = 0;
     const mlUnits = {
       'm', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares',
     };
@@ -4312,21 +4381,11 @@ class _TotaisMovimentacao {
       final pm2  = m.precoM2;
       final pu   = m.precoUnitario;
       final unid = (m.materialUnidade ?? '').toLowerCase().trim();
-      // Metro linear: a quantidade está em metros, então o fator correto é
-      // precoUnitario (custo por metro linear). precoM2, quando presente,
-      // é apenas referência de custo/m² do material e NÃO deve ser
-      // multiplicado pela quantidade em metros — fazer isso gera o valor
-      // errado (qtd × custo/m² em vez de qtd × custo/metro).
+
       final eMetroLinear = mlUnits.contains(unid);
-      // M²: a quantidade já está em área, então precoM2 é o fator correto.
+
       final eM2 = unid == 'm²' || unid == 'm2';
-      // UNIDADE (chapa, peça…): a quantidade é em unidades; o custo por unidade
-      // é precoUnitario. precoM2 é apenas referência (custo/m²) e NÃO deve ser
-      // multiplicado pela quantidade de unidades.
-      // Modo dimensional (chapa com largura×comprimento usados): precoM2 já é
-      // o custo proporcional TOTAL da área consumida (não custo/m² do
-      // material), e quantidade é sempre 1. Usar precoUnitario aqui contaria
-      // o valor da chapa inteira em vez do retalho realmente usado.
+
       final preco = m.usouModoDimensional
           ? (pm2 ?? 0.0)
           : (eMetroLinear
@@ -4337,19 +4396,30 @@ class _TotaisMovimentacao {
       if (m.tipo == 'ENTRADA') {
         qtdE += m.quantidade;
         valE += m.quantidade * preco;
+        if (m.usouModoDimensional) {
+          qtdEParc += m.quantidade;
+        } else {
+          qtdEInt += m.quantidade;
+        }
       } else {
         qtdS += m.quantidade;
         valS += m.quantidade * preco;
+        if (m.usouModoDimensional) {
+          qtdSParc += m.quantidade;
+        } else {
+          qtdSInt += m.quantidade;
+        }
       }
     }
     return _TotaisMovimentacao(
       qtdEntrada: qtdE, qtdSaida: qtdS,
       valorEntrada: valE, valorSaida: valS,
+      qtdEntradaInteira: qtdEInt, qtdEntradaParcial: qtdEParc,
+      qtdSaidaInteira: qtdSInt, qtdSaidaParcial: qtdSParc,
     );
   }
 }
 
-/// Chips compactos exibidos no card fechado.
 class _TotaisResumoMini extends StatelessWidget {
   final _TotaisMovimentacao totais;
   final String? unidade;
@@ -4360,11 +4430,6 @@ class _TotaisResumoMini extends StatelessWidget {
     required this.movimentacoes,
   });
 
-  /// Retorna a medida usada "(0.5x1m)" quando existir exatamente uma
-  /// movimentação do [tipo] informado e ela tiver sido feita em modo
-  /// dimensional (retalho com largura/comprimento usados). Com mais de uma
-  /// movimentação do mesmo tipo não há uma única medida a exibir no chip
-  /// resumido, então retorna null e o detalhe fica só no histórico.
   String? _medidaUsada(String tipo) {
     final doTipo = movimentacoes.where((m) => m.tipo == tipo).toList();
     if (doTipo.length != 1) return null;
@@ -4395,7 +4460,7 @@ class _TotaisResumoMini extends StatelessWidget {
           _TotalChip(
             icon: Icons.arrow_upward,
             cor: AppTheme.success,
-            qtd: '${totais.qtdEntradaStr}${unStr.isNotEmpty ? ' $unStr' : ''}'
+            qtd: '${totais.qtdEntradaComParciaisStr(unStr)}'
                 '${medidaEntrada != null ? ' $medidaEntrada' : ''}',
             valor: totais.valorEntradaStr,
           ),
@@ -4403,7 +4468,7 @@ class _TotaisResumoMini extends StatelessWidget {
           _TotalChip(
             icon: Icons.arrow_downward,
             cor: AppTheme.error,
-            qtd: '${totais.qtdSaidaStr}${unStr.isNotEmpty ? ' $unStr' : ''}'
+            qtd: '${totais.qtdSaidaComParciaisStr(unStr)}'
                 '${medidaSaida != null ? ' $medidaSaida' : ''}',
             valor: totais.valorSaidaStr,
           ),
@@ -4412,7 +4477,6 @@ class _TotaisResumoMini extends StatelessWidget {
   }
 }
 
-/// Bloco expandido exibido no modal de detalhe do material.
 class _TotaisResumoCompleto extends StatelessWidget {
   final List<MovimentacaoModel> movimentacoes;
   final String? unidade;
@@ -4440,7 +4504,7 @@ class _TotaisResumoCompleto extends StatelessWidget {
                 icon: Icons.arrow_upward,
                 cor: AppTheme.success,
                 label: 'Entrada total',
-                qtd: '${totais.qtdEntradaStr}${unStr.isNotEmpty ? ' $unStr' : ''}',
+                qtd: totais.qtdEntradaComParciaisStr(unStr),
                 valor: totais.valorEntradaStr,
               ),
             ),
@@ -4457,7 +4521,7 @@ class _TotaisResumoCompleto extends StatelessWidget {
                 icon: Icons.arrow_downward,
                 cor: AppTheme.error,
                 label: 'Saída total',
-                qtd: '${totais.qtdSaidaStr}${unStr.isNotEmpty ? ' $unStr' : ''}',
+                qtd: totais.qtdSaidaComParciaisStr(unStr),
                 valor: totais.valorSaidaStr,
               ),
             ),
@@ -4531,14 +4595,12 @@ class _TotalLinha extends StatelessWidget {
   }
 }
 
-// ─── Row de movimentação ──────────────────────────────────────────────────────
-
 class _MovimentacaoRow extends StatelessWidget {
   final MovimentacaoModel mov;
   final String? unidade;
   final String Function(DateTime) formatData;
   final String Function(double, String?) formatQtd;
-  // null = somente leitura (OS fechada)
+
   final VoidCallback? onRemove;
 
   const _MovimentacaoRow({
@@ -4598,7 +4660,7 @@ class _MovimentacaoRow extends StatelessWidget {
                             fontWeight: FontWeight.w600,
                           ),
                     ),
-                    // Badge de preço desta movimentação
+
                     Builder(builder: (_) {
                       final pu  = mov.precoUnitario;
                       final pm2 = mov.precoM2;
@@ -4606,15 +4668,14 @@ class _MovimentacaoRow extends StatelessWidget {
                       final eML = mlUnits.contains(unidade?.toLowerCase().trim() ?? '');
                       final partes = <String>[];
                       if (mov.usouModoDimensional) {
-                        // Modo dimensional: precoM2 é o custo TOTAL proporcional
-                        // ao retalho usado (não custo por m²), então exibe sem
-                        // sufixo "/m²" — e ignora precoUnitario (preço da chapa
-                        // inteira), que não corresponde ao valor desta saída.
-                        if (pm2 != null && pm2 > 0) {
-                          partes.add(_brl6(pm2));
+                        if (pm2 != null && pm2 > 0 &&
+                            mov.larguraUsada != null && mov.comprimentoUsado != null) {
+                          final area  = mov.larguraUsada! * mov.comprimentoUsado!;
+                          final total = double.parse((pm2 * area).toStringAsFixed(2));
+                          partes.add(_brl6(total));
                         }
                       } else if (eML) {
-                        // Metro linear: mostra apenas um valor (custo/m linear) com label M/L
+
                         final val = (pu != null && pu > 0) ? pu : (pm2 != null && pm2 > 0 ? pm2 : null);
                         if (val != null) partes.add('R\$ ${_brl6(val).substring(3)} /m/l');
                       } else {
@@ -4677,7 +4738,7 @@ class _MovimentacaoRow extends StatelessWidget {
               ],
             ),
           ),
-          // Botão remover — oculto quando OS está fechada
+
           if (onRemove != null)
             IconButton(
               onPressed: onRemove,
@@ -4699,8 +4760,6 @@ class _MovimentacaoRow extends StatelessWidget {
     );
   }
 }
-
-// ─── Dialog: movimentação de item específico ──────────────────────────────────
 
 class _MovimentacaoItemDialog extends StatefulWidget {
   final String tipo;
@@ -4751,10 +4810,7 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
     final messenger = ScaffoldMessenger.of(context);
 
     setState(() => _enviando = true);
-    
-    // ╔════════════════════════════════════════════════════════════════════╗
-    // ║ Usa o numeroOS completo (com sufixo) que veio do context          ║
-    // ╚════════════════════════════════════════════════════════════════════╝
+
     final ok = await provider.registrarMovimentacao(
       materialId:    widget.materialId,
       tipo:          widget.tipo,
@@ -4766,10 +4822,10 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
           ? null
           : _obsCtrl.text.trim(),
     );
-    
+
     if (!mounted) return;
     setState(() => _enviando = false);
-    
+
     if (ok) {
       provider.selecionarRelacaoOS(widget.numeroOS);
       navigator.pop();
@@ -4806,7 +4862,14 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
             color: cor,
           ),
           SizedBox(width: 8),
-          Text(isEntrada ? 'Registrar Entrada' : 'Registrar Saída'),
+          Expanded(child: Text(isEntrada ? 'Registrar Entrada' : 'Registrar Saída')),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Fechar',
+            style: IconButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          ),
         ],
       ),
       content: Form(
@@ -4846,7 +4909,7 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
                 if (_erroEstoque != null) setState(() => _erroEstoque = null);
               },
             ),
-            // Exibe o preço que será gravado com a movimentação
+
             Builder(builder: (_) {
               final pu  = widget.precoUnitario;
               final pm2 = widget.precoM2;
@@ -4862,7 +4925,7 @@ class _MovimentacaoItemDialogState extends State<_MovimentacaoItemDialog> {
                   partes.add('Unidade: R\$ ${_brl6(pu).substring(3)}');
                 }
                 if (pm2 != null && pm2 > 0) {
-                  partes.add('M²: R\$ ${_brl6(pm2).substring(3)}');
+                  partes.add('m²: R\$ ${_brl6(pm2).substring(3)}');
                 }
               }
               if (partes.isEmpty) return SizedBox.shrink();
@@ -4945,10 +5008,6 @@ class _MovimentacaoGlobalDialogState
   final List<_ItemMovimentacao> _itensSelecionados = [];
   bool _enviando = false;
 
-  // ── Autofill de cliente ao digitar um número de OS já existente ────────
-  // Quando a OS já tem cliente vinculado, mostramos o nome como texto
-  // informativo (não editável aqui — edição só via "Renomear OS" no
-  // detalhe). Sem cliente vinculado, o campo abaixo fica livre para digitar.
   String? _clienteVinculado;
   bool _buscandoCliente = false;
   Timer? _debounceCliente;
@@ -4967,16 +5026,17 @@ class _MovimentacaoGlobalDialogState
   bool _buscouUmaVez = false;
   Timer? _debounce;
 
+  static const int _itensPorPagina = 50;
+  int _paginaAtual  = 0;
+  int _totalItens   = 0;
+
   @override
   void initState() {
     super.initState();
-    // Adia para depois do build atual: chamar direto aqui faria o
-    // notifyListeners() do MaterialProvider disparar ainda dentro do
-    // initState (antes de qualquer await real), o que tenta reconstruir
-    // widgets enquanto o Flutter ainda está montando a árvore — gerando
-    // "setState()/markNeedsBuild() called during build".
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _carregarCategorias();
+      if (mounted) _buscar(irParaPagina: 0);
     });
     if (widget.numeroOSFixo != null) {
       final raw = widget.numeroOSFixo!;
@@ -5009,10 +5069,6 @@ class _MovimentacaoGlobalDialogState
     super.dispose();
   }
 
-  /// Agenda a busca do cliente já vinculado ao número de OS digitado
-  /// (debounced). Quando encontrado, fixa o campo como somente leitura com
-  /// o nome vinculado; quando não encontrado (OS nova ou sem cliente),
-  /// libera o campo para digitação, preservando o que já foi digitado.
   void _agendarBuscaCliente() {
     _debounceCliente?.cancel();
     final numero = _numeroOSCtrl.text.trim();
@@ -5041,9 +5097,7 @@ class _MovimentacaoGlobalDialogState
       if (encontrado != null) {
         _clienteCtrl.text = encontrado;
       } else if (tinhaVinculadoAntes) {
-        // Deixou de haver cliente vinculado (número trocado para uma OS
-        // nova/sem cliente) — limpa o texto que estava travado, já que ele
-        // pertencia à OS anterior, não foi digitado pelo usuário.
+
         _clienteCtrl.clear();
       }
     });
@@ -5064,34 +5118,17 @@ class _MovimentacaoGlobalDialogState
 
   void _agendarBusca() {
     _debounce?.cancel();
-    final temValor = _nomeCtrl.text.isNotEmpty ||
-        _identificadorCtrl.text.isNotEmpty ||
-        _medidaCtrl.text.isNotEmpty ||
-        _comprimentoCtrl.text.isNotEmpty ||
-        _larguraCtrl.text.isNotEmpty ||
-        _espessuraCtrl.text.isNotEmpty;
-    if (!temValor && _categoriaFiltro == null) {
-      setState(() {
-        _buscouUmaVez = false;
-        _resultados   = [];
-      });
-      return;
-    }
-    _debounce = Timer(const Duration(milliseconds: 350), _buscar);
+    _debounce = Timer(const Duration(milliseconds: 350), () => _buscar(irParaPagina: 0));
   }
 
-  Future<void> _buscar() async {
+  Future<void> _buscar({required int irParaPagina}) async {
     if (!mounted) return;
     setState(() {
       _buscando     = true;
       _buscouUmaVez = true;
     });
     try {
-      // Usa buscarParaMovimentacao em vez de carregar() por dois motivos:
-      // 1. Não polui o estado global do MaterialProvider (sem notifyListeners).
-      // 2. Inclui materiais temporários ativos, que devem aparecer aqui mas
-      //    não no catálogo padrão de materiais.
-      final lista = await context.read<MaterialProvider>().buscarParaMovimentacao(
+      final resultado = await context.read<MaterialProvider>().buscarParaMovimentacao(
         busca:         _nomeCtrl.text.trim(),
         identificador: _identificadorCtrl.text.trim(),
         medida:        _medidaCtrl.text.trim(),
@@ -5099,17 +5136,23 @@ class _MovimentacaoGlobalDialogState
         largura:       _larguraCtrl.text.trim(),
         espessura:     _espessuraCtrl.text.trim(),
         categoria:     _categoriaFiltro,
+        pagina:        irParaPagina + 1,
+        porPagina:     _itensPorPagina,
       );
       if (mounted) {
         setState(() {
-          _resultados = lista; // backend já filtra ativo=true
-          _buscando   = false;
+          _resultados  = resultado.itens;
+          _totalItens  = resultado.total;
+          _paginaAtual = irParaPagina;
+          _buscando    = false;
         });
       }
     } catch (_) {
       if (mounted) setState(() => _buscando = false);
     }
   }
+
+  void _irParaPagina(int p) => _buscar(irParaPagina: p);
 
   void _limparFiltros() {
     _nomeCtrl.clear();
@@ -5119,11 +5162,8 @@ class _MovimentacaoGlobalDialogState
     _larguraCtrl.clear();
     _espessuraCtrl.clear();
     _debounce?.cancel();
-    setState(() {
-      _categoriaFiltro = null;
-      _buscouUmaVez    = false;
-      _resultados      = [];
-    });
+    setState(() => _categoriaFiltro = null);
+    _buscar(irParaPagina: 0);
   }
 
   void _selecionarMaterial(MaterialModel m) {
@@ -5156,9 +5196,6 @@ class _MovimentacaoGlobalDialogState
       numeroOS = numeroOS.trim();
     }
 
-    // Só envia cliente quando o usuário digitou um novo (OS ainda sem
-    // cliente vinculado); se já existe cliente vinculado, não reenviamos —
-    // o backend preserva o valor já salvo de qualquer forma.
     final clienteDigitado = _clienteVinculado == null && _clienteCtrl.text.trim().isNotEmpty
         ? _clienteCtrl.text.trim()
         : null;
@@ -5213,7 +5250,7 @@ class _MovimentacaoGlobalDialogState
         comprimentoUsado: compUsado,
         cliente:          clienteDigitado,
       );
-      
+
       if (!ok) {
         todosOk = false;
         final erro = provider.erro ?? 'Erro desconhecido';
@@ -5289,7 +5326,7 @@ class _MovimentacaoGlobalDialogState
                         textCapitalization: TextCapitalization.characters,
                         inputFormatters: [_UpperCaseFormatter()],
                         decoration: InputDecoration(
-                          labelText: 'Número da OS *',
+                          labelText: 'Número da OS',
                           prefixText: 'OS ',
                           isDense: true,
                           filled: widget.numeroOSFixo != null,
@@ -5314,15 +5351,7 @@ class _MovimentacaoGlobalDialogState
                       ),
                     ),
                     const SizedBox(width: 12),
-                    // ── Campo Cliente ──────────────────────────────────────
-                    // Se a OS digitada já tem cliente vinculado, mostra como
-                    // texto travado (edição só via "Renomear OS" no
-                    // detalhe). Sem cliente vinculado, campo livre e opcional.
-                    // Mantém sempre o MESMO TextFormField (não troca o tipo
-                    // de widget conforme o estado) para não perder o foco
-                    // quando o autofill resolve — trocar para InputDecorator
-                    // destruía e recriava o Element, jogando o foco para o
-                    // campo Número da OS.
+
                     SizedBox(
                       width: 220,
                       child: TextFormField(
@@ -5396,6 +5425,16 @@ class _MovimentacaoGlobalDialogState
                         ),
                       ),
                     ],
+                    const Spacer(),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close, size: 20),
+                      tooltip: 'Fechar',
+                      style: IconButton.styleFrom().copyWith(
+                        mouseCursor:
+                            WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -5418,7 +5457,7 @@ class _MovimentacaoGlobalDialogState
                                     autofocus: true,
                                     decoration: InputDecoration(
                                       hintText: 'Nome do material',
-                                      prefixIcon: Icon(Icons.search,
+                                      prefixIcon: Icon(Icons.inventory_2_outlined,
                                           color: Theme.of(context).colorScheme.outline, size: 18),
                                       isDense: true,
                                     ),
@@ -5426,7 +5465,7 @@ class _MovimentacaoGlobalDialogState
                                         TextCapitalization.characters,
                                     inputFormatters: [_UpperCaseFormatter()],
                                     onChanged: (_) => _agendarBusca(),
-                                    onSubmitted: (_) => _buscar(),
+                                    onSubmitted: (_) => _buscar(irParaPagina: 0),
                                   ),
                                 ),
                                 SizedBox(width: 8),
@@ -5437,7 +5476,7 @@ class _MovimentacaoGlobalDialogState
                                     valorSelecionado: _categoriaFiltro,
                                     onSelecionar: (v) {
                                       setState(() => _categoriaFiltro = v);
-                                      if (_buscouUmaVez) _buscar();
+                                      if (_buscouUmaVez) _buscar(irParaPagina: 0);
                                     },
                                   ),
                                 ),
@@ -5488,7 +5527,7 @@ class _MovimentacaoGlobalDialogState
                                         TextCapitalization.characters,
                                     inputFormatters: [_UpperCaseFormatter()],
                                     onChanged: (_) => _agendarBusca(),
-                                    onSubmitted: (_) => _buscar(),
+                                    onSubmitted: (_) => _buscar(irParaPagina: 0),
                                   ),
                                 ),
                                 SizedBox(width: 8),
@@ -5503,7 +5542,7 @@ class _MovimentacaoGlobalDialogState
                                     ),
                                     inputFormatters: [_MedidaEspessuraFormatter()],
                                     onChanged: (_) => _agendarBusca(),
-                                    onSubmitted: (_) => _buscar(),
+                                    onSubmitted: (_) => _buscar(irParaPagina: 0),
                                   ),
                                 ),
                               ],
@@ -5525,7 +5564,7 @@ class _MovimentacaoGlobalDialogState
                                     ),
                                     inputFormatters: [_EspessuraFormatter()],
                                     onChanged: (_) => _agendarBusca(),
-                                    onSubmitted: (_) => _buscar(),
+                                    onSubmitted: (_) => _buscar(irParaPagina: 0),
                                   ),
                                 ),
                                 SizedBox(width: 8),
@@ -5542,7 +5581,7 @@ class _MovimentacaoGlobalDialogState
                                     ),
                                     inputFormatters: [_EspessuraFormatter()],
                                     onChanged: (_) => _agendarBusca(),
-                                    onSubmitted: (_) => _buscar(),
+                                    onSubmitted: (_) => _buscar(irParaPagina: 0),
                                   ),
                                 ),
                                 SizedBox(width: 8),
@@ -5558,7 +5597,7 @@ class _MovimentacaoGlobalDialogState
                                     ),
                                     inputFormatters: [_EspessuraFormatter()],
                                     onChanged: (_) => _agendarBusca(),
-                                    onSubmitted: (_) => _buscar(),
+                                    onSubmitted: (_) => _buscar(irParaPagina: 0),
                                   ),
                                 ),
                               ],
@@ -5590,7 +5629,10 @@ class _MovimentacaoGlobalDialogState
                                                     fontSize: 13),
                                               ),
                                             )
-                                          : Container(
+                                          : Column(
+                                              children: [
+                                                Expanded(
+                                                  child: Container(
                                               decoration: BoxDecoration(
                                                 border: Border.all(
                                                     color: Theme.of(context).colorScheme.outlineVariant),
@@ -5636,7 +5678,19 @@ class _MovimentacaoGlobalDialogState
                                                 }),
                                               ),
                                             ),
-                                        ),
+                                                ),
+                                                if (_totalItens > _itensPorPagina) ...[
+                                                  const SizedBox(height: 8),
+                                                  _RodapePaginacao(
+                                                    paginaAtual: _paginaAtual,
+                                                    itensPorPagina: _itensPorPagina,
+                                                    totalItens: _totalItens,
+                                                    onPaginaChanged: _irParaPagina,
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                            ),
                           ],
                         ),
                       ),
@@ -5759,8 +5813,6 @@ class _MovimentacaoGlobalDialogState
   }
 }
 
-// Alias público — permite importar via `show MaterialFormDialog` em outras páginas.
-// ignore: camel_case_types
 typedef MaterialFormDialog = _CadastroMaterialDialog;
 
 class _CadastroMaterialDialog extends StatefulWidget {
@@ -5775,19 +5827,9 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
   bool _salvando = false;
   String? _erroDialog;
 
-  // ── Modo Retalho ──────────────────────────────────────────────────────
   bool _modoRetalho = false;
   bool _hoverRetalho = false;
 
-  /// Detecta se o texto contém a palavra "RETALHO" (ou variações próximas
-  /// como "RETALHOS", "RETALH", "RETALHOO", "RETALHP" etc.) em qualquer
-  /// palavra do texto. Usado para impedir que o usuário digite isso no campo
-  /// Nome — retalhos devem ser identificados pelo campo Identificador, não
-  /// pelo nome do material.
-  ///
-  /// A detecção usa distância de edição (Levenshtein) em vez de apenas uma
-  /// regex exata, para pegar erros de digitação comuns (letra faltando,
-  /// duplicada ou trocada), sem disparar em palavras muito diferentes.
   static const _palavraRetalho = 'RETALHO';
 
   static int _distanciaEdicao(String a, String b) {
@@ -5814,9 +5856,8 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
 
   static bool _pareceRetalho(String palavra) {
     final p = palavra.toUpperCase();
-    if (p.length < 5) return false; // evita falso-positivo em palavras curtas
-    // Compara contra a raiz "RETALHO" e também contra "RETALHOS" (plural),
-    // tolerando até 2 edições de diferença (insere/remove/troca letra).
+    if (p.length < 5) return false;
+
     final distBase   = _distanciaEdicao(p, _palavraRetalho);
     final distPlural = _distanciaEdicao(p, '${_palavraRetalho}S');
     final tolerancia = p.length <= 7 ? 2 : 3;
@@ -5828,7 +5869,6 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     return palavras.any((p) => p.isNotEmpty && _pareceRetalho(p));
   }
 
-  // ── Detecção de possível material duplicado ───────────────────────────
   Timer? _debounceDuplicata;
   bool _verificandoDuplicata = false;
   List<_PossivelDuplicataCE> _possiveisDuplicatas = [];
@@ -5845,15 +5885,9 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
   late final TextEditingController _estoqueMinimo;
   late final TextEditingController _custoCtrl;
 
-  /// COMPRAS não pode definir o estoque mínimo no cadastro — essa definição
-  /// fica a cargo de quem faz a entrada real de estoque (Controle de
-  /// Estoque / OS), garantindo rastreabilidade. Mesma regra usada no
-  /// cadastro de materiais em Estoque.
   bool get _bloquearEstoqueMinimo =>
       context.watch<UsuarioProvider>().usuarioLogado?.role == 'COMPRAS';
 
-  /// Versão `context.read` de [_bloquearEstoqueMinimo], para uso fora do
-  /// build (ex.: dentro de `_salvar`).
   bool get _bloquearEstoqueMinimoAtual =>
       context.read<UsuarioProvider>().usuarioLogado?.role == 'COMPRAS';
 
@@ -5875,22 +5909,14 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     _estoqueMinimo = TextEditingController(text: '0');
     _custoCtrl     = TextEditingController();
 
-    // Campos que entram na comparação de duplicidade: qualquer alteração
-    // reagenda a verificação (debounced).
     for (final c in [_nome, _identificador, _medida, _espessura, _largura, _comprimento]) {
       c.addListener(_agendarVerificacaoDuplicata);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) => _agendarVerificacaoDuplicata());
 
-    // ── Snapshot inicial para detectar alterações não salvas ──────────────
-    // Usado para decidir se, ao tentar fechar o diálogo (X, "Cancelar",
-    // clique fora ou tecla Esc), é preciso confirmar com o usuário antes de
-    // descartar o que foi digitado.
     _snapshotInicial = _capturarEstadoAtual();
   }
 
-  /// Estado "assinatura" de todos os campos editáveis do formulário, usado
-  /// para comparar com o estado atual e saber se houve alguma alteração.
   late String _snapshotInicial;
 
   String _capturarEstadoAtual() => [
@@ -5907,15 +5933,8 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
         _modoRetalho.toString(),
       ].join('␟');
 
-  /// true se algum campo foi alterado em relação ao estado com que o
-  /// diálogo foi aberto.
   bool get _temAlteracoesNaoSalvas => _capturarEstadoAtual() != _snapshotInicial;
 
-  /// Verifica se há alterações não salvas e, em caso positivo, pergunta ao
-  /// usuário se deseja descartá-las antes de fechar o diálogo. Retorna
-  /// `true` quando o diálogo pode ser fechado (sem alterações, ou usuário
-  /// confirmou o descarte / optou por salvar), e `false` quando o
-  /// fechamento deve ser cancelado.
   Future<bool> _confirmarFechamento() async {
     if (!_temAlteracoesNaoSalvas) return true;
 
@@ -5960,9 +5979,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
       case 'descartar':
         return true;
       case 'salvar':
-        // _salvar() já cuida de dar Navigator.pop(context, true) quando
-        // a operação for concluída com sucesso; se falhar, o diálogo
-        // permanece aberto para o usuário corrigir/tentar de novo.
+
         await _salvar();
         return false;
       case 'continuar':
@@ -5971,9 +5988,6 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     }
   }
 
-  /// Tenta fechar o diálogo, passando pela confirmação de alterações não
-  /// salvas quando necessário. Usado pelo botão "X", pelo botão "Cancelar"
-  /// e pelo PopScope (Esc / clique fora / botão voltar).
   Future<void> _tentarFechar() async {
     if (_salvando) return;
     final podeFechar = await _confirmarFechamento();
@@ -6019,25 +6033,14 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
 
     final provider = context.read<MaterialProvider>();
 
-    // O backend faz busca por AND entre as palavras digitadas (todas as
-    // palavras precisam estar contidas no nome). Isso significa que buscar
-    // pela frase inteira falha em achar duplicatas quando o nome digitado
-    // tem uma palavra a mais/a menos/diferente do material já cadastrado,
-    // ou as palavras estão em ordem diferente. Por isso buscamos por cada
-    // palavra do nome separadamente (OR) e unificamos os resultados — a
-    // similaridade real é decidida depois, então um candidato a mais aqui
-    // não causa falso-positivo, só amplia a chance de achar o material
-    // realmente parecido. Mesma estratégia usada em estoque_page.dart.
     final tokensUnicos = _nome.text
         .trim()
         .split(RegExp(r'\s+'))
         .where((t) => t.isNotEmpty)
         .toSet()
         .toList()
-      ..sort((a, b) => b.length.compareTo(a.length)); // palavras mais longas (mais distintivas) primeiro
+      ..sort((a, b) => b.length.compareTo(a.length));
 
-    // Limita a 5 palavras para não disparar buscas demais em nomes longos;
-    // ignora tokens de 1 char (pouco distintivos, geram excesso de ruído).
     final termosBusca = tokensUnicos.where((t) => t.length >= 2).take(5).toList();
     if (termosBusca.isEmpty && _nome.text.trim().isNotEmpty) {
       termosBusca.add(_nome.text.trim());
@@ -6060,11 +6063,6 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     final medidaNorm        = _normalizarTextoComparacaoCE(_medida.text);
     final espessuraNorm     = _normalizarTextoComparacaoCE(_espessura.text);
 
-    // Dimensões digitadas: usa os campos numéricos Comprimento/Largura/
-    // Espessura como fonte principal e, quando algum deles estiver vazio,
-    // cai para o que der pra extrair do texto livre "medida" (que pode
-    // trazer tudo junto, em qualquer grafia: com ou sem "m"/"mm", com ou
-    // sem casas decimais, com ou sem um terceiro "x" pra espessura).
     final medidaDigitadaExtraida = _extrairDimensoesMedidaCE(_medida.text);
     final comprimentoDigitado = double.tryParse(_comprimento.text.trim().replaceAll(',', '.'))
         ?? medidaDigitadaExtraida.comprimento;
@@ -6085,86 +6083,48 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
       final mMedidaNorm        = _normalizarTextoComparacaoCE(m.medida);
       final mEspessuraNorm     = _normalizarTextoComparacaoCE(m.espessura);
 
-      // Mesma lógica de fallback do lado do material cadastrado: prioriza os
-      // campos numéricos e, na falta deles, extrai do texto "medida" salvo.
       final mMedidaExtraida = _extrairDimensoesMedidaCE(m.medida);
       final mComprimentoFinal = m.comprimento ?? mMedidaExtraida.comprimento;
       final mLarguraFinal     = m.largura ?? mMedidaExtraida.largura;
       final mEspessuraFinal   = _extrairNumeroDeTextoCE(m.espessura) ?? mMedidaExtraida.espessura;
 
-      // Comprimento/largura batem se os valores numéricos coincidirem,
-      // não importa como cada lado escreveu a medida (com/sem "m", com/sem
-      // decimais, com/sem espessura embutida no texto).
       final dimensoesBatem = dimensaoBate(comprimentoDigitado, mComprimentoFinal) &&
           dimensaoBate(larguraDigitada, mLarguraFinal);
       final medidaOuDimensaoBate = mMedidaNorm == medidaNorm || dimensoesBatem;
 
-      // Espessura: compara numericamente (ignorando "mm" e formatação) e só
-      // cai para comparação de texto puro quando nenhum lado tem número
-      // reconhecível (ex.: valor não numérico digitado por engano). Quando
-      // ambos os lados estão vazios, conta como igual.
       final espessuraBate = (espessuraNorm.isEmpty && mEspessuraNorm.isEmpty)
           ? true
           : (espessuraDigitadaNum != null && mEspessuraFinal != null)
               ? dimensaoBate(espessuraDigitadaNum, mEspessuraFinal)
               : mEspessuraNorm == espessuraNorm;
 
-      // Mesma regra de unicidade usada no backend (nome + identificador +
-      // medida + espessura, normalizados): se bater, o cadastro será
-      // rejeitado com 409 ao salvar.
       final exata = mNomeNorm == nomeNorm &&
           mIdentificadorNorm == identificadorNorm &&
           medidaOuDimensaoBate &&
           espessuraBate;
 
       final similaridadeNome = _similaridadeTextoCE(nomeNorm, mNomeNorm);
-      // Similaridade que ignora a ordem das palavras (ex.: "TINTA DUPLA
-      // FUNCAO PRETO FOSCO" vs "TINTA PRETO FOSCO DUPLA FUNCAO"), pra pegar
-      // casos em que o texto inteiro mudou de posição mas as palavras são
-      // as mesmas. Usa o maior dos dois scores como similaridade "efetiva".
+
       final similaridadePalavras = _similaridadePalavrasCE(nomeNorm, mNomeNorm);
       final similaridadeEfetiva =
           similaridadeNome > similaridadePalavras ? similaridadeNome : similaridadePalavras;
       final mesmoIdentificador =
           identificadorNorm.isNotEmpty && identificadorNorm == mIdentificadorNorm;
 
-      // Detecta se um nome é prefixo/trecho do outro. Importante para quando
-      // o usuário ainda está no início da digitação (ex.: "ABS ACO" digitado
-      // com "ABS ACO ESCOVADO DOURADO" já cadastrado): a similaridade
-      // Levenshtein do texto inteiro fica baixa (o nome cadastrado é bem mais
-      // longo), mas o texto digitado é claramente o começo de um nome já
-      // existente, então isso também conta como "similar". Exige um mínimo
-      // de 4 caracteres no texto mais curto pra não disparar em prefixos
-      // genéricos demais (ex.: "AB").
       final curto = nomeNorm.length <= mNomeNorm.length ? nomeNorm : mNomeNorm;
       final longo = nomeNorm.length <= mNomeNorm.length ? mNomeNorm : nomeNorm;
       final contido = curto.length >= 4 && curto.isNotEmpty && longo.contains(curto);
 
-      // Quantas palavras (>=2 chars, pra ignorar conectivos irrelevantes)
-      // coincidem exatamente entre os dois nomes, não importa a ordem. Serve
-      // como sinal adicional e explícito: "se 1, 2, 3 palavras coincidirem,
-      // já vai acusando" — quanto mais palavras em comum, mais forte o
-      // indício de duplicidade, mesmo com nome final bem diferente.
       final palavrasDigitadas = nomeNorm.split(RegExp(r'\s+')).where((t) => t.length >= 2).toSet();
       final palavrasCadastro  = mNomeNorm.split(RegExp(r'\s+')).where((t) => t.length >= 2).toSet();
       final palavrasComuns = palavrasDigitadas.intersection(palavrasCadastro).length;
-      // Exige pelo menos 2 palavras em comum (1 palavra só é fraco demais e
-      // gera excesso de falso-positivo com termos genéricos), e que essas
-      // palavras comuns cubram uma fração razoável do nome mais curto — pra
-      // não acusar "TINTA PRETO" (2 palavras) contra "TINTA VERMELHA PRETO
-      // FOSCO BRILHANTE ACETINADA" (5 palavras) só porque 2 bateram.
+
       final menorQtdPalavras =
           palavrasDigitadas.length < palavrasCadastro.length ? palavrasDigitadas.length : palavrasCadastro.length;
       final cobreParcialPalavras = palavrasComuns >= 2 &&
           menorQtdPalavras > 0 &&
           (palavrasComuns / menorQtdPalavras) >= 0.6;
 
-      // "Similar": nome muito parecido em sequência (>=72%), muito parecido
-      // ignorando a ordem das palavras (>=72%), mesmo identificador com
-      // alguma semelhança (evita falso-positivo de identificadores genéricos
-      // reutilizados em materiais bem diferentes), um nome é prefixo/trecho
-      // do outro (digitação em andamento), ou várias palavras batem
-      // independente da ordem (>=2 palavras cobrindo >=60% do nome menor).
       final similar = !exata &&
           (similaridadeNome >= 0.72 ||
               similaridadePalavras >= 0.72 ||
@@ -6195,9 +6155,6 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
     });
   }
 
-  /// Considera o campo Medida "vazio" quando não há valor digitado — seja
-  /// porque o campo está realmente vazio (modo normal), seja porque no modo
-  /// Retalho só contém o sufixo fixo "m²" sem número à esquerda.
   bool _medidaRetalhoEstaVazia() {
     final texto = _medida.text.trim();
     if (!_modoRetalho) return texto.isEmpty;
@@ -6227,11 +6184,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
   }
 
   Future<void> _salvar() async {
-    // Trava o botão IMEDIATAMENTE, antes de qualquer "await" — inclusive
-    // antes da validação e da verificação de duplicidade. Isso fecha a
-    // janela em que um duplo clique (ou duplo toque no mobile) disparava
-    // _salvar() duas vezes antes que _salvando virasse true, resultando
-    // em dois materiais idênticos cadastrados a partir de um único clique.
+
     if (_salvando) return;
     setState(() { _salvando = true; });
 
@@ -6246,9 +6199,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
       });
       return;
     }
-    // Garante que a verificação de duplicidade mais recente já foi
-    // concluída antes de decidir se pode salvar (evita salvar durante o
-    // debounce, quando _possiveisDuplicatas ainda reflete o texto anterior).
+
     _debounceDuplicata?.cancel();
     await _verificarDuplicatas();
     if (!mounted) return;
@@ -6301,10 +6252,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
 
   @override
   Widget build(BuildContext context) {
-    // Intercepta qualquer tentativa de fechar o diálogo que não passe pelos
-    // botões (X/Cancelar), como a tecla Esc ou o gesto/botão "voltar":
-    // sempre barra o pop automático e decide via _confirmarFechamento se
-    // deve realmente fechar.
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
@@ -6329,7 +6277,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(width: 12),
-                  // ── Atalho RETALHO ────────────────────────────────────
+
                   Tooltip(
                     message: _modoRetalho
                         ? 'Desmarcar como retalho'
@@ -6411,7 +6359,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Painel lateral (possíveis duplicatas), à esquerda — sempre visível
+
                   Container(
                     width: 260,
                     decoration: BoxDecoration(
@@ -6461,7 +6409,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                       ],
                     ),
                   ),
-                  // Formulário
+
                   Expanded(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
@@ -6505,7 +6453,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                       TextFormField(
                         controller: _nome,
                         autofocus: true,
-                        decoration: const InputDecoration(labelText: 'Nome *'),
+                        decoration: const InputDecoration(labelText: 'Nome'),
                         textCapitalization: TextCapitalization.characters,
                         inputFormatters: [_UpperCaseFormatter()],
                         autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -6523,9 +6471,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         controller: _identificador,
                         readOnly: _modoRetalho,
                         onChanged: (v) {
-                          // Ativa o modo Retalho automaticamente ao digitar essa
-                          // palavra no Identificador, travando os campos como se o
-                          // usuário tivesse clicado no botão "Modo Retalho".
+
                           if (!_modoRetalho && _contemRetalho(v)) {
                             _ativarModoRetalho();
                           }
@@ -6637,7 +6583,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                                   cursor: SystemMouseCursors.click,
                                   child: DropdownButtonFormField<String>(
                                     initialValue: _unidade,
-                                    decoration: const InputDecoration(labelText: 'Unidade *'),
+                                    decoration: const InputDecoration(labelText: 'Unidade'),
                                     hint: const Text('Selecione'),
                                     icon: const Icon(Icons.arrow_drop_down),
                                     mouseCursor: SystemMouseCursors.click,
@@ -6697,7 +6643,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                         ],
                         onChanged: (_) { if (_erroDialog != null) setState(() => _erroDialog = null); },
                       ),
-                      ], // end if not ML/G (medida)
+                      ],
                       if (_unidade != 'ML' && _unidade != 'G') ...[
                       const SizedBox(height: 10),
                       Row(children: [
@@ -6757,7 +6703,7 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
                           ),
                         ),
                       ]),
-                      ], // end if not ML/G
+                      ],
                       const SizedBox(height: 10),
                       Row(children: [
                         Expanded(
@@ -6880,15 +6826,6 @@ class _CadastroMaterialDialogState extends State<_CadastroMaterialDialog> {
   }
 }
 
-// ─── Modelo de item de movimentação ──────────────────────────────────────────
-
-// ═════════════════════════════════════════════════════════════════════════
-// Diálogo: Saída para Produção (transferência de estoque)
-// ═════════════════════════════════════════════════════════════════════════
-//
-// Move uma quantidade de um material do estoque normal para o estoque de
-// produção (EstoqueProducao). Não vincula a uma OS — a OS só é informada
-// depois, quando a produção der baixa a partir do estoque de produção.
 class _TransferenciaProducaoDialog extends StatefulWidget {
   const _TransferenciaProducaoDialog();
 
@@ -6901,7 +6838,6 @@ class _TransferenciaProducaoDialogState
     extends State<_TransferenciaProducaoDialog> with SingleTickerProviderStateMixin {
   late final TabController _tabController;
 
-  // ── Filtros de busca ──────────────────────────────────────────────────
   final _nomeCtrl         = TextEditingController();
   final _identificadorCtrl = TextEditingController();
   final _medidaCtrl       = TextEditingController();
@@ -6912,19 +6848,19 @@ class _TransferenciaProducaoDialogState
   bool _buscando = false;
   bool _buscouUmaVez = false;
   List<MaterialModel> _resultados = [];
+  static const int _itensPorPagina = 50;
+  int _paginaAtual = 0;
+  int _totalItens  = 0;
 
-  // ── Material selecionado e campos do formulário ───────────────────────
   MaterialModel? _selecionado;
   final _quantCtrl            = TextEditingController();
   final _obsCtrl              = TextEditingController();
-  // Linha de produção de destino ('1' ou '2'). Obrigatório escolher antes
-  // de confirmar — não há mais um "estoque de produção" único.
+
   String? _producaoSelecionada;
 
   bool _enviando = false;
   String? _erro;
 
-  // ── Card "Pendentes de confirmação" ────────────────────────────────────
   int? _resolvendoPendenteId;
 
   @override
@@ -6933,6 +6869,7 @@ class _TransferenciaProducaoDialogState
     _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<EstoqueProducaoProvider>().carregarPendentes();
+      if (mounted) _buscar(irParaPagina: 0);
     });
   }
 
@@ -6980,40 +6917,31 @@ class _TransferenciaProducaoDialogState
 
   void _agendarBusca() {
     _debounce?.cancel();
-    final temQualquerFiltro = _nomeCtrl.text.trim().isNotEmpty ||
-        _identificadorCtrl.text.trim().isNotEmpty ||
-        _medidaCtrl.text.trim().isNotEmpty ||
-        _comprimentoCtrl.text.trim().isNotEmpty ||
-        _larguraCtrl.text.trim().isNotEmpty ||
-        _espessuraCtrl.text.trim().isNotEmpty;
-    if (!temQualquerFiltro) {
-      setState(() {
-        _buscouUmaVez = false;
-        _resultados = [];
-      });
-      return;
-    }
-    _debounce = Timer(const Duration(milliseconds: 350), _buscar);
+    _debounce = Timer(const Duration(milliseconds: 350), () => _buscar(irParaPagina: 0));
   }
 
-  Future<void> _buscar() async {
+  Future<void> _buscar({required int irParaPagina}) async {
     if (!mounted) return;
     setState(() {
       _buscando = true;
       _buscouUmaVez = true;
     });
     try {
-      final lista = await context.read<MaterialProvider>().buscarParaMovimentacao(
+      final resultado = await context.read<MaterialProvider>().buscarParaMovimentacao(
         busca:         _nomeCtrl.text.trim(),
         identificador: _identificadorCtrl.text.trim(),
         medida:        _medidaCtrl.text.trim(),
         comprimento:   _comprimentoCtrl.text.trim(),
         largura:       _larguraCtrl.text.trim(),
         espessura:     _espessuraCtrl.text.trim(),
+        pagina:        irParaPagina + 1,
+        porPagina:     _itensPorPagina,
       );
       if (mounted) {
         setState(() {
-          _resultados = lista;
+          _resultados  = resultado.itens;
+          _totalItens  = resultado.total;
+          _paginaAtual = irParaPagina;
           _buscando = false;
         });
       }
@@ -7022,20 +6950,24 @@ class _TransferenciaProducaoDialogState
     }
   }
 
+  void _irParaPagina(int p) => _buscar(irParaPagina: p);
+
   void _limparFiltros() {
     _identificadorCtrl.clear();
     _medidaCtrl.clear();
     _comprimentoCtrl.clear();
     _larguraCtrl.clear();
     _espessuraCtrl.clear();
-    _agendarBusca();
+    _buscar(irParaPagina: 0);
   }
 
   void _selecionar(MaterialModel m) {
     setState(() {
       _selecionado = m;
-      _resultados = [];
       _erro = null;
+      if ((m.identificador?.toUpperCase() ?? '') == 'RETALHO') {
+        _quantCtrl.text = formatarQuantidadeExibicao(m.quantidade);
+      }
     });
   }
 
@@ -7100,21 +7032,20 @@ class _TransferenciaProducaoDialogState
               ),
               const SizedBox(height: 16),
 
-              // ── Busca / seleção de material ───────────────────────────
               if (_selecionado == null) ...[
-                // Busca por nome
+
                 TextField(
                   controller: _nomeCtrl,
                   autofocus: true,
                   decoration: InputDecoration(
-                    hintText: 'Buscar material por nome',
-                    prefixIcon: Icon(Icons.search, size: 18, color: Theme.of(context).colorScheme.outline),
+                    hintText: 'Nome do material',
+                    prefixIcon: Icon(Icons.inventory_2_outlined, size: 18, color: Theme.of(context).colorScheme.outline),
                     isDense: true,
                   ),
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [_UpperCaseFormatter()],
                   onChanged: (_) { _agendarBusca(); setState(() {}); },
-                  onSubmitted: (_) => _buscar(),
+                  onSubmitted: (_) => _buscar(irParaPagina: 0),
                 ),
                 const SizedBox(height: 8),
 
@@ -7132,7 +7063,7 @@ class _TransferenciaProducaoDialogState
                         textCapitalization: TextCapitalization.characters,
                         inputFormatters: [_UpperCaseFormatter()],
                         onChanged: (_) { _agendarBusca(); setState(() {}); },
-                        onSubmitted: (_) => _buscar(),
+                        onSubmitted: (_) => _buscar(irParaPagina: 0),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -7147,7 +7078,7 @@ class _TransferenciaProducaoDialogState
                         ),
                         inputFormatters: [_MedidaEspessuraFormatter()],
                         onChanged: (_) { _agendarBusca(); setState(() {}); },
-                        onSubmitted: (_) => _buscar(),
+                        onSubmitted: (_) => _buscar(irParaPagina: 0),
                       ),
                     ),
                   ],
@@ -7169,7 +7100,7 @@ class _TransferenciaProducaoDialogState
                         ),
                         inputFormatters: [_EspessuraFormatter()],
                         onChanged: (_) { _agendarBusca(); setState(() {}); },
-                        onSubmitted: (_) => _buscar(),
+                        onSubmitted: (_) => _buscar(irParaPagina: 0),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -7186,7 +7117,7 @@ class _TransferenciaProducaoDialogState
                         ),
                         inputFormatters: [_EspessuraFormatter()],
                         onChanged: (_) { _agendarBusca(); setState(() {}); },
-                        onSubmitted: (_) => _buscar(),
+                        onSubmitted: (_) => _buscar(irParaPagina: 0),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -7202,7 +7133,7 @@ class _TransferenciaProducaoDialogState
                         ),
                         inputFormatters: [_EspessuraFormatter()],
                         onChanged: (_) { _agendarBusca(); setState(() {}); },
-                        onSubmitted: (_) => _buscar(),
+                        onSubmitted: (_) => _buscar(irParaPagina: 0),
                       ),
                     ),
                   ],
@@ -7210,9 +7141,8 @@ class _TransferenciaProducaoDialogState
 
                 const SizedBox(height: 8),
 
-                // ── Lista de resultados ───────────────────────────────
                 SizedBox(
-                  height: 220,
+                  height: 400,
                   child: _buscando
                       ? const Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary))
                       : !_buscouUmaVez
@@ -7256,46 +7186,61 @@ class _TransferenciaProducaoDialogState
                                     ],
                                   ),
                                 )
-                              : Container(
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: ListView.separated(
-                                    itemCount: _resultados.length,
-                                    separatorBuilder: (_, __) => const Divider(height: 0, thickness: 0.5),
-                                    itemBuilder: (_, i) {
-                                      final m = _resultados[i];
-                                      final medidaFmt = formatarMedidaOuDimensoes(
-                                        medida:      m.medida,
-                                        largura:     m.largura,
-                                        comprimento: m.comprimento,
-                                      );
-                                      final detalhes = [
-                                        if (m.identificador != null && m.identificador!.isNotEmpty) m.identificador!,
-                                        if (medidaFmt != null) medidaFmt,
-                                        if (formatarEspessuraComSufixo(m.espessura) != null) formatarEspessuraComSufixo(m.espessura)!,
-                                      ].join(' • ');
-                                      final qtdStr = formatarQuantidadeExibicao(m.quantidade);
-                                      final corQtd = m.quantidade <= 0
-                                          ? AppTheme.error
-                                          : Theme.of(context).colorScheme.onSurfaceVariant;
-                                      return ListTile(
-                                        dense: true,
-                                        title: Text(m.nome, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                                        subtitle: detalhes.isEmpty ? null : Text(detalhes, style: const TextStyle(fontSize: 11)),
-                                        trailing: Text(
-                                          '$qtdStr ${formatarUnidadeExibicao(m.unidade)}',
-                                          style: TextStyle(fontSize: 12, color: corQtd, fontWeight: FontWeight.w500),
-                                        ),
-                                        onTap: () => _selecionar(m),
-                                      );
-                                    },
-                                  ),
+                              : Column(
+                                  children: [
+                                    Expanded(
+                                      child: Container(
+                                    decoration: BoxDecoration(
+                                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: ListView.separated(
+                                      itemCount: _resultados.length,
+                                      separatorBuilder: (_, __) => const Divider(height: 0, thickness: 0.5),
+                                      itemBuilder: (_, i) {
+                                        final m = _resultados[i];
+                                        final medidaFmt = formatarMedidaOuDimensoes(
+                                          medida:      m.medida,
+                                          largura:     m.largura,
+                                          comprimento: m.comprimento,
+                                        );
+                                        final detalhes = [
+                                          if (m.identificador != null && m.identificador!.isNotEmpty) m.identificador!,
+                                          if (medidaFmt != null) medidaFmt,
+                                          if (formatarEspessuraComSufixo(m.espessura) != null) formatarEspessuraComSufixo(m.espessura)!,
+                                        ].join(' • ');
+                                        final qtdStr = formatarQuantidadeExibicao(m.quantidade);
+                                        final corQtd = m.quantidade <= 0
+                                            ? AppTheme.error
+                                            : Theme.of(context).colorScheme.onSurfaceVariant;
+                                        return ListTile(
+                                          dense: true,
+                                          title: Text(m.nome, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                          subtitle: detalhes.isEmpty ? null : Text(detalhes, style: const TextStyle(fontSize: 11)),
+                                          trailing: Text(
+                                            '$qtdStr ${formatarUnidadeExibicao(m.unidade)}',
+                                            style: TextStyle(fontSize: 12, color: corQtd, fontWeight: FontWeight.w500),
+                                          ),
+                                          onTap: () => _selecionar(m),
+                                        );
+                                      },
+                                    ),
+                                      ),
+                                    ),
+                                    if (_totalItens > _itensPorPagina) ...[
+                                      const SizedBox(height: 6),
+                                      _RodapePaginacao(
+                                        paginaAtual: _paginaAtual,
+                                        itensPorPagina: _itensPorPagina,
+                                        totalItens: _totalItens,
+                                        onPaginaChanged: _irParaPagina,
+                                      ),
+                                    ],
+                                  ],
                                 ),
                 ),
               ] else ...[
-                // ── Material selecionado ──────────────────────────────
+
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -7373,7 +7318,7 @@ class _TransferenciaProducaoDialogState
 
                 const SizedBox(height: 14),
                 Text(
-                  'Transferir para *',
+                  'Transferir para',
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
@@ -7587,12 +7532,7 @@ class _TransferenciaProducaoDialogState
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: ConstrainedBox(
-        // Limita a altura do diálogo ao espaço disponível na tela (descontando
-        // o insetPadding acima). Antes, a área das abas tinha altura FIXA
-        // (SizedBox(height: 560)), que não se adaptava a telas/janelas menores.
-        // Em resoluções baixas, cabeçalho + 560 + rodapé ultrapassava a altura
-        // da janela e o rodapé com "Confirmar Transferência" era empurrado
-        // para fora (overflow), ficando inacessível.
+
         constraints: BoxConstraints(
           maxWidth: 880,
           maxHeight: MediaQuery.of(context).size.height - 48,
@@ -7605,12 +7545,22 @@ class _TransferenciaProducaoDialogState
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Cabeçalho ─────────────────────────────────────────────
+
                 Row(
                   children: [
                     const Icon(Icons.factory_outlined, color: AppTheme.warning),
                     const SizedBox(width: 8),
                     Text('Produção', style: Theme.of(context).textTheme.headlineSmall),
+                    const Spacer(),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close, size: 20),
+                      tooltip: 'Fechar',
+                      style: IconButton.styleFrom().copyWith(
+                        mouseCursor:
+                            WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -7645,13 +7595,7 @@ class _TransferenciaProducaoDialogState
                     ),
                   ],
                 ),
-                // Antes: SizedBox(height: 560, ...) — altura fixa que causava o
-                // overflow em telas menores. Agora: Flexible dentro da Column
-                // (mainAxisSize.min), então essa área ocupa o espaço restante
-                // até o limite do ConstrainedBox acima, sem nunca empurrar o
-                // rodapé (Cancelar / Confirmar Transferência) para fora da
-                // área visível. Se o conteúdo interno não couber, ele rola
-                // (SingleChildScrollView já usado em cada aba).
+
                 Flexible(
                   child: TabBarView(
                     controller: _tabController,
@@ -7703,8 +7647,6 @@ class _TransferenciaProducaoDialogState
   }
 }
 
-/// Cartão selecionável simples usado para escolher a linha de produção
-/// ('1' ou '2') de destino no diálogo de transferência.
 class _CartaoProducaoSelecionavel extends StatelessWidget {
   final String label;
   final bool selecionado;
@@ -7760,9 +7702,6 @@ class _CartaoProducaoSelecionavel extends StatelessWidget {
   }
 }
 
-/// Corrige o texto de um campo de dimensão usada para não ultrapassar o
-/// [maximo] da chapa. Se o valor digitado exceder o máximo, o controller é
-/// truncado para o próprio máximo (formatado) e a seleção movida para o fim.
 void _limitarDimensao(TextEditingController ctrl, double maximo) {
   final v = double.tryParse(ctrl.text.replaceAll(',', '.'));
   if (v == null || v <= maximo) return;
@@ -7784,14 +7723,11 @@ class _ItemMovimentacao {
   bool usarModoDimensional = false;
   String? erroEstoque;
 
-  /// True se a unidade do material é metro linear (m, m/l, ml, etc.).
   bool get _eMetroLinear {
     final u = material.unidade?.toLowerCase().trim() ?? '';
     return const {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'}.contains(u);
   }
 
-  /// True se o material é UNIDADE (chapa/peça) e tem largura + comprimento
-  /// cadastrados.
   bool get podeInformarDimensao {
     final m = material;
     if (_eMetroLinear) return false;
@@ -7800,7 +7736,6 @@ class _ItemMovimentacao {
         m.comprimento != null && m.comprimento! > 0;
   }
 
-  /// Área usada em m² (larguraUsadaCtrl × alturaUsadaCtrl), quando ativo.
   double? get areaUsadaM2 {
     if (!usarModoDimensional) return null;
     final l = double.tryParse(larguraUsadaCtrl.text.replaceAll(',', '.'));
@@ -7809,7 +7744,6 @@ class _ItemMovimentacao {
     return l * c;
   }
 
-  /// Custo proporcional desta saída = custoM2 × areaUsada.
   double? get precoM2Proporcional {
     final area    = areaUsadaM2;
     final custoM2 = precoM2Sugerido;
@@ -7862,9 +7796,6 @@ class _ItemMovimentacao {
   }
 }
 
-/// Substitui o campo "Estoque mínimo" no cadastro quando o usuário é COMPRAS.
-/// A definição do estoque mínimo deve ser feita por quem tem acesso à
-/// entrada real de estoque (Controle de Estoque / OS vinculada).
 class _EstoqueMinimoBloqueadoInfo extends StatelessWidget {
   const _EstoqueMinimoBloqueadoInfo();
 
@@ -7897,12 +7828,10 @@ class _EstoqueMinimoBloqueadoInfo extends StatelessWidget {
   }
 }
 
-// ─── Card de item selecionado ─────────────────────────────────────────────────
-
 class _ItemSelecionadoCard extends StatefulWidget {
   final _ItemMovimentacao item;
   final VoidCallback onRemover;
-  /// 'ENTRADA' ou 'SAIDA' — controla se o modo retalho é exibido.
+
   final String tipo;
 
   const _ItemSelecionadoCard({
@@ -7919,21 +7848,12 @@ class _ItemSelecionadoCard extends StatefulWidget {
 class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
   _ItemMovimentacao get item => widget.item;
 
-  // Materiais metro linear (M/L, m, ml…) NUNCA entram no modo dimensional —
-  // a largura deles é fixa e o comprimento cortado já é a quantidade
-  // informada pelo usuário.
   bool get _eMetroLinear {
     final unidade = item.material.unidade?.toLowerCase().trim() ?? '';
     const unidadesMetroLinear = {'m', 'ml', 'm/l', 'metro', 'metros', 'metro linear', 'metros lineares'};
     return unidadesMetroLinear.contains(unidade);
   }
 
-  /// Retorna (largura, comprimento) da chapa/peça, em metros.
-  /// Prioriza os campos largura/comprimento cadastrados diretamente no
-  /// material (igual à tela de Produção); quando ausentes, tenta extrair do
-  /// campo medida no formato "LxA" ou "LxAM" (ex: "2X1", "1.20X0.80M") como
-  /// fallback de compatibilidade.
-  /// Retorna null se inválido ou se o material for metro linear.
   (double l, double a)? get _medidaChapa {
     if (_eMetroLinear) return null;
 
@@ -7945,12 +7865,12 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
 
     final medida = m.medida;
     if (medida == null || medida.isEmpty) return null;
-    // Aceita sufixo opcional "M" no final (ex: 1.20X0.80M, 2X1M)
+
     if (!RegExp(r'^\d+([.,]\d+)?\s*[xX]\s*\d+([.,]\d+)?\s*M?$', caseSensitive: false)
         .hasMatch(medida.trim())) {
       return null;
     }
-    // Remove sufixo "M" antes de parsear
+
     final semSufixo = medida.trim().replaceFirst(RegExp(r'M\s*$', caseSensitive: false), '').trim();
     final partes = semSufixo.split(RegExp(r'\s*[xX]\s*'));
     if (partes.length < 2) return null;
@@ -7980,7 +7900,6 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
     final chapa        = _medidaChapa;
     final podeDimensao = chapa != null;
 
-    // ── Preview do cálculo dimensional ───────────────────────────────────────
     Widget? previewDimensional;
     if (item.usarModoDimensional && podeDimensao) {
       final largStr = item.larguraUsadaCtrl.text.replaceAll(',', '.');
@@ -7994,7 +7913,6 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
         final areaRetalho = double.parse((areaTotal - areaUsada).toStringAsFixed(4));
         final temRetalho  = areaRetalho > 0.0001;
 
-        // Custo proporcional (só para SAÍDA)
         final custoProporcional = widget.tipo == 'SAIDA'
             ? item.precoM2Proporcional
             : null;
@@ -8063,7 +7981,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Cabeçalho: nome + botão remover ──────────────────────────────
+
           Row(
             children: [
               const Icon(Icons.check_circle,
@@ -8110,15 +8028,11 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
           ),
           const SizedBox(height: 10),
 
-          // ── Toggle modo dimensional (só chapas com medida LxA) ───────────
           if (podeDimensao) ...[
             InkWell(
               onTap: () => setState(() {
                 item.usarModoDimensional = !item.usarModoDimensional;
-                // Ao ativar o modo dimensional, a quantidade é sempre 1
-                // (uma chapa/peça inteira é "usada", a área que sai do
-                // estoque é controlada pela largura × comprimento usados).
-                // O campo fica bloqueado para edição manual.
+
                 if (item.usarModoDimensional) {
                   item.quantCtrl.text = '1';
                 }
@@ -8173,7 +8087,6 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
             const SizedBox(height: 8),
           ],
 
-          // ── Campos de dimensão (quando modo ativo) ────────────────────────
           if (item.usarModoDimensional && podeDimensao) ...[
             Row(
               children: [
@@ -8224,7 +8137,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
             if (previewDimensional != null) previewDimensional,
             const SizedBox(height: 10),
           ],
-          // ── Campos de quantidade e observação ─────────────────────────────
+
           Row(
             children: [
               SizedBox(
@@ -8236,7 +8149,7 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
                       TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [_MilharInputFormatter()],
                   decoration: InputDecoration(
-                    labelText: 'Quantidade *',
+                    labelText: 'Quantidade',
                     isDense: true,
                     suffixText: formatarUnidadeExibicao(m.unidade),
                   ),
@@ -8267,8 +8180,6 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
             ],
           ),
 
-
-          // ── Preço sugerido ────────────────────────────────────────────────
           Builder(builder: (_) {
             final pu  = item.precoUnitarioSugerido;
             final pm2 = item.precoM2Sugerido;
@@ -8286,10 +8197,10 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
               }
             } else {
               if (pu != null && pu > 0) {
-                partesBrl.add('Unit.: R\$ ${_brl6(pu).substring(3)}');
+                partesBrl.add('Unidade: R\$ ${_brl6(pu).substring(3)}');
               }
               if (pm2 != null && pm2 > 0) {
-                partesBrl.add('M²: R\$ ${_brl6(pm2).substring(3)}');
+                partesBrl.add('m²: R\$ ${_brl6(pm2).substring(3)}');
               }
             }
             if (partesBrl.isEmpty) return SizedBox.shrink();
@@ -8316,9 +8227,6 @@ class _ItemSelecionadoCardState extends State<_ItemSelecionadoCard> {
     );
   }
 }
-
-
-// ─── Tile de resultado de busca ───────────────────────────────────────────────
 
 class _MaterialResultadoTile extends StatefulWidget {
   final MaterialModel material;
@@ -8452,8 +8360,6 @@ class _MaterialResultadoTileState extends State<_MaterialResultadoTile> {
   }
 }
 
-// ─── Badge de status mini (material) ─────────────────────────────────────────
-
 class _StatusBadgeMini extends StatelessWidget {
   final String status;
   const _StatusBadgeMini({required this.status});
@@ -8486,14 +8392,6 @@ class _StatusBadgeMini extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS — Detecção de materiais semelhantes (Cadastro de Material)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Extrai o primeiro número de um texto, aceitando vírgula ou ponto como
-/// separador decimal e ignorando qualquer sufixo de unidade colado nele
-/// (ex.: "1.22m" -> 1.22, "3mm" -> 3, "2,00" -> 2.0). Retorna null se não
-/// houver número reconhecível.
 double? _extrairNumeroDeTextoCE(String? s) {
   if (s == null) return null;
   final match = RegExp(r'[-+]?\d+(?:[.,]\d+)?').firstMatch(s.trim());
@@ -8501,7 +8399,6 @@ double? _extrairNumeroDeTextoCE(String? s) {
   return double.tryParse(match.group(0)!.replaceAll(',', '.'));
 }
 
-/// Dimensões numéricas extraídas do texto livre "medida".
 class _DimensoesMedidaCE {
   final double? comprimento;
   final double? largura;
@@ -8509,12 +8406,6 @@ class _DimensoesMedidaCE {
   const _DimensoesMedidaCE({this.comprimento, this.largura, this.espessura});
 }
 
-/// Faz o parse do campo "medida" (texto livre) em até 3 números separados
-/// por "x"/"X"/"×", tolerando qualquer combinação de: presença ou não do
-/// sufixo de unidade ("m", "mm"), formatação decimal (2 vs 2.00 vs 2,00), e
-/// um terceiro segmento opcional com a espessura embutida (ex.: "5x1.22x3mm",
-/// "2x1x2mm", "2.00x1.00m", "2x1"). Todas essas grafias devem ser
-/// reconhecidas como a mesma medida física.
 _DimensoesMedidaCE _extrairDimensoesMedidaCE(String? medida) {
   if (medida == null || medida.trim().isEmpty) return const _DimensoesMedidaCE();
   final partes = medida.trim().split(RegExp(r'[xX×]'));
@@ -8526,16 +8417,12 @@ _DimensoesMedidaCE _extrairDimensoesMedidaCE(String? medida) {
   );
 }
 
-/// Normaliza texto para comparação: remove acentos, converte para maiúsculas
-/// e colapsa espaços múltiplos.
 String _normalizarTextoComparacaoCE(String? v) {
   if (v == null) return '';
   final upper = _UpperCaseFormatter._removerAcentos(v.trim().toUpperCase());
   return upper.replaceAll(RegExp(r'\s+'), ' ');
 }
 
-/// Distância de Levenshtein clássica (número mínimo de inserções, remoções
-/// e substituições para transformar [a] em [b]).
 int _levenshteinDistanceCE(String a, String b) {
   if (a == b) return 0;
   if (a.isEmpty) return b.length;
@@ -8560,11 +8447,6 @@ int _levenshteinDistanceCE(String a, String b) {
   return anterior[b.length];
 }
 
-/// Similaridade entre 0 (totalmente diferentes) e 1 (idênticos), baseada na
-/// distância de Levenshtein normalizada pelo tamanho do maior texto.
-///
-/// Sensível à ORDEM das palavras: "TINTA PRETO FOSCO" x "PRETO FOSCO TINTA"
-/// tem similaridade baixa aqui, mesmo contendo as mesmas palavras.
 double _similaridadeTextoCE(String a, String b) {
   if (a.isEmpty && b.isEmpty) return 1;
   if (a.isEmpty || b.isEmpty) return 0;
@@ -8573,27 +8455,12 @@ double _similaridadeTextoCE(String a, String b) {
   return 1 - (distancia / maiorTamanho);
 }
 
-/// Similaridade por CONJUNTO DE PALAVRAS, ignorando a ordem em que aparecem.
-///
-/// Resolve o caso de nomes com as mesmas palavras escritas em ordem
-/// diferente (ex.: "TINTA DUPLA FUNCAO PRETO FOSCO" vs "TINTA PRETO FOSCO
-/// DUPLA FUNCAO"), que teriam distância de Levenshtein alta (o texto inteiro
-/// muda de posição) apesar de serem, na prática, o mesmo material.
-///
-/// Cada palavra do texto mais curto é casada com a melhor correspondente
-/// ainda não usada no texto mais longo (permitindo pequenas diferenças de
-/// grafia por palavra, via Levenshtein por palavra), e o resultado é a
-/// fração de palavras casadas ponderada pelo tamanho combinado dos dois
-/// textos — combinação equivalente a um Jaccard/overlap tolerante a erros
-/// de digitação em cada palavra individual.
 double _similaridadePalavrasCE(String a, String b) {
   final palavrasA = a.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
   final palavrasB = b.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
   if (palavrasA.isEmpty && palavrasB.isEmpty) return 1;
   if (palavrasA.isEmpty || palavrasB.isEmpty) return 0;
 
-  // Garante que iteramos sobre a lista menor (menos comparações) e usa a
-  // maior como "disponível" para casar.
   final menor = palavrasA.length <= palavrasB.length ? palavrasA : palavrasB;
   final maior = palavrasA.length <= palavrasB.length ? palavrasB : palavrasA;
   final usados = List<bool>.filled(maior.length, false);
@@ -8605,19 +8472,16 @@ double _similaridadePalavrasCE(String a, String b) {
     for (var i = 0; i < maior.length; i++) {
       if (usados[i]) continue;
       if (palavra == maior[i]) {
-        // Palavra idêntica: casamento perfeito, não precisa procurar mais.
+
         melhorIdx = i;
         melhorScore = 1.0;
         break;
       }
-      // Palavras de 1-2 letras são pouco distintivas (ex.: "DE", "M2"):
-      // só aceita casamento parcial entre elas se muito parecidas, pra não
-      // gerar falso-positivo (ex.: "DE" casando com "SE").
+
       final tamMin = palavra.length < maior[i].length ? palavra.length : maior[i].length;
       if (tamMin <= 2 && palavra != maior[i]) continue;
       final score = _similaridadeTextoCE(palavra, maior[i]);
-      // Só considera casamento parcial (palavra diferente, mas parecida —
-      // ex.: singular/plural, erro de digitação) acima de um limiar alto.
+
       if (score >= 0.75 && score > melhorScore) {
         melhorScore = score;
         melhorIdx = i;
@@ -8631,23 +8495,16 @@ double _similaridadePalavrasCE(String a, String b) {
 
   final pesoTotal = (palavrasA + palavrasB).fold<int>(0, (soma, p) => soma + p.length);
   if (pesoTotal == 0) return 0;
-  // Multiplica por 2 porque cada palavra casada contribui peso de um lado
-  // só (pesoCasado é somado a partir da lista "menor"), mas representa a
-  // correspondência dos dois lados ao mesmo tempo.
+
   return (pesoCasado * 2) / pesoTotal;
 }
 
-/// Resultado de uma possível duplicata encontrada ao comparar os campos do
-/// formulário com materiais já cadastrados.
 class _PossivelDuplicataCE {
   final MaterialModel material;
 
-  /// true quando nome + identificador + medida + espessura (normalizados)
-  /// coincidem exatamente — o backend rejeitaria esse cadastro com 409.
   final bool exata;
   final double similaridade;
-  /// true quando o nome digitado é prefixo/trecho do nome já cadastrado
-  /// (ou vice-versa) — indica digitação em andamento.
+
   final bool contido;
 
   _PossivelDuplicataCE({
@@ -8658,9 +8515,6 @@ class _PossivelDuplicataCE {
   });
 }
 
-/// Banner exibido no formulário de cadastro de material quando o algoritmo
-/// de comparação encontra materiais já cadastrados com nome, identificador,
-/// medida ou espessura parecidos com os campos digitados.
 class _AvisoPossivelDuplicataCE extends StatelessWidget {
   final bool carregando;
   final List<_PossivelDuplicataCE> duplicatas;
@@ -8740,10 +8594,6 @@ class _AvisoPossivelDuplicataCE extends StatelessWidget {
           ...duplicatas.map((d) {
             final m = d.material;
 
-            // Formata comprimento x largura (ex.: "2x1m") quando ambos os
-            // valores numéricos estiverem disponíveis. Nesse caso, o texto
-            // livre "medida" é omitido, para não repetir a mesma informação
-            // em formatos diferentes.
             String? dimensaoFormatada;
             if (m.comprimento != null && m.largura != null &&
                 m.comprimento! > 0 && m.largura! > 0) {
@@ -8813,16 +8663,10 @@ class _AvisoPossivelDuplicataCE extends StatelessWidget {
     );
   }
 }
-// ── Dropdown de categoria (filtro no diálogo de Entrada/Saída) ─────────────
-// Mesmo padrão visual do dropdown de categoria usado nas outras páginas do
-// sistema (ex.: estoque_page.dart): campo com o mesmo estilo de
-// InputDecorator dos demais filtros, cursor de mão no campo inteiro, seta
-// que destaca no hover e busca embutida no próprio menu. Diferente do
-// dropdown de estoque_page.dart, aqui há 3 estados possíveis: null = Todas,
-// '' = Sem categoria, e o nome da categoria selecionada.
+
 class _CategoriaFiltroDropdownCE extends StatefulWidget {
   final List<String> categorias;
-  final String? valorSelecionado; // null = Todas; '' = Sem categoria
+  final String? valorSelecionado;
   final ValueChanged<String?> onSelecionar;
   const _CategoriaFiltroDropdownCE({
     required this.categorias,
@@ -9004,8 +8848,86 @@ class _CategoriaFiltroDropdownCEState extends State<_CategoriaFiltroDropdownCE> 
   }
 }
 
-// ── Botão "voltar" com hover, cursor de mão e tooltip ───────────────────────
-// Mesmo padrão usado no cabeçalho das outras páginas do sistema.
+class _RodapePaginacao extends StatelessWidget {
+  final int paginaAtual;
+  final int itensPorPagina;
+  final int totalItens;
+  final ValueChanged<int> onPaginaChanged;
+
+  const _RodapePaginacao({
+    required this.paginaAtual,
+    required this.itensPorPagina,
+    required this.totalItens,
+    required this.onPaginaChanged,
+  });
+
+  List<int> _paginas(int totalPaginas, int paginaAtual) {
+    if (totalPaginas <= 7) return List.generate(totalPaginas, (i) => i);
+    final Set<int> vis = {0, totalPaginas - 1, paginaAtual};
+    if (paginaAtual > 0) vis.add(paginaAtual - 1);
+    if (paginaAtual < totalPaginas - 1) vis.add(paginaAtual + 1);
+    final sorted = vis.toList()..sort();
+    final List<int> result = [];
+    for (int i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.add(-1);
+      result.add(sorted[i]);
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final totalPaginas = (totalItens / itensPorPagina).ceil().clamp(1, 999999999);
+    final pagina = paginaAtual.clamp(0, totalPaginas - 1);
+    final inicio = pagina * itensPorPagina + 1;
+    final fim    = ((pagina + 1) * itensPorPagina).clamp(0, totalItens);
+    final scheme = Theme.of(context).colorScheme;
+    final paginas = _paginas(totalPaginas, pagina);
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          'Exibindo $inicio–$fim de $totalItens itens',
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _BotaoPaginaOS(
+              icon: Icons.chevron_left,
+              tooltip: 'Página anterior',
+              enabled: pagina > 0,
+              onTap: () => onPaginaChanged(pagina - 1),
+            ),
+            SizedBox(width: 4),
+            for (final p in paginas) ...[
+              if (p == -1)
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  child: Text('…', style: TextStyle(color: scheme.outline)),
+                )
+              else
+                _BotaoNumeroPaginaOS(
+                  numero: p,
+                  ativa: p == pagina,
+                  onTap: () => onPaginaChanged(p),
+                ),
+              const SizedBox(width: 4),
+            ],
+            _BotaoPaginaOS(
+              icon: Icons.chevron_right,
+              tooltip: 'Próxima página',
+              enabled: pagina < totalPaginas - 1,
+              onTap: () => onPaginaChanged(pagina + 1),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;

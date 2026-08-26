@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
+import 'dart:io' show Platform, exit;
+import 'package:window_manager/window_manager.dart';
 
 import 'rotas/app_router.dart';
 import 'theme/app_theme.dart';
@@ -21,6 +24,7 @@ import 'providers/gastos_categoria_provider.dart';
 import 'providers/alertas_estoque_provider.dart';
 import 'providers/veiculo_provider.dart';
 import 'providers/theme_provider.dart';
+import 'providers/nav_layout_provider.dart';
 import 'providers/orcamento_venda_provider.dart';
 import 'providers/solicitacao_material_provider.dart';
 import 'providers/chat_provider.dart';
@@ -33,13 +37,33 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
 
+  if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+    await windowManager.ensureInitialized();
+
+    final jaVisivel = await windowManager.isVisible();
+
+    if (!jaVisivel) {
+      const windowOptions = WindowOptions(
+        title: 'Visual Premium',
+      );
+
+      await windowManager.waitUntilReadyToShow(windowOptions, () async {
+        await windowManager.setPreventClose(true);
+        await windowManager.maximize();
+        await windowManager.show();
+        await windowManager.focus();
+        await windowManager.setMinimumSize(const Size(1024, 700));
+      });
+    } else {
+      await windowManager.setPreventClose(true);
+    }
+  }
+
   final usuarioProvider             = UsuarioProvider();
   final orcamentoProvider           = OrcamentoProvider();
   final solicitacaoMaterialProvider = SolicitacaoMaterialProvider();
-  // Criado aqui (e não dentro do MultiProvider) para poder ser ligado ao
-  // UsuarioProvider via setChatProvider ANTES de restaurarSessao() rodar —
-  // do contrário, a restauração de sessão no boot do app não teria como
-  // inicializar a conexão de chat (SSE + heartbeat) do usuário já logado.
+  final materialProvider            = MaterialProvider();
+
   final chatProvider                = ChatProvider();
 
   usuarioProvider.setOrcamentoProvider(orcamentoProvider);
@@ -52,6 +76,7 @@ Future<void> main() async {
     usuarioProvider:             usuarioProvider,
     orcamentoProvider:           orcamentoProvider,
     solicitacaoMaterialProvider: solicitacaoMaterialProvider,
+    materialProvider:            materialProvider,
     chatProvider:                chatProvider,
   ));
 }
@@ -60,6 +85,7 @@ class VisualPremiumApp extends StatefulWidget {
   final UsuarioProvider             usuarioProvider;
   final OrcamentoProvider           orcamentoProvider;
   final SolicitacaoMaterialProvider solicitacaoMaterialProvider;
+  final MaterialProvider            materialProvider;
   final ChatProvider                chatProvider;
 
   const VisualPremiumApp({
@@ -67,6 +93,7 @@ class VisualPremiumApp extends StatefulWidget {
     required this.usuarioProvider,
     required this.orcamentoProvider,
     required this.solicitacaoMaterialProvider,
+    required this.materialProvider,
     required this.chatProvider,
   });
 
@@ -74,11 +101,81 @@ class VisualPremiumApp extends StatefulWidget {
   State<VisualPremiumApp> createState() => _VisualPremiumAppState();
 }
 
-class _VisualPremiumAppState extends State<VisualPremiumApp> {
-  // Criado uma única vez. Se isso for reconstruído a cada troca de tema
-  // (ex: dentro de um Consumer<ThemeProvider>), o GoRouter reinicia do zero
-  // em initialLocation: '/' — ou seja, a LoadingPage reaparece a cada toggle.
+class _VisualPremiumAppState extends State<VisualPremiumApp> with WindowListener {
   late final GoRouter _router = AppRouter.buildRouter(widget.usuarioProvider);
+
+  bool get _suportaJanelaDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+
+  @override
+  void initState() {
+    super.initState();
+    if (_suportaJanelaDesktop) {
+      windowManager.addListener(this);
+    }
+  }
+
+  @override
+  void onWindowClose() async {
+    final sw = Stopwatch()..start();
+    void log(String etapa) =>
+        debugPrint('[FECHAR] ${sw.elapsedMilliseconds}ms — $etapa');
+
+    log('onWindowClose chamado, iniciando encerramento das conexões SSE');
+
+    try {
+      widget.orcamentoProvider.encerrarConexoesTempoReal();
+      log('orcamentoProvider.encerrarConexoesTempoReal() concluído');
+    } catch (e, st) {
+      log('ERRO em orcamentoProvider.encerrarConexoesTempoReal(): $e\n$st');
+    }
+
+    try {
+      widget.chatProvider.encerrarConexaoSSE();
+      log('chatProvider.encerrarConexaoSSE() concluído');
+    } catch (e, st) {
+      log('ERRO em chatProvider.encerrarConexaoSSE(): $e\n$st');
+    }
+
+    try {
+      widget.materialProvider.encerrarConexaoSSE();
+      log('materialProvider.encerrarConexaoSSE() concluído');
+    } catch (e, st) {
+      log('ERRO em materialProvider.encerrarConexaoSSE(): $e\n$st');
+    }
+
+    try {
+      widget.solicitacaoMaterialProvider.encerrarConexaoSSE();
+      log('solicitacaoMaterialProvider.encerrarConexaoSSE() concluído');
+    } catch (e, st) {
+      log('ERRO em solicitacaoMaterialProvider.encerrarConexaoSSE(): $e\n$st');
+    }
+
+    log('todos os encerramentos de SSE concluídos, chamando windowManager.destroy()');
+
+    try {
+      await windowManager.destroy().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          log('TIMEOUT: windowManager.destroy() não retornou em 10s');
+        },
+      );
+      log('windowManager.destroy() retornou');
+    } catch (e, st) {
+      log('ERRO em windowManager.destroy(): $e\n$st');
+    }
+
+    log('forçando encerramento do processo com exit(0)');
+    exit(0);
+  }
+
+  @override
+  void dispose() {
+    if (_suportaJanelaDesktop) {
+      windowManager.removeListener(this);
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -86,7 +183,7 @@ class _VisualPremiumAppState extends State<VisualPremiumApp> {
       providers: [
         ChangeNotifierProvider.value(value: widget.usuarioProvider),
         ChangeNotifierProvider.value(value: widget.orcamentoProvider),
-        ChangeNotifierProvider(create: (_) => MaterialProvider()),
+        ChangeNotifierProvider.value(value: widget.materialProvider),
         ChangeNotifierProvider(create: (_) => ProdutoProvider()),
         ChangeNotifierProvider(create: (_) => EstoqueProvider()),
         ChangeNotifierProvider(create: (_) => FornecedorProvider()),
@@ -98,16 +195,10 @@ class _VisualPremiumAppState extends State<VisualPremiumApp> {
         ChangeNotifierProvider(create: (_) => AlertasEstoqueProvider()),
         ChangeNotifierProvider(create: (_) => VeiculoProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => NavLayoutProvider()),
         ChangeNotifierProvider(create: (_) => OrcamentoVendaProvider()),
         ChangeNotifierProvider(create: (_) => RoboHelperProvider()),
         ChangeNotifierProvider.value(value: widget.solicitacaoMaterialProvider),
-        // .value (e não create) porque a MESMA instância já foi ligada ao
-        // UsuarioProvider em main() e pode já estar inicializada (sessão
-        // restaurada no boot). Usar create: (_) => ChatProvider() aqui
-        // criaria uma SEGUNDA instância desconectada, que era exatamente o
-        // bug original: o widget flutuante (que lê via context.watch)
-        // acabava enxergando um ChatProvider "vazio" diferente do que a
-        // ChatPage inicializava.
         ChangeNotifierProvider.value(value: widget.chatProvider),
       ],
       child: Consumer<ThemeProvider>(
@@ -117,29 +208,17 @@ class _VisualPremiumAppState extends State<VisualPremiumApp> {
             debugShowCheckedModeBanner: false,
             theme: AppTheme.light,
             darkTheme: AppTheme.dark,
-            themeMode: themeProvider.themeMode,   // ← controlado pelo provider
-            // AnimatedTheme faz a transição de cores (fundo, texto, bordas
-            // etc.) suavemente em vez do corte seco que MaterialApp aplica
-            // por padrão ao trocar theme/darkTheme. O ThemeTransitionOverlay
-            // adiciona por cima um efeito de revelação circular a partir do
-            // ponto tocado (ver widgets/theme_transition.dart), que é quem
-            // dispara o toggle propriamente dito.
+            themeMode: themeProvider.themeMode,
+           
             builder: (context, child) => ThemeTransitionOverlay(
               child: AnimatedTheme(
                 data: themeProvider.isDark ? AppTheme.dark : AppTheme.light,
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeInOut,
-                // O robô assistente (RoboHelperWidget) NÃO entra aqui: ele
-                // é gerenciado pelo AppShell via OverlayEntry inserido no
-                // Overlay raiz (mesmo padrão do WelcomeBanner, ver
-                // widgets/app_shell.dart) — assim ele só existe quando o
-                // AppShell está montado (nunca aparece em loading/login) e
-                // ainda fica acima de qualquer showDialog, sem precisar
-                // morar fora do MaterialApp.router.
                 child: UpdateChecker(child: child!),
               ),
             ),
-            routerConfig: _router, // ← reaproveitado, nunca recriado
+            routerConfig: _router,
             localizationsDelegates: const [
               GlobalMaterialLocalizations.delegate,
               GlobalWidgetsLocalizations.delegate,

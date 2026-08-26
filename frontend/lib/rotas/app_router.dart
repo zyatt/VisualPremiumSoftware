@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:visual_premium/pages/gastos_categoria_page.dart';
 import 'package:visual_premium/pages/solicitacoes_material_page.dart';
 import 'package:visual_premium/pages/veiculo_page.dart';
-import 'package:visual_premium/pages/orcamento_venda_page.dart'; // ← NOVO
+import 'package:visual_premium/pages/orcamento_venda_page.dart';
 import '../pages/admin_page.dart';
 import '../pages/loading_page.dart';
 import '../pages/login_page.dart';
@@ -21,16 +21,10 @@ import '../pages/chat_page.dart';
 import '../widgets/app_shell.dart';
 import '../providers/usuario_provider.dart';
 
-/// Chave global que permite chamar métodos do state de OrdemCompraPage
-/// mesmo quando a branch já está montada (StatefulShellRoute preserva estado).
 final ordemCompraPageKey = GlobalKey<OrdemCompraPageState>();
 
 class AppRouter {
   static final rootNavigatorKey = GlobalKey<NavigatorState>();
-
-  // Uma chave de Navigator por branch, para que cada seção mantenha sua
-  // própria pilha de navegação (e portanto seu estado) preservada quando o
-  // usuário troca de página pelo menu lateral.
   static final _inicioNavigatorKey          = GlobalKey<NavigatorState>(debugLabel: 'inicio');
   static final _estoqueNavigatorKey         = GlobalKey<NavigatorState>(debugLabel: 'estoque');
   static final _produtosNavigatorKey        = GlobalKey<NavigatorState>(debugLabel: 'produtos');
@@ -47,7 +41,6 @@ class AppRouter {
   static final _solicitacoesMaterialNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'solicitacoes-material');
   static final _chatNavigatorKey                  = GlobalKey<NavigatorState>(debugLabel: 'chat');
 
-  // /inicio é intencionalmente omitido: todos os roles acessam a home.
   static const _rotasBloqueadasParaProducao = [
     '/estoque',
     '/produtos',
@@ -90,7 +83,6 @@ class AppRouter {
         final isOrcamentista = roleUp == 'ORCAMENTISTA';
 
         if (naLogin) {
-          // Todos os roles caem na home; a home exibe apenas os cards permitidos.
           return '/inicio';
         }
 
@@ -113,8 +105,6 @@ class AppRouter {
           return '/inicio';
         }
 
-        // ORCAMENTISTA: acesso somente a estoque, produtos e orçamento de vendas.
-        // Qualquer outra rota (incluindo /inicio) cai em /orcamento-venda.
         if (isOrcamentista) {
           const rotasPermitidas = [
             '/inicio',
@@ -230,7 +220,7 @@ class AppRouter {
                 GoRoute(path: '/veiculos', builder: (_, __) => const VeiculoPage()),
               ],
             ),
-            StatefulShellBranch(                                   // ← NOVO
+            StatefulShellBranch(
               navigatorKey: _orcamentoVendaNavigatorKey,
               routes: [
                 GoRoute(path: '/orcamento-venda', builder: (_, __) => const OrcamentoVendaPage()),

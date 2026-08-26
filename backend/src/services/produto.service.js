@@ -1,14 +1,39 @@
 const prisma = require('../utils/prisma');
 
-function _calcularPrecoMedio(fornecedorMateriais) {
-  const precos   = fornecedorMateriais.map((fm) => Number(fm.preco)).filter((p) => p > 0);
-  const precosM2 = fornecedorMateriais.map((fm) => Number(fm.precoMetroQuadrado)).filter((p) => p > 0);
-  const media    = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
-  return { precoMedio: media(precos), precoMedioM2: media(precosM2) };
+function _calcularPrecoMedio(fornecedorMateriais, material = {}) {
+  const refL = material.largura     != null ? Number(material.largura)     : null;
+  const refC = material.comprimento != null ? Number(material.comprimento) : null;
+  const area = (refL && refC && refL > 0 && refC > 0) ? refL * refC : null;
+
+  const precos = fornecedorMateriais.map((fm) => Number(fm.preco)).filter((p) => p > 0);
+
+  const precosM2 = fornecedorMateriais.map((fm) => {
+    const direto = Number(fm.precoMetroQuadrado);
+    if (direto > 0) return direto;
+    const base = Number(fm.preco);
+    if (base > 0 && area) return base / area;
+    return 0;
+  }).filter((p) => p > 0);
+
+  const precosUnidadeMedida = fornecedorMateriais.map((fm) => {
+    const direto = Number(fm.precoUnidadeMedida);
+    if (direto > 0) return direto;
+    const base = Number(fm.preco);
+    if (base > 0 && refC && refC > 0) return base / refC;
+    return 0;
+  }).filter((p) => p > 0);
+
+  const media = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+  return {
+    precoMedio: media(precos),
+    precoMedioM2: media(precosM2),
+    precoUnidadeMedidaMediano: media(precosUnidadeMedida),
+  };
 }
 
 function _enrichMaterial(mat) {
-  const { precoMedio, precoMedioM2 } = _calcularPrecoMedio(mat.fornecedorMateriais ?? []);
+  const { precoMedio, precoMedioM2, precoUnidadeMedidaMediano } =
+      _calcularPrecoMedio(mat.fornecedorMateriais ?? [], mat);
   return {
     id:                mat.id,
     nome:              mat.nome,
@@ -23,6 +48,7 @@ function _enrichMaterial(mat) {
     comprimento: mat.comprimento != null ? Number(mat.comprimento) : null,
     precoMedio,
     precoMedioM2,
+    precoUnidadeMedidaMediano,
   };
 }
 

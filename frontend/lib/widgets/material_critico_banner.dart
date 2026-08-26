@@ -1,19 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/material_model.dart';
 
-/// Banner flutuante que desliza da direita para dentro da tela avisando que
-/// um material entrou em estoque CRÍTICO — mesmo padrão visual/animação do
-/// [NovaSolicitacaoBanner] e do [WelcomeBanner], mas com os dados do material
-/// e cores de alerta.
-///
-/// Diferente dos demais banners, este permanece fixo na tela até o usuário
-/// fechá-lo manualmente (botão de fechar no card ou toque no card, que
-/// também dispara [onTap]).
-///
-/// Exibido apenas uma vez por evento (o SSE só dispara na transição para
-/// CRITICO — veja `notificarSeCritico` no backend), e quem chama controla a
-/// exibição única consumindo a notificação no provider assim que mostra o
-/// banner.
 class MaterialCriticoBanner extends StatelessWidget {
   final MaterialCriticoNotificacao notificacao;
   final VoidCallback? onTap;
@@ -29,27 +16,11 @@ class MaterialCriticoBanner extends StatelessWidget {
     MaterialCriticoNotificacao notificacao, {
     VoidCallback? onTap,
   }) {
-    // rootOverlay: true força o Overlay do MaterialApp.router (que
-    // sobrevive a qualquer navegação do GoRouter), em vez do Overlay mais
-    // próximo — que pode pertencer a uma parte da árvore sendo desmontada
-    // no exato momento da troca de rota/usuário (ver AppShell). maybeOf
-    // evita lançar exceção e derrubar o app se, por algum motivo, nenhum
-    // Overlay estiver mais disponível nesse instante.
-    //
-    // ATENÇÃO: [context] precisa ser um contexto de DENTRO da árvore do
-    // Navigator (ex: o context de build() do AppShell), nunca
-    // `navigatorKey.currentContext` — esse é o contexto do próprio widget
-    // Navigator, e o Overlay dele é filho na árvore, não ancestral, então
-    // Overlay.maybeOf (que só busca pra cima) sempre retornaria null. Se
-    // precisar de um contexto "estável" que sobreviva a uma desmontagem,
-    // use [showOnOverlay] com `navigatorKey.currentState?.overlay`.
     final overlay = Overlay.maybeOf(context, rootOverlay: true);
     if (overlay == null) return;
     showOnOverlay(overlay, notificacao, onTap: onTap);
   }
 
-  /// Mesmo comportamento de [show], mas recebendo o [OverlayState]
-  /// diretamente — sem passar por busca de ancestral via BuildContext.
   static void showOnOverlay(
     OverlayState overlay,
     MaterialCriticoNotificacao notificacao, {
@@ -74,8 +45,6 @@ class MaterialCriticoBanner extends StatelessWidget {
       );
 }
 
-// ── Versão overlay ────────────────────────────────────────────────────────────
-
 class _BannerOverlay extends StatefulWidget {
   final MaterialCriticoNotificacao notificacao;
   final VoidCallback onDone;
@@ -97,7 +66,6 @@ class _BannerOverlayState extends State<_BannerOverlay>
   late final Animation<double> _fade;
   bool _fechando = false;
 
-  // Posição atual do banner na tela (atualizada ao arrastar).
   double? _top;
   double? _left;
 
@@ -108,13 +76,10 @@ class _BannerOverlayState extends State<_BannerOverlay>
   void initState() {
     super.initState();
 
-    // Sem timeline fixa: o controller representa apenas o quanto o banner
-    // está "aberto" (0 = fora da tela, 1 = totalmente visível). Ele entra
-    // uma vez e permanece em 1 até o usuário fechar manualmente.
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 320), // entrada
-      reverseDuration: const Duration(milliseconds: 220), // saída
+      duration: const Duration(milliseconds: 320),
+      reverseDuration: const Duration(milliseconds: 220),
     );
 
     _slide = _ctrl.drive(
@@ -136,8 +101,6 @@ class _BannerOverlayState extends State<_BannerOverlay>
     super.dispose();
   }
 
-  /// Define a posição inicial (mesmo lugar de sempre: canto superior
-  /// direito) apenas na primeira vez que o tamanho da tela é conhecido.
   void _garantirPosicaoInicial(Size tela) {
     _top ??= 100;
     _left ??= (tela.width - _cardWidth - _margemDireita).clamp(0.0, tela.width);
@@ -150,13 +113,11 @@ class _BannerOverlayState extends State<_BannerOverlay>
     });
   }
 
-  /// Toque no corpo do card: dispara a ação (se houver) e fecha o banner.
   void _tocarCard() {
     widget.onTap?.call();
     _fechar();
   }
 
-  /// Botão de fechar: apenas dispensa o banner, sem disparar [onTap].
   void _fechar() {
     if (_fechando) return;
     _fechando = true;
@@ -198,8 +159,6 @@ class _BannerOverlayState extends State<_BannerOverlay>
   }
 }
 
-// ── Card visual ───────────────────────────────────────────────────────────────
-
 class _BannerCard extends StatefulWidget {
   final MaterialCriticoNotificacao notificacao;
   final VoidCallback onTap;
@@ -220,7 +179,7 @@ class _BannerCardState extends State<_BannerCard> {
   @override
   Widget build(BuildContext context) {
     final n = widget.notificacao;
-    const corAlerta = Color(0xFFE53935); // vermelho de alerta
+    const corAlerta = Color(0xFFE53935);
 
     final detalhes = <String>[
       if (n.identificador != null && n.identificador!.trim().isNotEmpty)
@@ -373,8 +332,6 @@ class _BannerCardState extends State<_BannerCard> {
     );
   }
 }
-
-// ── Botão de fechar ───────────────────────────────────────────────────────────
 
 class _CloseButton extends StatefulWidget {
   final VoidCallback onTap;

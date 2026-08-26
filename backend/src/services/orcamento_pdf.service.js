@@ -2,6 +2,41 @@ const PDFDocument = require('pdfkit');
 const prisma      = require('../utils/prisma');
 const path        = require('path');
 
+const FONT_REGULAR = path.join(__dirname, '../assets/fonts/DejaVuSans.ttf');
+const FONT_BOLD    = path.join(__dirname, '../assets/fonts/DejaVuSans-Bold.ttf');
+
+function limparTexto(valor) {
+  if (valor == null) return valor;
+  return String(valor)
+    .replace(/[\t\r\n\v\f]+/g, ' ')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
+
+function truncarParaLargura(doc, texto, maxWidth) {
+  if (!texto) return texto;
+  if (doc.widthOfString(texto) <= maxWidth) return texto;
+
+  const reticencias = '…';
+  let low = 0;
+  let high = texto.length;
+  let melhor = '';
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const candidato = texto.slice(0, mid).trimEnd() + reticencias;
+    if (doc.widthOfString(candidato) <= maxWidth) {
+      melhor = candidato;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return melhor || reticencias;
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value ?? 0);
 }
@@ -27,11 +62,6 @@ function formatNumberSmart(value) {
   }).format(v);
 }
 
-/**
- * Retorna a dimensão formatada como "2x1m" (comprimento x largura).
- * Se o material já tiver `medida` preenchida, usa só a medida (prioridade).
- * Se não tiver nem medida nem largura/comprimento, retorna null.
- */
 function formatDimensao(medida, largura, comprimento) {
   if (medida && medida.trim()) return medida.trim();
   const l = largura != null ? Number(largura) : null;
@@ -43,11 +73,6 @@ function formatDimensao(medida, largura, comprimento) {
   return `${fmt(c)}x${fmt(l)}m`;
 }
 
-/**
- * Formata a espessura do material para exibição, acrescentando o sufixo
- * "mm". Ex.: "1" -> "1mm". Se já terminar com "mm" (case-insensitive) ou
- * estiver vazio/nulo, retorna como está.
- */
 function formatEspessura(espessura) {
   if (!espessura) return null;
   const v = String(espessura).trim();
@@ -101,11 +126,11 @@ function drawPageHeader(doc, oc, logoPath) {
   try {
     doc.image(logoPath, logoX, logoY, { height: 42, fit: [logoW, 42] });
   } catch (_) {
-    doc.font('Helvetica-Bold').fontSize(14).fillColor(C.accent)
+    doc.font('Bold').fontSize(14).fillColor(C.accent)
        .text('Visual', logoX, logoY + 5, { lineBreak: false });
-    doc.font('Helvetica').fontSize(14).fillColor(C.black)
+    doc.font('Regular').fontSize(14).fillColor(C.black)
        .text(' Premium', logoX + 38, logoY + 5, { lineBreak: false });
-    doc.font('Helvetica').fontSize(6).fillColor(C.lightGray)
+    doc.font('Regular').fontSize(6).fillColor(C.lightGray)
        .text('comunicação visual', logoX, logoY + 22, { lineBreak: false });
   }
 
@@ -130,13 +155,13 @@ function drawPageHeader(doc, oc, logoPath) {
   const infoW       = 220;
   const infoY       = 13;
 
-  doc.font('Helvetica-Bold').fontSize(8).fillColor(C.black)
+  doc.font('Bold').fontSize(8).fillColor(C.black)
      .text(empresa.nome, infoX, infoY, { width: infoW, lineBreak: false });
-  doc.font('Helvetica').fontSize(7).fillColor(C.gray)
+  doc.font('Regular').fontSize(7).fillColor(C.gray)
      .text(empresa.cnpjIe, infoX, infoY + 11, { width: infoW, lineBreak: false });
-  doc.font('Helvetica').fontSize(7).fillColor(C.gray)
+  doc.font('Regular').fontSize(7).fillColor(C.gray)
      .text(empresa.endereco, infoX, infoY + 21, { width: infoW, lineBreak: true });
-  doc.font('Helvetica').fontSize(7).fillColor(C.gray)
+  doc.font('Regular').fontSize(7).fillColor(C.gray)
      .text(empresa.telefone, infoX, infoY + 38, { width: infoW, lineBreak: false });
 
   const ocX = infoX + infoW + 10;
@@ -147,18 +172,18 @@ function drawPageHeader(doc, oc, logoPath) {
 
   const isOC = oc._isOrdemCompra === true;
   if (isOC) {
-    doc.font('Helvetica-Bold').fontSize(7.5).fillColor(C.gray)
+    doc.font('Bold').fontSize(7.5).fillColor(C.gray)
        .text('ORDEM DE COMPRA', ocX, 14, { width: ocW, align: 'right', lineBreak: false });
-    doc.font('Helvetica-Bold').fontSize(28).fillColor(C.black)
+    doc.font('Bold').fontSize(28).fillColor(C.black)
        .text(`#${oc.id}`, ocX, 22, { width: ocW, align: 'right', lineBreak: false });
     const st = statusLabel(oc.status);
-    doc.font('Helvetica-Bold').fontSize(6.5).fillColor(st.color)
+    doc.font('Bold').fontSize(6.5).fillColor(st.color)
        .text(st.text, ocX, 56, { width: ocW, align: 'right', lineBreak: false });
   } else {
-    doc.font('Helvetica-Bold').fontSize(13).fillColor(C.accent)
+    doc.font('Bold').fontSize(13).fillColor(C.accent)
        .text('ORÇAMENTO', ocX, 24, { width: ocW, align: 'right', lineBreak: false });
     const dataHoje = formatDate(new Date());
-    doc.font('Helvetica').fontSize(7).fillColor(C.lightGray)
+    doc.font('Regular').fontSize(7).fillColor(C.lightGray)
        .text(dataHoje, ocX, 44, { width: ocW, align: 'right', lineBreak: false });
   }
 
@@ -169,21 +194,21 @@ function drawPageHeader(doc, oc, logoPath) {
 function drawSectionHeader(doc, y, title) {
   fillRect(doc, MARGIN, y, CONTENT_W, 20, C.bgHeader);
   fillRect(doc, MARGIN, y, 4, 20, C.accent);
-  doc.font('Helvetica-Bold').fontSize(7.5).fillColor(C.black)
+  doc.font('Bold').fontSize(7.5).fillColor(C.black)
      .text(title.toUpperCase(), MARGIN + 12, y + 7);
 }
 
 function drawInfoRow(doc, y, label, value) {
-  doc.font('Helvetica').fontSize(7.5).fillColor(C.lightGray)
+  doc.font('Regular').fontSize(7.5).fillColor(C.lightGray)
      .text(label, MARGIN, y, { width: 130 });
-  doc.font('Helvetica-Bold').fontSize(7.5).fillColor(C.black)
+  doc.font('Bold').fontSize(7.5).fillColor(C.black)
      .text(value || '—', MARGIN + 135, y, { width: CONTENT_W - 135 });
 }
 
 function drawOsBadges(doc, numerosOS, startY) {
   if (!numerosOS || numerosOS.length === 0) return startY;
 
-  doc.font('Helvetica').fontSize(7.5).fillColor(C.lightGray)
+  doc.font('Regular').fontSize(7.5).fillColor(C.lightGray)
      .text('Números de OS', MARGIN, startY, { width: 130 });
 
   let bx = MARGIN + 135;
@@ -194,7 +219,7 @@ function drawOsBadges(doc, numerosOS, startY) {
     const tw    = doc.widthOfString(text, { fontSize: 7 }) + 12;
     fillRect(doc, bx, by, tw, 13, C.accent + '1A');
     doc.rect(bx, by, tw, 13).strokeColor(C.accent + '55').lineWidth(0.5).stroke();
-    doc.font('Helvetica-Bold').fontSize(7).fillColor(C.accent)
+    doc.font('Bold').fontSize(7).fillColor(C.accent)
        .text(text, bx + 6, by + 3, { width: tw - 12, lineBreak: false });
     bx += tw + 5;
   }
@@ -209,9 +234,9 @@ function drawTotalBox(doc, y, valorTotal) {
 
   fillRect(doc, boxX, y, boxW, boxH, C.bgHeader);
 
-  doc.font('Helvetica').fontSize(7).fillColor(C.gray)
+  doc.font('Regular').fontSize(7).fillColor(C.gray)
      .text('TOTAL GERAL', boxX + 10, y + 6, { width: boxW - 20, align: 'left' });
-  doc.font('Helvetica-Bold').fontSize(13).fillColor(C.black)
+  doc.font('Bold').fontSize(13).fillColor(C.black)
      .text(formatCurrency(valorTotal), boxX + 10, y + 14, { width: boxW - 20, align: 'right' });
 
   return y + boxH;
@@ -250,7 +275,7 @@ function drawItensTable(doc, itens, startY) {
     doc.strokeColor('#D1D5DB').lineWidth(0.8)
        .moveTo(MARGIN, y + HEADER_H).lineTo(PAGE_W - MARGIN, y + HEADER_H).stroke();
 
-    doc.font('Helvetica-Bold').fontSize(7).fillColor(C.gray);
+    doc.font('Bold').fontSize(7).fillColor(C.gray);
     for (const col of cols) {
       doc.text(col.label, col.x + col.pad, y + (HEADER_H - 7) / 2,
                { width: col.w - col.pad * 2, align: col.hAlign, lineBreak: false });
@@ -266,10 +291,10 @@ function drawItensTable(doc, itens, startY) {
     const unidade = item.material?.unidade ?? '—';
     const descricao = item.descricaoItem?.trim() || null;
 
-    doc.font('Helvetica-Bold').fontSize(FONT_SZ);
+    doc.font('Bold').fontSize(FONT_SZ);
     const matH  = doc.heightOfString(nome, { width: cols[0].w - cols[0].pad * 2 });
     const descH = descricao
-      ? doc.font('Helvetica').fontSize(FONT_SZ - 0.5).heightOfString(descricao, { width: cols[0].w - cols[0].pad * 2 }) + 3
+      ? doc.font('Regular').fontSize(FONT_SZ - 0.5).heightOfString(descricao, { width: cols[0].w - cols[0].pad * 2 }) + 3
       : 0;
     const rowH  = Math.max(20, matH + descH + ROW_PAD_V * 2);
 
@@ -288,28 +313,28 @@ function drawItensTable(doc, itens, startY) {
     const [C0, C1, C2, C3, C4] = cols;
 
     doc.save();
-    doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
+    doc.font('Bold').fontSize(FONT_SZ).fillColor(C.black)
        .text(nome, C0.x + C0.pad, tyMulti, { width: C0.w - C0.pad * 2, align: 'left', lineBreak: true });
     if (descricao) {
       const descY = tyMulti + matH + 2;
-      doc.font('Helvetica').fontSize(FONT_SZ - 0.5).fillColor(C.gray)
+      doc.font('Regular').fontSize(FONT_SZ - 0.5).fillColor(C.gray)
          .text(descricao, C0.x + C0.pad, descY, { width: C0.w - C0.pad * 2, align: 'left', lineBreak: true });
     }
     doc.restore();
 
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.black)
+    doc.font('Regular').fontSize(FONT_SZ).fillColor(C.black)
        .text(formatNumberSmart(item.quantidade), C1.x + C1.pad, tySingle,
              { width: C1.w - C1.pad * 2, align: 'center', lineBreak: false });
 
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.black)
+    doc.font('Regular').fontSize(FONT_SZ).fillColor(C.black)
        .text(unidade, C2.x + C2.pad, tySingle,
              { width: C2.w - C2.pad * 2, align: 'center', lineBreak: false });
 
-    doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
+    doc.font('Regular').fontSize(FONT_SZ).fillColor(C.gray)
        .text(formatCurrency(item.precoUnitario), C3.x + C3.pad, tySingle,
              { width: C3.w - C3.pad * 2, align: 'center', lineBreak: false });
 
-    doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
+    doc.font('Bold').fontSize(FONT_SZ).fillColor(C.black)
        .text(formatCurrency(item.precoTotal), C4.x + C4.pad, tySingle,
              { width: C4.w - C4.pad * 2, align: 'right', lineBreak: false });
 
@@ -339,12 +364,12 @@ function drawObservacoes(doc, observacoes) {
   fillRect(doc, MARGIN, blockY, maxW, blockH, C.bgHeader);
   fillRect(doc, MARGIN, blockY, 3, blockH, C.accent);
 
-  doc.font('Helvetica-Bold').fontSize(7).fillColor(C.black)
+  doc.font('Bold').fontSize(7).fillColor(C.black)
      .text('Observações', MARGIN + padH, blockY + padV, { width: maxW - padH * 2 });
 
   let ty = blockY + padV + 11;
   for (const linha of linhas) {
-    doc.font('Helvetica').fontSize(7).fillColor(C.black)
+    doc.font('Regular').fontSize(7).fillColor(C.black)
        .text(`• ${linha}`, MARGIN + padH, ty, { width: maxW - padH * 2, lineBreak: true });
     ty += lineH;
   }
@@ -372,14 +397,14 @@ function drawInfoFixa(doc) {
   fillRect(doc, blockX, blockY, blockW, blockH, '#FFF7ED');
   fillRect(doc, blockX, blockY, 3, blockH, C.accent);
 
-  doc.font('Helvetica-Bold').fontSize(7).fillColor(C.accent)
+  doc.font('Bold').fontSize(7).fillColor(C.accent)
      .text('⚠  INDISPENSÁVEL', blockX + padH, blockY + padV, { width: blockW - padH * 2, lineBreak: false });
 
   let ty = blockY + padV + 11;
   for (const linha of linhas) {
     if (linha === '') { ty += lineH * 0.4; continue; }
     const isBold = linha.startsWith('Horário');
-    doc.font(isBold ? 'Helvetica-Bold' : 'Helvetica').fontSize(7).fillColor(C.black)
+    doc.font(isBold ? 'Bold' : 'Regular').fontSize(7).fillColor(C.black)
        .text(linha, blockX + padH, ty, { width: blockW - padH * 2, lineBreak: false });
     ty += lineH;
   }
@@ -388,18 +413,12 @@ function drawInfoFixa(doc) {
 function drawFooter(doc, pageNum, empresaNome = 'Visual Premium') {
   const y = PAGE_H - 36;
   hline(doc, y - 8);
-  doc.font('Helvetica').fontSize(7).fillColor(C.lightGray)
+  doc.font('Regular').fontSize(7).fillColor(C.lightGray)
      .text(`Gerado em ${formatDate(new Date())}   •   ${empresaNome} Estoque e Compras`,
            MARGIN, y, { width: CONTENT_W - 60, align: 'left' })
      .text(`Página ${pageNum}`, MARGIN, y, { width: CONTENT_W, align: 'right' });
 }
 
-/**
- * Formata a unidade de medida do material para exibição, no mesmo padrão
- * usado no editor Flutter (ver `_formatarUnidadeExibicao`): minúsculo para
- * as abreviações de medida (m/l, m, ml, m²), com "Unidade" e "Kg" mantendo
- * a inicial maiúscula.
- */
 function formatarUnidadeExibicao(unidade) {
   if (!unidade || !unidade.trim()) return '';
   const u = unidade.trim().toUpperCase();
@@ -431,15 +450,6 @@ function precoEfetivo(pf) {
   return pf.preco ?? null;
 }
 
-/**
- * Área (m²) de uma unidade do material, mesma lógica do getter
- * `areaM2PorUnidade` no editor Flutter:
- * - Para materiais em "UNIDADE" (ex.: chapas): largura x comprimento.
- * - Para os demais (M/L, M², KG etc.): largura x qtdUnidade — a largura é
- *   fixa do material e o "comprimento" de cada unidade/rolo vendido é o
- *   que foi informado em qtdUnidade (campo "Qtd por Unidade").
- * Retorna null quando não há dados suficientes para calcular.
- */
 function areaM2PorUnidade(item) {
   const l = item.materialLargura != null ? Number(item.materialLargura) : null;
   if (!l || l <= 0) return null;
@@ -458,12 +468,6 @@ function areaM2PorUnidade(item) {
   return l * q;
 }
 
-/**
- * Preço por m² efetivo de um vínculo fornecedor x material, para exibição
- * no PDF: usa o valor salvo (`pf.precoMetroQuadrado`) quando presente, e
- * senão deriva do preço unitário e da área por unidade (mesmo fallback do
- * editor Flutter, ver célula de preço na tabela de comparativo).
- */
 function precoMetroQuadradoEfetivo(pf, item) {
   if (!pf) return null;
   if (pf.precoMetroQuadrado != null) return pf.precoMetroQuadrado;
@@ -489,8 +493,33 @@ function aplicarFornecedoresOcultos(itens, fornecedoresOcultos) {
 }
 
 async function gerarPdfDeItens(dados) {
-  const { titulo = 'Orçamento', fornecedoresOcultos = [], modoPrecificacao = 'UNIDADE' } = dados;
-  const itens = aplicarFornecedoresOcultos(dados.itens ?? [], fornecedoresOcultos);
+  const { fornecedoresOcultos = [], modoPrecificacao = 'UNIDADE' } = dados;
+  const titulo = limparTexto(dados.titulo) || 'Orçamento';
+
+  const itensBrutos = (dados.itens ?? []).map((item) => ({
+    ...item,
+    materialNome:          limparTexto(item.materialNome),
+    materialCategoria:     limparTexto(item.materialCategoria),
+    materialMedida:        limparTexto(item.materialMedida),
+    materialEspessura:     limparTexto(item.materialEspessura),
+    materialIdentificador: limparTexto(item.materialIdentificador),
+    materialUnidade:       limparTexto(item.materialUnidade),
+    descricao:             limparTexto(item.descricao),
+    precos: item.precos
+      ? Object.fromEntries(
+          Object.entries(item.precos).map(([fId, pf]) => [
+            fId,
+            {
+              ...pf,
+              fornecedorNome: limparTexto(pf?.fornecedorNome),
+              observacao:     limparTexto(pf?.observacao),
+            },
+          ])
+        )
+      : item.precos,
+  }));
+
+  const itens = aplicarFornecedoresOcultos(itensBrutos, fornecedoresOcultos);
 
   const orcarPorMetroLinear = modoPrecificacao === 'METRO_LINEAR';
   const fatorItem = (item) => {
@@ -511,6 +540,10 @@ async function gerarPdfDeItens(dados) {
 
     const doc    = new PDFDocument({ size: pageSize, margin: 0, bufferPages: true });
     const chunks = [];
+
+    doc.registerFont('Regular', FONT_REGULAR);
+    doc.registerFont('Bold',    FONT_BOLD);
+    doc.font('Regular');
 
     doc.on('data',  (chunk) => chunks.push(chunk));
     doc.on('end',   () => resolve(Buffer.concat(chunks)));
@@ -534,13 +567,13 @@ async function gerarPdfDeItens(dados) {
       try {
         doc.image(logoPath, margin, 14, { height: 38, fit: [logoW, 38] });
       } catch (_) {
-        doc.font('Helvetica-Bold').fontSize(13).fillColor(C.accent)
+        doc.font('Bold').fontSize(13).fillColor(C.accent)
            .text('Visual Premium', margin, 22, { lineBreak: false });
       }
 
-      doc.font('Helvetica-Bold').fontSize(13).fillColor(C.accent)
+      doc.font('Bold').fontSize(13).fillColor(C.accent)
          .text('ORÇAMENTO', margin + logoW + 12, 20, { width: contentW - logoW - 12, align: 'right', lineBreak: false });
-      doc.font('Helvetica').fontSize(7.5).fillColor(C.lightGray)
+      doc.font('Regular').fontSize(7.5).fillColor(C.lightGray)
          .text(`${titulo}   •   Emitido em ${formatDate(new Date())}`,
                margin + logoW + 12, 38, { width: contentW - logoW - 12, align: 'right', lineBreak: false });
 
@@ -552,7 +585,7 @@ async function gerarPdfDeItens(dados) {
     const drawFooterL = (pageNum) => {
       const y = pH - 30;
       hlineL(y - 6);
-      doc.font('Helvetica').fontSize(6.5).fillColor(C.lightGray)
+      doc.font('Regular').fontSize(6.5).fillColor(C.lightGray)
          .text(`Gerado em ${formatDate(new Date())}   •   Visual Premium Estoque e Compras`,
                margin, y, { width: contentW - 60, align: 'left' })
          .text(`Página ${pageNum}`, margin, y, { width: contentW, align: 'right' });
@@ -671,12 +704,28 @@ async function gerarPdfDeItens(dados) {
     const xQtdUn  = xQtd + COL_QTD;
     const xForn   = (i) => xQtdUn + COL_QTDUN + i * COL_FORN;
     const xMelhor = xQtdUn + COL_QTDUN + nForn * COL_FORN;
-
     const ROW_H      = 50;
-    const HDR_H      = 30;
     const TOTAL_H    = 26;
     const SUGEST_H   = 28;
     const FONT_SZ    = 7;
+    const HDR_PAD_TOP    = 7;
+    const HDR_NAME_GAP   = 3;
+    const HDR_COB_H      = 7;
+    const HDR_PAD_BOTTOM = 6;
+    const HDR_BADGE_H    = 8;
+    const HDR_H_MIN      = 30;
+
+    let hdrH = HDR_H_MIN;
+    fornecedores.forEach(({ id, nome }) => {
+      const isMenuorCol = menorTotalForn != null && totaisForn[id].total === menorTotalForn && totaisForn[id].total > 0;
+      const fsz = isMenuorCol ? Math.min(7, fornFontSz + 0.5) : fornFontSz;
+      doc.font('Bold').fontSize(fsz);
+      const nomeH = doc.heightOfString(nome || '', { width: COL_FORN - 8, align: 'center' });
+      const topo  = HDR_PAD_TOP + (isMenuorCol ? HDR_BADGE_H : 0);
+      const total = topo + nomeH + HDR_NAME_GAP + HDR_COB_H + HDR_PAD_BOTTOM;
+      if (total > hdrH) hdrH = Math.ceil(total);
+    });
+    const HDR_H = hdrH;
 
     const drawTableHeader = (y) => {
       fillR(margin, y, contentW, HDR_H, '#F1F3F5');
@@ -684,13 +733,13 @@ async function gerarPdfDeItens(dados) {
 
       const ty = y + (HDR_H - 7) / 2;
 
-      doc.font('Helvetica-Bold').fontSize(6.5).fillColor(C.gray)
+      doc.font('Bold').fontSize(6.5).fillColor(C.gray)
          .text('MATERIAL', xMat + 4, ty, { width: COL_MAT - 8, lineBreak: false });
 
-      doc.font('Helvetica-Bold').fontSize(6).fillColor(C.gray)
+      doc.font('Bold').fontSize(6).fillColor(C.gray)
          .text('QUANTIDADE', xQtd + 2, ty - 3, { width: COL_QTD - 4, align: 'center', lineBreak: true });
 
-      doc.font('Helvetica-Bold').fontSize(6).fillColor(C.gray)
+      doc.font('Bold').fontSize(6).fillColor(C.gray)
          .text('QUANTIDADE POR UNIDADE', xQtdUn + 2, ty - 3, { width: COL_QTDUN - 4, align: 'center', lineBreak: true });
 
       fornecedores.forEach(({ id, nome }, fi) => {
@@ -705,16 +754,18 @@ async function gerarPdfDeItens(dados) {
         }
 
         if (isMenuor) {
-          doc.font('Helvetica-Bold').fontSize(5).fillColor(C.statusOk)
+          doc.font('Bold').fontSize(5).fillColor(C.statusOk)
              .text('▼ MENOR TOTAL', x + 4, y + 5, { width: COL_FORN - 8, align: 'center', lineBreak: false });
         }
 
-        doc.font('Helvetica-Bold').fontSize(isMenuor ? Math.min(7, fornFontSz + 0.5) : fornFontSz)
-           .fillColor(isMenuor ? C.statusOk : C.gray)
-           .text(nome, x + 4, isMenuor ? y + 13 : ty - 3, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+        const fszNome = isMenuor ? Math.min(7, fornFontSz + 0.5) : fornFontSz;
+        doc.font('Bold').fontSize(fszNome).fillColor(isMenuor ? C.statusOk : C.gray);
+        const nomeTopo = y + HDR_PAD_TOP + (isMenuor ? HDR_BADGE_H : 0);
+        doc.text(nome || '', x + 4, nomeTopo, { width: COL_FORN - 8, align: 'center', lineBreak: true });
+        const nomeH = doc.heightOfString(nome || '', { width: COL_FORN - 8, align: 'center' });
 
-        doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 1)).fillColor(C.lightGray)
-           .text(`${cob}/${totalMateriais} mat.`, x + 4, isMenuor ? y + 21 : ty + 8,
+        doc.font('Regular').fontSize(Math.max(4.5, fornFontSz - 1)).fillColor(C.lightGray)
+           .text(`${cob}/${totalMateriais} mat.`, x + 4, nomeTopo + nomeH + HDR_NAME_GAP,
                  { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
         if (fi > 0) {
@@ -723,9 +774,9 @@ async function gerarPdfDeItens(dados) {
         }
       });
 
-      doc.font('Helvetica-Bold').fontSize(6).fillColor('#1D4ED8')
+      doc.font('Bold').fontSize(6).fillColor('#1D4ED8')
          .text('★ MELHOR', xMelhor + 4, ty - 4, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
-      doc.font('Helvetica').fontSize(5.5).fillColor('#93C5FD')
+      doc.font('Regular').fontSize(5.5).fillColor('#93C5FD')
          .text('menor por item', xMelhor + 4, ty + 5, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
 
       doc.strokeColor(C.divider).lineWidth(0.4)
@@ -741,7 +792,7 @@ async function gerarPdfDeItens(dados) {
 
       const ty = y + (TOTAL_H - 7) / 2;
 
-      doc.font('Helvetica-Bold').fontSize(7).fillColor(C.black)
+      doc.font('Bold').fontSize(7).fillColor(C.black)
          .text('TOTAL POR FORNECEDOR', xMat + 4, ty, { width: COL_MAT + COL_QTD + COL_QTDUN - 8, lineBreak: false });
 
       fornecedores.forEach(({ id }, fi) => {
@@ -750,13 +801,13 @@ async function gerarPdfDeItens(dados) {
         const isMen  = menorTotalForn != null && info.total === menorTotalForn && info.total > 0;
         const semPrc = info.vinculados - info.comPreco;
 
-        doc.font('Helvetica-Bold').fontSize(isMen ? Math.min(8, fornFontSz + 1) : fornFontSz)
+        doc.font('Bold').fontSize(isMen ? Math.min(8, fornFontSz + 1) : fornFontSz)
            .fillColor(isMen ? C.statusOk : (info.total > 0 ? C.black : C.lightGray))
            .text(info.total > 0 ? formatCurrency(info.total) : '—',
                  x + 4, semPrc > 0 ? ty - 3 : ty, { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
         if (semPrc > 0) {
-          doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 1)).fillColor(C.statusWarn)
+          doc.font('Regular').fontSize(Math.max(4.5, fornFontSz - 1)).fillColor(C.statusWarn)
              .text(`${semPrc} sem preço`, x + 4, ty + 7, { width: COL_FORN - 8, align: 'center', lineBreak: false });
         }
       });
@@ -764,10 +815,10 @@ async function gerarPdfDeItens(dados) {
       fillR(xMelhor + 2, y + 3, COL_MELHOR - 4, TOTAL_H - 6, '#EFF6FF');
       doc.rect(xMelhor + 2, y + 3, COL_MELHOR - 4, TOTAL_H - 6)
          .strokeColor('#BFDBFE').lineWidth(0.5).stroke();
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#1D4ED8')
+      doc.font('Bold').fontSize(7.5).fillColor('#1D4ED8')
          .text(matComMelhorPreco > 0 ? formatCurrency(totalMelhorPreco) : '—',
                xMelhor + 4, ty - 2, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
-      doc.font('Helvetica').fontSize(5.5).fillColor('#93C5FD')
+      doc.font('Regular').fontSize(5.5).fillColor('#93C5FD')
          .text(`${matComMelhorPreco}/${totalMateriais} mat.`,
                xMelhor + 4, ty + 7, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
 
@@ -792,7 +843,7 @@ async function gerarPdfDeItens(dados) {
 
       const ty = y + (SUGEST_H - 7) / 2;
 
-      doc.font('Helvetica-Bold').fontSize(7).fillColor(txColor)
+      doc.font('Bold').fontSize(7).fillColor(txColor)
          .text(`${icon} SUGESTÃO DE COMPRA IDEAL`, margin + 10, ty - 4, { lineBreak: false });
 
       let msg;
@@ -803,8 +854,9 @@ async function gerarPdfDeItens(dados) {
         msg = `Comprando tudo de "${suggFornNome}" (${formatCurrency(suggTotal ?? 0)}) vs melhor por item separado (${formatCurrency(totalMelhorPreco)}): diferença de ${dif} a mais. Avalie se a praticidade compensa.`;
       }
 
-      doc.font('Helvetica').fontSize(6.5).fillColor(txColor)
-         .text(msg, margin + 10, ty + 5, { width: contentW - 20, lineBreak: false });
+      doc.font('Regular').fontSize(6.5).fillColor(txColor);
+      const msgExibida = truncarParaLargura(doc, msg, contentW - 20);
+      doc.text(msgExibida, margin + 10, ty + 5, { width: contentW - 20, lineBreak: false });
 
       hlineL(y + SUGEST_H, bdColor, 0.5);
       return y + SUGEST_H;
@@ -813,7 +865,7 @@ async function gerarPdfDeItens(dados) {
     let y = drawHeader();
 
     if (itens.length === 0) {
-      doc.font('Helvetica').fontSize(10).fillColor(C.gray)
+      doc.font('Regular').fontSize(10).fillColor(C.gray)
          .text('Nenhum item neste orçamento.', margin, y + 20, { width: contentW, align: 'center' });
     } else {
       drawSectionHeader(doc, y, `Comparativo de Preços — ${totalMateriais} ${totalMateriais === 1 ? 'material' : 'materiais'} × ${nForn} ${nForn === 1 ? 'fornecedor' : 'fornecedores'}`);
@@ -826,10 +878,10 @@ async function gerarPdfDeItens(dados) {
         const qtdTotal = qtd * fatorItem(item);
         const menor = menorPorItem[iIdx];
 
-        doc.font('Helvetica-Bold').fontSize(FONT_SZ);
+        doc.font('Bold').fontSize(FONT_SZ);
         const nomeH = doc.heightOfString(item.materialNome, { width: COL_MAT - 8 });
         const descH = item.descricao?.trim()
-          ? doc.font('Helvetica').fontSize(5.5).heightOfString(item.descricao.trim(), { width: COL_MAT - 8 }) + 2
+          ? doc.font('Regular').fontSize(5.5).heightOfString(item.descricao.trim(), { width: COL_MAT - 8 }) + 2
           : 0;
         const rowH  = Math.max(ROW_H, nomeH + descH + 14);
 
@@ -845,36 +897,36 @@ async function gerarPdfDeItens(dados) {
         const tyCtr = y + (rowH - FONT_SZ) / 2;
         const tyTop = y + 8;
 
-        doc.font('Helvetica-Bold').fontSize(FONT_SZ).fillColor(C.black)
+        doc.font('Bold').fontSize(FONT_SZ).fillColor(C.black)
            .text(item.materialNome, xMat + 4, tyTop, { width: COL_MAT - 8, lineBreak: true });
 
         const dimensao = formatDimensao(item.materialMedida, item.materialLargura, item.materialComprimento);
         const subparts = [item.materialCategoria, dimensao, formatEspessura(item.materialEspessura), item.materialIdentificador]
           .filter(Boolean).join(' · ');
         if (subparts) {
-          doc.font('Helvetica').fontSize(5.5).fillColor(C.black)
+          doc.font('Regular').fontSize(5.5).fillColor(C.black)
              .text(subparts, xMat + 4, tyTop + nomeH + 1, { width: COL_MAT - 8, lineBreak: false });
         }
         if (item.descricao?.trim()) {
-          doc.font('Helvetica').fontSize(5.5).fillColor(C.gray)
+          doc.font('Regular').fontSize(5.5).fillColor(C.gray)
              .text(item.descricao.trim(), xMat + 4, tyTop + nomeH + (subparts ? 7 : 1), { width: COL_MAT - 8, lineBreak: false });
         }
 
         const unidLabel = formatarUnidadeExibicao(item.materialUnidade);
-        doc.font('Helvetica').fontSize(6.5).fillColor(C.black)
+        doc.font('Regular').fontSize(6.5).fillColor(C.black)
            .text(formatNumberSmart(qtd), xQtd + 2, tyCtr, { width: COL_QTD - 4, align: 'center', lineBreak: false });
 
         doc.strokeColor(C.divider).lineWidth(0.3)
            .moveTo(xQtdUn, y + 4).lineTo(xQtdUn, y + rowH - 4).stroke();
         if (item.qtdUnidade != null) {
-          doc.font('Helvetica').fontSize(6.5).fillColor(C.black)
+          doc.font('Regular').fontSize(6.5).fillColor(C.black)
              .text(formatNumberSmart(item.qtdUnidade), xQtdUn + 2, tyCtr - 4, { width: COL_QTDUN - 4, align: 'center', lineBreak: false });
           if (unidLabel) {
-            doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
+            doc.font('Regular').fontSize(5.5).fillColor(C.lightGray)
                .text(unidLabel, xQtdUn + 2, tyCtr + 4, { width: COL_QTDUN - 4, align: 'center', lineBreak: false });
           }
         } else {
-          doc.font('Helvetica').fontSize(6.5).fillColor(C.lightGray)
+          doc.font('Regular').fontSize(6.5).fillColor(C.lightGray)
              .text('—', xQtdUn + 2, tyCtr, { width: COL_QTDUN - 4, align: 'center', lineBreak: false });
         }
 
@@ -886,7 +938,7 @@ async function gerarPdfDeItens(dados) {
              .moveTo(x, y + 4).lineTo(x, y + rowH - 4).stroke();
 
           if (!pf) {
-            doc.font('Helvetica').fontSize(5.5).fillColor(C.lightGray)
+            doc.font('Regular').fontSize(5.5).fillColor(C.lightGray)
                .text('—', x + 4, tyCtr, { width: COL_FORN - 8, align: 'center', lineBreak: false });
             return;
           }
@@ -904,43 +956,45 @@ async function gerarPdfDeItens(dados) {
 
           if (preco != null) {
             if (isMen) {
-              doc.font('Helvetica-Bold').fontSize(Math.max(4.5, fornFontSz - 1)).fillColor(C.statusOk)
+              doc.font('Bold').fontSize(Math.max(4.5, fornFontSz - 1)).fillColor(C.statusOk)
                  .text('▼ MENOR', x + 4, y + 5, { width: COL_FORN - 8, align: 'center', lineBreak: false });
             }
             const precoY = isMen ? y + 12 : tyCtr - 4;
-            doc.font(isMen ? 'Helvetica-Bold' : 'Helvetica')
+            doc.font(isMen ? 'Bold' : 'Regular')
                .fontSize(isMen ? Math.min(8, fornFontSz + 1) : fornFontSz)
                .fillColor(isMen ? C.statusOk : C.black)
                .text(formatCurrency(preco), x + 4, precoY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
             let proximaY = precoY + 9;
             if (precoM2 != null) {
-              doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 1))
+              doc.font('Regular').fontSize(Math.max(4.5, fornFontSz - 1))
                  .fillColor(isMen ? '#15803D' : C.gray)
                  .text(`${formatCurrency(precoM2)}/m²`, x + 4, proximaY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
               proximaY += 8;
             }
 
             if (total != null) {
-              doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 1))
+              doc.font('Regular').fontSize(Math.max(4.5, fornFontSz - 1))
                  .fillColor(isMen ? '#15803D' : C.gray)
                  .text(formatCurrency(total), x + 4, proximaY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
               proximaY += 9;
             }
 
             if (pf.observacao) {
-              doc.font('Helvetica').fontSize(Math.max(4, fornFontSz - 1.5))
-                 .fillColor(C.statusWarn)
-                 .text(pf.observacao, x + 4, proximaY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+              doc.font('Regular').fontSize(Math.max(4, fornFontSz - 1.5))
+                 .fillColor(C.statusWarn);
+              const obsExibida = truncarParaLargura(doc, pf.observacao, COL_FORN - 8);
+              doc.text(obsExibida, x + 4, proximaY, { width: COL_FORN - 8, align: 'center', lineBreak: false });
             }
           } else {
-            doc.font('Helvetica').fontSize(Math.max(4.5, fornFontSz - 0.5)).fillColor(C.lightGray)
+            doc.font('Regular').fontSize(Math.max(4.5, fornFontSz - 0.5)).fillColor(C.lightGray)
                .text('sem preço', x + 4, tyCtr - 4, { width: COL_FORN - 8, align: 'center', lineBreak: false });
 
             if (pf.observacao) {
-              doc.font('Helvetica').fontSize(Math.max(4, fornFontSz - 1.5))
-                 .fillColor(C.statusWarn)
-                 .text(pf.observacao, x + 4, tyCtr + 5, { width: COL_FORN - 8, align: 'center', lineBreak: false });
+              doc.font('Regular').fontSize(Math.max(4, fornFontSz - 1.5))
+                 .fillColor(C.statusWarn);
+              const obsExibida = truncarParaLargura(doc, pf.observacao, COL_FORN - 8);
+              doc.text(obsExibida, x + 4, tyCtr + 5, { width: COL_FORN - 8, align: 'center', lineBreak: false });
             }
           }
         });
@@ -954,12 +1008,12 @@ async function gerarPdfDeItens(dados) {
           doc.rect(xMelhor + 2, y + 3, COL_MELHOR - 4, rowH - 6)
              .strokeColor('#BFDBFE').lineWidth(0.4).stroke();
 
-          doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#1D4ED8')
+          doc.font('Bold').fontSize(7.5).fillColor('#1D4ED8')
              .text(formatCurrency(menor), xMelhor + 4, tyCtr - 5, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
-          doc.font('Helvetica').fontSize(6).fillColor('#60A5FA')
+          doc.font('Regular').fontSize(6).fillColor('#60A5FA')
              .text(formatCurrency(melhorTotal), xMelhor + 4, tyCtr + 4, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
         } else {
-          doc.font('Helvetica').fontSize(7).fillColor(C.lightGray)
+          doc.font('Regular').fontSize(7).fillColor(C.lightGray)
              .text('—', xMelhor + 4, tyCtr, { width: COL_MELHOR - 8, align: 'center', lineBreak: false });
         }
 
@@ -1004,9 +1058,30 @@ const ordemCompraPdfService = {
 
     if (!oc) throw { status: 404, message: 'Ordem de compra não encontrada' };
 
+    oc.requisitante   = limparTexto(oc.requisitante);
+    oc.empresa         = limparTexto(oc.empresa);
+    oc.formaPagamento  = limparTexto(oc.formaPagamento);
+    oc.prazoPagamento  = limparTexto(oc.prazoPagamento);
+    oc.observacoes      = limparTexto(oc.observacoes);
+    if (oc.fornecedor) {
+      oc.fornecedor.nomeFantasia = limparTexto(oc.fornecedor.nomeFantasia);
+      oc.fornecedor.nome          = limparTexto(oc.fornecedor.nome);
+    }
+    oc.itens = (oc.itens ?? []).map((item) => ({
+      ...item,
+      descricaoItem: limparTexto(item.descricaoItem),
+      material: item.material
+        ? { ...item.material, nome: limparTexto(item.material.nome), unidade: limparTexto(item.material.unidade) }
+        : item.material,
+    }));
+
     return new Promise((resolve, reject) => {
       const doc    = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true });
       const chunks = [];
+
+      doc.registerFont('Regular', FONT_REGULAR);
+      doc.registerFont('Bold',    FONT_BOLD);
+      doc.font('Regular');
 
       doc.on('data',  (chunk) => chunks.push(chunk));
       doc.on('end',   () => resolve(Buffer.concat(chunks)));
@@ -1050,7 +1125,7 @@ const ordemCompraPdfService = {
       y += 24;
 
       if (oc.itens.length === 0) {
-        doc.font('Helvetica').fontSize(9).fillColor(C.gray)
+        doc.font('Regular').fontSize(9).fillColor(C.gray)
            .text('Nenhum item nesta Ordem de Compra.', MARGIN, y, { width: CONTENT_W, align: 'center' });
         y += 20;
       } else {
@@ -1060,9 +1135,9 @@ const ordemCompraPdfService = {
         hline(doc, y, '#D1D5DB', 0.8);
         y += 8;
 
-        doc.font('Helvetica').fontSize(7).fillColor(C.gray)
+        doc.font('Regular').fontSize(7).fillColor(C.gray)
            .text('Subtotal dos itens:', MARGIN, y);
-        doc.font('Helvetica-Bold').fontSize(9).fillColor(C.black)
+        doc.font('Bold').fontSize(9).fillColor(C.black)
            .text(formatCurrency(valorTotal), MARGIN, y - 1, { width: CONTENT_W, align: 'right' });
       }
 

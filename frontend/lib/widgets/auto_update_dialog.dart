@@ -50,8 +50,6 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
     final info = widget.updateInfo;
 
     return PopScope(
-      // Só impede fechar (ESC / botão voltar) enquanto o download/instalação
-      // estiver em andamento. Fora isso, o usuário pode sempre sair.
       canPop: !_downloading,
       child: Dialog(
         backgroundColor: Theme.of(context).colorScheme.surface,
@@ -63,7 +61,6 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
             Row(
               children: [
                 Container(
@@ -119,7 +116,6 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
             Divider(color: Theme.of(context).colorScheme.outlineVariant),
             SizedBox(height: 16),
 
-            // Release notes
             if (info.releaseNotes.isNotEmpty) ...[
               Text(
                 'O que há de novo',
@@ -153,7 +149,6 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
               const SizedBox(height: 20),
             ],
 
-            // Barra de progresso
             if (_downloading) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -196,7 +191,6 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
               ),
             ],
 
-            // Erro
             if (_error != null) ...[
               Container(
                 width: double.infinity,
@@ -227,7 +221,6 @@ class _AutoUpdateDialogState extends State<AutoUpdateDialog> {
               const SizedBox(height: 16),
             ],
 
-            // Botões
             if (!_downloading) ...[
               const SizedBox(height: 4),
               Row(
