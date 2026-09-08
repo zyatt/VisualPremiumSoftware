@@ -65,6 +65,18 @@ class OrcamentoRepository {
     return ApiClient.putList('/orcamentos/$orcamentoId/itens', {'itens': itens});
   }
 
+  /// Salva os itens do orçamento como RASCUNHO (usado ao voltar, abrir nova
+  /// guia ou fechar o app). Ao contrário de [substituirItens], o backend
+  /// NÃO resolve/cria o Material filho para itens de material genérico —
+  /// a descrição digitada fica gravada crua em descricaoItem, apontando
+  /// ainda para o materialId do pai genérico. A resolução definitiva só
+  /// acontece em "Enviar para aprovação" (via substituirItens).
+  Future<List<dynamic>> salvarRascunhoItens(
+      int orcamentoId, List<Map<String, dynamic>> itens) async {
+    return ApiClient.putList(
+        '/orcamentos/$orcamentoId/itens/rascunho', {'itens': itens});
+  }
+
   Future<Map<String, dynamic>> atualizarItem(
       int orcamentoId, int itemId, Map<String, dynamic> dados) async {
     return ApiClient.patch('/orcamentos/$orcamentoId/itens/$itemId', dados);

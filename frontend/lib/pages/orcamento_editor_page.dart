@@ -23,6 +23,7 @@ import '../repositories/orcamento_repository.dart';
 import '../rotas/app_router.dart';
 import '../utils/api_client.dart' show OrcamentoTravadoException;
 import '../widgets/escolher_usuario_chat_dialog.dart';
+import 'package:collection/collection.dart';
 
 import '../theme/app_theme.dart';
 
@@ -315,11 +316,13 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
   OrcamentoProvider? _orcamentoProviderRef;
 
   bool _syncing = false;
+  DateTime? _ultimoCarregamentoMateriais;
   final Map<int, Set<int>> _ultimosOcultosSincronizados = {};
   late final _ScrollMetricsNotifier _abasScrollHintNotifier;
   late final _ScrollMetricsNotifier _tabelaHScrollHintNotifier;
 
   int? _abaRenomeando;
+  int? _abaHover;
   TextEditingController? _renomeCtrl;
   final _renomeFocusNode = FocusNode();
 
@@ -417,6 +420,21 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
 
       _garantirTravaAbaAtiva(origem: 'initState');
 
+      // Ao reabrir o app, as abas são restauradas só do cache local
+      // (SharedPreferences), que pode estar desatualizado — em particular,
+      // a descrição de um item vinculado a um material genérico só é
+      // conhecida com certeza pelo servidor (ela vive em material.descricao,
+      // resolvida no backend). Sem recarregar aqui, a descrição aparecia
+      // ausente (ou colada no nome, ver fix acima) até o usuário sair e
+      // reabrir a aba manualmente, o que força um buscarPorId nesse ponto.
+      final provider = context.read<OrcamentoProvider>();
+      for (final aba in provider.abas) {
+        final sid = aba.servidorId;
+        if (sid != null) {
+          _recarregarItensDoServidor(sid);
+        }
+      }
+
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted && _tabelaHScrollCtrl.hasClients) {
           _tabelaHScrollHintNotifier.update(_tabelaHScrollCtrl);
@@ -454,6 +472,12 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
   int _ultimoEdicaoLocalTrigger = 0;
   int _recargaSeq = 0;
   Timer? _autoSaveDebounce;
+  // Debounce por item (chave = itemId) para a busca de material vinculado
+  // já existente ao digitar a descrição de um item de material genérico.
+  // Precisa ser por item (e não um único Timer global) porque o usuário
+  // pode ter vários itens de materiais genéricos sendo editados na mesma
+  // tela ao mesmo tempo.
+  final Map<String, Timer> _descVinculoDebounce = {};
   Timer? _recargaExternaDebounce;
 
   void _onProviderTempoRealChanged() {
@@ -473,6 +497,22 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
             if (mounted) provider.marcarAbaAtivaComoSalva();
           }).catchError((e) {
             _logOrc('auto-save debounced: erro ao persistir orcamentoId=$sidAtual', erro: e);
+            // Antes o erro só ia pro log e ficava invisível para o
+            // usuário — o autosave falhava por inteiro (nenhum item era
+            // persistido, nem os que estavam ok) e ninguém percebia até
+            // reabrir o orçamento e ver itens "sumidos". Mantemos o
+            // salvamento silencioso no caminho feliz (não queremos um
+            // snackbar a cada 1.2s de digitação), mas qualquer falha
+            // precisa aparecer, já que ela significa que o estado atual
+            // da tela ainda NÃO está seguro no servidor.
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Não foi possível salvar automaticamente: ${_mensagemErro(e, acao: 'salvar orçamento')}'),
+                  backgroundColor: AppTheme.error,
+                ),
+              );
+            }
           });
         });
       }
@@ -542,17 +582,61 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
 
 
       final itensRemotos = (orcamentoCompleto['itens'] as List? ?? []);
-      final Map<int, ItemOrcamentoData> itensPorChave = {};
+      final Map<String, ItemOrcamentoData> itensPorChave = {};
       for (final item in itensRemotos) {
         final materialId = item['materialId'] as int;
         final materialData = item['material'] as Map<String, dynamic>?;
         final fornecedorId = item['fornecedorId'] as int?;
         final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
+        final ehGenericoDireto = materialData?['ehGenerico'] as bool? ?? false;
+        final materialGenericoIdDoFilho = materialData?['materialGenericoId'] as int?;
+        // Depois de salvo, um item de material genérico é resolvido no
+        // backend para o filho concreto (ehGenerico=false, descricaoItem
+        // do item zerado — a descrição passa a viver em material.descricao).
+        // Sem tratar esse caso aqui, o item recarregado parece "normal" e o
+        // campo de descrição some da tela, mesmo a descrição existindo no
+        // banco.
+        final ehVinculoDeGenerico = materialGenericoIdDoFilho != null;
+        final ehGenerico = ehGenericoDireto || ehVinculoDeGenerico;
+        final descricaoItem = ehVinculoDeGenerico
+            ? (materialData?['descricao'] as String?)
+            : (item['descricaoItem'] as String?);
 
-        if (!itensPorChave.containsKey(materialId)) {
-          itensPorChave[materialId] = ItemOrcamentoData(
+        // Materiais genéricos podem aparecer várias vezes no mesmo
+        // orçamento, uma para cada descrição diferente — por isso a chave
+        // de agrupamento inclui a descrição quando o material é genérico.
+        // Para materiais normais, a chave continua sendo só o materialId.
+        //
+        // Quando a descrição ainda está vazia (item genérico recém
+        // adicionado, usuário ainda não digitou nada), NÃO podemos cair
+        // no mesmo `'$materialId|'` de outro item genérico do mesmo pai
+        // que também esteja sem descrição — isso fazia o segundo item
+        // ser tratado como o mesmo do primeiro (o "if
+        // (!itensPorChave.containsKey(chave))" abaixo ignora a criação de
+        // uma nova entrada) e um deles parecia "sumir" da tela. Nesse
+        // caso, usamos o id do item (sempre único, vindo do banco) como
+        // parte da chave para manter cada item sem descrição separado.
+        final idItem = item['id'];
+        final chave = ehGenerico
+            ? (descricaoItem != null && descricaoItem.trim().isNotEmpty
+                ? '$materialId|${descricaoItem.trim()}'
+                : '$materialId|semdesc|${idItem ?? identityHashCode(item)}')
+            : '$materialId';
+
+        // Para um filho já resolvido (ehVinculoDeGenerico), `ehGenerico`
+        // continua true (ver acima) e por isso o campo de descrição
+        // (_DescricaoGenericoField) segue sendo exibido logo abaixo do
+        // nome. Concatenar a descrição aqui no nome também duplicava a
+        // informação na tela: uma vez colada no nome ("TINTA AZUL 400ML")
+        // e de novo no campo de texto logo abaixo ("AZUL 400ML"). O nome
+        // exibido deve ficar só com o nome base do material.
+        final nomeMaterialBase = materialData?['nome'] as String? ?? '';
+        final nomeExibicao = nomeMaterialBase;
+
+        if (!itensPorChave.containsKey(chave)) {
+          itensPorChave[chave] = ItemOrcamentoData(
             materialId: materialId,
-            materialNome: materialData?['nome'] as String? ?? '',
+            materialNome: nomeExibicao,
             materialUnidade: materialData?['unidade'] as String?,
             materialMedida: materialData?['medida'] as String?,
             materialEspessura: materialData?['espessura'] as String?,
@@ -561,16 +645,46 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             qtdUnidade: item['qtdUnidade'] != null ? double.tryParse(item['qtdUnidade'].toString()) : null,
             precos: {},
+            ehGenerico: ehGenerico,
+            descricaoItem: descricaoItem,
+            // Para um filho já resolvido, o pai é materialGenericoIdDoFilho.
+            // Para um item de rascunho ainda não resolvido (materialId já
+            // é o do próprio genérico), o "pai" é ele mesmo. Isso é o que
+            // a busca por descrição (_agendarBuscaVinculoPorDescricao) e o
+            // save do rascunho precisam para funcionar corretamente depois
+            // de sair e voltar ao orçamento.
+            materialGenericoId: ehVinculoDeGenerico
+                ? materialGenericoIdDoFilho
+                : (ehGenericoDireto ? materialId : null),
+            // Só trava quando o item já foi de fato RESOLVIDO para um
+            // Material filho real (ehVinculoDeGenerico) — isso só
+            // acontece via "Enviar para aprovação". Um item de rascunho
+            // ainda apontando pro genérico (materialId = pai), mesmo com
+            // descricaoItem preenchida, NÃO está confirmado — é só o que
+            // o usuário digitou até agora, salvo cru pelo autosave. Travar
+            // nesse caso faria o campo ficar travado sozinho, sem diálogo
+            // nenhum, poucos segundos depois de digitar (bug: autosave
+            // salva rascunho -> SSE recarrega -> travava aqui à toa).
+            // Trava se: (a) já foi de fato RESOLVIDO para um Material
+            // filho real (ehVinculoDeGenerico — via "Enviar para
+            // aprovação"), OU (b) o usuário já confirmou explicitamente
+            // essa descrição antes (persistido em descricaoConfirmada,
+            // gravado no banco pelo salvarRascunho — ver
+            // OrcamentoService.salvarRascunho). Sem o (b), a trava não
+            // sobrevivia a fechar e reabrir o orçamento: cada reload
+            // criava uma aba nova sem noção de que a confirmação já tinha
+            // acontecido numa sessão anterior.
+            descricaoTravada: ehVinculoDeGenerico || (item['descricaoConfirmada'] as bool? ?? false),
           );
         }
         if (fornecedorId != null && fornecedorData != null) {
-          itensPorChave[materialId]!.precos[fornecedorId] = PrecoFornecedorData(
+          itensPorChave[chave]!.precos[fornecedorId] = PrecoFornecedorData(
             fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
             preco: item['precoUnitario'] != null ? double.tryParse(item['precoUnitario'].toString()) : null,
             observacao: item['observacao'] as String?,
           );
           if (item['selecionado'] as bool? ?? false) {
-            itensPorChave[materialId]!.fornecedorSelecionado = fornecedorId;
+            itensPorChave[chave]!.fornecedorSelecionado = fornecedorId;
           }
         }
       }
@@ -665,6 +779,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     _autoSyncTimer?.cancel();
     _autoSaveDebounce?.cancel();
     _recargaExternaDebounce?.cancel();
+    for (final t in _descVinculoDebounce.values) {
+      t.cancel();
+    }
+    _descVinculoDebounce.clear();
     try {
       _orcamentoProviderRef?.removeListener(_onProviderTempoRealChanged);
     } catch (_) {}
@@ -809,17 +927,114 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         largura: largura.isNotEmpty ? largura : '',
         espessura: esp.isNotEmpty ? esp : '',
         ativo: true,
+        // Não trazemos os filhos vinculados (variantes com descrição) aqui:
+        // no seletor de materiais só o "pai" genérico deve aparecer. As
+        // variantes (ex.: "TINTA" + "AZUL 400ML") são criadas a partir da
+        // descrição digitada no próprio item do orçamento, não escolhidas
+        // diretamente nesta busca — caso contrário o mesmo genérico
+        // apareceria duplicado (uma linha por variante já cadastrada).
+        incluirVinculados: false,
       );
       if (!mounted) return;
       final todos = context.read<MaterialProvider>().materiais;
       final provider = context.read<OrcamentoProvider>();
-      final idsJaAdicionados = provider.tabAtual?.itens.map((i) => i.materialId).toSet() ?? {};
+      final idsJaAdicionados = provider.tabAtual?.itens
+              .where((i) => !i.ehGenerico)
+              .map((i) => i.materialId)
+              .toSet() ??
+          {};
       setState(() {
-        _resultadosBusca = todos.where((m) => !idsJaAdicionados.contains(m.id)).toList();
+        _resultadosBusca = todos
+            .where((m) => !idsJaAdicionados.contains(m.id))
+            // Defesa extra: mesmo com incluirVinculados: false, garante que
+            // nenhum material filho (variante já vinculada a um genérico)
+            // apareça no seletor — só o "pai" genérico deve ser escolhível.
+            .where((m) => !m.ehVinculado)
+            .toList();
       });
     } finally {
       if (mounted) setState(() => _buscando = false);
     }
+  }
+
+  /// Quando o usuário digita uma descrição num item de material genérico,
+  /// busca (com debounce) se já existe uma variante (Material filho)
+  /// cadastrada com essa mesma descrição — se existir, puxa os
+  /// fornecedores/preços dela automaticamente para o item, sem precisar
+  /// salvar o orçamento e reabrir.
+  void _agendarBuscaVinculoPorDescricao(String itemId, int materialGenericoId, String descricao) {
+    _descVinculoDebounce[itemId]?.cancel();
+
+    final desc = descricao.trim();
+    if (desc.isEmpty) return;
+
+    _descVinculoDebounce[itemId] = Timer(const Duration(milliseconds: 500), () async {
+      if (!mounted) return;
+      final provider = context.read<OrcamentoProvider>();
+
+      // A descrição pode ter mudado de novo (ou o item pode ter sido
+      // removido) entre o agendamento e a execução deste timer — confere
+      // o estado atual antes de aplicar qualquer coisa.
+      final itemAtual = provider.tabAtual?.itens.firstWhereOrNull((i) => i.itemId == itemId);
+      if (itemAtual == null) return;
+      if ((itemAtual.descricaoItem ?? '').trim().toLowerCase() != desc.toLowerCase()) return;
+
+      final materialProvider = context.read<MaterialProvider>();
+      try {
+        await materialProvider.carregarVinculados(materialGenericoId);
+      } catch (_) {
+        return;
+      }
+      if (!mounted) return;
+
+      final encontrado = materialProvider.vinculados?.itens.firstWhereOrNull(
+        (m) => (m.descricao ?? '').trim().toLowerCase() == desc.toLowerCase(),
+      );
+      if (encontrado == null) return;
+
+      // Confere de novo antes de aplicar: a busca é assíncrona e o usuário
+      // pode ter continuado digitando ou trocado de material enquanto ela
+      // rodava.
+      final itemAindaValido = provider.tabAtual?.itens.firstWhereOrNull((i) => i.itemId == itemId);
+      if (itemAindaValido == null) return;
+      if ((itemAindaValido.descricaoItem ?? '').trim().toLowerCase() != desc.toLowerCase()) return;
+
+      // A variante encontrada pode estar INATIVA (ex.: foi desativada no
+      // Estoque). Ao ser reencontrada aqui — porque o usuário digitou e
+      // bateu com essa mesma descrição — ela volta a ficar ativa
+      // automaticamente, em vez de silenciosamente trazer preço/fornecedor
+      // de um material que deveria estar fora de uso.
+      if (!encontrado.ativo) {
+        final reativou = await materialProvider.reativar(encontrado.id);
+        if (!mounted) return;
+        if (!reativou) {
+          // Se a reativação falhar, não aplica o vínculo.
+          return;
+        }
+      }
+
+      final precos = <int, PrecoFornecedorData>{};
+      int? fornecedorSelecionado;
+      for (final fm in encontrado.fornecedorMateriais) {
+        if (!fm.ativo) continue;
+        precos[fm.fornecedorId] = PrecoFornecedorData(
+          fornecedorNome: fm.fornecedorNome,
+          preco: fm.preco > 0 ? fm.preco : null,
+        );
+      }
+      // Se havia exatamente um fornecedor cadastrado para essa variante,
+      // já pré-seleciona — replica o comportamento de quando o material é
+      // adicionado direto pela busca normal (não-genérico).
+      if (precos.length == 1) {
+        fornecedorSelecionado = precos.keys.first;
+      }
+
+      provider.aplicarVinculoEncontrado(
+        itemId,
+        precos: precos,
+        fornecedorSelecionado: fornecedorSelecionado,
+      );
+    });
   }
 
   void _adicionarMaterial(MaterialModel material) {
@@ -844,6 +1059,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       materialComprimento: material.comprimento,
       estoqueMinimo: material.estoqueMinimo,
       precos: precos,
+      ehGenerico: material.ehGenerico,
+      // Ainda não resolvido: materialId já é o id do genérico.
+      materialGenericoId: material.ehGenerico ? material.id : null,
     ));
     _searchNomeCtrl.clear();
     _searchIdentificadorCtrl.clear();
@@ -1583,6 +1801,14 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     _ultimosOcultosSincronizados[orcId] = atual;
   }
 
+  /// Persiste os itens da aba como RASCUNHO (voltar, nova aba, fechar
+  /// app). IMPORTANTE: usa [OrcamentoRepository.salvarRascunhoItens], que
+  /// no backend NÃO resolve/cria o Material filho para itens de material
+  /// genérico — a descrição digitada fica só em descricaoItem, apontando
+  /// ainda para o materialId do genérico. Isso evita que uma descrição
+  /// digitada "de passagem" (usuário ainda decidindo) vire um Material
+  /// real no estoque. A resolução definitiva só acontece em
+  /// "Enviar para aprovação" (_enviarParaAprovacao, via repo.adicionarItem).
   Future<void> _persistirItensDaAba(int orcId, OrcamentoTab tab) async {
     try {
       final repo = OrcamentoRepository();
@@ -1590,35 +1816,135 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
 
       final itensSnapshot = List<ItemOrcamentoData>.of(tab.itens);
 
+      // Para itens genéricos, o rascunho sempre grava o materialId do PAI
+      // (nunca o de um filho já resolvido) — é isso que garante que trocar
+      // a descrição continue sendo "trocar de variante" enquanto o item
+      // não estiver travado, sem já ter criado um Material filho de verdade.
+      int materialIdParaSalvar(ItemOrcamentoData item) =>
+          item.ehGenerico ? (item.materialGenericoId ?? item.materialId) : item.materialId;
+
       final itensPayload = <Map<String, dynamic>>[];
       for (final item in itensSnapshot) {
+        final materialIdSalvo = materialIdParaSalvar(item);
         if (item.precos.isEmpty) {
           itensPayload.add({
-            'materialId': item.materialId,
+            'materialId': materialIdSalvo,
             'fornecedorId': null,
             'quantidade': item.quantidade,
             'qtdUnidade': item.qtdUnidade,
             'precoUnitario': null,
             'selecionado': false,
+            'descricaoItem': item.descricaoItem,
+            // Reenvia o que já estava confirmado (ou acabou de ser
+            // confirmado no diálogo) — salvarRascunho recria todos os
+            // itens a cada chamada, então essa flag precisa vir do
+            // cliente toda vez, senão se perde no próximo autosave.
+            'descricaoConfirmada': item.descricaoTravada,
           });
         } else {
           for (final entry in item.precos.entries) {
             itensPayload.add({
-              'materialId': item.materialId,
+              'materialId': materialIdSalvo,
               'fornecedorId': entry.key,
               'quantidade': item.quantidade,
               'qtdUnidade': item.qtdUnidade,
               'precoUnitario': entry.value.preco,
               'selecionado': item.fornecedorSelecionado == entry.key,
               'observacao': entry.value.observacao,
+              'descricaoItem': item.descricaoItem,
+              'descricaoConfirmada': item.descricaoTravada,
             });
           }
         }
       }
 
-      await repo.substituirItens(orcId, itensPayload);
+      await repo.salvarRascunhoItens(orcId, itensPayload);
     } finally {
     }
+  }
+
+  /// Mostra o diálogo "Confirma a descrição 'X' para MATERIAL?" para um
+  /// item específico. Se confirmado, trava a descrição (via provider) e
+  /// retorna true. Se cancelado, retorna false sem travar nada — quem
+  /// chamou decide o que fazer (ex.: devolver o foco ao campo).
+  ///
+  /// Único ponto que efetivamente trava uma descrição — chamado tanto ao
+  /// perder o foco do campo (_DescricaoGenericoField.onSairDoCampo, fluxo
+  /// principal) quanto como rede de segurança ao clicar em "Voltar" com
+  /// alguma descrição pendente que não passou por um blur (ex.: o campo
+  /// nunca chegou a perder o foco antes do clique).
+  Future<bool> _confirmarDescricaoItem(ItemOrcamentoData item, String texto) async {
+    if (!mounted) return false;
+    final confirmar = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar descrição'),
+        content: Text(
+          'Confirma a descrição "$texto" para ${item.materialNome}?\n\n'
+          'Depois de confirmada, a descrição não poderá mais ser editada '
+          '(só remover e adicionar o material novamente).',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return false;
+
+    if (!mounted) return false;
+    context.read<OrcamentoProvider>().travarDescricaoItem(item.itemId);
+    return true;
+  }
+
+  /// Callback chamado pelo _DescricaoGenericoField quando ele perde o foco
+  /// (usuário clicou fora, apertou Enter/Tab, ou tentou navegar com o
+  /// campo focado). Este é o gatilho principal da confirmação — não o
+  /// clique em "Voltar".
+  Future<bool> _confirmarDescricaoAoSairDoCampo(ItemOrcamentoData item, String texto) {
+    if (item.descricaoTravada) return Future.value(true);
+    return _confirmarDescricaoItem(item, texto);
+  }
+
+  /// Rede de segurança ao clicar em "Voltar": cobre o caso raro de uma
+  /// descrição pendente que nunca passou por um blur (o campo do
+  /// _DescricaoGenericoField já cobre o caso normal, disparando o mesmo
+  /// diálogo assim que perde o foco — o que já acontece na prática ao
+  /// clicar em qualquer outro lugar da tela, inclusive no botão Voltar).
+  Future<bool> _confirmarDescricoesPendentesAntesDeSair() async {
+    final provider = context.read<OrcamentoProvider>();
+    final tab = provider.tabAtual;
+    if (tab == null) return true;
+
+    final pendentes = tab.itens.where((i) =>
+        i.ehGenerico &&
+        !i.descricaoTravada &&
+        (i.descricaoItem ?? '').trim().isNotEmpty).toList();
+
+    for (final item in pendentes) {
+      if (!mounted) return false;
+      final desc = item.descricaoItem!.trim();
+      final confirmou = await _confirmarDescricaoItem(item, desc);
+      if (!confirmou) {
+        // Usuário quer revisar essa descrição antes de sair — aborta a
+        // saída inteira (não confirma as demais, nem sai do editor).
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> _salvarSilenciosamenteAoSair() async {
@@ -1664,6 +1990,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
   }
 
   Future<void> _aoClicarVoltar() async {
+    final podeContinuar = await _confirmarDescricoesPendentesAntesDeSair();
+    if (!podeContinuar) return;
+    if (!mounted) return;
 
     await _salvarSilenciosamenteAoSair();
     if (!mounted) return;
@@ -1717,6 +2046,11 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
     final tab = provider.tabAtual;
     if (tab == null || tab.itens.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Adicione ao menos um material antes de enviar para aprovação.')));
+      return;
+    }
+
+    if (tab.itens.any((i) => i.descricaoObrigatoriaFaltando)) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Preencha a descrição de todos os materiais genéricos antes de enviar para aprovação.'), backgroundColor: AppTheme.error));
       return;
     }
 
@@ -1792,10 +2126,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       final itensSnapshot = List<ItemOrcamentoData>.of(tab.itens);
       for (final item in itensSnapshot) {
         if (item.precos.isEmpty) {
-          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false});
+          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false, 'descricaoItem': item.descricaoItem});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao, 'descricaoItem': item.descricaoItem});
           }
         }
       }
@@ -1867,10 +2201,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         final itensSnapshot = List<ItemOrcamentoData>.of(tab.itens);
         for (final item in itensSnapshot) {
          if (item.precos.isEmpty) {
-          await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false});
+          await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false, 'descricaoItem': item.descricaoItem});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+            await repo.adicionarItem(id, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao, 'descricaoItem': item.descricaoItem});
           }
         }
         }
@@ -2012,7 +2346,14 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
 
       if (!mounted) return;
       final materialProvider = context.read<MaterialProvider>();
-      await materialProvider.carregar();
+      final agora = DateTime.now();
+      final ultimoCarregamento = _ultimoCarregamentoMateriais;
+      final precisaRecarregar = ultimoCarregamento == null ||
+          agora.difference(ultimoCarregamento) > const Duration(seconds: 20);
+      if (precisaRecarregar) {
+        await materialProvider.carregar();
+        _ultimoCarregamentoMateriais = DateTime.now();
+      }
       if (!mounted) return;
       provider.atualizarDadosMateriaisDosItens(materialProvider.materiais);
     } catch (e, st) {
@@ -2122,15 +2463,21 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
           style: const TextStyle(fontSize: 13),
         ),
         actions: [
-          TextButton(
-            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Não'),
+          Tooltip(
+            message: 'Manter a guia aberta',
+            child: TextButton(
+              style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Não'),
+            ),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(sid != null ? 'Excluir orçamento' : 'Descartar'),
+          Tooltip(
+            message: sid != null ? 'Excluir permanentemente este orçamento' : 'Descartar este rascunho não salvo',
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(sid != null ? 'Excluir orçamento' : 'Descartar'),
+            ),
           ),
         ],
       ),
@@ -2283,6 +2630,17 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
       return;
     }
 
+    // Mesmo bloqueio já aplicado em "Enviar para aprovação": um item de
+    // material genérico sem descrição não tem como aparecer de forma
+    // legível no PDF (o nome do material sozinho não diferencia a
+    // variante). O backend também valida isso (ver
+    // orcamento_pdf.controller.js) — esta checagem aqui é só para dar
+    // feedback imediato sem esperar a ida e volta da rede.
+    if (tab.itens.any((i) => i.descricaoObrigatoriaFaltando)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha a descrição de todos os materiais genéricos antes de exportar o PDF.'), backgroundColor: AppTheme.error));
+      return;
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Gerando PDF…'),
@@ -2375,10 +2733,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         await repo.limparItens(orcId);
         for (final item in itensSnapshot) {
         if (item.precos.isEmpty) {
-          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false});
+          await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false, 'descricaoItem': item.descricaoItem});
         } else {
           for (final entry in item.precos.entries) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao, 'descricaoItem': item.descricaoItem});
           }
         }
         }
@@ -2389,10 +2747,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
         await _sincronizarFornecedoresOcultos(orcId, tab);
         for (final item in itensSnapshot) {
           if (item.precos.isEmpty) {
-            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false});
+            await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': null, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': null, 'selecionado': false, 'descricaoItem': item.descricaoItem});
           } else {
             for (final entry in item.precos.entries) {
-              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao});
+              await repo.adicionarItem(orcId, {'materialId': item.materialId, 'fornecedorId': entry.key, 'quantidade': item.quantidade, 'qtdUnidade': item.qtdUnidade, 'precoUnitario': entry.value.preco, 'selecionado': item.fornecedorSelecionado == entry.key, 'observacao': entry.value.observacao, 'descricaoItem': item.descricaoItem});
             }
           }
         }
@@ -2601,22 +2959,40 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
 
         return Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          appBar: AppBar(
-            backgroundColor: Theme.of(context).colorScheme.surface,
-            elevation: 0,
-            automaticallyImplyLeading: false,
-            titleSpacing: 16,
-            title: Row(
+          body: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _BotaoVoltar(
-                  label: 'Voltar',
-                  tooltip: 'Voltar',
-
-                  onTap: _aoClicarVoltar,
+                Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: _BotaoVoltar(
+                    label: 'Categorias',
+                    tooltip: 'Voltar para orçamentos',
+                    onTap: _aoClicarVoltar,
+                    iconSize: 18,
+                    fontSize: 14,
+                    padH: 16,
+                    padV: 12,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: ScrollConfiguration(
+                  child: Listener(
+                    onPointerSignal: (signal) {
+                      if (signal is PointerScrollEvent && _abasScrollCtrl.hasClients) {
+                        final delta = signal.scrollDelta.dy != 0
+                            ? signal.scrollDelta.dy
+                            : signal.scrollDelta.dx;
+                        final destino = (_abasScrollCtrl.position.pixels + delta)
+                            .clamp(0.0, _abasScrollCtrl.position.maxScrollExtent);
+                        _abasScrollCtrl.jumpTo(destino);
+                      }
+                    },
+                    child: ScrollConfiguration(
                     behavior: _HorizontalScrollBehavior(),
                     child: SingleChildScrollView(
                       controller: _abasScrollCtrl,
@@ -2628,7 +3004,11 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                             final aba = entry.value;
                             final ativa = i == abaAtiva;
                             final temConteudo = aba.itens.isNotEmpty || aba.servidorId != null;
-                            return GestureDetector(
+                            return MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              onEnter: (_) => setState(() => _abaHover = i),
+                              onExit: (_) => setState(() => _abaHover == i ? _abaHover = null : null),
+                              child: GestureDetector(
                               onTap: () {
                                 setState(() {
                                   _itensSelecionados.clear();
@@ -2650,7 +3030,11 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                                 margin: EdgeInsets.only(right: 4),
                                 padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: ativa ? AppTheme.primary : Theme.of(context).scaffoldBackgroundColor,
+                                  color: ativa
+                                      ? AppTheme.primary
+                                      : (_abaHover == i
+                                          ? Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5)
+                                          : Theme.of(context).scaffoldBackgroundColor),
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(color: ativa ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant),
                                 ),
@@ -2751,6 +3135,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                                   ],
                                 ),
                               ),
+                            ),
                             );
                           }),
                           Tooltip(
@@ -2781,6 +3166,7 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                       ),
                     ),
                   ),
+                  ),
                 ),
                 ValueListenableBuilder<ScrollMetrics>(
                   valueListenable: _abasScrollHintNotifier,
@@ -2788,13 +3174,25 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                     final podeEsquerda = metrics.pixels > 0;
                     final podeDireita = metrics.maxScrollExtent > 0 && metrics.pixels < metrics.maxScrollExtent;
                     if (!podeEsquerda && !podeDireita) return const SizedBox.shrink();
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(width: 4),
-                        _TabNavBtn(icon: Icons.chevron_left, enabled: podeEsquerda, onTap: _scrollAbasEsquerda),
-                        _TabNavBtn(icon: Icons.chevron_right, enabled: podeDireita, onTap: _scrollAbasDireita),
-                      ],
+                    return Listener(
+                      onPointerSignal: (signal) {
+                        if (signal is PointerScrollEvent && _abasScrollCtrl.hasClients) {
+                          final delta = signal.scrollDelta.dy != 0
+                              ? signal.scrollDelta.dy
+                              : signal.scrollDelta.dx;
+                          final destino = (_abasScrollCtrl.position.pixels + delta)
+                              .clamp(0.0, _abasScrollCtrl.position.maxScrollExtent);
+                          _abasScrollCtrl.jumpTo(destino);
+                        }
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(width: 4),
+                          _TabNavBtn(icon: Icons.chevron_left, enabled: podeEsquerda, onTap: _scrollAbasEsquerda),
+                          _TabNavBtn(icon: Icons.chevron_right, enabled: podeDireita, onTap: _scrollAbasDireita),
+                        ],
+                      ),
                     );
                   },
                 ),
@@ -2804,9 +3202,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 ],
               ],
             ),
-            bottom: PreferredSize(preferredSize: Size.fromHeight(1), child: Container(height: 1, color: Theme.of(context).colorScheme.outlineVariant)),
-          ),
-          body: tab == null
+                const SizedBox(height: 16),
+                Container(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
+                Expanded(
+                  child: tab == null
               ? Center(child: Text('Nenhuma aba aberta', style: TextStyle(color: Theme.of(context).colorScheme.outline)))
               : Column(
                   children: [
@@ -2860,6 +3259,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                     ),
                   ],
                 ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );
@@ -3152,12 +3555,8 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                   autofocus: !context.watch<RoboHelperProvider>().tourAtivo,
                   inputFormatters: [_NoCommaFormatter(), _UpperCaseFormatter()],
                   decoration: InputDecoration(
-                    labelText: 'Nome do material',
+                    hintText: 'Nome do material',
                     isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 8,
-                    ),
                     prefixIcon:
                         _buscando && _searchNomeCtrl.text.isNotEmpty
                             ? const Padding(
@@ -3171,9 +3570,10 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                                   ),
                                 ),
                               )
-                            : const Icon(
+                            : Icon(
                                 Icons.inventory_2_outlined,
-                                size: 15,
+                                color: Theme.of(context).colorScheme.outline,
+                                size: 20,
                               ),
                   ),
                   onChanged: (_) {
@@ -3183,24 +3583,21 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 ),
               ),
 
-              const SizedBox(width: 6),
+              const SizedBox(width: 12),
 
               Expanded(
                 flex: 2,
                 child: TextField(
                   controller: _searchIdentificadorCtrl,
                   inputFormatters: [_NoCommaFormatter(), _UpperCaseFormatter()],
-                  decoration: const InputDecoration(
-                    labelText: 'Identificador',
+                  decoration: InputDecoration(
+                    hintText: 'Identificador',
                     prefixIcon: Icon(
                       Icons.qr_code_outlined,
-                      size: 13,
+                      color: Theme.of(context).colorScheme.outline,
+                      size: 18,
                     ),
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 8,
-                    ),
                   ),
                   onChanged: (_) {
                     setState(() {});
@@ -3209,24 +3606,21 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 ),
               ),
 
-              const SizedBox(width: 6),
+              const SizedBox(width: 12),
 
               Expanded(
                 flex: 2,
                 child: TextField(
                   controller: _searchMedidaCtrl,
                   inputFormatters: [_NoCommaFormatter()],
-                  decoration: const InputDecoration(
-                    labelText: 'Medida',
+                  decoration: InputDecoration(
+                    hintText: 'Medida',
                     prefixIcon: Icon(
                       Icons.straighten_outlined,
-                      size: 13,
+                      color: Theme.of(context).colorScheme.outline,
+                      size: 18,
                     ),
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 8,
-                    ),
                   ),
                   onChanged: (_) {
                     setState(() {});
@@ -3235,25 +3629,31 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 ),
               ),
 
-              const SizedBox(width: 6),
+              const SizedBox(width: 12),
 
               Expanded(
                 flex: 2,
                 child: TextField(
                   controller: _searchComprimentoCtrl,
                   inputFormatters: [_DecimalInputFormatter()],
-                  decoration: const InputDecoration(
-                    labelText: 'Comprimento',
-                    suffixText: 'm',
-                    prefixIcon: Icon(
-                      Icons.height,
-                      size: 13,
+                  decoration: InputDecoration(
+                    hintText: 'Comprimento',
+                    suffixIcon: Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        widthFactor: 1,
+                        child: Text(
+                          'm',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.outline,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
                     ),
+                    prefixIcon: Icon(Icons.height, color: Theme.of(context).colorScheme.outline, size: 18),
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 8,
-                    ),
                   ),
                   onChanged: (_) {
                     setState(() {});
@@ -3262,25 +3662,31 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 ),
               ),
 
-              const SizedBox(width: 6),
+              const SizedBox(width: 12),
 
               Expanded(
                 flex: 2,
                 child: TextField(
                   controller: _searchLarguraCtrl,
                   inputFormatters: [_DecimalInputFormatter()],
-                  decoration: const InputDecoration(
-                    labelText: 'Largura',
-                    suffixText: 'm',
-                    prefixIcon: Icon(
-                      Icons.width_normal,
-                      size: 13,
+                  decoration: InputDecoration(
+                    hintText: 'Largura',
+                    suffixIcon: Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        widthFactor: 1,
+                        child: Text(
+                          'm',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.outline,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
                     ),
+                    prefixIcon: Icon(Icons.width_normal, color: Theme.of(context).colorScheme.outline, size: 18),
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 8,
-                    ),
                   ),
                   onChanged: (_) {
                     setState(() {});
@@ -3289,24 +3695,31 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                 ),
               ),
 
-              const SizedBox(width: 6),
+              const SizedBox(width: 12),
 
               Expanded(
                 flex: 2,
                 child: TextField(
                   controller: _searchEspCtrl,
                   inputFormatters: [_DecimalInputFormatter()],
-                  decoration: const InputDecoration(
-                    labelText: 'Espessura',
-                    prefixIcon: Icon(
-                      Icons.layers_outlined,
-                      size: 13,
+                  decoration: InputDecoration(
+                    hintText: 'Espessura',
+                    suffixIcon: Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        widthFactor: 1,
+                        child: Text(
+                          'mm',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.outline,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
                     ),
+                    prefixIcon: Icon(Icons.layers_outlined, color: Theme.of(context).colorScheme.outline, size: 18),
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 8,
-                    ),
                   ),
                   onChanged: (_) {
                     setState(() {});
@@ -3329,7 +3742,9 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                     tooltip: 'Limpar filtros',
                     icon: Icon(
                       Icons.filter_alt_off,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      color: temFiltro
+                          ? Theme.of(context).colorScheme.onSurfaceVariant
+                          : Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
                     ),
                     onPressed: temFiltro
                         ? () {
@@ -3347,7 +3762,11 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                           }
                         : null,
                     style: IconButton.styleFrom(
-                      side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                      side: BorderSide(
+                        color: temFiltro
+                            ? Theme.of(context).colorScheme.outline
+                            : Theme.of(context).colorScheme.outline.withValues(alpha: 0.35),
+                      ),
                     ).copyWith(
                       mouseCursor: WidgetStateProperty.resolveWith((states) {
                         if (states.contains(WidgetState.disabled)) {
@@ -3409,18 +3828,28 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                           return ListTile(
                             key: i == 0 ? _tourKeys.primeiroResultado : null,
                             dense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                            title: RichText(
-                              overflow: TextOverflow.ellipsis,
-                              text: TextSpan(
-                                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface),
-                                children: [
-                                  if (m.identificador != null && m.identificador!.isNotEmpty)
-                                    TextSpan(text: '${m.identificador}  ·  ', style: const TextStyle(fontWeight: FontWeight.w400)),
-                                  TextSpan(text: m.nome, style: const TextStyle(fontWeight: FontWeight.w600)),
-                                  if (sub.isNotEmpty)
-                                    TextSpan(text: ' • $sub', style: const TextStyle(fontWeight: FontWeight.w400)),
+                            title: Row(
+                              children: [
+                                Expanded(
+                                  child: RichText(
+                                    overflow: TextOverflow.ellipsis,
+                                    text: TextSpan(
+                                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface),
+                                      children: [
+                                        if (m.identificador != null && m.identificador!.isNotEmpty)
+                                          TextSpan(text: '${m.identificador}  ·  ', style: const TextStyle(fontWeight: FontWeight.w400)),
+                                        TextSpan(text: m.nome, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                        if (sub.isNotEmpty)
+                                          TextSpan(text: ' • $sub', style: const TextStyle(fontWeight: FontWeight.w400)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                if (m.ehGenerico) ...[
+                                  const SizedBox(width: 6),
+                                  const _GenericoChip(),
                                 ],
-                              ),
+                              ],
                             ),
                             trailing: _StatusChip(status: m.status),
                             onTap: () => _adicionarMaterial(m),
@@ -3712,6 +4141,44 @@ class _OrcamentoEditorPageState extends State<OrcamentoEditorPage> with WidgetsB
                     Flexible(child: Text(item.materialNome, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), softWrap: true)),
                       if ([item.materialMedida, item.materialDimensaoFormatada, item.materialEspessura, item.materialIdentificador].any((s) => s != null && s.isNotEmpty))
                         Text([item.materialMedida ?? item.materialDimensaoFormatada, _formatarEspessura(item.materialEspessura), item.materialIdentificador].where((s) => s != null && s.isNotEmpty).join(' · '), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), softWrap: true),
+                    if (item.ehGenerico) ...[
+                      const SizedBox(height: 3),
+                      _DescricaoGenericoField(
+                        key: ValueKey('desc_${item.itemId}'),
+                        value: item.descricaoItem,
+                        obrigatoriaFaltando: item.descricaoObrigatoriaFaltando,
+                        // Uma vez confirmada/persistida, a descrição não
+                        // pode mais ser trocada (só remover e readicionar
+                        // o material) — evita criar um Material filho
+                        // "órfão" no estoque por engano ao editar depois.
+                        somenteLeitura: item.descricaoTravada,
+                        onSairDoCampo: (texto) => _confirmarDescricaoAoSairDoCampo(item, texto),
+                        onChanged: (v) {
+                          // Adia a notificação do provider para depois do
+                          // frame atual: chamar notifyListeners() de forma
+                          // síncrona dentro do onChanged do TextField pode
+                          // colidir com o setState() do próprio campo,
+                          // causando "setState() called during build".
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (!mounted) return;
+                            provider.atualizarDescricaoItem(item.itemId, v);
+                          });
+                          // IMPORTANTE: sempre usa o id do material GENÉRICO
+                          // (pai), nunca item.materialId puro — depois que o
+                          // item é recarregado do servidor já resolvido para
+                          // um filho, item.materialId passa a ser o id do
+                          // filho, e carregarVinculados só funciona com o
+                          // id do pai. Sem isso, o lookup silenciosamente
+                          // não encontrava nada após sair e voltar ao
+                          // orçamento.
+                          _agendarBuscaVinculoPorDescricao(
+                            item.itemId,
+                            item.materialGenericoId ?? item.materialId,
+                            v,
+                          );
+                        },
+                      ),
+                    ],
                     const SizedBox(height: 3),
                     FittedBox(
                       fit: BoxFit.scaleDown,
@@ -4128,6 +4595,153 @@ class _StatusChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
       child: Text(status, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: fg)),
+    );
+  }
+}
+
+class _GenericoChip extends StatelessWidget {
+  const _GenericoChip();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: const Text(
+        'GENÉRICO',
+        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppTheme.primary),
+      ),
+    );
+  }
+}
+
+class _DescricaoGenericoField extends StatefulWidget {
+  final String? value;
+  final bool obrigatoriaFaltando;
+  final bool somenteLeitura;
+  final ValueChanged<String> onChanged;
+
+  /// Chamado quando o campo PERDE O FOCO (usuário clicou fora, apertou
+  /// Enter/Tab, ou tentou sair do editor com o campo focado) com texto
+  /// não vazio e ainda não travado. Deve mostrar o diálogo de confirmação
+  /// e retornar true se o usuário confirmou (o campo então trava) ou
+  /// false se cancelou (o campo recupera o foco e permanece editável).
+  final Future<bool> Function(String texto) onSairDoCampo;
+
+  const _DescricaoGenericoField({
+    super.key,
+    required this.value,
+    required this.obrigatoriaFaltando,
+    this.somenteLeitura = false,
+    required this.onChanged,
+    required this.onSairDoCampo,
+  });
+
+  @override
+  State<_DescricaoGenericoField> createState() => _DescricaoGenericoFieldState();
+}
+
+class _DescricaoGenericoFieldState extends State<_DescricaoGenericoField> {
+  late TextEditingController _ctrl;
+  late FocusNode _focusNode;
+  bool _editando = false;
+  bool _confirmando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.value ?? '');
+    _focusNode = FocusNode();
+    _focusNode.addListener(_aoMudarFoco);
+  }
+
+  void _aoMudarFoco() async {
+    if (_focusNode.hasFocus) return; // só nos importa a PERDA de foco
+    if (widget.somenteLeitura) return;
+    if (_confirmando) return; // evita reentrância se o listener disparar de novo
+
+    final texto = _ctrl.text.trim();
+    if (texto.isEmpty) {
+      if (mounted) setState(() => _editando = false);
+      return;
+    }
+
+    _confirmando = true;
+    final confirmou = await widget.onSairDoCampo(texto);
+    _confirmando = false;
+    if (!mounted) return;
+
+    if (confirmou) {
+      setState(() => _editando = false);
+    } else {
+      // Usuário cancelou: permanece no campo, com foco de volta.
+      setState(() => _editando = true);
+      _focusNode.requestFocus();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_DescricaoGenericoField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_editando && oldWidget.value != widget.value) {
+      final novoTexto = widget.value ?? '';
+      if (_ctrl.text != novoTexto) {
+        _ctrl.text = novoTexto;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_aoMudarFoco);
+    _focusNode.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _ctrl,
+      focusNode: _focusNode,
+      readOnly: widget.somenteLeitura,
+      enabled: !widget.somenteLeitura,
+      decoration: InputDecoration(
+        isDense: true,
+        filled: true,
+        fillColor: widget.somenteLeitura
+            ? Theme.of(context).colorScheme.surfaceContainerHighest
+            : Theme.of(context).colorScheme.surface,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 9),
+        hintText: 'Descrição (obrigatória)',
+        hintStyle: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.outline),
+        suffixIcon: widget.somenteLeitura
+            ? Icon(Icons.lock_outline, size: 13, color: Theme.of(context).colorScheme.outline)
+            : null,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(5),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(5),
+          borderSide: BorderSide.none,
+        ),
+      ),
+      style: const TextStyle(fontSize: 11),
+      onTap: widget.somenteLeitura ? null : () => setState(() => _editando = true),
+      onChanged: (v) {
+        setState(() {});
+        widget.onChanged(v);
+      },
+      onEditingComplete: () {
+        // Isso já dispara _aoMudarFoco via unfocus() (perda de foco) —
+        // não precisamos duplicar a lógica de confirmação aqui.
+        FocusScope.of(context).unfocus();
+      },
+      onSubmitted: (_) {},
     );
   }
 }
@@ -4578,15 +5192,21 @@ class _DialogVincularFornecedoresState extends State<_DialogVincularFornecedores
         ),
       ),
       actions: [
-        TextButton(
-          style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar'),
+        Tooltip(
+          message: 'Fechar sem adicionar fornecedores',
+          child: TextButton(
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
         ),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-          onPressed: _selecionados.isEmpty ? null : () => Navigator.pop(context, _selecionados.toList()),
-          child: const Text('Adicionar'),
+        Tooltip(
+          message: 'Vincular fornecedores selecionados a este material',
+          child: FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: _selecionados.isEmpty ? null : () => Navigator.pop(context, _selecionados.toList()),
+            child: const Text('Adicionar'),
+          ),
         ),
       ],
     );
@@ -4832,16 +5452,22 @@ class _DialogEditarMaterialState extends State<_DialogEditarMaterial> {
         ),
       ),
       actions: [
-        TextButton(style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)), onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-          onPressed: () {
-            final preco = _parsePreco(_precoCtrl.text);
-            final precoM2 = _parsePreco(_precoM2Ctrl.text);
-            final obs = _observacaoCtrl.text.trim().isEmpty ? null : _observacaoCtrl.text.trim();
-            Navigator.pop(context, {'preco': preco, 'precoMetroQuadrado': precoM2, 'observacao': obs});
-          },
-          child: const Text('Salvar'),
+        Tooltip(
+          message: 'Fechar sem salvar as alterações',
+          child: TextButton(style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)), onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        ),
+        Tooltip(
+          message: 'Salvar preço e observação deste fornecedor',
+          child: FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () {
+              final preco = _parsePreco(_precoCtrl.text);
+              final precoM2 = _parsePreco(_precoM2Ctrl.text);
+              final obs = _observacaoCtrl.text.trim().isEmpty ? null : _observacaoCtrl.text.trim();
+              Navigator.pop(context, {'preco': preco, 'precoMetroQuadrado': precoM2, 'observacao': obs});
+            },
+            child: const Text('Salvar'),
+          ),
         ),
       ],
     );
@@ -4905,21 +5531,27 @@ class _DialogDescartarOrcamentoState extends State<_DialogDescartarOrcamento> {
         ],
       ),
       actions: [
-        TextButton(
-          style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar'),
+        Tooltip(
+          message: 'Fechar sem cancelar o orçamento',
+          child: TextButton(
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
         ),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-          onPressed: () {
-            if (_ctrl.text.trim().isEmpty) {
-              setState(() => _vazio = true);
-              return;
-            }
-            Navigator.pop(context, _ctrl.text.trim());
-          },
-          child: const Text('Cancelar Orçamento'),
+        Tooltip(
+          message: 'Confirmar cancelamento e mover para o histórico',
+          child: FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            onPressed: () {
+              if (_ctrl.text.trim().isEmpty) {
+                setState(() => _vazio = true);
+                return;
+              }
+              Navigator.pop(context, _ctrl.text.trim());
+            },
+            child: const Text('Cancelar Orçamento'),
+          ),
         ),
       ],
     );
@@ -4991,17 +5623,21 @@ class _TabNavBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: Theme.of(context).scaffoldBackgroundColor,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+    return MouseRegion(
+      cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+          ),
+          child: Icon(icon, size: 14, color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline),
         ),
-        child: Icon(icon, size: 14, color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.outline),
       ),
     );
   }
@@ -5011,11 +5647,19 @@ class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;
   final VoidCallback onTap;
+  final double iconSize;
+  final double fontSize;
+  final double padH;
+  final double padV;
 
   const _BotaoVoltar({
     required this.label,
     required this.tooltip,
     required this.onTap,
+    this.iconSize = 18,
+    this.fontSize = 13,
+    this.padH = 16,
+    this.padV = 12,
   });
 
   @override
@@ -5024,7 +5668,6 @@ class _BotaoVoltar extends StatefulWidget {
 
 class _BotaoVoltarState extends State<_BotaoVoltar> {
   bool _hovered = false;
-  static const _accent = Color(0xFFF59E0B);
 
   @override
   Widget build(BuildContext context) {
@@ -5034,40 +5677,37 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
       onExit:  (_) => setState(() => _hovered = false),
       child: Tooltip(
         message: widget.tooltip,
-        child: InkWell(
-          onTap: widget.onTap,
-          mouseCursor: SystemMouseCursors.click,
+        child: Material(
+          color: _hovered
+              ? AppTheme.primary.withValues(alpha: 0.85)
+              : AppTheme.primary,
           borderRadius: BorderRadius.circular(10),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: _hovered
-                  ? _accent.withValues(alpha: 0.15)
-                  : _accent.withValues(alpha: 0.08),
-              border: Border.all(
-                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.arrow_back,
-                  size: 18,
-                  color: _accent,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  widget.label,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: _accent,
-                    fontWeight: FontWeight.w600,
+          child: InkWell(
+            onTap: widget.onTap,
+            mouseCursor: SystemMouseCursors.click,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: widget.padH, vertical: widget.padV),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.arrow_back,
+                    size: widget.iconSize,
+                    color: Colors.white,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      fontSize: widget.fontSize,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

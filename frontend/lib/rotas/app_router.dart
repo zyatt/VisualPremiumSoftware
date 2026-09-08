@@ -18,6 +18,7 @@ import '../pages/controle_estoque_page.dart';
 import '../pages/relatorio_os_page.dart';
 import '../pages/producao_page.dart';
 import '../pages/chat_page.dart';
+import '../pages/contas_pagar_page.dart';
 import '../widgets/app_shell.dart';
 import '../providers/usuario_provider.dart';
 
@@ -37,6 +38,7 @@ class AppRouter {
   static final _producaoNavigatorKey        = GlobalKey<NavigatorState>(debugLabel: 'producao');
   static final _adminNavigatorKey           = GlobalKey<NavigatorState>(debugLabel: 'admin');
   static final _gastosCategoriaNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'gastos-categoria');
+  static final _contasPagarNavigatorKey     = GlobalKey<NavigatorState>(debugLabel: 'contas-pagar');
   static final _veiculosNavigatorKey        = GlobalKey<NavigatorState>(debugLabel: 'veiculos');
   static final _solicitacoesMaterialNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'solicitacoes-material');
   static final _chatNavigatorKey                  = GlobalKey<NavigatorState>(debugLabel: 'chat');
@@ -53,6 +55,7 @@ class AppRouter {
     '/gastos-categoria',
     '/veiculos',
     '/solicitacoes-material',
+    '/contas-pagar',
   ];
 
   static GoRouter buildRouter(UsuarioProvider usuarioProvider) {
@@ -212,6 +215,12 @@ class AppRouter {
               navigatorKey: _gastosCategoriaNavigatorKey,
               routes: [
                 GoRoute(path: '/gastos-categoria', builder: (_, __) => const GastosCategoriaPage()),
+              ],
+            ),
+            StatefulShellBranch(
+              navigatorKey: _contasPagarNavigatorKey,
+              routes: [
+                GoRoute(path: '/contas-pagar', builder: (_, __) => const ContasPagarPage()),
               ],
             ),
             StatefulShellBranch(

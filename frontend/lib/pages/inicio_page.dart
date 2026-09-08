@@ -12,8 +12,6 @@ class InicioPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final usuario   = context.watch<UsuarioProvider>().usuarioLogado;
     final scheme    = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-
     final menuItems = AppShell.getMenuForRole(usuario?.role);
 
     return Scaffold(
@@ -22,15 +20,6 @@ class InicioPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Olá, ${usuario?.nome ?? ''}',
-              style: textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: scheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 32),
-
             Expanded(
               child: GridView.count(
                 crossAxisCount: 4,

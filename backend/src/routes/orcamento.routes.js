@@ -25,6 +25,7 @@ router.delete('/:id',                    authMiddleware, roleMiddleware(EXCLUSAO
 
 router.post('/:id/itens',                authMiddleware, roleMiddleware(ESCRITA),  ctrl.adicionarItem);
 router.put('/:id/itens',                 authMiddleware, roleMiddleware(ESCRITA),  ctrl.substituirItens);
+router.put('/:id/itens/rascunho',        authMiddleware, roleMiddleware(ESCRITA),  ctrl.salvarRascunho);
 router.delete('/:id/itens',              authMiddleware, roleMiddleware(ESCRITA),  ctrl.limparItens);
 router.delete('/:id/itens/:itemId',      authMiddleware, roleMiddleware(ESCRITA),  ctrl.removerItem);
 router.patch('/:id/itens/:itemId',       authMiddleware, roleMiddleware(ESCRITA),  ctrl.atualizarItem);

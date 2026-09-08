@@ -70,6 +70,43 @@ model Material {
   ativo                       Boolean                    @default(true)
   ultimoValorPago             Decimal?                   @db.Decimal(15, 6)
   ultimoValorPagoM2           Decimal?                   @db.Decimal(15, 6)
+  /// Quando true, este material é um material "genérico" (pai). Ele não
+  /// representa um item físico de estoque por si só — serve apenas como
+  /// agrupador para materiais "filhos" (ver materialGenericoId) que
+  /// compartilham o mesmo nome base e diferem apenas pela `descricao`.
+  /// Exemplo: material genérico "TINTA" (unidade ml) recebe filhos como
+  /// "TINTA" + descricao "AZUL CLARO". Um material genérico não pode ter
+  /// ele mesmo um materialGenericoId (não há hierarquia de 2 níveis).
+  ehGenerico                   Boolean                    @default(false)
+  /// Preenchido apenas em materiais "filhos" de um genérico: aponta para o
+  /// Material com ehGenerico = true ao qual este está vinculado. Um filho
+  /// mantém todos os seus próprios dados (fornecedores, preços, estoque,
+  /// movimentações) — o vínculo serve só para agrupar/exibir os filhos ao
+  /// selecionar o genérico correspondente nas telas de Orçamento, Ordem de
+  /// Compra e Solicitações.
+  materialGenericoId           Int?
+  /// Obrigatório quando materialGenericoId não é nulo. Complementa o nome
+  /// do material genérico (ex.: nome "TINTA" + descricao "AZUL CLARO").
+  descricao                    String?
+  materialGenerico             Material?                  @relation("MaterialGenericoFilhos", fields: [materialGenericoId], references: [id])
+  materiaisVinculados          Material[]                 @relation("MaterialGenericoFilhos")
+  /// Quando true, este material foi cadastrado por um usuário que não é
+  /// ADMIN e ainda não passou pela aprovação de um ADMIN. Enquanto estiver
+  /// true, o material fica oculto das listagens normais de estoque
+  /// (listar/listarPaginado/listarParaMovimentacao) e só aparece na fila
+  /// de aprovação (GET /materiais/pendentes). Ver material.service.js:
+  /// aprovar()/recusar().
+  aguardandoAprovacao         Boolean                    @default(false)
+  /// Snapshot do usuário que originou o cadastro (preenchido apenas quando
+  /// aguardandoAprovacao foi true em algum momento) — mantido mesmo após a
+  /// aprovação, para fins de histórico/auditoria. Não é uma FK para não
+  /// quebrar o registro se o usuário for excluído depois.
+  criadoPorId                 Int?
+  criadoPorNome               String?
+  /// Preenchidos no momento em que um ADMIN aprova o cadastro pendente.
+  aprovadoPorId               Int?
+  aprovadoPorNome             String?
+  aprovadoEm                  DateTime?
   criadoEm                    DateTime                   @default(now())
   atualizadoEm                DateTime                   @updatedAt
   fornecedorMateriais         FornecedorMaterial[]
@@ -103,6 +140,13 @@ model Material {
   // Este @@unique é mantido comentado apenas como referência histórica —
   // NÃO reative sem entender a limitação acima.
   // @@unique([nome, identificador, medida, espessura])
+  // Impede dois materiais "filhos" do mesmo genérico com a mesma descrição
+  // (case-insensitive, via índice de expressão criado na migração SQL —
+  // @@unique padrão do Prisma não faz comparação case-insensitive). Ver
+  // migração: materiais_generico_descricao_null_safe_key
+  @@index([aguardandoAprovacao])
+  @@index([ehGenerico])
+  @@index([materialGenericoId])
   @@map("materiais")
 }
 
@@ -207,13 +251,36 @@ model OrcamentoItem {
   usarM2        Boolean     @default(false)
   selecionado   Boolean     @default(false)
   descricaoItem String?
+  /// True quando o usuário confirmou explicitamente a descrição deste item
+  /// de material genérico (diálogo "Confirma a descrição 'X' para
+  /// MATERIAL?" ao sair do campo no editor). Persistido no banco para que
+  /// a trava sobreviva a fechar/reabrir o orçamento — sem isso, cada nova
+  /// aba carregada do servidor não tinha como saber que a descrição já
+  /// tinha sido confirmada antes, e o campo voltava destravado a cada
+  /// reabertura. Só é resetado (via novo item) se o material for removido
+  /// e readicionado; não pode ser "destravado" depois de true.
+  descricaoConfirmada Boolean @default(false)
   observacao    String?
   criadoEm      DateTime    @default(now())
   fornecedor    Fornecedor? @relation(fields: [fornecedorId], references: [id])
   material      Material    @relation(fields: [materialId], references: [id])
   orcamento     Orcamento   @relation(fields: [orcamentoId], references: [id], onDelete: Cascade)
 
-  @@unique([orcamentoId, materialId, fornecedorId])
+  // A unicidade lógica (orcamentoId + materialId + fornecedorId + descricaoItem)
+  // NÃO é garantida pelo @@unique padrão abaixo, porque o Postgres trata NULL
+  // como sempre diferente de NULL — dois itens do mesmo material/fornecedor
+  // com descricaoItem em branco não seriam bloqueados por essa constraint.
+  // Materiais genéricos (Material.ehGenerico=true) podem ter múltiplos itens
+  // no mesmo orçamento, com o mesmo material e o mesmo fornecedor, desde que
+  // a descricaoItem seja diferente entre eles. Materiais não-genéricos
+  // continuam únicos por (orcamentoId, materialId, fornecedorId), tratando
+  // descricaoItem nula como '' só para fins de comparação de unicidade — ver
+  // ÍNDICE ÚNICO DE EXPRESSÃO criado na migração `migration.sql`:
+  //   orcamento_itens_orcamentoId_materialId_fornecedorId_descricao_null_safe_key
+  //
+  // Este @@unique é mantido comentado apenas como referência histórica —
+  // NÃO reative sem entender a limitação acima.
+  // @@unique([orcamentoId, materialId, fornecedorId])
   @@map("orcamento_itens")
 }
 
@@ -782,4 +849,108 @@ enum StatusOrcamentoVenda {
   EM_ANDAMENTO
   APROVADO
   NAO_APROVADO
+}
+
+model Empresa {
+  id             Int                  @id @default(autoincrement())
+  nome           String
+  cnpj           String               @unique
+  ativo          Boolean              @default(true)
+  criadoEm       DateTime             @default(now())
+  atualizadoEm   DateTime             @updatedAt
+
+  certificadoA1  CertificadoDigital?
+  contasPagar    ContaPagar[]
+  notasFiscais   NotaFiscal[]
+
+  @@map("empresas")
+}
+
+model CertificadoDigital {
+  id                 Int       @id @default(autoincrement())
+  empresaId          Int       @unique
+  arquivoNome        String
+  arquivoPath        String
+  senhaCriptografada String
+  validade           DateTime?
+  ativo              Boolean   @default(false)
+  ultimaConsultaEm   DateTime?
+  ultimoErro         String?
+  criadoEm           DateTime  @default(now())
+  atualizadoEm       DateTime  @updatedAt
+
+  empresa            Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@map("certificados_digitais")
+}
+
+model NotaFiscal {
+  id               Int              @id @default(autoincrement())
+  empresaId        Int?
+  chaveAcesso      String           @unique
+  numero           String?
+  serie            String?
+  dataEmissao      DateTime?
+  valorTotal       Decimal?         @db.Decimal(15, 2)
+  emitenteCnpj     String?
+  emitenteNome     String?
+  destinatarioCnpj String?
+  destinatarioNome String?
+  xmlOriginal      String?          @db.Text
+  origem           OrigemNotaFiscal @default(XML_MANUAL)
+  criadoEm         DateTime         @default(now())
+  atualizadoEm     DateTime         @updatedAt
+
+  empresa          Empresa?         @relation(fields: [empresaId], references: [id])
+  contaPagar       ContaPagar?
+
+  @@index([empresaId])
+  @@map("notas_fiscais")
+}
+
+model ContaPagar {
+  id              Int              @id @default(autoincrement())
+  empresaId       Int?
+  notaFiscalId    Int?             @unique
+  descricao       String
+  numeroDocumento String?
+  /// Nome de quem emitiu a nota (preenchido a partir do XML, sem depender
+  /// do cadastro de Fornecedor do módulo de Estoque/Compras)
+  emitenteNome    String?
+  emitenteCnpj    String?
+  valor           Decimal          @db.Decimal(15, 2)
+  dataEmissao     DateTime?
+  dataVencimento  DateTime
+  dataPagamento   DateTime?
+  status          StatusContaPagar @default(PENDENTE)
+  formaPagamento  String?
+  categoria       String?
+  observacao      String?
+  anexoUrl        String?
+  criadoPorId     Int?
+  criadoPorNome   String?
+  pagoPorId       Int?
+  pagoPorNome     String?
+  criadoEm        DateTime         @default(now())
+  atualizadoEm    DateTime         @updatedAt
+
+  empresa         Empresa?         @relation(fields: [empresaId], references: [id])
+  notaFiscal      NotaFiscal?      @relation(fields: [notaFiscalId], references: [id])
+
+  @@index([empresaId])
+  @@index([status])
+  @@index([dataVencimento])
+  @@map("contas_pagar")
+}
+
+enum StatusContaPagar {
+  PENDENTE
+  PAGO
+  VENCIDO
+  CANCELADO
+}
+
+enum OrigemNotaFiscal {
+  XML_MANUAL
+  CERTIFICADO_A1
 }

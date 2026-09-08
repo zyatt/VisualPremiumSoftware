@@ -236,6 +236,7 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
   const colW0 = cols[0].w - 8;
 
   const sublines = [];
+  if (item.materialDescricao) sublines.push(item.materialDescricao);
   const partes = [item.medida, item.espessura].filter(Boolean);
   if (partes.length > 0) sublines.push(partes.join(' \u00b7 '));
   if (item.observacao)   sublines.push(`Obs: ${item.observacao}`);

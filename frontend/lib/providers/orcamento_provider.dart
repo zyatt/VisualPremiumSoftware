@@ -63,6 +63,32 @@ class ItemOrcamentoData {
   Map<int, PrecoFornecedorData> precos;
   int? fornecedorSelecionado;
 
+  /// True quando o material é um material "genérico" (agrupador), ver
+  /// [MaterialModel.ehGenerico]. Materiais genéricos exigem [descricaoItem]
+  /// preenchida e podem aparecer várias vezes no mesmo orçamento, desde que
+  /// cada ocorrência tenha uma descrição diferente.
+  final bool ehGenerico;
+
+  /// Descrição obrigatória quando [ehGenerico] é true (ex.: "AZUL CLARO"
+  /// para um material genérico "TINTA"). Livre/opcional para os demais.
+  String? descricaoItem;
+
+  /// Id do Material genérico "pai" quando este item é (ou já foi resolvido
+  /// para) uma variante de um material genérico. Diferente de [materialId]
+  /// quando o item já foi resolvido para um Material filho concreto (nesse
+  /// caso materialId é o id do filho, e materialGenericoId é o id do pai).
+  /// Necessário para: (1) o lookup por descrição (carregarVinculados exige
+  /// o id do PAI, nunca o do filho); (2) persistir o rascunho sempre
+  /// apontando para o genérico, nunca para um filho já resolvido, já que
+  /// mudar a descrição deve poder trocar de variante livremente enquanto
+  /// o item ainda não foi confirmado/travado.
+  final int? materialGenericoId;
+
+  /// True quando a descrição deste item já foi confirmada (ex.: orçamento
+  /// já foi salvo com ela e o usuário seguiu em frente) e não deve mais
+  /// poder ser editada — só remover e readicionar o item.
+  bool descricaoTravada;
+
   ItemOrcamentoData({
     String? itemId,
     required this.materialId,
@@ -80,8 +106,17 @@ class ItemOrcamentoData {
     this.qtdUnidade,
     Map<int, PrecoFornecedorData>? precos,
     this.fornecedorSelecionado,
+    this.ehGenerico = false,
+    this.descricaoItem,
+    this.materialGenericoId,
+    this.descricaoTravada = false,
   }) : itemId = itemId ?? const Uuid().v4(),
        precos = precos ?? {};
+
+  /// True quando este item precisa de descrição preenchida para poder ser
+  /// enviado para aprovação (materiais genéricos).
+  bool get descricaoObrigatoriaFaltando =>
+      ehGenerico && (descricaoItem == null || descricaoItem!.trim().isEmpty);
 
   bool get precisaQtdUnidade {
     final u = (materialUnidade ?? '').toUpperCase().trim();
@@ -143,6 +178,10 @@ class ItemOrcamentoData {
         'qtdUnidade': qtdUnidade,
         'precos': precos.map((k, v) => MapEntry(k.toString(), v.toJson())),
         'fornecedorSelecionado': fornecedorSelecionado,
+        'ehGenerico': ehGenerico,
+        'descricaoItem': descricaoItem,
+        'materialGenericoId': materialGenericoId,
+        'descricaoTravada': descricaoTravada,
       };
 
   Map<String, dynamic> toJsonComparavel() {
@@ -174,6 +213,10 @@ class ItemOrcamentoData {
           ),
         ),
         fornecedorSelecionado: j['fornecedorSelecionado'] as int?,
+        ehGenerico: j['ehGenerico'] as bool? ?? false,
+        descricaoItem: j['descricaoItem'] as String?,
+        materialGenericoId: j['materialGenericoId'] as int?,
+        descricaoTravada: j['descricaoTravada'] as bool? ?? false,
       );
 }
 
@@ -285,6 +328,10 @@ class OrcamentoAbertoMaterialInfo {
   final double? largura;
   final double? comprimento;
 
+  /// Descrição do item quando o material é genérico (ex.: "AZUL CLARO" para
+  /// um material genérico "TINTA"). Null/vazio para materiais não genéricos.
+  final String? descricaoItem;
+
   OrcamentoAbertoMaterialInfo({
     required this.materialId,
     required this.nome,
@@ -293,9 +340,13 @@ class OrcamentoAbertoMaterialInfo {
     this.identificador,
     this.largura,
     this.comprimento,
+    this.descricaoItem,
   });
 
-  factory OrcamentoAbertoMaterialInfo.fromJson(Map<String, dynamic> j) =>
+  factory OrcamentoAbertoMaterialInfo.fromJson(
+    Map<String, dynamic> j, {
+    String? descricaoItem,
+  }) =>
       OrcamentoAbertoMaterialInfo(
         materialId: j['id'] as int,
         nome: j['nome'] as String? ?? '',
@@ -304,6 +355,7 @@ class OrcamentoAbertoMaterialInfo {
         identificador: j['identificador'] as String?,
         largura: j['largura'] != null ? double.tryParse(j['largura'].toString()) : null,
         comprimento: j['comprimento'] != null ? double.tryParse(j['comprimento'].toString()) : null,
+        descricaoItem: descricaoItem,
       );
 }
 
@@ -341,13 +393,31 @@ class OrcamentoAbertoInfo {
   bool get emEdicaoPorAlguem => travaUsuarioId != null;
 
   static List<OrcamentoAbertoMaterialInfo> _materiaisUnicosFromJson(List itens) {
-    final Map<int, OrcamentoAbertoMaterialInfo> unicos = {};
+    final Map<String, OrcamentoAbertoMaterialInfo> unicos = {};
     for (final item in itens) {
       final materialId = item['materialId'] as int?;
-      if (materialId == null || unicos.containsKey(materialId)) continue;
+      if (materialId == null) continue;
       final materialData = item['material'] as Map<String, dynamic>?;
       if (materialData == null) continue;
-      unicos[materialId] = OrcamentoAbertoMaterialInfo.fromJson(materialData);
+      // Após salvo, `item.descricaoItem` fica sempre null — a descrição de
+      // uma variante de material genérico passa a viver em
+      // `material.descricao` (o Material filho resolvido), não mais no
+      // item do orçamento (ver substituirItens no backend). Por isso
+      // preferimos `material.descricao`, com `item.descricaoItem` só como
+      // fallback (ex.: item ainda não sincronizado com o servidor).
+      final descricaoDoMaterial = materialData['descricao'] as String?;
+      final descricaoItem = (descricaoDoMaterial != null && descricaoDoMaterial.trim().isNotEmpty)
+          ? descricaoDoMaterial
+          : item['descricaoItem'] as String?;
+      // Materiais genéricos podem se repetir no mesmo orçamento desde que
+      // tenham descrições diferentes (ex.: "TINTA" AZUL CLARO / VERMELHA),
+      // então a chave de dedupe precisa incluir a descrição.
+      final chave = '$materialId|${descricaoItem ?? ''}';
+      if (unicos.containsKey(chave)) continue;
+      unicos[chave] = OrcamentoAbertoMaterialInfo.fromJson(
+        materialData,
+        descricaoItem: descricaoItem,
+      );
     }
     return unicos.values.toList();
   }
@@ -610,6 +680,13 @@ class OrcamentoProvider extends ChangeNotifier {
       if (idx != -1) {
 
         final atual = _orcamentosAbertos[idx];
+        // Reaproveita `info` (buscado fresco via buscarPorId, já com
+        // `materiais` e `criadoEm` corretos) e só preserva os campos de
+        // trava local, que não vêm nesse fetch. Antes este construtor
+        // reconstruía o objeto campo a campo sem passar `materiais` nem
+        // `criadoEm` — como ambos têm valor default quando omitidos
+        // (`const []` / null), a lista de materiais e a data de criação
+        // eram apagadas a cada evento SSE de item alterado.
         _orcamentosAbertos[idx] = OrcamentoAbertoInfo(
           id: info.id,
           titulo: info.titulo,
@@ -617,8 +694,10 @@ class OrcamentoProvider extends ChangeNotifier {
           criadorNome: info.criadorNome,
           quantidadeItens: info.quantidadeItens,
           atualizadoEm: info.atualizadoEm,
+          criadoEm: info.criadoEm,
           travaUsuarioId: atual.travaUsuarioId,
           travaUsuarioNome: atual.travaUsuarioNome,
+          materiais: info.materiais,
         );
       } else {
         _orcamentosAbertos.insert(0, info);
@@ -916,10 +995,22 @@ class OrcamentoProvider extends ChangeNotifier {
   void adicionarItem(ItemOrcamentoData item) {
     if (tabAtual == null) return;
 
-    final idx = tabAtual!.itens.indexWhere(
-      (i) => i.itemId == item.itemId ||
-             i.materialId == item.materialId,
-    );
+    final idx = tabAtual!.itens.indexWhere((i) {
+      if (i.itemId == item.itemId) return true;
+      if (i.materialId != item.materialId) return false;
+      if (item.ehGenerico || i.ehGenerico) {
+        final descA = (i.descricaoItem ?? '').trim().toUpperCase();
+        final descB = (item.descricaoItem ?? '').trim().toUpperCase();
+        // Itens genéricos só são considerados "o mesmo item" quando ambos
+        // já têm uma descrição preenchida e ela é idêntica. Duas ocorrências
+        // ainda sem descrição (ex.: acabaram de ser adicionadas agora) NUNCA
+        // devem ser tratadas como iguais — senão a segunda sobrescreve a
+        // primeira e some da tabela.
+        if (descA.isEmpty || descB.isEmpty) return false;
+        return descA == descB;
+      }
+      return true;
+    });
     if (idx >= 0) {
       tabAtual!.itens[idx] = item;
       _salvarAbas();
@@ -929,6 +1020,87 @@ class OrcamentoProvider extends ChangeNotifier {
     }
 
     tabAtual!.itens.add(item);
+    _salvarAbas();
+    _sinalizarEdicaoLocal();
+    notifyListeners();
+  }
+
+  /// Atualiza a descrição de um item de material genérico. Salva
+  /// automaticamente no estado local (que já persiste via SharedPreferences
+  /// em [_salvarAbas]).
+  void atualizarDescricaoItem(String itemId, String descricao) {
+    if (tabAtual == null) return;
+    final idx = tabAtual!.itens.indexWhere((i) => i.itemId == itemId);
+    if (idx < 0) return;
+    final item = tabAtual!.itens[idx];
+    if (item.descricaoTravada) return;
+
+    final descricaoAnterior = item.descricaoItem;
+    item.descricaoItem = descricao;
+
+    // Qualquer alteração/apagamento da descrição invalida um vínculo de
+    // fornecedores/preços que tenha sido puxado para a descrição anterior
+    // — sem isso, ao trocar de "AZUL" pra "VERMELHO" o preço do "AZUL"
+    // ficava colado no item até um novo match ser encontrado (ou nunca,
+    // se a nova descrição não corresponder a nenhuma variante existente).
+    // O lookup por descrição (_agendarBuscaVinculoPorDescricao) é quem
+    // repovoa isso, de forma assíncrona, caso ache uma variante existente.
+    if (descricaoAnterior != descricao) {
+      item.precos.clear();
+      item.fornecedorSelecionado = null;
+    }
+
+    _salvarAbas();
+    _sinalizarEdicaoLocal();
+    notifyListeners();
+  }
+
+  /// Trava a descrição de um item genérico (não pode mais ser editada,
+  /// só remover e readicionar o item). Usado depois que o rascunho com
+  /// essa descrição é persistido com sucesso no servidor.
+  void travarDescricaoItem(String itemId) {
+    if (tabAtual == null) return;
+    final idx = tabAtual!.itens.indexWhere((i) => i.itemId == itemId);
+    if (idx < 0) return;
+    if (tabAtual!.itens[idx].descricaoTravada) return;
+    tabAtual!.itens[idx].descricaoTravada = true;
+    _salvarAbas();
+    // Precisa disparar o autosave (debounce ouve edicaoLocalTrigger) para
+    // que a confirmação seja persistida no servidor logo em seguida — sem
+    // isso, a trava ficava só na memória local até a próxima edição
+    // qualquer disparar um save, ou até o usuário sair do editor.
+    _sinalizarEdicaoLocal();
+    notifyListeners();
+  }
+
+  /// Quando o usuário digita, num item de material genérico, uma descrição
+  /// que já corresponde a uma variante (Material filho) já cadastrada,
+  /// preenche os preços/fornecedores desse filho no item automaticamente.
+  ///
+  /// Sem isso, o vínculo com fornecedores/preços só aparecia depois de
+  /// salvar o orçamento e recarregar (o backend resolve o filho via
+  /// resolverOuCriarFilho só nesse momento) — o usuário via o campo de
+  /// descrição preenchido mas nenhum preço/fornecedor até sair e voltar.
+  ///
+  /// [materialEncontrado] deve ser o Material filho (variante) já
+  /// existente, tipicamente obtido de MaterialProvider.vinculados ao
+  /// comparar a descrição digitada com MaterialModel.descricao de cada
+  /// item vinculado ao genérico.
+  void aplicarVinculoEncontrado(
+    String itemId, {
+    required Map<int, PrecoFornecedorData> precos,
+    int? fornecedorSelecionado,
+  }) {
+    if (tabAtual == null) return;
+    final idx = tabAtual!.itens.indexWhere((i) => i.itemId == itemId);
+    if (idx < 0) return;
+
+    final item = tabAtual!.itens[idx];
+    item.precos
+      ..clear()
+      ..addAll(precos);
+    item.fornecedorSelecionado = fornecedorSelecionado;
+
     _salvarAbas();
     _sinalizarEdicaoLocal();
     notifyListeners();
@@ -992,6 +1164,10 @@ class OrcamentoProvider extends ChangeNotifier {
         qtdUnidade: old.qtdUnidade,
         precos: old.precos,
         fornecedorSelecionado: old.fornecedorSelecionado,
+        ehGenerico: old.ehGenerico,
+        descricaoItem: old.descricaoItem,
+        materialGenericoId: old.materialGenericoId,
+        descricaoTravada: old.descricaoTravada,
       );
       mudou = true;
     }
@@ -1079,6 +1255,10 @@ class OrcamentoProvider extends ChangeNotifier {
       fornecedorSelecionado: clearFornecedor
           ? null
           : (fornecedorSelecionado ?? old.fornecedorSelecionado),
+      ehGenerico: old.ehGenerico,
+      descricaoItem: old.descricaoItem,
+      materialGenericoId: old.materialGenericoId,
+      descricaoTravada: old.descricaoTravada,
     );
     _salvarAbas();
     _sinalizarEdicaoLocal();
@@ -1202,6 +1382,11 @@ class OrcamentoProvider extends ChangeNotifier {
       estoqueMinimo:         material.estoqueMinimo,
       precos:                precos,
       fornecedorSelecionado: fornecedor.fornecedorId,
+      ehGenerico:            material.ehGenerico,
+      // Ainda não resolvido para nenhum filho: materialId já É o id do
+      // genérico, então materialGenericoId aponta pra ele mesmo. Necessário
+      // para o lookup por descrição (carregarVinculados exige o pai).
+      materialGenericoId:    material.ehGenerico ? material.id : null,
     );
     adicionarItem(item);
   }

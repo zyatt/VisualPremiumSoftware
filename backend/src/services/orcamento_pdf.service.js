@@ -504,7 +504,11 @@ async function gerarPdfDeItens(dados) {
     materialEspessura:     limparTexto(item.materialEspessura),
     materialIdentificador: limparTexto(item.materialIdentificador),
     materialUnidade:       limparTexto(item.materialUnidade),
-    descricao:             limparTexto(item.descricao),
+    // O app Flutter (ItemOrcamentoData.toJson) envia a descrição do item
+    // sob a chave 'descricaoItem', não 'descricao' — sem esse fallback a
+    // descrição de variantes de material genérico (ex.: "TINTA" + "AZUL")
+    // nunca chega aqui e some do comparativo do PDF.
+    descricao:             limparTexto(item.descricao ?? item.descricaoItem),
     precos: item.precos
       ? Object.fromEntries(
           Object.entries(item.precos).map(([fId, pf]) => [
@@ -664,7 +668,7 @@ async function gerarPdfDeItens(dados) {
       const FORN_ABS   = 50;
 
       let mat    = 170;
-      let qtd    = 48;
+      let qtd    = 52;
       let qtdUn  = 62;
       let melhor = 80;
       let forn   = nForn > 0 ? (contentW - mat - qtd - qtdUn - melhor) / nForn : FORN_IDEAL;
@@ -908,7 +912,7 @@ async function gerarPdfDeItens(dados) {
              .text(subparts, xMat + 4, tyTop + nomeH + 1, { width: COL_MAT - 8, lineBreak: false });
         }
         if (item.descricao?.trim()) {
-          doc.font('Regular').fontSize(5.5).fillColor(C.gray)
+          doc.font('Regular').fontSize(5.5).fillColor(C.black)
              .text(item.descricao.trim(), xMat + 4, tyTop + nomeH + (subparts ? 7 : 1), { width: COL_MAT - 8, lineBreak: false });
         }
 

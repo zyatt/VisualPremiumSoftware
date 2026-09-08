@@ -358,6 +358,7 @@ class MaterialProvider extends ChangeNotifier {
     String largura = '',
     String comprimento = '',
     bool? ativo,
+    bool incluirVinculados = false,
   }) async {
     _busca = busca;
     _categoriaFiltro = categoria;
@@ -383,6 +384,7 @@ class MaterialProvider extends ChangeNotifier {
         largura:      largura,
         comprimento:  comprimento,
         ativo:        ativo,
+        incluirVinculados: incluirVinculados,
       );
     } catch (e) {
       _erro = _mensagemErro(e, acao: 'carregar estoque');
@@ -416,7 +418,7 @@ class MaterialProvider extends ChangeNotifier {
     String largura = '',
     String comprimento = '',
     bool? ativo,
-    bool comFornecedor = false,
+    bool? comFornecedor,
     required int pagina,
     int porPagina = 50,
     String? ordenarPor,
@@ -548,11 +550,15 @@ class MaterialProvider extends ChangeNotifier {
 
   bool _criando = false;
 
+  bool _ultimoMaterialCriadoAguardaAprovacao = false;
+  bool get ultimoMaterialCriadoAguardaAprovacao => _ultimoMaterialCriadoAguardaAprovacao;
+
   Future<bool> criar(Map<String, dynamic> dados) async {
     if (_criando) return false;
     _criando = true;
     try {
-      await _repo.criar(dados);
+      final material = await _repo.criar(dados);
+      _ultimoMaterialCriadoAguardaAprovacao = material.aguardandoAprovacao;
       await recarregar();
       return true;
     } catch (e) {
@@ -571,6 +577,69 @@ class MaterialProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _erro = _mensagemErro(e, acao: 'atualizar material');
+      notifyListeners();
+      return false;
+    }
+  }
+
+  List<MaterialModel> _pendentes = [];
+  List<MaterialModel> get pendentes => _pendentes;
+
+  int _totalPendentes = 0;
+  int get totalPendentes => _totalPendentes;
+
+  bool _carregandoPendentes = false;
+  bool get carregandoPendentes => _carregandoPendentes;
+
+  Future<void> carregarPendentes() async {
+    _carregandoPendentes = true;
+    notifyListeners();
+    try {
+      _pendentes = await _repo.listarPendentes();
+      _totalPendentes = _pendentes.length;
+    } catch (e) {
+      _erro = _mensagemErro(e, acao: 'carregar materiais pendentes');
+    } finally {
+      _carregandoPendentes = false;
+      notifyListeners();
+    }
+  }
+
+  /// Atualiza só o contador (usado para o badge do botão, sem precisar
+  /// carregar a lista inteira).
+  Future<void> atualizarContadorPendentes() async {
+    try {
+      _totalPendentes = await _repo.contarPendentes();
+      notifyListeners();
+    } catch (_) {
+      // Silencioso: contador é só um indicador visual, não deve travar a tela.
+    }
+  }
+
+  Future<bool> aprovarPendente(int id, [Map<String, dynamic>? dados]) async {
+    try {
+      await _repo.aprovar(id, dados);
+      _pendentes.removeWhere((m) => m.id == id);
+      _totalPendentes = _pendentes.length;
+      await recarregar();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e, acao: 'aprovar material');
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> recusarPendente(int id) async {
+    try {
+      await _repo.recusar(id);
+      _pendentes.removeWhere((m) => m.id == id);
+      _totalPendentes = _pendentes.length;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _erro = _mensagemErro(e, acao: 'recusar material');
       notifyListeners();
       return false;
     }
@@ -624,12 +693,29 @@ class MaterialProvider extends ChangeNotifier {
     }
   }
 
-  Future<List<MaterialModel>> buscarSugestoes(String busca, {int limite = 10, bool apenasAtivos = false}) async {
+  Future<List<MaterialModel>> buscarSugestoes(String busca, {int limite = 10, bool apenasAtivos = false, bool incluirVinculados = false}) async {
     try {
       return await _repo.listar(
         busca: busca,
         ativo: apenasAtivos ? true : null,
         limite: limite,
+        incluirVinculados: incluirVinculados,
+      );
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Lista os materiais genéricos ativos (agrupadores), usados no dialog
+  /// de "Novo Material Genérico" no cadastro de Estoque/Controle de
+  /// Estoque, para o usuário escolher a qual genérico vincular a nova
+  /// variante (ex.: escolher "TINTA" e informar apenas a descrição).
+  Future<List<MaterialModel>> listarGenericos({String? busca}) async {
+    try {
+      return await _repo.listar(
+        busca: busca,
+        ehGenerico: true,
+        ativo: true,
       );
     } catch (_) {
       return [];
@@ -662,5 +748,33 @@ class MaterialProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  MateriaisVinculadosModel? _vinculados;
+  MateriaisVinculadosModel? get vinculados => _vinculados;
+
+  bool _carregandoVinculados = false;
+  bool get carregandoVinculados => _carregandoVinculados;
+
+  /// Carrega os materiais vinculados a um material genérico — usado pelo
+  /// dialog que abre ao selecionar um genérico em Orçamento/Ordem de
+  /// Compra/Solicitações/Estoque.
+  Future<void> carregarVinculados(int materialGenericoId, {bool apenasAtivos = false}) async {
+    _carregandoVinculados = true;
+    _erro = null;
+    notifyListeners();
+    try {
+      _vinculados = await _repo.listarVinculados(materialGenericoId, apenasAtivos: apenasAtivos);
+    } catch (e) {
+      _vinculados = null;
+      _erro = _mensagemErro(e, acao: 'carregar materiais vinculados');
+    } finally {
+      _carregandoVinculados = false;
+      notifyListeners();
+    }
+  }
+
+  void limparVinculados() {
+    _vinculados = null;
   }
 }

@@ -13,7 +13,9 @@ class MaterialRepository {
     String? largura,
     String? comprimento,
     bool? ativo,
+    bool? ehGenerico,
     int? limite,
+    bool incluirVinculados = false,
   }) async {
     final params = <String, String>{};
     if (busca != null && busca.isNotEmpty)               params['busca']        = busca;
@@ -30,7 +32,13 @@ class MaterialRepository {
     if (largura != null && largura.isNotEmpty)           params['largura']      = largura;
     if (comprimento != null && comprimento.isNotEmpty)   params['comprimento']  = comprimento;
     if (ativo != null)                                   params['ativo']        = ativo.toString();
+    if (ehGenerico != null)                              params['ehGenerico']   = ehGenerico.toString();
     if (limite != null)                                  params['limite']       = limite.toString();
+    // Só usado por telas que precisam localizar uma variante já vinculada
+    // a um material genérico pelo nome (ex.: busca de material no
+    // Orçamento). A tela de Estoque nunca deve passar true aqui — materiais
+    // vinculados não devem aparecer nas listagens normais de estoque.
+    if (incluirVinculados)                               params['incluirVinculados'] = 'true';
 
     final query = params.entries
         .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
@@ -67,7 +75,7 @@ class MaterialRepository {
     if (medida != null && medida.isNotEmpty)             params['medida']       = medida;
     if (espessura != null && espessura.isNotEmpty)       params['espessura']    = espessura;
     if (ativo != null)                                   params['ativo']        = ativo.toString();
-    if (comFornecedor == true)                           params['comFornecedor'] = 'true';
+    if (comFornecedor != null)                           params['comFornecedor'] = comFornecedor.toString();
     return params;
   }
 
@@ -212,5 +220,45 @@ class MaterialRepository {
     if (ultimoValorPagoM2 != null) body['ultimoValorPagoM2'] = ultimoValorPagoM2;
     final data = await ApiClient.patch('/materiais/$id/custo', body);
     return MaterialModel.fromJson(data);
+  }
+
+  /// Materiais cadastrados por usuários não-ADMIN que ainda aguardam
+  /// aprovação. Requer role ADMIN no backend.
+  Future<List<MaterialModel>> listarPendentes() async {
+    final list = await ApiClient.getList('/materiais/pendentes');
+    return list
+        .map((e) => MaterialModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<int> contarPendentes() async {
+    final data = await ApiClient.get('/materiais/pendentes/total');
+    return (data['total'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Aprova um cadastro pendente. [dados] pode trazer qualquer campo
+  /// alterado pelo ADMIN antes de aprovar (mesmo formato de [atualizar]) —
+  /// se vazio, aprova o material como foi originalmente cadastrado.
+  Future<MaterialModel> aprovar(int id, [Map<String, dynamic>? dados]) async {
+    final data = await ApiClient.patch('/materiais/$id/aprovar', dados ?? {});
+    return MaterialModel.fromJson(data);
+  }
+
+  Future<void> recusar(int id) async {
+    await ApiClient.delete('/materiais/$id/recusar');
+  }
+
+  /// Lista os materiais vinculados (filhos) de um material genérico,
+  /// junto com os dados do próprio genérico. Lança se [materialGenericoId]
+  /// não for um material genérico.
+  Future<MateriaisVinculadosModel> listarVinculados(
+    int materialGenericoId, {
+    bool apenasAtivos = false,
+  }) async {
+    final path = apenasAtivos
+        ? '/materiais/$materialGenericoId/vinculados?ativo=true'
+        : '/materiais/$materialGenericoId/vinculados';
+    final data = await ApiClient.get(path);
+    return MateriaisVinculadosModel.fromJson(data);
   }
 }

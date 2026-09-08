@@ -3,6 +3,7 @@ class MovimentacaoModel {
   final int materialId;
   final String materialNome;
   final String? materialUnidade;
+  final String? materialDescricao;
   final String? materialIdentificador;
   final String? materialMedida;
   final String? materialEspessura;
@@ -30,6 +31,7 @@ class MovimentacaoModel {
     required this.materialId,
     required this.materialNome,
     this.materialUnidade,
+    this.materialDescricao,
     this.materialIdentificador,
     this.materialMedida,
     this.materialEspessura,
@@ -76,6 +78,7 @@ class MovimentacaoModel {
                                    ? json['descricaoItem'].toString().trim()
                                    : '(material excluído)'),
         materialUnidade:       json['material']?['unidade'],
+        materialDescricao:     json['material']?['descricao'],
         materialIdentificador: json['material']?['identificador'],
         materialMedida:        json['material']?['medida'],
         materialEspessura:     json['material']?['espessura'],

@@ -1,3 +1,20 @@
+/// Resultado de GET /materiais/:id/vinculados — o material genérico
+/// selecionado e a lista de materiais vinculados a ele.
+class MateriaisVinculadosModel {
+  final MaterialModel generico;
+  final List<MaterialModel> itens;
+
+  const MateriaisVinculadosModel({required this.generico, required this.itens});
+
+  factory MateriaisVinculadosModel.fromJson(Map<String, dynamic> json) =>
+      MateriaisVinculadosModel(
+        generico: MaterialModel.fromJson(json['generico'] as Map<String, dynamic>),
+        itens: (json['itens'] as List? ?? [])
+            .map((e) => MaterialModel.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
 class MateriaisPaginadosModel {
   final List<MaterialModel> itens;
   final int total;
@@ -179,8 +196,37 @@ class MaterialModel {
   final double? precoM2Mediano;
   final double? precoUnidadeMedidaMediano;
 
+  /// True quando este material foi cadastrado por um usuário não-ADMIN e
+  /// ainda aguarda aprovação. Fica oculto das listagens normais até um
+  /// ADMIN aprovar (ver EstoqueCategoriaPage: fila "Aguardando aprovação").
+  final bool aguardandoAprovacao;
+  final String? criadoPorNome;
+  final String? aprovadoPorNome;
+  final DateTime? aprovadoEm;
+  final DateTime? criadoEm;
+
+  /// True quando este material é um material "genérico" (pai), que serve
+  /// apenas para agrupar materiais vinculados (ver [materialGenericoId]).
+  final bool ehGenerico;
+
+  /// Preenchido quando este material está vinculado a um material genérico.
+  final int? materialGenericoId;
+  final String? materialGenericoNome;
+
+  /// Complementa o nome do material genérico quando vinculado
+  /// (ex.: "TINTA" + descricao "AZUL CLARO").
+  final String? descricao;
+
   final List<FornecedorMaterialModel> fornecedorMateriais;
   final List<HistoricoPrecoModel> historicoPrecos;
+
+  /// True quando este material está vinculado a um material genérico.
+  bool get ehVinculado => materialGenericoId != null;
+
+  /// Nome de exibição: "NOME DESCRICAO" quando vinculado a um genérico,
+  /// ou o próprio nome caso contrário.
+  String get nomeExibicao =>
+      (descricao != null && descricao!.trim().isNotEmpty) ? '$nome ${descricao!.trim()}' : nome;
 
   MaterialModel({
     required this.id,
@@ -204,6 +250,15 @@ class MaterialModel {
     this.precoMediano,
     this.precoM2Mediano,
     this.precoUnidadeMedidaMediano,
+    this.aguardandoAprovacao = false,
+    this.criadoPorNome,
+    this.aprovadoPorNome,
+    this.aprovadoEm,
+    this.criadoEm,
+    this.ehGenerico = false,
+    this.materialGenericoId,
+    this.materialGenericoNome,
+    this.descricao,
     this.fornecedorMateriais = const [],
     this.historicoPrecos = const [],
   });
@@ -255,6 +310,19 @@ class MaterialModel {
       precoMediano:       parseDoubleOrNull(json['precoMediano']),
       precoM2Mediano:     parseDoubleOrNull(json['precoM2Mediano']),
       precoUnidadeMedidaMediano: parseDoubleOrNull(json['precoUnidadeMedidaMediano']),
+      aguardandoAprovacao: json['aguardandoAprovacao'] ?? false,
+      criadoPorNome:   json['criadoPorNome'],
+      aprovadoPorNome: json['aprovadoPorNome'],
+      aprovadoEm:      json['aprovadoEm'] != null
+          ? DateTime.tryParse(json['aprovadoEm'].toString())?.toLocal()
+          : null,
+      criadoEm:        json['criadoEm'] != null
+          ? DateTime.tryParse(json['criadoEm'].toString())?.toLocal()
+          : null,
+      ehGenerico:          json['ehGenerico'] ?? false,
+      materialGenericoId:  (json['materialGenericoId'] as num?)?.toInt(),
+      materialGenericoNome: json['materialGenerico']?['nome'],
+      descricao:           json['descricao'],
       fornecedorMateriais: (json['fornecedorMateriais'] as List? ?? [])
           .map((f) => FornecedorMaterialModel.fromJson(f as Map<String, dynamic>))
           .toList(),

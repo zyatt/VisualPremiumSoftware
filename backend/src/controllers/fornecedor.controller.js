@@ -150,9 +150,25 @@ const listarPorMaterial = async (req, res, next) => {
   }
 };
 
+// Usado pela tela de "Vincular por Material": o front ainda não tem o id
+// da variante concreta (o usuário está digitando a descrição), então
+// resolve pelo par (material genérico, descrição) em vez de um id fixo.
+const listarPorMaterialGenericoEDescricao = async (req, res, next) => {
+  try {
+    res.json(
+      await svc.listarPorMaterialGenericoEDescricao(
+        +req.params.materialId,
+        req.query.descricao,
+      ),
+    );
+  } catch (e) {
+    next(e);
+  }
+};
+
 const vincularMaterial = async (req, res, next) => {
   try {
-    const { materialId, preco, precoMetroQuadrado, precoUnidadeMedida } = req.body;
+    const { materialId, descricao, preco, precoMetroQuadrado, precoUnidadeMedida } = req.body;
 
     res.json(
       await svc.vincularMaterial(
@@ -161,9 +177,13 @@ const vincularMaterial = async (req, res, next) => {
         preco,
         precoMetroQuadrado,
         precoUnidadeMedida,
+        descricao,
       ),
     );
   } catch (e) {
+    if (e && (e.status === 400 || e.status === 404)) {
+      return res.status(e.status).json({ message: e.message });
+    }
     next(e);
   }
 };
@@ -207,6 +227,7 @@ module.exports = {
   atualizar,
   remover,
   listarPorMaterial,
+  listarPorMaterialGenericoEDescricao,
   vincularMaterial,
   desvincularMaterial,
   atualizarPreco,

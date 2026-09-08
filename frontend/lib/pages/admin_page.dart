@@ -202,21 +202,27 @@ class _UsuariosTabState extends State<_UsuariosTab> {
           'Deseja excluir "$nome"? Esta ação não pode ser desfeita.',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            style: TextButton.styleFrom().copyWith(
-              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+          Tooltip(
+            message: 'Cancelar exclusão',
+            child: TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              style: TextButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: const Text('Cancelar'),
             ),
-            child: const Text('Cancelar'),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.error,
-            ).copyWith(
-              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+          Tooltip(
+            message: 'Confirmar exclusão do usuário',
+            child: FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.error,
+              ).copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: const Text('Excluir'),
             ),
-            child: const Text('Excluir'),
           ),
         ],
       ),
@@ -262,17 +268,20 @@ class _UsuariosTabState extends State<_UsuariosTab> {
                     ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             const Spacer(),
-            FilledButton.icon(
-              onPressed: _abrirFormularioCriacao,
-              icon: const Icon(Icons.person_add_rounded, size: 18),
-              label: const Text('Novo usuário'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                padding:
-                    EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              ).copyWith(
-                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            Tooltip(
+              message: 'Cadastrar um novo usuário',
+              child: FilledButton.icon(
+                onPressed: _abrirFormularioCriacao,
+                icon: const Icon(Icons.person_add_rounded, size: 18),
+                label: const Text('Novo usuário'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding:
+                      EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ).copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
               ),
             ),
             SizedBox(width: 10),
@@ -324,13 +333,16 @@ class _UsuariosTabState extends State<_UsuariosTab> {
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 16),
-                          FilledButton.icon(
-                            onPressed: _carregar,
-                            icon: const Icon(Icons.refresh, size: 18),
-                            label: const Text('Tentar novamente'),
-                            style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.primary)
-                              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                          Tooltip(
+                            message: 'Tentar carregar os usuários novamente',
+                            child: FilledButton.icon(
+                              onPressed: _carregar,
+                              icon: const Icon(Icons.refresh, size: 18),
+                              label: const Text('Tentar novamente'),
+                              style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.primary)
+                                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                            ),
                           ),
                         ],
                       ),
@@ -876,10 +888,13 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                                 color: AppTheme.error, fontSize: 13),
                           ),
                         ),
-                        GestureDetector(
-                          onTap: () => setState(() => _erroDialog = null),
-                          child: const Icon(Icons.close,
-                              color: AppTheme.error, size: 16),
+                        Tooltip(
+                          message: 'Fechar mensagem de erro',
+                          child: GestureDetector(
+                            onTap: () => setState(() => _erroDialog = null),
+                            child: const Icon(Icons.close,
+                                color: AppTheme.error, size: 16),
+                          ),
                         ),
                       ],
                     ),
@@ -927,6 +942,7 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
                         size: 18,
                         color: Theme.of(context).colorScheme.outline,
                       ),
+                      tooltip: _mostrarSenha ? 'Ocultar senha' : 'Mostrar senha',
                       onPressed: () =>
                           setState(() => _mostrarSenha = !_mostrarSenha),
                     ),
@@ -1014,43 +1030,54 @@ class _UsuarioFormDialogState extends State<_UsuarioFormDialog> {
         Row(
           children: [
             if (_isEdicao && widget.onExcluir != null)
-              TextButton(
-                onPressed: (_salvando || _excluindo || _isSelf) ? null : _excluir,
-                style: TextButton.styleFrom(foregroundColor: AppTheme.error).copyWith(
+              Tooltip(
+                message: _isSelf
+                    ? 'Você não pode excluir seu próprio usuário'
+                    : 'Excluir este usuário',
+                child: TextButton(
+                  onPressed: (_salvando || _excluindo || _isSelf) ? null : _excluir,
+                  style: TextButton.styleFrom(foregroundColor: AppTheme.error).copyWith(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                  ),
+                  child: _excluindo
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Excluir'),
+                ),
+              ),
+            const Expanded(child: SizedBox.shrink()),
+            Tooltip(
+              message: 'Fechar sem salvar alterações',
+              child: TextButton(
+                onPressed: (_salvando || _excluindo) ? null : () => Navigator.of(context).pop(),
+                style: TextButton.styleFrom().copyWith(
                   mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                 ),
-                child: _excluindo
+                child: const Text('Cancelar'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Tooltip(
+              message: _isEdicao ? 'Salvar alterações do usuário' : 'Criar novo usuário',
+              child: FilledButton(
+                onPressed: (_salvando || _excluindo) ? null : _salvar,
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+                child: _salvando
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
-                    : const Text('Excluir'),
+                    : Text(_isEdicao ? 'Salvar alterações' : 'Criar usuário'),
               ),
-            const Expanded(child: SizedBox.shrink()),
-            TextButton(
-              onPressed: (_salvando || _excluindo) ? null : () => Navigator.of(context).pop(),
-              style: TextButton.styleFrom().copyWith(
-                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-              ),
-              child: const Text('Cancelar'),
-            ),
-            const SizedBox(width: 8),
-            FilledButton(
-              onPressed: (_salvando || _excluindo) ? null : _salvar,
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
-                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-              ),
-              child: _salvando
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : Text(_isEdicao ? 'Salvar alterações' : 'Criar usuário'),
             ),
           ],
         ),
@@ -1304,32 +1331,38 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
 
                           Row(
                             children: [
-                              OutlinedButton.icon(
-                                onPressed: _adicionarFaixa,
-                                icon: const Icon(Icons.add_rounded, size: 16),
-                                label: Text('Adicionar faixa',
-                                    style: GoogleFonts.nunito(fontSize: 13)),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: AppTheme.primary,
-                                  side: const BorderSide(color: AppTheme.primary),
-                                ).copyWith(
-                                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                              Tooltip(
+                                message: 'Adicionar nova faixa de markup',
+                                child: OutlinedButton.icon(
+                                  onPressed: _adicionarFaixa,
+                                  icon: const Icon(Icons.add_rounded, size: 16),
+                                  label: Text('Adicionar faixa',
+                                      style: GoogleFonts.nunito(fontSize: 13)),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppTheme.primary,
+                                    side: const BorderSide(color: AppTheme.primary),
+                                  ).copyWith(
+                                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                  ),
                                 ),
                               ),
                               const Spacer(),
-                              FilledButton.icon(
-                                onPressed: _salvandoFaixas ? null : _salvarFaixas,
-                                icon: _salvandoFaixas
-                                    ? const SizedBox(
-                                        width: 14, height: 14,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2, color: Colors.white))
-                                    : const Icon(Icons.save_rounded, size: 16),
-                                label: Text('Salvar faixas',
-                                    style: GoogleFonts.nunito(fontSize: 13)),
-                                style: FilledButton.styleFrom(
-                                    backgroundColor: AppTheme.primary).copyWith(
-                                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                              Tooltip(
+                                message: 'Salvar faixas de markup',
+                                child: FilledButton.icon(
+                                  onPressed: _salvandoFaixas ? null : _salvarFaixas,
+                                  icon: _salvandoFaixas
+                                      ? const SizedBox(
+                                          width: 14, height: 14,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2, color: Colors.white))
+                                      : const Icon(Icons.save_rounded, size: 16),
+                                  label: Text('Salvar faixas',
+                                      style: GoogleFonts.nunito(fontSize: 13)),
+                                  style: FilledButton.styleFrom(
+                                      backgroundColor: AppTheme.primary).copyWith(
+                                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                  ),
                                 ),
                               ),
                             ],
@@ -1385,19 +1418,22 @@ class _ConfiguracaoTabState extends State<_ConfiguracaoTab> {
                           Row(
                             children: [
                               const Spacer(),
-                              FilledButton.icon(
-                                onPressed: _salvandoConfig ? null : _salvarConfig,
-                                icon: _salvandoConfig
-                                    ? const SizedBox(
-                                        width: 14, height: 14,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2, color: Colors.white))
-                                    : const Icon(Icons.save_rounded, size: 16),
-                                label: Text('Salvar',
-                                    style: GoogleFonts.nunito(fontSize: 13)),
-                                style: FilledButton.styleFrom(
-                                    backgroundColor: AppTheme.primary).copyWith(
-                                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                              Tooltip(
+                                message: 'Salvar imposto sobre sobra de material',
+                                child: FilledButton.icon(
+                                  onPressed: _salvandoConfig ? null : _salvarConfig,
+                                  icon: _salvandoConfig
+                                      ? const SizedBox(
+                                          width: 14, height: 14,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2, color: Colors.white))
+                                      : const Icon(Icons.save_rounded, size: 16),
+                                  label: Text('Salvar',
+                                      style: GoogleFonts.nunito(fontSize: 13)),
+                                  style: FilledButton.styleFrom(
+                                      backgroundColor: AppTheme.primary).copyWith(
+                                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                  ),
                                 ),
                               ),
                             ],
@@ -1644,12 +1680,15 @@ class _ErroInline extends StatelessWidget {
                   color: Theme.of(context).colorScheme.onSurfaceVariant),
               textAlign: TextAlign.center),
           const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh, size: 16),
-            label: const Text('Tentar novamente'),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
-              .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+          Tooltip(
+            message: 'Tentar carregar novamente',
+            child: FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Tentar novamente'),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary)
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            ),
           ),
         ],
       ),

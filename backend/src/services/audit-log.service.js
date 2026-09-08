@@ -17,11 +17,36 @@ const _LABELS = {
   ativo:             'Ativo',
   ultimoValorPago:   'Último Valor Pago',
   ultimoValorPagoM2: 'Último Valor Pago m²',
+
+  // Fluxo de aprovação de cadastro (usuários não-ADMIN)
+  estoqueConfirmado:   'Estoque Confirmado',
+  aguardandoAprovacao: 'Aguardando Aprovação',
+  criadoPorId:         'Cadastrado Por',
+  criadoPorNome:       'Cadastrado Por',
+  aprovadoPorId:       'Aprovado Por',
+  aprovadoPorNome:     'Aprovado Por',
+  aprovadoEm:          'Data de Aprovação',
 };
 
 const _IGNORAR = new Set([
   'criadoEm', 'atualizadoEm', 'id',
+  // Preenchidos automaticamente pelo próprio fluxo de aprovação — não fazem
+  // sentido como "campo alterado" dentro de uma EDICAO comum.
+  'criadoPorId', 'aprovadoPorId', 'aprovadoEm',
 ]);
+
+/// Converte um nome de campo cru (camelCase, ex: "custoM2UltimaCompra") em um
+/// texto legível ("Custo M2 Ultima Compra") para exibição ao usuário, usado
+/// como último recurso quando o campo não está mapeado em _LABELS. Isso
+/// evita que o histórico mostre nomes de variável/método truncados.
+function _labelFallback(campo) {
+  if (!campo) return campo;
+  const comEspacos = campo
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .trim();
+  return comEspacos.charAt(0).toUpperCase() + comEspacos.slice(1);
+}
 
 function _str(v) {
   if (v === null || v === undefined) return null;
@@ -37,7 +62,7 @@ function _str(v) {
 }
 
 function _label(campo) {
-  return _LABELS[campo] ?? campo;
+  return _LABELS[campo] ?? _labelFallback(campo);
 }
 
 function _snapshot(material) {
@@ -108,7 +133,7 @@ async function registrarEdicao(materialId, antes, depois, usuarioId, usuarioNome
 const _MATERIAL_SELECT = {
   id: true, nome: true, categoria: true, unidade: true,
   medida: true, espessura: true, identificador: true,
-  largura: true, comprimento: true,
+  largura: true, comprimento: true, descricao: true,
 };
 
 function _comMaterialResolvido(log) {

@@ -121,6 +121,8 @@ class SolicitacoesMaterialPage extends StatefulWidget {
 class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     with SingleTickerProviderStateMixin {
   final _buscaCtrl = TextEditingController();
+  final _buscaClienteCtrl = TextEditingController();
+  final _buscaMaterialCtrl = TextEditingController();
   String _andamentoFiltro = '';
   Timer? _debounceTimer;
   late TabController _tabController;
@@ -244,6 +246,8 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     _solicitacaoProviderRef?.removeListener(_onProviderChanged);
     _debounceTimer?.cancel();
     _buscaCtrl.dispose();
+    _buscaClienteCtrl.dispose();
+    _buscaMaterialCtrl.dispose();
     _tabController.dispose();
     _scrollEmAndamento.dispose();
     _roboHelperPagina?.removeListener(_onRoboHelperPaginaChanged);
@@ -282,9 +286,15 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     });
   }
 
+  String get _buscaCombinada => [
+        _buscaCtrl.text.trim(),
+        _buscaClienteCtrl.text.trim(),
+        _buscaMaterialCtrl.text.trim(),
+      ].where((s) => s.isNotEmpty).join(' ');
+
   void _aplicarFiltros() {
     context.read<SolicitacaoMaterialProvider>().carregar(
-          busca: _buscaCtrl.text.trim(),
+          busca: _buscaCombinada,
           andamento: _andamentoFiltro.isEmpty ? null : _andamentoFiltro,
         );
     setState(() {
@@ -292,7 +302,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
       _paginaFinalizadas = 0;
     });
 
-    final semFiltro = _buscaCtrl.text.trim().isEmpty && _andamentoFiltro.isEmpty;
+    final semFiltro = _buscaCombinada.isEmpty && _andamentoFiltro.isEmpty;
     if (semFiltro) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _atualizarTotaisGlobais());
     }
@@ -329,7 +339,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
     if (salvou == true && mounted) {
       await context.read<SolicitacaoMaterialProvider>().carregar();
 
-      final semFiltro = _buscaCtrl.text.trim().isEmpty && _andamentoFiltro.isEmpty;
+      final semFiltro = _buscaCombinada.isEmpty && _andamentoFiltro.isEmpty;
       if (semFiltro) _atualizarTotaisGlobais();
     }
   }
@@ -839,38 +849,35 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                   ],
                 ),
                 const Spacer(),
-                Tooltip(
-                  message: 'Ver histórico geral de solicitações',
-                  child: OutlinedButton.icon(
-                    onPressed: _abrirHistoricoSolicitacoes,
-                    icon: const Icon(Icons.history, size: 18),
-                    label: const Text('Histórico'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.onSurface,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                    ).copyWith(
-                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                    ),
-                  ),
+                _BotaoCabecalhoWidget(
+                  icone: Icons.history,
+                  texto: 'Histórico',
+                  onPressed: _abrirHistoricoSolicitacoes,
+                  corFundo: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  corTexto: Theme.of(context).colorScheme.onSurface,
+                  corBorda: Theme.of(context).brightness == Brightness.dark
+                      ? Theme.of(context).colorScheme.outlineVariant
+                      : null,
+                  iconSize: 18,
+                  fontSize: 14,
+                  padH: 16,
+                  padV: 12,
+                  tooltip: 'Ver histórico geral de solicitações',
                 ),
-                const SizedBox(width: 10),
-                Tooltip(
-                  message: 'Criar uma nova solicitação de material',
-                  child: KeyedSubtree(
-                    key: _tourKeyNovaSolicitacao,
-                    child: FilledButton.icon(
-                      onPressed: () => _abrirFormSolicitacao(),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Nova Solicitação'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      ).copyWith(
-                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                      ),
-                    ),
+                const SizedBox(width: 12),
+                KeyedSubtree(
+                  key: _tourKeyNovaSolicitacao,
+                  child: _BotaoCabecalhoWidget(
+                    icone: Icons.add,
+                    texto: 'Nova Solicitação',
+                    onPressed: () => _abrirFormSolicitacao(),
+                    corFundo: AppTheme.primary,
+                    corTexto: Colors.white,
+                    iconSize: 18,
+                    fontSize: 14,
+                    padH: 20,
+                    padV: 12,
+                    tooltip: 'Criar uma nova solicitação de material',
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -901,12 +908,50 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
             Row(
               children: [
                 Expanded(
-                  flex: 3,
+                  flex: 2,
                   child: TextField(
                     controller: _buscaCtrl,
                     decoration: InputDecoration(
-                      hintText: 'Buscar por material, OS ou cliente',
+                      hintText: 'Buscar por número da OS',
                       prefixIcon: Icon(Icons.search,
+                          color: Theme.of(context).colorScheme.outline, size: 20),
+                      isDense: true,
+                    ),
+                    onChanged: (_) {
+                      setState(() {});
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                          const Duration(milliseconds: 400), _aplicarFiltros);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _buscaClienteCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Nome do cliente',
+                      prefixIcon: Icon(Icons.person_outline,
+                          color: Theme.of(context).colorScheme.outline, size: 20),
+                      isDense: true,
+                    ),
+                    onChanged: (_) {
+                      setState(() {});
+                      _debounceTimer?.cancel();
+                      _debounceTimer = Timer(
+                          const Duration(milliseconds: 400), _aplicarFiltros);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 3,
+                  child: TextField(
+                    controller: _buscaMaterialCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Nome do material',
+                      prefixIcon: Icon(Icons.inventory_2_outlined,
                           color: Theme.of(context).colorScheme.outline, size: 20),
                       isDense: true,
                     ),
@@ -921,7 +966,7 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                 const SizedBox(width: 8),
                 Builder(
                   builder: (context) {
-                    final temFiltro = _buscaCtrl.text.isNotEmpty || _andamentoFiltro.isNotEmpty;
+                    final temFiltro = _buscaCombinada.isNotEmpty || _andamentoFiltro.isNotEmpty;
                     return IconButton.outlined(
                       tooltip: 'Limpar filtros',
                       icon: Icon(Icons.filter_alt_off,
@@ -929,6 +974,8 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
                       onPressed: temFiltro
                           ? () {
                               _buscaCtrl.clear();
+                              _buscaClienteCtrl.clear();
+                              _buscaMaterialCtrl.clear();
                               setState(() => _andamentoFiltro = '');
                               _aplicarFiltros();
                             }
@@ -1164,6 +1211,100 @@ class _SolicitacoesMaterialPageState extends State<SolicitacoesMaterialPage>
 }
 
 enum _Aba { emAndamento, finalizadas }
+
+/// Botão de ação do cabeçalho ("Histórico", "Nova Solicitação") — mesmo
+/// design/layout usado em estoque_page.dart, garantindo altura, raio e
+/// comportamento de hover consistentes entre as páginas.
+class _BotaoCabecalhoWidget extends StatefulWidget {
+  final Key? tourKey;
+  final IconData icone;
+  final String texto;
+  final VoidCallback onPressed;
+  final Color corFundo;
+  final Color corTexto;
+  final double iconSize;
+  final double fontSize;
+  final double padH;
+  final double padV;
+  final String? tooltip;
+  final Color? corBorda;
+  final Widget? badge;
+
+  const _BotaoCabecalhoWidget({
+    // ignore: unused_element_parameter
+    this.tourKey,
+    required this.icone,
+    required this.texto,
+    required this.onPressed,
+    required this.corFundo,
+    required this.corTexto,
+    required this.iconSize,
+    required this.fontSize,
+    required this.padH,
+    required this.padV,
+    this.tooltip,
+    this.corBorda,
+    // ignore: unused_element_parameter
+    this.badge,
+  });
+
+  @override
+  State<_BotaoCabecalhoWidget> createState() => _BotaoCabecalhoWidgetState();
+}
+
+class _BotaoCabecalhoWidgetState extends State<_BotaoCabecalhoWidget> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final botao = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Material(
+        color: _hovered
+            ? widget.corFundo.withValues(alpha: 0.85)
+            : widget.corFundo,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: widget.onPressed,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: widget.padH, vertical: widget.padV),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: widget.corBorda != null ? Border.all(color: widget.corBorda!) : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(widget.icone, size: widget.iconSize, color: widget.corTexto),
+                const SizedBox(width: 6),
+                Text(
+                  widget.texto,
+                  style: TextStyle(
+                    fontSize: widget.fontSize,
+                    color: widget.corTexto,
+                    fontWeight: FontWeight.w600,
+                    height: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final comChave = widget.tourKey != null ? Container(key: widget.tourKey, child: botao) : botao;
+    final comTooltip =
+        widget.tooltip != null ? Tooltip(message: widget.tooltip, child: comChave) : comChave;
+
+    if (widget.badge == null) return comTooltip;
+    return Stack(clipBehavior: Clip.none, children: [comTooltip, widget.badge!]);
+  }
+}
 
 class _BarraPaginacao extends StatelessWidget {
   final int paginaAtual;
@@ -2537,11 +2678,14 @@ class _ItemMaterialCard extends StatelessWidget {
                               medidaFmt,
                               formatarEspessuraComSufixo(m.espessura),
                             ].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
+                            final descricaoVariante = (m.descricao ?? '').trim();
                             return Text.rich(
                               TextSpan(
                                 style: TextStyle(fontSize: 14, color: corTexto),
                                 children: [
                                   TextSpan(text: m.nome),
+                                  if (descricaoVariante.isNotEmpty)
+                                    TextSpan(text: ' · $descricaoVariante'),
                                   if (infoAoLado.isNotEmpty)
                                     TextSpan(text: ' · $infoAoLado'),
                                 ],
@@ -2575,7 +2719,13 @@ class _ItemMaterialCard extends StatelessWidget {
                     child: TextFormField(
                       controller: item.quantidadeCtrl,
                       focusNode: item.quantidadeFocus,
-                      decoration: const InputDecoration(labelText: 'Quantidade'),
+                      decoration: InputDecoration(
+                        labelText: 'Quantidade',
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
+                        suffixText: item.material?.unidade != null
+                            ? formatarUnidadeExibicao(item.material!.unidade)
+                            : null,
+                      ),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
                         FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,3}')),
@@ -3769,6 +3919,16 @@ class _MaterialCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Text(
+                        'Material',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.2,
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -3865,7 +4025,7 @@ class _MaterialCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Qtd. solicitada',
+                        'Quantidade solicitada',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
@@ -5345,6 +5505,25 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
     }
   }
 
+  /// Material genérico não pode ser solicitado diretamente — abre o
+  /// seletor de variantes e, ao escolher uma, fecha este dialog com ela.
+  Future<void> _selecionarOuAbrirVariante(
+    BuildContext context,
+    MaterialModel material,
+  ) async {
+    if (!material.ehGenerico) {
+      Navigator.of(context, rootNavigator: true).pop(material);
+      return;
+    }
+    final variante = await showDialog<MaterialModel>(
+      context: context,
+      builder: (_) => _SelecionarVarianteMaterialDialog(materialGenerico: material),
+    );
+    if (variante != null && context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop(variante);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -5773,8 +5952,7 @@ class _SeletorMaterialDialogState extends State<_SeletorMaterialDialog> {
                         key: i == 0 ? widget.tourKeys?.primeiroMaterial : null,
                         material: _materiais[i],
                         cor: _categoriaCor,
-                        onTap: () => Navigator.of(context, rootNavigator: true)
-                            .pop(_materiais[i]),
+                        onTap: () => _selecionarOuAbrirVariante(context, _materiais[i]),
                       ),
                     ),
         ),
@@ -6048,18 +6226,295 @@ class _MaterialItemSeletorState extends State<_MaterialItemSeletor> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(width: 12),
-              Text(
-                '${formatarQuantidade(m.quantidade)} ${formatarUnidadeExibicao(m.unidade)}',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+              if (m.ehGenerico) ...[
+                const SizedBox(width: 8),
+                const _GenericoChipSolicitacao(),
+              ] else ...[
+                const SizedBox(width: 12),
+                Text(
+                  '${formatarQuantidade(m.quantidade)} ${formatarUnidadeExibicao(m.unidade)}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
-              ),
+              ],
               const SizedBox(width: 8),
               Icon(Icons.chevron_right, size: 18,
                   color: Theme.of(context).colorScheme.outline),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GenericoChipSolicitacao extends StatelessWidget {
+  const _GenericoChipSolicitacao();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: const Text(
+        'GENÉRICO',
+        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppTheme.primary),
+      ),
+    );
+  }
+}
+
+/// Material genérico (ex.: "TINTA") não pode ser solicitado diretamente —
+/// cada variante vinculada é o item de estoque de fato. Abre um seletor
+/// com as variantes cadastradas e, ao escolher uma, ela é usada como se
+/// tivesse sido selecionada diretamente na lista.
+class _SelecionarVarianteMaterialDialog extends StatefulWidget {
+  final MaterialModel materialGenerico;
+
+  const _SelecionarVarianteMaterialDialog({required this.materialGenerico});
+
+  @override
+  State<_SelecionarVarianteMaterialDialog> createState() =>
+      _SelecionarVarianteMaterialDialogState();
+}
+
+class _SelecionarVarianteMaterialDialogState
+    extends State<_SelecionarVarianteMaterialDialog> {
+  final _buscaCtrl = TextEditingController();
+  String _busca = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<MaterialProvider>().carregarVinculados(widget.materialGenerico.id);
+    });
+    _buscaCtrl.addListener(() {
+      setState(() => _busca = _buscaCtrl.text.trim().toUpperCase());
+    });
+  }
+
+  @override
+  void dispose() {
+    _buscaCtrl.dispose();
+    context.read<MaterialProvider>().limparVinculados();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 620, maxHeight: 560),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 12, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.materialGenerico.nome,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Selecione a variante do material',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).hintColor,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Tooltip(
+                    message: 'Fechar',
+                    child: IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: IconButton.styleFrom()
+                          .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: TextField(
+                controller: _buscaCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Buscar por descrição',
+                  prefixIcon: Icon(Icons.search,
+                      size: 18, color: Theme.of(context).colorScheme.outline),
+                  suffixIcon: _busca.isEmpty
+                      ? null
+                      : Tooltip(
+                          message: 'Limpar busca',
+                          child: IconButton(
+                            icon: const Icon(Icons.close, size: 16),
+                            onPressed: () => _buscaCtrl.clear(),
+                            style: IconButton.styleFrom()
+                                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                          ),
+                        ),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: Consumer<MaterialProvider>(
+                builder: (_, prov, __) {
+                  if (prov.carregandoVinculados) {
+                    return const Center(
+                      child: CircularProgressIndicator(color: AppTheme.primary, strokeWidth: 2),
+                    );
+                  }
+                  if (prov.erro != null) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Text(
+                          prov.erro!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Theme.of(context).colorScheme.error),
+                        ),
+                      ),
+                    );
+                  }
+                  final todos = prov.vinculados?.itens ?? [];
+                  final variantes = _busca.isEmpty
+                      ? todos
+                      : todos.where((m) {
+                          final descricao = (m.descricao ?? '').toUpperCase();
+                          final nome = m.nome.toUpperCase();
+                          return descricao.contains(_busca) || nome.contains(_busca);
+                        }).toList();
+
+                  if (variantes.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Text(
+                          _busca.isNotEmpty
+                              ? 'Nenhuma variante encontrada para "$_busca".'
+                              : 'Este material não possui variantes cadastradas.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Theme.of(context).colorScheme.outline),
+                        ),
+                      ),
+                    );
+                  }
+
+                  return ListView.separated(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: variantes.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 1,
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                    itemBuilder: (_, i) {
+                      final m = variantes[i];
+                      return _VarianteMaterialTileSolicitacao(
+                        material: m,
+                        onTap: () => Navigator.of(context).pop(m),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VarianteMaterialTileSolicitacao extends StatefulWidget {
+  final MaterialModel material;
+  final VoidCallback onTap;
+
+  const _VarianteMaterialTileSolicitacao({
+    required this.material,
+    required this.onTap,
+  });
+
+  @override
+  State<_VarianteMaterialTileSolicitacao> createState() =>
+      _VarianteMaterialTileSolicitacaoState();
+}
+
+class _VarianteMaterialTileSolicitacaoState
+    extends State<_VarianteMaterialTileSolicitacao> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = widget.material;
+    final unidade = formatarUnidadeExibicao(m.unidade);
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          color: _hovered ? AppTheme.primary.withValues(alpha: 0.06) : Colors.transparent,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      m.nome,
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                    ),
+                    if (m.descricao != null && m.descricao!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        m.descricao!.trim(),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: 110,
+                child: Text(
+                  '${formatarQuantidade(m.quantidade)}${unidade.isNotEmpty ? ' $unidade' : ''}',
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
             ],
           ),
         ),

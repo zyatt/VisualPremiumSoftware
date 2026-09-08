@@ -22,7 +22,7 @@ const _includeMovimentacoes = {
     include: {
       material: {
         select: {
-          id: true, nome: true, unidade: true,
+          id: true, nome: true, unidade: true, descricao: true,
           identificador: true, medida: true, espessura: true,
           largura: true, comprimento: true,
         },
@@ -752,7 +752,7 @@ async function listarMovimentacoes(filtros = {}) {
       include: {
         material: {
           select: {
-            id: true, nome: true, unidade: true,
+            id: true, nome: true, unidade: true, descricao: true,
             identificador: true, medida: true, espessura: true,
             largura: true, comprimento: true,
           },
@@ -823,7 +823,7 @@ async function atualizarPrecoMovimentacao(movimentacaoId, { precoUnitario, preco
       include: {
         material: {
           select: {
-            id: true, nome: true, unidade: true,
+            id: true, nome: true, unidade: true, descricao: true,
             identificador: true, medida: true, espessura: true,
           },
         },
@@ -891,4 +891,5 @@ module.exports = {
   atualizarPrecoMovimentacao,
   resolverRelacaoOSDescritiva,
   buscarClientePorNumeroOS,
+  formatUnidade,
 };

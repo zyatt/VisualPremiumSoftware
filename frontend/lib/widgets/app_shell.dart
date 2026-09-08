@@ -1,10 +1,11 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HardwareKeyboard, KeyEvent, KeyDownEvent, LogicalKeyboardKey;
 import 'package:flutter/gestures.dart' show PointerDeviceKind, PointerScrollEvent, PointerSignalEvent;
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers/usuario_provider.dart';
 import '../models/usuario_model.dart';
@@ -12,6 +13,7 @@ import '../providers/alertas_estoque_provider.dart';
 import '../providers/orcamento_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/nav_layout_provider.dart';
+import '../providers/widgets_flutuantes_provider.dart';
 import '../pages/orcamento_page.dart';
 import '../providers/veiculo_provider.dart';
 import '../providers/solicitacao_material_provider.dart';
@@ -98,6 +100,7 @@ class AppShell extends StatefulWidget {
       const AppMenuItem(icon: Icons.description_rounded,             label: 'Relatório OS',       route: '/relatorio-os',          color: Color(0xFF2196F3)),
       const AppMenuItem(icon: Icons.precision_manufacturing_rounded, label: 'Produção',           route: '/producao',              color: Color(0xFF00BCD4)),
       const AppMenuItem(icon: Icons.pie_chart_rounded,               label: 'Gastos',             route: '/gastos-categoria',      color: Color(0xFFFF7043)),
+      const AppMenuItem(icon: Icons.receipt_long_rounded,            label: 'Contas a Pagar',     route: '/contas-pagar',          color: Color(0xFF9C27B0)),
       const AppMenuItem(icon: Icons.directions_car_rounded,          label: 'Veículos',           route: '/veiculos',              color: Color(0xFF607D8B)),
       const AppMenuItem(icon: Icons.chat_rounded,                    label: 'Chat',               route: '/chat',                  color: Color(0xFF26C6DA)),
     ];
@@ -112,12 +115,12 @@ class AppShell extends StatefulWidget {
     if (r == 'GERENTE') {
 
       return completo
-          .where((e) => !['/gastos-categoria', '/orcamento-venda', '/produtos'].contains(e.route))
+          .where((e) => !['/gastos-categoria', '/orcamento-venda', '/produtos', '/contas-pagar'].contains(e.route))
           .toList();
     }
 
     return completo
-        .where((e) => !['/gastos-categoria', '/orcamento-venda', '/produtos'].contains(e.route))
+        .where((e) => !['/gastos-categoria', '/orcamento-venda', '/produtos', '/contas-pagar'].contains(e.route))
         .toList();
   }
 
@@ -308,8 +311,10 @@ class _AppShellState extends State<AppShell> {
               ],
             ),
 
-          if (mostrarBolhaChat) const RoboHelperWidget(),
-          if (mostrarBolhaChat) const ChatFloatingWidget(),
+          if (mostrarBolhaChat && context.watch<WidgetsFlutuantesProvider>().roboVisivel)
+            const RoboHelperWidget(),
+          if (mostrarBolhaChat && context.watch<WidgetsFlutuantesProvider>().chatVisivel)
+            const ChatFloatingWidget(),
         ],
       ),
       drawer: isWide
@@ -328,6 +333,147 @@ class _NavItem {
   const _NavItem({required this.icon, required this.label, required this.route});
 }
 
+/// Um grupo de navegação da sidebar compacta.
+/// Se [items] tiver mais de 1 elemento, ao clicar/passar o mouse no ícone do
+/// grupo abre um painel lateral com as páginas do grupo.
+/// Se tiver só 1 elemento, o clique navega direto pra rota (sem abrir painel).
+class _NavGroup {
+  final String id;
+  final String groupLabel;
+  final IconData groupIcon;
+  final List<_NavItem> items;
+  const _NavGroup({
+    required this.id,
+    required this.groupLabel,
+    required this.groupIcon,
+    required this.items,
+  });
+
+  bool get isSingle => items.length <= 1;
+
+  @override
+  bool operator ==(Object other) => other is _NavGroup && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
+/// Monta os grupos da sidebar compacta a partir da lista plana de [_NavItem]
+/// já filtrada por role (getMenuForRole). Rotas que não existirem para a
+/// role atual simplesmente não aparecem (o grupo fica sem esse item).
+List<_NavGroup> _montarGruposSidebar(List<_NavItem> items) {
+  _NavItem? porRota(String rota) {
+    for (final i in items) {
+      if (i.route == rota) return i;
+    }
+    return null;
+  }
+
+  List<_NavItem> filtrar(List<String> rotas) =>
+      rotas.map(porRota).whereType<_NavItem>().toList();
+
+  final grupos = <_NavGroup>[];
+
+  final inicio = porRota('/inicio');
+  if (inicio != null) {
+    grupos.add(_NavGroup(
+      id: 'inicio',
+      groupLabel: 'Início',
+      groupIcon: Icons.home_rounded,
+      items: [inicio],
+    ));
+  }
+
+  final estoqueGrupo = filtrar(
+      ['/estoque', '/controle-estoque', '/relatorio-os']);
+  if (estoqueGrupo.isNotEmpty) {
+    grupos.add(_NavGroup(
+      id: 'estoque',
+      groupLabel: 'Estoque',
+      groupIcon: Icons.inventory_2_rounded,
+      items: estoqueGrupo,
+    ));
+  }
+
+  final vendasGrupo = filtrar(['/produtos', '/orcamento-venda']);
+  if (vendasGrupo.isNotEmpty) {
+    grupos.add(_NavGroup(
+      id: 'vendas',
+      groupLabel: 'Vendas',
+      groupIcon: Icons.sell_rounded,
+      items: vendasGrupo,
+    ));
+  }
+
+  final comprasGrupo =
+      filtrar(['/fornecedores', '/orcamento', '/ordem-compra']);
+  if (comprasGrupo.isNotEmpty) {
+    grupos.add(_NavGroup(
+      id: 'compras',
+      groupLabel: 'Compras',
+      groupIcon: Icons.storefront_rounded,
+      items: comprasGrupo,
+    ));
+  }
+
+  final solicitacoes = porRota('/solicitacoes-material');
+  if (solicitacoes != null) {
+    grupos.add(_NavGroup(
+      id: 'solicitacoes',
+      groupLabel: 'Solicitações',
+      groupIcon: Icons.assignment_rounded,
+      items: [solicitacoes],
+    ));
+  }
+
+  final financeiroGrupo =
+      filtrar(['/gastos-categoria', '/contas-pagar', '/veiculos']);
+  if (financeiroGrupo.isNotEmpty) {
+    grupos.add(_NavGroup(
+      id: 'financeiro',
+      groupLabel: 'Financeiro',
+      groupIcon: Icons.account_balance_wallet_rounded,
+      items: financeiroGrupo,
+    ));
+  }
+
+  final producao = porRota('/producao');
+  if (producao != null) {
+    grupos.add(_NavGroup(
+      id: 'producao',
+      groupLabel: 'Produção',
+      groupIcon: Icons.precision_manufacturing_rounded,
+      items: [producao],
+    ));
+  }
+
+  final admin = porRota('/admin');
+  if (admin != null) {
+    grupos.add(_NavGroup(
+      id: 'admin',
+      groupLabel: 'Admin',
+      groupIcon: Icons.admin_panel_settings_rounded,
+      items: [admin],
+    ));
+  }
+
+  final chat = porRota('/chat');
+  if (chat != null) {
+    grupos.add(_NavGroup(
+      id: 'chat',
+      groupLabel: 'Chat',
+      groupIcon: Icons.chat_rounded,
+      items: [chat],
+    ));
+  }
+
+  return grupos;
+}
+
+/// Sidebar compacta: mostra apenas ícones agrupados. Ao passar o mouse
+/// (desktop) ou tocar (touch) em um grupo com múltiplas páginas, abre um
+/// popover flutuante (mini janela) ao lado do ícone com as páginas daquele
+/// grupo. Grupos com uma única página navegam direto, sem abrir popover.
 class _Sidebar extends StatefulWidget {
   final String currentRoute;
   final List<_NavItem> items;
@@ -338,82 +484,325 @@ class _Sidebar extends StatefulWidget {
 }
 
 class _SidebarState extends State<_Sidebar> {
-  static const double _larguraMin = 160;
-  static const double _larguraMax = 340;
-  static const double _larguraPadrao = 190;
-  static const _chavePrefs = 'sidebar_largura';
+  static const double _larguraIcones = 64;
+  static const Object _tapRegionGroupId = 'app-shell-sidebar-menu';
 
-  double _largura = _larguraPadrao;
-  bool _arrastando = false;
-  double _larguraAoIniciar = _larguraPadrao;
+  final Map<_NavGroup, LayerLink> _links = {};
+  _NavGroup? _grupoAberto;
+  bool _travadoPorClique = false;
+  OverlayEntry? _overlayEntry;
+  Timer? _timerFechamento;
 
   @override
   void initState() {
     super.initState();
-    _carregarLarguraSalva();
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
   }
 
-  Future<void> _carregarLarguraSalva() async {
-    final prefs = await SharedPreferences.getInstance();
-    final salva = prefs.getDouble(_chavePrefs);
-    if (salva != null && mounted) {
-      setState(() {
-        _largura = salva.clamp(_larguraMin, _larguraMax);
-      });
+  /// Fecha o popover aberto ao apertar Esc, sem interferir em outros
+  /// atalhos ou campos de texto focados em outras partes da tela.
+  bool _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey != LogicalKeyboardKey.escape) return false;
+    if (_grupoAberto == null) return false;
+    _fecharPopover(forcar: true);
+    return true;
+  }
+
+  LayerLink _linkPara(_NavGroup grupo) =>
+      _links.putIfAbsent(grupo, () => LayerLink());
+
+  void _abrirGrupo(_NavGroup grupo, {required bool porClique}) {
+    if (grupo.isSingle) return;
+    _timerFechamento?.cancel();
+    if (_grupoAberto == grupo) {
+      if (porClique) {
+        setState(() => _travadoPorClique = true);
+      }
+      return;
     }
+    setState(() {
+      _grupoAberto = grupo;
+      _travadoPorClique = porClique;
+    });
+    _mostrarOverlay(grupo);
   }
 
-  Future<void> _salvarLargura(double largura) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_chavePrefs, largura);
+  /// Cancela qualquer fechamento agendado. Chamado quando o cursor entra
+  /// novamente no ícone ou no popover, incluindo durante a travessia do
+  /// pequeno espaço (gap) entre os dois.
+  void _cancelarFechamento() {
+    _timerFechamento?.cancel();
+  }
+
+  /// Agenda o fechamento do popover com um pequeno atraso, em vez de
+  /// fechar instantaneamente no onExit. Isso dá tempo do cursor atravessar
+  /// o gap entre o ícone e o popover sem que ele feche no meio do caminho.
+  void _fecharPopover({bool forcar = false}) {
+    if (_travadoPorClique && !forcar) return;
+    if (forcar) {
+      _timerFechamento?.cancel();
+      _fecharAgora();
+      return;
+    }
+    _timerFechamento?.cancel();
+    _timerFechamento = Timer(const Duration(milliseconds: 150), () {
+      if (_travadoPorClique) return;
+      _fecharAgora();
+    });
+  }
+
+  void _fecharAgora() {
+    _removerOverlay();
+    if (!mounted) return;
+    setState(() {
+      _grupoAberto = null;
+      _travadoPorClique = false;
+    });
+  }
+
+  void _alternarPorClique(_NavGroup grupo) {
+    if (grupo.isSingle) return;
+    if (_grupoAberto == grupo && _travadoPorClique) return;
+    _abrirGrupo(grupo, porClique: true);
+  }
+
+  void _mostrarOverlay(_NavGroup grupo) {
+    _removerOverlay();
+    final overlay = Overlay.of(context);
+    _overlayEntry = OverlayEntry(
+      builder: (ctx) {
+        return _SidebarPopover(
+          link: _linkPara(grupo),
+          railWidth: _larguraIcones,
+          currentRoute: widget.currentRoute,
+          grupo: grupo,
+          tapRegionGroupId: _tapRegionGroupId,
+          onMouseEnter: () => _cancelarFechamento(),
+          onMouseExit: () => _fecharPopover(),
+          onItemTap: () => _fecharPopover(forcar: true),
+          onTapOutside: () => _fecharPopover(forcar: true),
+        );
+      },
+    );
+    overlay.insert(_overlayEntry!);
+  }
+
+  void _removerOverlay() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
+    _timerFechamento?.cancel();
+    _removerOverlay();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final corDivisor = isDark ? Colors.white10 : Colors.black12;
-    final corDivisorAtivo = AppTheme.accent.withValues(alpha: 0.6);
+    final grupos = _montarGruposSidebar(widget.items);
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SizedBox(
-          width: _largura,
-          child: _SidebarContent(
-              currentRoute: widget.currentRoute, items: widget.items),
+    // Se a rota mudou (navegação por outro meio) ou o grupo aberto some da
+    // lista, garante que o overlay não fique órfão.
+    if (_grupoAberto != null && !grupos.contains(_grupoAberto)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fecharPopover(forcar: true);
+      });
+    }
+
+    return SizedBox(
+      width: _larguraIcones,
+      child: TapRegion(
+        groupId: _tapRegionGroupId,
+        child: _SidebarIconRail(
+          currentRoute: widget.currentRoute,
+          grupos: grupos,
+          grupoAberto: _grupoAberto,
+          linkForGrupo: _linkPara,
+          onHoverGrupo: (g) {
+            _cancelarFechamento();
+            _abrirGrupo(g, porClique: false);
+          },
+          onHoverSair: () => _fecharPopover(),
+          onTapGrupo: _alternarPorClique,
         ),
-        MouseRegion(
-          cursor: SystemMouseCursors.resizeLeftRight,
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onHorizontalDragStart: (_) {
-              setState(() {
-                _arrastando = true;
-                _larguraAoIniciar = _largura;
-              });
-            },
-            onHorizontalDragUpdate: (details) {
-              setState(() {
-                _largura = (_larguraAoIniciar + details.localPosition.dx)
-                    .clamp(_larguraMin, _larguraMax);
-              });
-            },
-            onHorizontalDragEnd: (_) {
-              setState(() => _arrastando = false);
-              _salvarLargura(_largura);
-            },
-            child: Container(
-              width: 6,
-              color: Colors.transparent,
-              alignment: Alignment.center,
-              child: Container(
-                width: _arrastando ? 2 : 1,
-                color: _arrastando ? corDivisorAtivo : corDivisor,
+      ),
+    );
+  }
+}
+
+/// Mini janela (popover) flutuante que aparece ao lado do ícone do grupo,
+/// ancorada via [LayerLink] à posição do ícone no trilho. Fecha quando o
+/// mouse sai da área composta (ícone + popover) ou ao tocar num item.
+class _SidebarPopover extends StatelessWidget {
+  final LayerLink link;
+  final double railWidth;
+  final String currentRoute;
+  final _NavGroup grupo;
+  final Object tapRegionGroupId;
+  final VoidCallback onMouseEnter;
+  final VoidCallback onMouseExit;
+  final VoidCallback onItemTap;
+  final VoidCallback onTapOutside;
+
+  static const double _larguraPopover = 232;
+  static const double _espacamento = 8;
+
+  const _SidebarPopover({
+    required this.link,
+    required this.railWidth,
+    required this.currentRoute,
+    required this.grupo,
+    required this.tapRegionGroupId,
+    required this.onMouseEnter,
+    required this.onMouseExit,
+    required this.onItemTap,
+    required this.onTapOutside,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final alturaEstim =
+        (56.0 + grupo.items.length * 44.0).clamp(0.0, screenHeight - 32.0);
+
+    return Positioned(
+      width: _larguraPopover,
+      child: CompositedTransformFollower(
+        link: link,
+        showWhenUnlinked: false,
+        offset: Offset(railWidth + _espacamento, 0),
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: MouseRegion(
+            onEnter: (_) => onMouseEnter(),
+            onExit: (_) => onMouseExit(),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: 1),
+              duration: const Duration(milliseconds: 140),
+              curve: Curves.easeOut,
+              builder: (context, t, child) {
+                return Opacity(
+                  opacity: t,
+                  child: Transform.scale(
+                    scale: 0.94 + (0.06 * t),
+                    alignment: Alignment.centerLeft,
+                    child: child,
+                  ),
+                );
+              },
+              child: TapRegion(
+                groupId: tapRegionGroupId,
+                onTapOutside: (_) => onTapOutside(),
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    constraints: BoxConstraints(maxHeight: alturaEstim + 40),
+                    child: _SidebarPopoverCard(
+                      currentRoute: currentRoute,
+                      grupo: grupo,
+                      onItemTap: onItemTap,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
         ),
-      ],
+      ),
+    );
+  }
+}
+
+/// Conteúdo visual do popover: card com sombra, cantos arredondados e a
+/// lista de páginas do grupo.
+class _SidebarPopoverCard extends StatelessWidget {
+  final String currentRoute;
+  final _NavGroup grupo;
+  final VoidCallback onItemTap;
+
+  const _SidebarPopoverCard({
+    required this.currentRoute,
+    required this.grupo,
+    required this.onItemTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? AppTheme.sidebar : Colors.white;
+    final dividerColor = isDark ? Colors.white10 : Colors.black12;
+    final textColor = isDark ? Colors.white : Colors.black;
+
+    final solProv       = context.watch<SolicitacaoMaterialProvider>();
+    final nSolicitacoes = solProv.novasSolicitacoes;
+    final chatProv      = context.watch<ChatProvider>();
+    final nChat         = chatProv.totalNaoLidas;
+    final nPendentesProducao =
+        context.watch<EstoqueProducaoProvider>().totalPendentes;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.06),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.18),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Text(
+              grupo.groupLabel,
+              style: GoogleFonts.raleway(
+                color: textColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Divider(color: dividerColor, height: 1, indent: 14, endIndent: 14),
+          const SizedBox(height: 4),
+          ...grupo.items.map((item) {
+            final isActive =
+                currentRoute == item.route ||
+                (item.route != '/inicio' &&
+                    currentRoute.startsWith('${item.route}/'));
+
+            final badge = item.route == '/solicitacoes-material' && nSolicitacoes > 0
+                ? nSolicitacoes
+                : item.route == '/chat' && nChat > 0
+                    ? nChat
+                    : item.route == '/controle-estoque' && nPendentesProducao > 0
+                        ? nPendentesProducao
+                        : 0;
+
+            return _SidebarTile(
+              item: item,
+              isActive: isActive,
+              badge: badge,
+              isDark: isDark,
+              onTapExtra: onItemTap,
+            );
+          }),
+        ],
+      ),
     );
   }
 }
@@ -428,17 +817,38 @@ class _TopBar extends StatefulWidget {
 }
 
 class _TopBarState extends State<_TopBar> {
+  static const Object _tapRegionGroupId = 'app-shell-topbar-menu';
   String _version = '';
   final ScrollController _scrollController = ScrollController();
+
+  // Estado de agrupamento (idêntico em espírito ao _SidebarState, porém
+  // com o popover se abrindo abaixo do ícone em vez de ao lado).
+  final Map<_NavGroup, LayerLink> _links = {};
+  _NavGroup? _grupoAberto;
+  bool _travadoPorClique = false;
+  OverlayEntry? _overlayEntry;
+  Timer? _timerFechamento;
 
   @override
   void initState() {
     super.initState();
     _loadVersion();
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+  }
+
+  bool _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey != LogicalKeyboardKey.escape) return false;
+    if (_grupoAberto == null) return false;
+    _fecharPopover(forcar: true);
+    return true;
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
+    _timerFechamento?.cancel();
+    _removerOverlay();
     _scrollController.dispose();
     super.dispose();
   }
@@ -484,6 +894,90 @@ class _TopBarState extends State<_TopBar> {
     );
   }
 
+  LayerLink _linkPara(_NavGroup grupo) =>
+      _links.putIfAbsent(grupo, () => LayerLink());
+
+  void _abrirGrupo(_NavGroup grupo, {required bool porClique}) {
+    if (grupo.isSingle) return;
+    _timerFechamento?.cancel();
+    if (_grupoAberto == grupo) {
+      if (porClique) {
+        setState(() => _travadoPorClique = true);
+      }
+      return;
+    }
+    setState(() {
+      _grupoAberto = grupo;
+      _travadoPorClique = porClique;
+    });
+    _mostrarOverlay(grupo);
+  }
+
+  void _cancelarFechamento() {
+    _timerFechamento?.cancel();
+  }
+
+  void _fecharPopover({bool forcar = false}) {
+    if (_travadoPorClique && !forcar) return;
+    if (forcar) {
+      _timerFechamento?.cancel();
+      _fecharAgora();
+      return;
+    }
+    _timerFechamento?.cancel();
+    _timerFechamento = Timer(const Duration(milliseconds: 150), () {
+      if (_travadoPorClique) return;
+      _fecharAgora();
+    });
+  }
+
+  void _fecharAgora() {
+    _removerOverlay();
+    if (!mounted) return;
+    setState(() {
+      _grupoAberto = null;
+      _travadoPorClique = false;
+    });
+  }
+
+  void _alternarPorClique(_NavGroup grupo) {
+    if (grupo.isSingle) return;
+    if (_grupoAberto == grupo && _travadoPorClique) return;
+    _abrirGrupo(grupo, porClique: true);
+  }
+
+  void _mostrarOverlay(_NavGroup grupo) {
+    _removerOverlay();
+    final overlay = Overlay.of(context);
+    _overlayEntry = OverlayEntry(
+      builder: (ctx) {
+        return _TopBarPopover(
+          link: _linkPara(grupo),
+          currentRoute: widget.currentRoute,
+          grupo: grupo,
+          tapRegionGroupId: _tapRegionGroupId,
+          onMouseEnter: () => _cancelarFechamento(),
+          onMouseExit: () => _fecharPopover(),
+          onItemTap: () => _fecharPopover(forcar: true),
+          onTapOutside: () => _fecharPopover(forcar: true),
+        );
+      },
+    );
+    overlay.insert(_overlayEntry!);
+  }
+
+  void _removerOverlay() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+  }
+
+  bool _grupoAtivo(_NavGroup grupo) {
+    return grupo.items.any((item) =>
+        widget.currentRoute == item.route ||
+        (item.route != '/inicio' &&
+            widget.currentRoute.startsWith('${item.route}/')));
+  }
+
   @override
   Widget build(BuildContext context) {
     final usuario = context.watch<UsuarioProvider>().usuarioLogado;
@@ -507,6 +1001,24 @@ class _TopBarState extends State<_TopBar> {
     final textColorTertiary = isDark ? const Color.fromARGB(97, 240, 240, 240) : Colors.black54;
     final dividerColor = isDark ? Colors.white10 : Colors.black26;
 
+    final grupos = _montarGruposSidebar(widget.items);
+
+    if (_grupoAberto != null && !grupos.contains(_grupoAberto)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fecharPopover(forcar: true);
+      });
+    }
+
+    int badgeDoGrupo(_NavGroup grupo) {
+      var total = 0;
+      for (final item in grupo.items) {
+        if (item.route == '/solicitacoes-material') total += nSolicitacoes;
+        if (item.route == '/chat') total += nChat;
+        if (item.route == '/controle-estoque') total += nPendentesProducao;
+      }
+      return total;
+    }
+
     return Container(
       color: sidebarBg,
       child: SafeArea(
@@ -516,22 +1028,14 @@ class _TopBarState extends State<_TopBar> {
           child: Row(
             children: [
               const _AnimatedLogo(),
-              const SizedBox(width: 10),
-              Text(
-                'Visual Premium',
-                style: GoogleFonts.raleway(
-                  color: textColor,
-                  fontSize: 19,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                ),
-              ),
               const SizedBox(width: 16),
               Container(width: 1, height: 24, color: dividerColor),
               const SizedBox(width: 8),
 
               Expanded(
-                child: Listener(
+                child: TapRegion(
+                  groupId: _tapRegionGroupId,
+                  child: Listener(
                   onPointerSignal: _handlePointerSignal,
                   child: ScrollConfiguration(
                     behavior: ScrollConfiguration.of(context).copyWith(
@@ -545,33 +1049,38 @@ class _TopBarState extends State<_TopBar> {
                       controller: _scrollController,
                       scrollDirection: Axis.horizontal,
                       child: Row(
-                      children: widget.items.map((item) {
-                        final isActive =
-                            widget.currentRoute == item.route ||
-                            (item.route != '/inicio' &&
-                                widget.currentRoute
-                                    .startsWith('${item.route}/'));
+                        children: grupos.map((grupo) {
+                          final isActive = _grupoAtivo(grupo);
+                          final isOpen = _grupoAberto == grupo;
+                          final badge = badgeDoGrupo(grupo);
 
-                        final badge = item.route == '/solicitacoes-material' && nSolicitacoes > 0
-                            ? nSolicitacoes
-                            : item.route == '/chat' && nChat > 0
-                                ? nChat
-                                : item.route == '/controle-estoque' && nPendentesProducao > 0
-                                    ? nPendentesProducao
-                                    : 0;
-
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 3),
-                          child: _TopBarTile(
-                            item: item,
-                            isActive: isActive,
-                            badge: badge,
-                            isDark: isDark,
-                          ),
-                        );
-                      }).toList(),
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 3),
+                            child: _TopBarGroupTile(
+                              grupo: grupo,
+                              link: _linkPara(grupo),
+                              isActive: isActive,
+                              isOpen: isOpen,
+                              badge: badge,
+                              isDark: isDark,
+                              onHover: () {
+                                _cancelarFechamento();
+                                _abrirGrupo(grupo, porClique: false);
+                              },
+                              onHoverSair: () => _fecharPopover(),
+                              onTap: () {
+                                if (grupo.isSingle) {
+                                  context.go(grupo.items.first.route);
+                                } else {
+                                  _alternarPorClique(grupo);
+                                }
+                              },
+                            ),
+                          );
+                        }).toList(),
+                      ),
                     ),
-                    ),
+                  ),
                   ),
                 ),
               ),
@@ -666,84 +1175,198 @@ class _TopBarState extends State<_TopBar> {
   }
 }
 
-class _TopBarTile extends StatelessWidget {
-  final _NavItem item;
+/// Ícone+rótulo de um grupo na barra superior. Ao passar o mouse (desktop)
+/// ou tocar (touch) em um grupo com múltiplas páginas, abre um popover
+/// flutuante abaixo do item com as páginas daquele grupo — mesmo
+/// comportamento da sidebar vertical, só que ancorado por baixo em vez de
+/// ao lado. Grupos com uma única página navegam direto, sem popover.
+class _TopBarGroupTile extends StatelessWidget {
+  final _NavGroup grupo;
+  final LayerLink link;
   final bool isActive;
+  final bool isOpen;
   final int badge;
   final bool isDark;
+  final VoidCallback onHover;
+  final VoidCallback onHoverSair;
+  final VoidCallback onTap;
 
-  const _TopBarTile({
-    required this.item,
+  const _TopBarGroupTile({
+    required this.grupo,
+    required this.link,
     required this.isActive,
-    this.badge = 0,
+    required this.isOpen,
+    required this.badge,
     required this.isDark,
+    required this.onHover,
+    required this.onHoverSair,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final textColorSecondary = isDark ? Colors.white : Colors.black87;
     final iconColor = isDark ? Colors.white38 : Colors.black87;
+    final destacado = isActive || isOpen;
 
-    return Material(
-      color: isActive
-          ? AppTheme.accent.withValues(alpha: 0.15)
-          : Colors.transparent,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        mouseCursor: SystemMouseCursors.click,
-        onTap: () => context.go(item.route),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
+    return CompositedTransformTarget(
+      link: link,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => onHover(),
+        onExit: (_) => onHoverSair(),
+        child: Material(
+          color: destacado
+              ? AppTheme.accent.withValues(alpha: 0.15)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          child: InkWell(
             borderRadius: BorderRadius.circular(8),
-            border: isActive
-                ? const Border(
-                    bottom: BorderSide(color: AppTheme.accent, width: 2),
-                  )
-                : null,
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                item.icon,
-                color: isActive ? AppTheme.accent : iconColor,
-                size: 18,
+            mouseCursor: SystemMouseCursors.click,
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: isActive
+                    ? const Border(
+                        bottom: BorderSide(color: AppTheme.accent, width: 2),
+                      )
+                    : null,
               ),
-              const SizedBox(width: 7),
-              Text(
-                item.label,
-                style: GoogleFonts.nunito(
-                  color: isActive
-                      ? (isDark ? Colors.white : Colors.black87)
-                      : textColorSecondary,
-                  fontSize: 14,
-                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                ),
-              ),
-              if (badge > 0) ...[
-                const SizedBox(width: 6),
-                Container(
-                  constraints: const BoxConstraints(minWidth: 16),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEF4444),
-                    borderRadius: BorderRadius.circular(10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    grupo.groupIcon,
+                    color: destacado ? AppTheme.accent : iconColor,
+                    size: 18,
                   ),
-                  child: Text(
-                    badge > 99 ? '99+' : '$badge',
+                  const SizedBox(width: 7),
+                  Text(
+                    grupo.groupLabel,
                     style: GoogleFonts.nunito(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
+                      color: destacado
+                          ? (isDark ? Colors.white : Colors.black87)
+                          : textColorSecondary,
+                      fontSize: 14,
+                      fontWeight: destacado ? FontWeight.w700 : FontWeight.w500,
                     ),
-                    textAlign: TextAlign.center,
+                  ),
+                  if (!grupo.isSingle) ...[
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      size: 16,
+                      color: destacado ? AppTheme.accent : iconColor,
+                    ),
+                  ],
+                  if (badge > 0) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      constraints: const BoxConstraints(minWidth: 16),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        badge > 99 ? '99+' : '$badge',
+                        style: GoogleFonts.nunito(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Popover flutuante da barra superior: mesmo card da sidebar vertical
+/// (_SidebarPopoverCard), porém ancorado por baixo do ícone do grupo em
+/// vez de ao lado. Fecha quando o mouse sai da área composta (ícone +
+/// popover) ou ao tocar num item.
+class _TopBarPopover extends StatelessWidget {
+  final LayerLink link;
+  final String currentRoute;
+  final _NavGroup grupo;
+  final Object tapRegionGroupId;
+  final VoidCallback onMouseEnter;
+  final VoidCallback onMouseExit;
+  final VoidCallback onItemTap;
+  final VoidCallback onTapOutside;
+
+  static const double _larguraPopover = 232;
+  static const double _espacamento = 6;
+
+  const _TopBarPopover({
+    required this.link,
+    required this.currentRoute,
+    required this.grupo,
+    required this.tapRegionGroupId,
+    required this.onMouseEnter,
+    required this.onMouseExit,
+    required this.onItemTap,
+    required this.onTapOutside,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final alturaEstim =
+        (56.0 + grupo.items.length * 44.0).clamp(0.0, screenHeight - 32.0);
+
+    return Positioned(
+      width: _larguraPopover,
+      child: CompositedTransformFollower(
+        link: link,
+        showWhenUnlinked: false,
+        offset: const Offset(0, 48 + _espacamento),
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: MouseRegion(
+            onEnter: (_) => onMouseEnter(),
+            onExit: (_) => onMouseExit(),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: 1),
+              duration: const Duration(milliseconds: 140),
+              curve: Curves.easeOut,
+              builder: (context, t, child) {
+                return Opacity(
+                  opacity: t,
+                  child: Transform.scale(
+                    scale: 0.94 + (0.06 * t),
+                    alignment: Alignment.topLeft,
+                    child: child,
+                  ),
+                );
+              },
+              child: TapRegion(
+                groupId: tapRegionGroupId,
+                onTapOutside: (_) => onTapOutside(),
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    constraints: BoxConstraints(maxHeight: alturaEstim + 40),
+                    child: _SidebarPopoverCard(
+                      currentRoute: currentRoute,
+                      grupo: grupo,
+                      onItemTap: onItemTap,
+                    ),
                   ),
                 ),
-              ],
-            ],
+              ),
+            ),
           ),
         ),
       ),
@@ -763,7 +1386,6 @@ class _AnimatedLogoState extends State<_AnimatedLogo>
   late final AnimationController _ctrl;
   late final Animation<double> _float;
   late final Animation<double> _tilt;
-  late final Animation<double> _glow;
 
   @override
   void initState() {
@@ -779,10 +1401,6 @@ class _AnimatedLogoState extends State<_AnimatedLogo>
 
     _tilt = Tween<double>(begin: -0.045, end: 0.045).animate(
       CurvedAnimation(parent: _ctrl, curve: Curves.easeInOutSine),
-    );
-
-    _glow = Tween<double>(begin: 0.15, end: 0.45).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
     );
   }
 
@@ -803,29 +1421,400 @@ class _AnimatedLogoState extends State<_AnimatedLogo>
           child: child,
         ),
       ),
-      child: AnimatedBuilder(
-        animation: _glow,
-        builder: (context, _) => DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.primary.withValues(alpha: _glow.value),
-                blurRadius: 16,
-                spreadRadius: 1,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.asset(
+          'assets/images/logo.png',
+          width: 40,
+          height: 40,
+          fit: BoxFit.cover,
+        ),
+      ),
+    );
+  }
+}
+
+/// Trilho vertical apenas com ícones (logo, grupos de navegação, usuário,
+/// configurações). É a coluna fixa e estreita da sidebar compacta.
+class _SidebarIconRail extends StatefulWidget {
+  final String currentRoute;
+  final List<_NavGroup> grupos;
+  final _NavGroup? grupoAberto;
+  final LayerLink Function(_NavGroup) linkForGrupo;
+  final ValueChanged<_NavGroup> onHoverGrupo;
+  final VoidCallback onHoverSair;
+  final ValueChanged<_NavGroup> onTapGrupo;
+
+  const _SidebarIconRail({
+    required this.currentRoute,
+    required this.grupos,
+    required this.grupoAberto,
+    required this.linkForGrupo,
+    required this.onHoverGrupo,
+    required this.onHoverSair,
+    required this.onTapGrupo,
+  });
+
+  @override
+  State<_SidebarIconRail> createState() => _SidebarIconRailState();
+}
+
+class _SidebarIconRailState extends State<_SidebarIconRail> {
+  void _abrirConfiguracoes(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => const _ConfiguracoesDialog(),
+    );
+  }
+
+  void _abrirTrocaUsuario(BuildContext context) {
+    final usuarioProvider = context.read<UsuarioProvider>();
+    final salvos = usuarioProvider.usuariosSalvos;
+    final atual  = usuarioProvider.usuarioLogado;
+
+    final outros = salvos.where((u) => u.id != atual?.id).toList();
+
+    showDialog(
+      context: context,
+      builder: (_) => _TrocaUsuarioDialog(
+        usuarioAtual: atual,
+        usuariosSalvos: outros,
+      ),
+    );
+  }
+
+  void _mostrarPainelRetirada(BuildContext context, VeiculoProvider provider) {
+    showDialog(
+      context: context,
+      builder: (_) => _PainelRetiradaDialog(provider: provider),
+    );
+  }
+
+  bool _grupoAtivo(_NavGroup grupo) {
+    return grupo.items.any((item) =>
+        widget.currentRoute == item.route ||
+        (item.route != '/inicio' &&
+            widget.currentRoute.startsWith('${item.route}/')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final usuario     = context.watch<UsuarioProvider>().usuarioLogado;
+    final alertas     = context.watch<AlertasEstoqueProvider>();
+    final nAlertas    = alertas.totalAlertas;
+    final veiculoProv = context.watch<VeiculoProvider>();
+
+    final nRetirada = veiculoProv.veiculos
+        .cast<VeiculoModel>()
+        .where((v) => v.manutencoes.any((m) => m.retiradaHoje))
+        .length;
+
+    final solProv       = context.watch<SolicitacaoMaterialProvider>();
+    final nSolicitacoes = solProv.novasSolicitacoes;
+
+    final chatProv = context.watch<ChatProvider>();
+    final nChat    = chatProv.totalNaoLidas;
+
+    final nPendentesProducao =
+        context.watch<EstoqueProducaoProvider>().totalPendentes;
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final sidebarBg = isDark ? AppTheme.sidebar : const Color.fromARGB(255, 247, 247, 247);
+    final textColorTertiary = isDark ? const Color.fromARGB(97, 240, 240, 240) : Colors.black54;
+    final dividerColor = isDark ? Colors.white10 : Colors.black26;
+
+    int badgeDoGrupo(_NavGroup grupo) {
+      var total = 0;
+      for (final item in grupo.items) {
+        if (item.route == '/solicitacoes-material') total += nSolicitacoes;
+        if (item.route == '/chat') total += nChat;
+        if (item.route == '/controle-estoque') total += nPendentesProducao;
+      }
+      return total;
+    }
+
+    return Container(
+      color: sidebarBg,
+      child: SafeArea(
+        child: Column(
+          children: [
+            const SizedBox(height: 16),
+            const _AnimatedLogo(),
+            const SizedBox(height: 12),
+            Divider(color: dividerColor, height: 1, indent: 12, endIndent: 12),
+            const SizedBox(height: 6),
+
+            if (nAlertas > 0 && !AppShell.isProducaoRole(usuario?.role))
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: _SidebarIconBadgeButton(
+                  icon: Icons.warning_amber_rounded,
+                  color: const Color(0xFFDC2626),
+                  badge: nAlertas,
+                  mostrarBadge: false,
+                  tooltip: 'Alertas de estoque',
+                  onTap: () => _mostrarPainelAlertas(context, alertas),
+                ),
               ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Image.asset(
-              'assets/images/logo.png',
-              width: 40,
-              height: 40,
-              fit: BoxFit.cover,
+
+            if (nRetirada > 0 && !AppShell.isProducaoRole(usuario?.role))
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: _SidebarIconBadgeButton(
+                  icon: Icons.directions_car_rounded,
+                  color: const Color(0xFF1E88E5),
+                  badge: nRetirada,
+                  tooltip: 'Retiradas de veículos',
+                  onTap: () => _mostrarPainelRetirada(context, veiculoProv),
+                ),
+              ),
+
+            const SizedBox(height: 4),
+
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                children: widget.grupos.map((grupo) {
+                  final isActive = _grupoAtivo(grupo);
+                  final isOpen = widget.grupoAberto == grupo;
+                  final badge = badgeDoGrupo(grupo);
+
+                  return _SidebarGroupIconTile(
+                    grupo: grupo,
+                    link: widget.linkForGrupo(grupo),
+                    isActive: isActive,
+                    isOpen: isOpen,
+                    badge: badge,
+                    isDark: isDark,
+                    onHover: () => widget.onHoverGrupo(grupo),
+                    onHoverSair: widget.onHoverSair,
+                    onTap: () {
+                      if (grupo.isSingle) {
+                        context.go(grupo.items.first.route);
+                      } else {
+                        widget.onTapGrupo(grupo);
+                      }
+                    },
+                  );
+                }).toList(),
+              ),
+            ),
+
+            Divider(color: dividerColor, height: 1, indent: 12, endIndent: 12),
+            const SizedBox(height: 8),
+
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: () => _abrirTrocaUsuario(context),
+                child: Tooltip(
+                  message: usuario?.nome ?? '',
+                  child: CircleAvatar(
+                    radius: 15,
+                    backgroundColor: AppTheme.accent.withValues(alpha: 0.2),
+                    child: Text(
+                      (usuario?.nome ?? 'U')[0].toUpperCase(),
+                      style: GoogleFonts.nunito(
+                        color: AppTheme.accent,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            IconButton(
+              tooltip: 'Configurações',
+              icon: Icon(Icons.settings_rounded,
+                  size: 18, color: textColorTertiary),
+              onPressed: () => _abrirConfiguracoes(context),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              style: IconButton.styleFrom().copyWith(
+                  mouseCursor:
+                      WidgetStateProperty.all(SystemMouseCursors.click)),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Botão de ícone simples com badge numérico (usado para alertas/retiradas
+/// no trilho compacto).
+class _SidebarIconBadgeButton extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final int badge;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool mostrarBadge;
+
+  const _SidebarIconBadgeButton({
+    required this.icon,
+    required this.color,
+    required this.badge,
+    required this.tooltip,
+    required this.onTap,
+    this.mostrarBadge = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Material(
+          color: color.withValues(alpha: 0.12),
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            mouseCursor: SystemMouseCursors.click,
+            onTap: onTap,
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Center(child: Icon(icon, color: color, size: 18)),
+                  if (mostrarBadge && badge > 0)
+                    Positioned(
+                      top: -2,
+                      right: -2,
+                      child: Container(
+                        constraints: const BoxConstraints(minWidth: 15),
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFEF4444),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          badge > 9 ? '9+' : '$badge',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.nunito(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Ícone de um grupo no trilho compacto. Abre o painel no hover (desktop) ou
+/// no toque (mobile/tablet); navega direto se o grupo tiver só uma página.
+class _SidebarGroupIconTile extends StatelessWidget {
+  final _NavGroup grupo;
+  final LayerLink link;
+  final bool isActive;
+  final bool isOpen;
+  final int badge;
+  final bool isDark;
+  final VoidCallback onHover;
+  final VoidCallback onHoverSair;
+  final VoidCallback onTap;
+
+  const _SidebarGroupIconTile({
+    required this.grupo,
+    required this.link,
+    required this.isActive,
+    required this.isOpen,
+    required this.badge,
+    required this.isDark,
+    required this.onHover,
+    required this.onHoverSair,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final iconColor = isDark ? Colors.white38 : Colors.black87;
+    final destacado = isActive || isOpen;
+
+    return CompositedTransformTarget(
+      link: link,
+      child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 10),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => onHover(),
+        onExit: (_) => onHoverSair(),
+        child: Tooltip(
+          message: grupo.groupLabel,
+          child: Material(
+            color: destacado
+                ? AppTheme.accent.withValues(alpha: 0.15)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              mouseCursor: SystemMouseCursors.click,
+              onTap: onTap,
+              child: Container(
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border: isActive
+                      ? const Border(
+                          left: BorderSide(color: AppTheme.accent, width: 3),
+                        )
+                      : null,
+                ),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Center(
+                      child: Icon(
+                        grupo.groupIcon,
+                        color: destacado ? AppTheme.accent : iconColor,
+                        size: 20,
+                      ),
+                    ),
+                    if (badge > 0)
+                      Positioned(
+                        top: -2,
+                        right: 6,
+                        child: Container(
+                          constraints: const BoxConstraints(minWidth: 15),
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFEF4444),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            badge > 9 ? '9+' : '$badge',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.nunito(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
       ),
     );
   }
@@ -1117,12 +2106,14 @@ class _SidebarTile extends StatelessWidget {
   final bool isActive;
   final int badge;
   final bool isDark;
+  final VoidCallback? onTapExtra;
 
   const _SidebarTile({
     required this.item,
     required this.isActive,
     this.badge = 0,
     required this.isDark,
+    this.onTapExtra,
   });
 
   @override
@@ -1140,7 +2131,10 @@ class _SidebarTile extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           mouseCursor: SystemMouseCursors.click,
-          onTap: () => context.go(item.route),
+          onTap: () {
+            onTapExtra?.call();
+            context.go(item.route);
+          },
           child: Container(
             padding:
                 const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
@@ -1462,6 +2456,164 @@ class _ConfiguracoesDialog extends StatelessWidget {
                                 onChanged: (_) => rowContext
                                     .read<NavLayoutProvider>()
                                     .alternar(),
+                                activeThumbColor: AppTheme.primary,
+                                activeTrackColor:
+                                    AppTheme.primary.withValues(alpha: 0.3),
+                                inactiveThumbColor:
+                                    colorScheme.onSurfaceVariant,
+                                inactiveTrackColor: colorScheme.outline
+                                    .withValues(alpha: 0.3),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              Divider(
+                  color: colorScheme.outline.withValues(alpha: 0.4),
+                  height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text(
+                  'WIDGETS FLUTUANTES',
+                  style: GoogleFonts.nunito(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Builder(
+                  builder: (rowContext) {
+                    final widgetsProv = rowContext.watch<WidgetsFlutuantesProvider>();
+                    final chatVisivel = widgetsProv.chatVisivel;
+
+                    return Material(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        mouseCursor: SystemMouseCursors.click,
+                        onTap: () => rowContext
+                            .read<WidgetsFlutuantesProvider>()
+                            .definirChatVisivel(!chatVisivel),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.chat_bubble_rounded,
+                                color: colorScheme.onSurfaceVariant,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Bolha do chat',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: colorScheme.onSurface,
+                                      ),
+                                    ),
+                                    Text(
+                                      chatVisivel ? 'Exibida' : 'Removida da tela',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 11,
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Switch(
+                                value: chatVisivel,
+                                onChanged: (v) => rowContext
+                                    .read<WidgetsFlutuantesProvider>()
+                                    .definirChatVisivel(v),
+                                activeThumbColor: AppTheme.primary,
+                                activeTrackColor:
+                                    AppTheme.primary.withValues(alpha: 0.3),
+                                inactiveThumbColor:
+                                    colorScheme.onSurfaceVariant,
+                                inactiveTrackColor: colorScheme.outline
+                                    .withValues(alpha: 0.3),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Builder(
+                  builder: (rowContext) {
+                    final widgetsProv = rowContext.watch<WidgetsFlutuantesProvider>();
+                    final roboVisivel = widgetsProv.roboVisivel;
+
+                    return Material(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        mouseCursor: SystemMouseCursors.click,
+                        onTap: () => rowContext
+                            .read<WidgetsFlutuantesProvider>()
+                            .definirRoboVisivel(!roboVisivel),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.help_rounded,
+                                color: colorScheme.onSurfaceVariant,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Robô Ajudante',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: colorScheme.onSurface,
+                                      ),
+                                    ),
+                                    Text(
+                                      roboVisivel ? 'Exibido' : 'Removido da tela',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 11,
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Switch(
+                                value: roboVisivel,
+                                onChanged: (v) => rowContext
+                                    .read<WidgetsFlutuantesProvider>()
+                                    .definirRoboVisivel(v),
                                 activeThumbColor: AppTheme.primary,
                                 activeTrackColor:
                                     AppTheme.primary.withValues(alpha: 0.3),
@@ -2053,24 +3205,9 @@ class _AlertasTopBarChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         onTap: onTap,
         mouseCursor: SystemMouseCursors.click,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline_rounded, size: 14, color: cor),
-              const SizedBox(width: 6),
-              Text(
-                '$totalAlertas crítico${totalAlertas > 1 ? 's' : ''}',
-                style: GoogleFonts.nunito(
-                  color: cor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
+        child: const Padding(
+          padding: EdgeInsets.all(8),
+          child: Icon(Icons.warning_amber_rounded, size: 18, color: cor),
         ),
       ),
     );

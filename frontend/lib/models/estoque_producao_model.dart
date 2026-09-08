@@ -1,6 +1,7 @@
 class MaterialEstoqueProducaoModel {
   final int id;
   final String nome;
+  final String? descricao;
   final String? unidade;
   final String? categoria;
   final String? identificador;
@@ -17,6 +18,7 @@ class MaterialEstoqueProducaoModel {
   MaterialEstoqueProducaoModel({
     required this.id,
     required this.nome,
+    this.descricao,
     this.unidade,
     this.categoria,
     this.identificador,
@@ -31,6 +33,12 @@ class MaterialEstoqueProducaoModel {
     required this.producao,
   });
 
+  /// Nome de exibição: "NOME DESCRICAO" quando o material variante tem
+  /// descrição (ex.: material genérico "TINTA" + descricao "AZUL CLARO"),
+  /// ou o próprio nome caso contrário. Segue o mesmo padrão de MaterialModel.
+  String get nomeExibicao =>
+      (descricao != null && descricao!.trim().isNotEmpty) ? '$nome ${descricao!.trim()}' : nome;
+
   factory MaterialEstoqueProducaoModel.fromJson(Map<String, dynamic> json) {
     double? parseDoubleOrNull(dynamic value) {
       if (value == null) return null;
@@ -43,6 +51,7 @@ class MaterialEstoqueProducaoModel {
     return MaterialEstoqueProducaoModel(
       id:            (json['id'] as num?)?.toInt() ?? 0,
       nome:          json['nome']?.toString() ?? '',
+      descricao:     json['descricao']?.toString(),
       unidade:       json['unidade']?.toString(),
       categoria:     json['categoria']?.toString(),
       identificador: json['identificador']?.toString(),
@@ -140,6 +149,7 @@ class MovimentacaoProducaoModel {
   final int id;
   final int materialId;
   final String materialNome;
+  final String? materialDescricao;
   final String? materialUnidade;
   final String? materialIdentificador;
   final String? materialMedida;
@@ -158,6 +168,7 @@ class MovimentacaoProducaoModel {
     required this.id,
     required this.materialId,
     required this.materialNome,
+    this.materialDescricao,
     this.materialUnidade,
     this.materialIdentificador,
     this.materialMedida,
@@ -177,6 +188,13 @@ class MovimentacaoProducaoModel {
   bool get ehBaixa => tipo == 'BAIXA';
   bool get ehTransferenciaLinha => tipo == 'TRANSFERENCIA_LINHA';
   bool get ehDevolucao => tipo == 'DEVOLUCAO';
+
+  /// Nome de exibição: "NOME DESCRICAO" quando o material variante tem
+  /// descrição (ex.: material genérico "TINTA" + descricao "AZUL CLARO"),
+  /// ou o próprio nome caso contrário.
+  String get materialNomeExibicao => (materialDescricao != null && materialDescricao!.trim().isNotEmpty)
+      ? '$materialNome ${materialDescricao!.trim()}'
+      : materialNome;
 
   String get producaoOrigemDerivada => producao == '1' ? '2' : '1';
 
@@ -201,6 +219,7 @@ class MovimentacaoProducaoModel {
       id:                    (json['id'] as num?)?.toInt() ?? 0,
       materialId:            (json['materialId'] as num?)?.toInt() ?? 0,
       materialNome:          json['material']?['nome']?.toString() ?? '(material excluído)',
+      materialDescricao:     json['material']?['descricao']?.toString(),
       materialUnidade:       json['material']?['unidade']?.toString(),
       materialIdentificador: json['material']?['identificador']?.toString(),
       materialMedida:        json['material']?['medida']?.toString(),

@@ -1,3 +1,20 @@
+/// Nome de exibição do material: "NOME DESCRICAO" quando o material é uma
+/// variante vinculada a um genérico (ex.: "TINTA" + descricao "teste123"),
+/// ou apenas o nome quando não há descrição. Mesma lógica usada em
+/// orcamento_model.dart — sem isso, itens cujo material genérico foi
+/// resolvido para um filho concreto no backend voltam a aparecer com o
+/// nome "pelado" do pai (ex.: só "TINTA"), escondendo a descrição que
+/// migrou para o próprio Material.
+String _nomeExibicaoMaterial(dynamic material) {
+  if (material == null) return '';
+  final nome = material['nome'] ?? '';
+  final descricao = material['descricao'];
+  if (descricao != null && descricao.toString().trim().isNotEmpty) {
+    return '$nome · ${descricao.toString().trim()}';
+  }
+  return nome;
+}
+
 class OrdemCompraItemModel {
   final int? id;
   final int? materialId;
@@ -16,6 +33,11 @@ class OrdemCompraItemModel {
   final double? precoMetroQuadrado;
   final double precoTotal;
   final bool usarM2;
+  // Só true se o material retornado pelo backend ainda for o genérico
+  // "pai" (ex.: item legado ou algum fluxo que não resolveu a variante).
+  // Itens normais, já resolvidos, apontam pro Material filho concreto e
+  // vêm com isso false — a descrição nesse caso já faz parte do nome.
+  final bool ehGenerico;
 
   OrdemCompraItemModel({
     this.id,
@@ -28,6 +50,7 @@ class OrdemCompraItemModel {
     this.materialLargura,
     this.materialComprimento,
     this.descricaoItem,
+    this.ehGenerico = false,
     required this.numeroOS,
     required this.quantidade,
     this.qtdUnidade,
@@ -46,7 +69,7 @@ class OrdemCompraItemModel {
   factory OrdemCompraItemModel.fromJson(Map<String, dynamic> json) => OrdemCompraItemModel(
     id:                     json['id'],
     materialId:             (json['materialId'] as num?)?.toInt(),
-    materialNome:           json['material']?['nome'] ?? '',
+    materialNome:           _nomeExibicaoMaterial(json['material']),
     materialUnidade:        json['material']?['unidade'],
     materialMedida:         json['material']?['medida'],
     materialEspessura:      json['material']?['espessura'],
@@ -58,6 +81,7 @@ class OrdemCompraItemModel {
         ? double.tryParse(json['material']['comprimento'].toString())
         : null,
     descricaoItem:          json['descricaoItem'],
+    ehGenerico:             json['material']?['ehGenerico'] ?? false,
     numeroOS:               json['numeroOS'] ?? '',
     quantidade:             double.tryParse(json['quantidade']?.toString() ?? '0') ?? 0,
     qtdUnidade:             json['qtdUnidade'] != null

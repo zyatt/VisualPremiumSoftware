@@ -1,3 +1,17 @@
+/// Nome de exibição do material: "NOME DESCRICAO" quando o material é uma
+/// variante vinculada a um genérico (ex.: "TINTA" + descricao "AZUL 400ML"),
+/// ou apenas o nome quando não há descrição. Sem isso, itens de material
+/// genérico aparecem todos com o mesmo nome do pai, sem diferenciação.
+String _nomeExibicaoMaterial(dynamic material) {
+  if (material == null) return '';
+  final nome = material['nome'] ?? '';
+  final descricao = material['descricao'];
+  if (descricao != null && descricao.toString().trim().isNotEmpty) {
+    return '$nome · ${descricao.toString().trim()}';
+  }
+  return nome;
+}
+
 class OrcamentoItemModel {
   final int? id;
   final int materialId;
@@ -36,7 +50,7 @@ class OrcamentoItemModel {
       OrcamentoItemModel(
         id: json['id'],
         materialId: json['materialId'],
-        materialNome: json['material']?['nome'] ?? '',
+        materialNome: _nomeExibicaoMaterial(json['material']),
         fornecedorId: json['fornecedorId'],
         fornecedorNome: json['fornecedor']?['nomeFantasia'],
         quantidade:

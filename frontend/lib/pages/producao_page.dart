@@ -294,20 +294,20 @@ class _ProducaoPageState extends State<ProducaoPage> {
                   ],
                 ),
                 const Spacer(),
-                Tooltip(
-                  message: 'Ver histórico de movimentações de produção',
-                  child: OutlinedButton.icon(
-                    onPressed: _abrirHistorico,
-                    icon: const Icon(Icons.history, size: 18),
-                    label: const Text('Histórico'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.onSurface,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                    ).copyWith(
-                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                    ),
-                  ),
+                _BotaoCabecalhoWidget(
+                  icone: Icons.history,
+                  texto: 'Histórico',
+                  onPressed: _abrirHistorico,
+                  corFundo: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  corTexto: Theme.of(context).colorScheme.onSurface,
+                  corBorda: Theme.of(context).brightness == Brightness.dark
+                      ? Theme.of(context).colorScheme.outlineVariant
+                      : null,
+                  iconSize: 18,
+                  fontSize: 14,
+                  padH: 16,
+                  padV: 12,
+                  tooltip: 'Ver histórico de movimentações de produção',
                 ),
                 const SizedBox(width: 10),
                 IconButton(
@@ -443,21 +443,21 @@ class _CategoriaCardProducaoState extends State<_CategoriaCardProducao> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 56,
-                height: 56,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
                   color: widget.cor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(widget.icone, color: widget.cor, size: 28),
+                child: Icon(widget.icone, color: widget.cor, size: 24),
               ),
-              SizedBox(height: 12),
+              SizedBox(height: 8),
               Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
+                padding: EdgeInsets.symmetric(horizontal: 8),
                 child: Text(
                   widget.categoria,
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: 12.5,
                     fontWeight: FontWeight.w600,
                     color: ativo ? widget.cor : Theme.of(context).colorScheme.onSurface,
                   ),
@@ -522,21 +522,21 @@ class _IdentificadorCardProducaoState extends State<_IdentificadorCardProducao> 
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 56,
-                height: 56,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: widget.cor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(widget.icone, color: widget.cor, size: 28),
+                child: Icon(widget.icone, color: widget.cor, size: 20),
               ),
-              SizedBox(height: 10),
+              SizedBox(height: 8),
               Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
+                padding: EdgeInsets.symmetric(horizontal: 8),
                 child: Text(
                   widget.label,
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: 11,
                     fontWeight: FontWeight.w600,
                     color: ativo ? widget.cor : Theme.of(context).colorScheme.onSurface,
                   ),
@@ -545,11 +545,11 @@ class _IdentificadorCardProducaoState extends State<_IdentificadorCardProducao> 
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              SizedBox(height: 4),
+              SizedBox(height: 2),
               Text(
                 '${widget.quantidade} ${widget.quantidade == 1 ? "material" : "materiais"}',
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: 9,
                   color: ativo ? widget.cor.withValues(alpha: 0.8) : Theme.of(context).colorScheme.outline,
                   fontWeight: FontWeight.w500,
                 ),
@@ -894,6 +894,92 @@ class _BotaoNumeroPagina extends StatelessWidget {
     );
   }
 }
+/// Botão de ação do cabeçalho ("Histórico", etc.) — mesmo comportamento de
+/// hover do [_BotaoVoltar] (escurece levemente a cor de fundo ao passar o
+/// mouse), garantindo feedback visual consistente com o restante do app
+/// (ver estoque_page.dart).
+class _BotaoCabecalhoWidget extends StatefulWidget {
+  final IconData icone;
+  final String texto;
+  final VoidCallback onPressed;
+  final Color corFundo;
+  final Color corTexto;
+  final double iconSize;
+  final double fontSize;
+  final double padH;
+  final double padV;
+  final String? tooltip;
+  final Color? corBorda;
+
+  const _BotaoCabecalhoWidget({
+    required this.icone,
+    required this.texto,
+    required this.onPressed,
+    required this.corFundo,
+    required this.corTexto,
+    required this.iconSize,
+    required this.fontSize,
+    required this.padH,
+    required this.padV,
+    this.tooltip,
+    this.corBorda,
+  });
+
+  @override
+  State<_BotaoCabecalhoWidget> createState() => _BotaoCabecalhoWidgetState();
+}
+
+class _BotaoCabecalhoWidgetState extends State<_BotaoCabecalhoWidget> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final botao = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Material(
+        color: _hovered
+            ? widget.corFundo.withValues(alpha: 0.85)
+            : widget.corFundo,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: widget.onPressed,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: widget.padH, vertical: widget.padV),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: widget.corBorda != null ? Border.all(color: widget.corBorda!) : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(widget.icone, size: widget.iconSize, color: widget.corTexto),
+                const SizedBox(width: 6),
+                Text(
+                  widget.texto,
+                  style: TextStyle(
+                    fontSize: widget.fontSize,
+                    color: widget.corTexto,
+                    fontWeight: FontWeight.w600,
+                    height: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    return widget.tooltip != null
+        ? Tooltip(message: widget.tooltip, child: botao)
+        : botao;
+  }
+}
+
 class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;
@@ -920,40 +1006,37 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
       onExit:  (_) => setState(() => _hovered = false),
       child: Tooltip(
         message: widget.tooltip,
-        child: InkWell(
-          onTap: widget.onTap,
-          mouseCursor: SystemMouseCursors.click,
+        child: Material(
+          color: _hovered
+              ? AppTheme.primary.withValues(alpha: 0.85)
+              : AppTheme.primary,
           borderRadius: BorderRadius.circular(10),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: _hovered
-                  ? AppTheme.primary.withValues(alpha: 0.15)
-                  : AppTheme.primary.withValues(alpha: 0.08),
-              border: Border.all(
-                color: AppTheme.primary.withValues(alpha: _hovered ? 0.9 : 0.5),
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.arrow_back,
-                  size: 18,
-                  color: AppTheme.primary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  widget.label,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.w600,
+          child: InkWell(
+            onTap: widget.onTap,
+            mouseCursor: SystemMouseCursors.click,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.arrow_back,
+                    size: 18,
+                    color: Colors.white,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.label,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1076,7 +1159,7 @@ class _EstoqueProducaoTabState extends State<_EstoqueProducaoTab> {
         : provider.erro;
 
     return Padding(
-      padding: const EdgeInsets.only(top: 16),
+      padding: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1228,7 +1311,7 @@ class _EstoqueProducaoTabState extends State<_EstoqueProducaoTab> {
                               }
 
                               return GridView.count(
-                                crossAxisCount:   4,
+                                crossAxisCount:   6,
                                 crossAxisSpacing: 16,
                                 mainAxisSpacing:  16,
                                 childAspectRatio: 1.0,
@@ -1500,7 +1583,7 @@ class _EstoqueProducaoIdentificadorPageState extends State<_EstoqueProducaoIdent
 
     return SingleChildScrollView(
       child: GridView.count(
-        crossAxisCount:   4,
+        crossAxisCount:   6,
         crossAxisSpacing: 16,
         mainAxisSpacing:  16,
         childAspectRatio: 1.0,
@@ -2266,7 +2349,7 @@ class _LinhaEstoqueProducaoState extends State<_LinhaEstoqueProducao> {
                 nextCol(Padding(
                   padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                   child: Text(
-                    m.nome,
+                    m.nomeExibicao,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
@@ -2959,7 +3042,7 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                m.nome,
+                                m.nomeExibicao,
                                 style: const TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w700,
@@ -3095,7 +3178,7 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
                                     TableRow(
                                       children: [
                                         _celTab(context, 'RETALHO'),
-                                        _celTab(context, m.nome, negrito: true, wrap: true),
+                                        _celTab(context, m.nomeExibicao, negrito: true, wrap: true),
                                         _celTab(context, '${_fmt(areaRetalho)}m²'),
                                         _celTab(context, m.espessura != null && m.espessura!.isNotEmpty ? _fmtEspessura(m.espessura)! : '—'),
                                         _celTab(context, '${_fmt(areaRetalho)}m²', cor: AppTheme.success, negrito: true),
@@ -3195,19 +3278,25 @@ class _BaixaEstoqueProducaoDialogState extends State<_BaixaEstoqueProducaoDialog
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: _enviando ? null : _confirmar,
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(
-            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+        Tooltip(
+          message: 'Fechar sem registrar a baixa',
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: const Text('Cancelar'),
           ),
-          child: _enviando
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Text('Confirmar Baixa'),
+        ),
+        Tooltip(
+          message: 'Confirmar a baixa deste material do estoque',
+          child: FilledButton(
+            onPressed: _enviando ? null : _confirmar,
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: _enviando
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Confirmar Baixa'),
+          ),
         ),
       ],
     );
@@ -3301,7 +3390,7 @@ class _DevolverEstoquePadraoDialogState extends State<_DevolverEstoquePadraoDial
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              m.nome,
+              m.nomeExibicao,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
             ),
             const SizedBox(height: 4),
@@ -3378,19 +3467,25 @@ class _DevolverEstoquePadraoDialogState extends State<_DevolverEstoquePadraoDial
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: _enviando ? null : _confirmar,
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
-            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+        Tooltip(
+          message: 'Fechar sem registrar a devolução',
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: const Text('Cancelar'),
           ),
-          child: _enviando
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Text('Confirmar Devolução'),
+        ),
+        Tooltip(
+          message: 'Confirmar a devolução deste material ao estoque',
+          child: FilledButton(
+            onPressed: _enviando ? null : _confirmar,
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: _enviando
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Confirmar Devolução'),
+          ),
         ),
       ],
     );
@@ -3486,7 +3581,7 @@ class _TransferirEntreLinhasDialogState extends State<_TransferirEntreLinhasDial
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              m.nome,
+              m.nomeExibicao,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
             ),
             const SizedBox(height: 4),
@@ -3563,19 +3658,25 @@ class _TransferirEntreLinhasDialogState extends State<_TransferirEntreLinhasDial
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: _enviando ? null : _confirmar,
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
-            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+        Tooltip(
+          message: 'Fechar sem registrar a transferência',
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+            child: const Text('Cancelar'),
           ),
-          child: _enviando
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Text('Confirmar Transferência'),
+        ),
+        Tooltip(
+          message: 'Confirmar a transferência deste material entre as linhas',
+          child: FilledButton(
+            onPressed: _enviando ? null : _confirmar,
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary).copyWith(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            child: _enviando
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Confirmar Transferência'),
+          ),
         ),
       ],
     );
@@ -3736,7 +3837,7 @@ class _MovimentacaoEstoqueProducaoCardState extends State<_MovimentacaoEstoquePr
                     ),
                   ),
                   Text(
-                    mov.materialNome,
+                    mov.materialNomeExibicao,
                     style: TextStyle(
                       fontSize: 13,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,

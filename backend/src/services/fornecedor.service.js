@@ -1,4 +1,5 @@
 const prisma = require('../utils/prisma');
+const materialSvc = require('./material.service');
 
 function normalizarTelefone(tel) {
   if (!tel) return null;
@@ -207,18 +208,27 @@ async function listar(busca, tipo, id) {
     where,
     include: {
       materiais: {
-        where: { ativo: true },
+        // `ativo: true` filtra pelo vínculo (FornecedorMaterial) e
+        // `material: { ativo: true }` filtra pelo Material relacionado —
+        // Prisma permite condicionar a listagem do lado "muitos" (materiais)
+        // por um campo da relação para-um (material) dentro do mesmo where,
+        // mas NÃO aceita um `where` dentro de um include de relação
+        // para-um isolado (por isso o filtro fica aqui, não em `material`).
+        where: { ativo: true, material: { ativo: true } },
         include: {
           material: {
             select: {
               id: true,
               nome: true,
+              descricao: true,
               identificador: true,
               medida: true,
               espessura: true,
               unidade: true,
               largura: true,
               comprimento: true,
+              ativo: true,
+              ehGenerico: true,
             },
           },
         },
@@ -263,18 +273,27 @@ async function listarPaginado(filtros = {}) {
     where,
     include: {
       materiais: {
-        where: { ativo: true },
+        // `ativo: true` filtra pelo vínculo (FornecedorMaterial) e
+        // `material: { ativo: true }` filtra pelo Material relacionado —
+        // Prisma permite condicionar a listagem do lado "muitos" (materiais)
+        // por um campo da relação para-um (material) dentro do mesmo where,
+        // mas NÃO aceita um `where` dentro de um include de relação
+        // para-um isolado (por isso o filtro fica aqui, não em `material`).
+        where: { ativo: true, material: { ativo: true } },
         include: {
           material: {
             select: {
               id: true,
               nome: true,
+              descricao: true,
               identificador: true,
               medida: true,
               espessura: true,
               unidade: true,
               largura: true,
               comprimento: true,
+              ativo: true,
+              ehGenerico: true,
             },
           },
         },
@@ -316,18 +335,27 @@ async function buscarPorId(id) {
     where: { id },
     include: {
       materiais: {
-        where: { ativo: true },
+        // `ativo: true` filtra pelo vínculo (FornecedorMaterial) e
+        // `material: { ativo: true }` filtra pelo Material relacionado —
+        // Prisma permite condicionar a listagem do lado "muitos" (materiais)
+        // por um campo da relação para-um (material) dentro do mesmo where,
+        // mas NÃO aceita um `where` dentro de um include de relação
+        // para-um isolado (por isso o filtro fica aqui, não em `material`).
+        where: { ativo: true, material: { ativo: true } },
         include: {
           material: {
             select: {
               id: true,
               nome: true,
+              descricao: true,
               identificador: true,
               medida: true,
               espessura: true,
               unidade: true,
               largura: true,
               comprimento: true,
+              ativo: true,
+              ehGenerico: true,
             },
           },
         },
@@ -345,10 +373,77 @@ async function listarPorMaterial(materialId) {
     include: {
       materiais: {
         where: { materialId, ativo: true },
+        // Sem este `include.material`, o vínculo volta sem os dados do
+        // Material relacionado (nome, descricao, etc.) — o front usa
+        // `materialDescricao` para mostrar a descrição da variante
+        // (ex.: "ABC" de "TINTA · ABC") ao lado do fornecedor na tela
+        // "Vincular por Material", e sem isso o campo chega sempre null.
+        include: {
+          material: {
+            select: {
+              id: true,
+              nome: true,
+              descricao: true,
+              identificador: true,
+              medida: true,
+              espessura: true,
+              unidade: true,
+              largura: true,
+              comprimento: true,
+              ativo: true,
+              ehGenerico: true,
+            },
+          },
+        },
       },
     },
     orderBy: { nomeFantasia: 'asc' },
   });
+}
+
+/**
+ * Resolve o id do Material filho (variante) de um genérico a partir da
+ * descrição digitada, SEM criar nada — usado pela tela de "Vincular por
+ * Material" para saber quais fornecedores já têm aquela variante
+ * vinculada enquanto o usuário ainda está digitando a descrição. Criar o
+ * filho aqui geraria variantes "fantasma" toda vez que alguém apenas
+ * pesquisasse, então essa função só enxerga o que já existe.
+ *
+ * A comparação precisa casar exatamente com a usada em
+ * material.service.js::resolverOuCriarFilho — `equals` case-insensitive
+ * após trim(), SEM remover acentos — senão esta função e aquela podiam
+ * discordar sobre o que conta como "a mesma variante" (ex.: uma achando
+ * a variante existente e a outra criando um filho novo para o mesmo
+ * texto).
+ *
+ * @returns {Promise<number|null>} id do Material filho, ou null se a
+ *   variante ainda não existe.
+ */
+async function resolverFilhoPorDescricao(materialGenericoId, descricao) {
+  const descTrimmed = descricao?.trim();
+  if (!descTrimmed) return null;
+
+  const filho = await prisma.material.findFirst({
+    where: {
+      materialGenericoId,
+      descricao: { equals: descTrimmed, mode: 'insensitive' },
+    },
+    select: { id: true },
+  });
+  return filho ? filho.id : null;
+}
+
+/**
+ * Lista os fornecedores que já têm vinculada a variante (filho) de um
+ * material genérico correspondente à descrição informada. Se a variante
+ * ainda não existir, retorna lista vazia (ninguém pode estar vinculado a
+ * algo que não existe) em vez de erro — a UI trata isso como "nenhum
+ * fornecedor vinculado ainda".
+ */
+async function listarPorMaterialGenericoEDescricao(materialGenericoId, descricao) {
+  const materialIdReal = await resolverFilhoPorDescricao(materialGenericoId, descricao);
+  if (!materialIdReal) return [];
+  return listarPorMaterial(materialIdReal);
 }
 
 async function criar(data) {
@@ -495,16 +590,73 @@ function _normalizarPrecoDecimal(valor) {
   return parseFloat(num.toFixed(6)).toString();
 }
 
-async function vincularMaterial(fornecedorId, materialId, preco, precoMetroQuadrado, precoUnidadeMedida) {
+async function _garantirVinculoGenerico(fornecedorId, materialGenericoId) {
+  // Vínculo "de presença" do material genérico com o fornecedor, sem
+  // preço (o genérico nunca tem preço próprio, só suas variantes).
+  // Ver comentário em vincularMaterial() para o motivo.
+  await prisma.fornecedorMaterial.upsert({
+    where: { fornecedorId_materialId: { fornecedorId, materialId: materialGenericoId } },
+    create: {
+      fornecedorId,
+      materialId: materialGenericoId,
+      preco: 0,
+      precoMetroQuadrado: 0,
+      precoUnidadeMedida: 0,
+      ativo: true,
+    },
+    update: {
+      ativo: true,
+    },
+  });
+}
+
+async function vincularMaterial(fornecedorId, materialId, preco, precoMetroQuadrado, precoUnidadeMedida, descricao) {
   const precoVal   = _normalizarPrecoDecimal(preco);
   const precoM2Val = _normalizarPrecoDecimal(precoMetroQuadrado);
   const precoUnidadeMedidaVal = _normalizarPrecoDecimal(precoUnidadeMedida);
 
+  // Material genérico não pode receber vínculo/preço diretamente — o
+  // vínculo tem que ser sempre com a variante concreta (o Material
+  // filho, que carrega a descrição). Antes, a busca de materiais usada
+  // na tela de Fornecedores (GET /materiais) nem mostra os filhos por
+  // padrão, então a UI só oferecia o genérico para escolher — e o
+  // vínculo acabava ficando preso a ele, "sumindo" a descrição.
+  // Agora: se vier uma "descricao" junto, resolve (ou cria) o filho e
+  // vincula nele, do mesmo jeito que o orçamento já faz.
+  const material = await prisma.material.findUnique({
+    where: { id: materialId },
+    select: { id: true, ehGenerico: true, nome: true },
+  });
+  if (!material) throw { status: 404, message: 'Material não encontrado.' };
+
+  let materialIdReal = materialId;
+  if (material.ehGenerico) {
+    const desc = descricao != null && String(descricao).trim() ? String(descricao).trim() : null;
+    if (!desc) {
+      throw {
+        status: 400,
+        message: `"${material.nome}" é um material genérico: informe a descrição da variante (ex.: a cor) para vincular o preço do fornecedor.`,
+      };
+    }
+    materialIdReal = (await materialSvc.resolverOuCriarFilho(materialId, desc)).id;
+
+    // Além de vincular a variante concreta (acima), garante que o
+    // material genérico "pai" também fique marcado como vinculado a
+    // este fornecedor. Sem isso, o pai nunca aparece na lista de "já
+    // vinculados" na tela de Fornecedores/Ordem de Compra, mesmo
+    // depois de o usuário vincular várias variantes dele: ele some
+    // do array `fornecedor.materiais` e a UI mostra "Novo vínculo"
+    // pra ele pra sempre, obrigando o usuário a sempre expandir e
+    // escolher a variante certa mesmo pra adicionar outra variante
+    // nova depois.
+    await _garantirVinculoGenerico(fornecedorId, materialId);
+  }
+
   return prisma.fornecedorMaterial.upsert({
-    where: { fornecedorId_materialId: { fornecedorId, materialId } },
+    where: { fornecedorId_materialId: { fornecedorId, materialId: materialIdReal } },
     create: {
       fornecedorId,
-      materialId,
+      materialId: materialIdReal,
       preco: precoVal,
       precoMetroQuadrado: precoM2Val,
       precoUnidadeMedida: precoUnidadeMedidaVal,
@@ -558,6 +710,7 @@ module.exports = {
   buscarParaVinculo,
   buscarPorId,
   listarPorMaterial,
+  listarPorMaterialGenericoEDescricao,
   criar,
   atualizar,
   remover,
@@ -565,4 +718,10 @@ module.exports = {
   desvincularMaterial,
   atualizarPrecoVinculo,
   verificarSemelhantes,
+  // Exportado para o ordemCompra.service.js reaproveitar ao sincronizar
+  // vínculos fornecedor↔material a partir dos itens de uma OC (o mesmo
+  // "vínculo de presença" do genérico precisa acontecer nos dois fluxos:
+  // vincular manualmente na tela de Fornecedores, e vincular
+  // implicitamente ao salvar/atualizar uma Ordem de Compra).
+  _garantirVinculoGenerico,
 };

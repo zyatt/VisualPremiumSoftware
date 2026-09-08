@@ -575,7 +575,7 @@ class _AbaEstoqueState extends State<_AbaEstoque> {
             .where((e) =>
                 e.value.categoriaLabel.toLowerCase().contains(busca) ||
                 e.value.materiais.any((m) =>
-                    m.nome.toLowerCase().contains(busca)))
+                    m.nomeExibicao.toLowerCase().contains(busca)))
             .toList();
 
     final semCusto = prov.estoque
@@ -795,7 +795,7 @@ class _EstoqueCategoriaCardState extends State<_EstoqueCategoriaCard> {
     final materiais = widget.busca.isNotEmpty
         ? cat.materiais
             .where((m) =>
-                m.nome.toLowerCase().contains(widget.busca) ||
+                m.nomeExibicao.toLowerCase().contains(widget.busca) ||
                 (m.identificador ?? '')
                     .toLowerCase()
                     .contains(widget.busca))
@@ -976,7 +976,7 @@ class _LinhaEstoque extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(m.nome,
+                    Text(m.nomeExibicao,
                         style: TextStyle(
                           fontSize:   13,
                           fontWeight: FontWeight.w500,
@@ -1530,7 +1530,7 @@ class _LinhaGasto extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(m.nome,
+                    Text(m.nomeExibicao,
                         style: TextStyle(
                           fontSize:   13,
                           fontWeight: FontWeight.w500,

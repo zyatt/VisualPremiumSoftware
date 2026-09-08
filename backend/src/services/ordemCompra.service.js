@@ -1,4 +1,6 @@
 const prisma = require('../utils/prisma');
+const materialSvc = require('./material.service');
+const fornecedorSvc = require('./fornecedor.service');
 
 function _normalizarPreco(valor) {
   if (valor == null) return null;
@@ -72,19 +74,142 @@ function _expandirItensComDistribuicao(itens) {
   return resultado;
 }
 
+/// Resolve itens que apontam para um material genérico (ehGenerico: true)
+/// para o Material filho concreto correspondente à descrição informada,
+/// criando o filho se ainda não existir (mesma lógica usada em
+/// orcamento.service.js). Sem isso, a OC salvava o item com o materialId
+/// do próprio genérico — que fica oculto de todas as listagens de estoque
+/// — e ao finalizar a OC o estoque era creditado nesse registro fantasma,
+/// nunca aparecendo em lugar nenhum.
+///
+/// Retorna uma NOVA lista de itens (não modifica o array original), com
+/// materialId sempre apontando para um material concreto e descricaoItem
+/// zerado para os itens que foram resolvidos (a descrição já passa a
+/// viver no Material filho, como em orçamento).
+async function _resolverMateriaisGenericos(itens) {
+  const cache = new Map(); // `${materialId}::${descricaoLower}` -> filho resolvido
+
+  const resultado = [];
+  for (const item of itens) {
+    if (!item.materialId) {
+      resultado.push(item);
+      continue;
+    }
+
+    const material = await prisma.material.findUnique({
+      where: { id: Number(item.materialId) },
+      select: { id: true, nome: true, ehGenerico: true },
+    });
+    if (!material) throw { status: 404, message: `Material ${item.materialId} não encontrado.` };
+
+    if (!material.ehGenerico) {
+      // `materialNomeResolvido` só serve para mensagens de erro (ver
+      // _validarSemItensDuplicados) — nunca é persistido no OrdemCompraItem.
+      resultado.push({ ...item, materialNomeResolvido: material.nome });
+      continue;
+    }
+
+    const desc = item.descricaoItem != null && String(item.descricaoItem).trim()
+      ? String(item.descricaoItem).trim()
+      : null;
+    if (!desc) {
+      throw {
+        status: 400,
+        message: 'Este material é genérico: preencha a descrição do item antes de salvar.',
+      };
+    }
+
+    const chave = `${material.id}::${desc.toLowerCase()}`;
+    let filho = cache.get(chave);
+    if (!filho) {
+      filho = await materialSvc.resolverOuCriarFilho(material.id, desc);
+      cache.set(chave, filho);
+    }
+
+    // `materialGenericoOrigemId` guarda o id do genérico "pai" que deu
+    // origem a este item, mesmo depois de materialId já apontar pro
+    // filho concreto. É usado só internamente por
+    // _sincronizarVinculosFornecedor[PorTotal] pra também vincular o
+    // genérico ao fornecedor (ver comentário lá) — nunca é persistido
+    // no OrdemCompraItem. `materialNomeResolvido` (mesma ideia, só para
+    // mensagens de erro) segue o mesmo tratamento.
+    resultado.push({
+      ...item,
+      materialId: filho.id,
+      descricaoItem: null,
+      materialGenericoOrigemId: material.id,
+      materialNomeResolvido: filho.descricao ? `${filho.nome} · ${filho.descricao}` : filho.nome,
+    });
+  }
+  return resultado;
+}
+
+/// Impede que a mesma variante de material (mesmo materialId já resolvido)
+/// apareça duas vezes na lista de itens de uma OC — mesma regra que
+/// orcamento.service.js já aplica em substituirItens/salvarRascunho. Sem
+/// isso, adicionar "TINTA · ABC" duas vezes (ex.: uma vez pela variante já
+/// vinculada, outra informando a descrição "ABC" de novo pro genérico)
+/// cria dois OrdemCompraItem apontando pro mesmo Material, duplicando
+/// quantidade/estoque na finalização sem nenhum aviso.
+///
+/// Recebe a lista JÁ resolvida (pós _resolverMateriaisGenericos, portanto
+/// antes de _expandirItensComDistribuicao — a expansão por OS é o que
+/// legitimamente repete o mesmo materialId em múltiplas linhas).
+function _validarSemItensDuplicados(itensResolvidos) {
+  const vistos = new Map(); // materialId -> nome de exibição
+  for (const item of itensResolvidos) {
+    if (!item.materialId) continue;
+    const mid = Number(item.materialId);
+    if (vistos.has(mid)) {
+      const nome = vistos.get(mid) || item.materialNomeResolvido;
+      throw {
+        status: 400,
+        message: nome
+          ? `Item duplicado: "${nome}" já foi adicionado a esta ordem de compra.`
+          : `Item duplicado para o material ${mid}.`,
+      };
+    }
+    vistos.set(mid, item.materialNomeResolvido);
+  }
+}
+
 const _selectMaterial = {
   id: true,
   nome: true,
+  descricao: true,
   unidade: true,
   medida: true,
   espessura: true,
   identificador: true,
   largura: true,
   comprimento: true,
+  ehGenerico: true,
 };
+
+async function _vincularGenericosDeOrigem(fornecedorId, itens) {
+  // Garante que todo material genérico que originou algum item da OC
+  // (via _resolverMateriaisGenericos) também fique vinculado ao
+  // fornecedor — mesmo "vínculo de presença" sem preço que
+  // fornecedor.service.js já garante quando o usuário vincula uma
+  // variante manualmente pela tela de Fornecedores. Sem isso, itens de
+  // OC que resolveram um genérico direto (fluxo "Adicionar genérico
+  // com descrição" da tela de Ordem de Compra) nunca deixam o pai
+  // vinculado, e ele continua aparecendo como "Novo vínculo" pra
+  // sempre nas próximas OCs desse fornecedor.
+  if (!fornecedorId) return;
+  const genericosIds = new Set();
+  for (const item of itens) {
+    if (item.materialGenericoOrigemId) genericosIds.add(Number(item.materialGenericoOrigemId));
+  }
+  for (const materialGenericoId of genericosIds) {
+    await fornecedorSvc._garantirVinculoGenerico(fornecedorId, materialGenericoId);
+  }
+}
 
 async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
   if (!fornecedorId || !Array.isArray(itens) || itens.length === 0) return;
+
+  await _vincularGenericosDeOrigem(fornecedorId, itens);
 
   const porMaterial = new Map();
   for (const item of itens) {
@@ -143,6 +268,8 @@ async function _sincronizarVinculosFornecedor(fornecedorId, itens) {
 
 async function _sincronizarVinculosFornecedorPorTotal(fornecedorId, itens) {
   if (!fornecedorId || !Array.isArray(itens) || itens.length === 0) return;
+
+  await _vincularGenericosDeOrigem(fornecedorId, itens);
 
   const porMaterial = new Map();
   for (const item of itens) {
@@ -357,7 +484,9 @@ async function criar(data, usuarioId) {
   ordemData.status         = ordemData.status         ?? 'EM_ANDAMENTO';
 
   const osArray = _normalizarNumerosOS(numerosOS);
-  const itensExpandidos = _expandirItensComDistribuicao(itens || []);
+  const itensResolvidos = await _resolverMateriaisGenericos(itens || []);
+  _validarSemItensDuplicados(itensResolvidos);
+  const itensExpandidos = _expandirItensComDistribuicao(itensResolvidos);
 
   const valorTotal = itensExpandidos.reduce((acc, item) => {
     let precoItem;
@@ -407,7 +536,9 @@ async function criar(data, usuarioId) {
                 quantidade:         Number(item.quantidade),
                 qtdUnidade:         item.qtdUnidade != null ? Number(item.qtdUnidade) : null,
                 precoUnitario:      usarM2 ? 0 : Number(item.precoUnitario ?? 0),
-                precoMetroQuadrado: usarM2 ? Number(item.precoMetroQuadrado ?? 0) : 0,
+                precoMetroQuadrado: Number(item.precoMetroQuadrado ?? 0) > 0
+                  ? Number(item.precoMetroQuadrado)
+                  : 0,
                 usarM2,
                 precoTotal,
               };
@@ -424,7 +555,7 @@ async function criar(data, usuarioId) {
     },
   });
 
-  await _sincronizarVinculosFornecedor(ordemData.fornecedorId, itens || []);
+  await _sincronizarVinculosFornecedor(ordemData.fornecedorId, itensResolvidos);
   return oc;
 }
 
@@ -446,9 +577,12 @@ async function atualizar(id, data) {
     });
   }
 
+  let itensResolvidos = itens;
   if (Array.isArray(itens)) {
+    itensResolvidos = await _resolverMateriaisGenericos(itens);
+    _validarSemItensDuplicados(itensResolvidos);
     await prisma.ordemCompraItem.deleteMany({ where: { ordemCompraId: id } });
-    const itensExpandidos = _expandirItensComDistribuicao(itens);
+    const itensExpandidos = _expandirItensComDistribuicao(itensResolvidos);
     if (itensExpandidos.length) {
       await prisma.ordemCompraItem.createMany({
         data: itensExpandidos.map((item) => {
@@ -474,7 +608,9 @@ async function atualizar(id, data) {
             quantidade:         Number(item.quantidade),
             qtdUnidade:         item.qtdUnidade != null ? Number(item.qtdUnidade) : null,
             precoUnitario:      usarM2 ? 0 : Number(item.precoUnitario ?? 0),
-            precoMetroQuadrado: usarM2 ? Number(item.precoMetroQuadrado ?? 0) : 0,
+            precoMetroQuadrado: Number(item.precoMetroQuadrado ?? 0) > 0
+              ? Number(item.precoMetroQuadrado)
+              : 0,
             usarM2,
             precoTotal,
           };
@@ -486,28 +622,72 @@ async function atualizar(id, data) {
 
   const fornecedorIdFinal = ordemData.fornecedorId
     ?? (await prisma.ordemCompra.findUnique({ where: { id }, select: { fornecedorId: true } }))?.fornecedorId;
-  await _sincronizarVinculosFornecedor(fornecedorIdFinal, itens || []);
+  await _sincronizarVinculosFornecedor(fornecedorIdFinal, itensResolvidos || []);
 
   return ordem;
 }
 
 async function adicionarItem(ordemCompraId, itemData) {
-  const usarM2     = itemData.usarM2 ?? false;
-  const precoTotal = usarM2 && Number(itemData.precoMetroQuadrado) > 0
-    ? Number(itemData.quantidade) * Number(itemData.precoMetroQuadrado)
-    : Number(itemData.quantidade) * Number(itemData.precoUnitario);
+  const [itemResolvido] = await _resolverMateriaisGenericos([itemData]);
+  // `materialGenericoOrigemId` e `materialNomeResolvido` são campos
+  // internos de controle (ver _resolverMateriaisGenericos) e não existem
+  // no model OrdemCompraItem — precisam ser retirados antes de espalhar o
+  // item no `data` do Prisma create, ou a criação falha com
+  // "Unknown argument".
+  const { materialGenericoOrigemId, materialNomeResolvido, ...itemResolvidoSemOrigem } = itemResolvido;
+
+  // Impede adicionar um material (variante) que a OC já possui — mesma
+  // regra aplicada em criar/atualizar via _validarSemItensDuplicados,
+  // repetida aqui contra o banco porque este endpoint recebe só 1 item
+  // de cada vez, sem ver os itens já salvos na OC.
+  if (itemResolvidoSemOrigem.materialId) {
+    const jaExiste = await prisma.ordemCompraItem.findFirst({
+      where: { ordemCompraId, materialId: itemResolvidoSemOrigem.materialId },
+      select: { id: true },
+    });
+    if (jaExiste) {
+      throw {
+        status: 400,
+        message: materialNomeResolvido
+          ? `Item duplicado: "${materialNomeResolvido}" já foi adicionado a esta ordem de compra.`
+          : `Item duplicado para o material ${itemResolvidoSemOrigem.materialId}.`,
+      };
+    }
+  }
+
+  const usarM2     = itemResolvidoSemOrigem.usarM2 ?? false;
+  const precoTotal = usarM2 && Number(itemResolvidoSemOrigem.precoMetroQuadrado) > 0
+    ? Number(itemResolvidoSemOrigem.quantidade) * Number(itemResolvidoSemOrigem.precoMetroQuadrado)
+    : Number(itemResolvidoSemOrigem.quantidade) * Number(itemResolvidoSemOrigem.precoUnitario);
 
   const dadosItem = {
-    ...itemData,
+    ...itemResolvidoSemOrigem,
     usarM2,
-    precoUnitario:      usarM2 ? null : (itemData.precoUnitario ?? null),
-    precoMetroQuadrado: usarM2 ? (itemData.precoMetroQuadrado ?? null) : null,
+    precoUnitario:      usarM2 ? null : (itemResolvidoSemOrigem.precoUnitario ?? null),
+    precoMetroQuadrado: Number(itemResolvidoSemOrigem.precoMetroQuadrado ?? 0) > 0
+      ? Number(itemResolvidoSemOrigem.precoMetroQuadrado)
+      : null,
   };
 
   const item = await prisma.ordemCompraItem.create({
     data: { ...dadosItem, ordemCompraId, precoTotal },
     include: { material: { select: _selectMaterial } },
   });
+
+  // Mesma sincronização de vínculo fornecedor↔genérico que criar/atualizar
+  // já fazem — sem isso, adicionar um item de material genérico direto
+  // numa OC já existente (endpoint usado pelo botão "+ item" avulso)
+  // deixaria o genérico sem vínculo, igual ao bug original.
+  if (materialGenericoOrigemId) {
+    const ordem = await prisma.ordemCompra.findUnique({
+      where: { id: ordemCompraId },
+      select: { fornecedorId: true },
+    });
+    if (ordem?.fornecedorId) {
+      await fornecedorSvc._garantirVinculoGenerico(ordem.fornecedorId, materialGenericoOrigemId);
+    }
+  }
+
   await recalcularTotal(ordemCompraId);
   return item;
 }
@@ -519,13 +699,60 @@ async function removerItem(ordemCompraId, itemId) {
 
 async function atualizarItem(itemId, data) {
   const item = await prisma.ordemCompraItem.findUnique({ where: { id: itemId } });
-  const quantidade    = data.quantidade    ?? item.quantidade;
-  const precoUnitario = data.precoUnitario ?? item.precoUnitario;
+
+  // Se o materialId estiver sendo alterado para um material genérico
+  // (ex.: reaproveitando este endpoint para trocar de material), resolve
+  // para o filho concreto do mesmo jeito que em criar/atualizar/adicionarItem.
+  let dadosResolvidos = data;
+  let materialGenericoOrigemId = null;
+  if (data.materialId != null) {
+    const [resolvido] = await _resolverMateriaisGenericos([
+      { materialId: data.materialId, descricaoItem: data.descricaoItem ?? item.descricaoItem },
+    ]);
+    dadosResolvidos = { ...data, materialId: resolvido.materialId, descricaoItem: resolvido.descricaoItem };
+    materialGenericoOrigemId = resolvido.materialGenericoOrigemId ?? null;
+
+    // Mesma checagem de duplicidade de adicionarItem/criar/atualizar,
+    // aqui contra os demais itens já salvos nesta OC (excluindo o
+    // próprio item, senão ele sempre "colidiria" consigo mesmo).
+    if (resolvido.materialId !== item.materialId) {
+      const jaExiste = await prisma.ordemCompraItem.findFirst({
+        where: {
+          ordemCompraId: item.ordemCompraId,
+          materialId: resolvido.materialId,
+          id: { not: itemId },
+        },
+        select: { id: true },
+      });
+      if (jaExiste) {
+        throw {
+          status: 400,
+          message: resolvido.materialNomeResolvido
+            ? `Item duplicado: "${resolvido.materialNomeResolvido}" já foi adicionado a esta ordem de compra.`
+            : `Item duplicado para o material ${resolvido.materialId}.`,
+        };
+      }
+    }
+  }
+
+  const quantidade    = dadosResolvidos.quantidade    ?? item.quantidade;
+  const precoUnitario = dadosResolvidos.precoUnitario ?? item.precoUnitario;
   const precoTotal    = Number(quantidade) * Number(precoUnitario);
   const updated = await prisma.ordemCompraItem.update({
     where: { id: itemId },
-    data: { ...data, precoTotal },
+    data: { ...dadosResolvidos, precoTotal },
   });
+
+  if (materialGenericoOrigemId) {
+    const ordem = await prisma.ordemCompra.findUnique({
+      where: { id: item.ordemCompraId },
+      select: { fornecedorId: true },
+    });
+    if (ordem?.fornecedorId) {
+      await fornecedorSvc._garantirVinculoGenerico(ordem.fornecedorId, materialGenericoOrigemId);
+    }
+  }
+
   await recalcularTotal(item.ordemCompraId);
   return updated;
 }
@@ -806,7 +1033,16 @@ async function reverter(id) {
       usarM2:     item.usarM2,
       qtdUnidade: item.qtdUnidade,
     });
-    const novaQuantidade = Math.max(0, Number(material.quantidade) - quantidadeRealReverter);
+    // Sem o Math.max(0, ...) que havia aqui: o finalizar soma
+    // quantidadeReal sem nenhum piso, então o reverter precisa subtrair
+    // do mesmo jeito, sem piso, pra ser a operação inversa exata dele.
+    // Se o material já teve saída registrada em Controle de Estoque
+    // depois da entrada dada pela OC, a quantidade fica negativa aqui de
+    // propósito — é esse "débito" que, ao finalizar de novo, volta pro
+    // valor correto. Travar em 0 fazia esse -1 virar 0, e o finalizar
+    // seguinte reintroduzia 1 unidade fantasma que já tinha saído do
+    // estoque (era esse o bug relatado).
+    const novaQuantidade = Number(material.quantidade) - quantidadeRealReverter;
     const novoStatus     = _calcularStatus(novaQuantidade, material.estoqueMinimo, material.ativo);
     const anteriorUsarM2 = historicoAnterior?.usarM2 ?? false;
     await prisma.material.update({

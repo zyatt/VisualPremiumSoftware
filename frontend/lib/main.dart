@@ -22,12 +22,14 @@ import 'providers/estoque_producao_provider.dart';
 import 'providers/audit_log_provider.dart';
 import 'providers/gastos_categoria_provider.dart';
 import 'providers/alertas_estoque_provider.dart';
+import 'providers/widgets_flutuantes_provider.dart';
 import 'providers/veiculo_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/nav_layout_provider.dart';
 import 'providers/orcamento_venda_provider.dart';
 import 'providers/solicitacao_material_provider.dart';
 import 'providers/chat_provider.dart';
+import 'providers/conta_pagar_provider.dart';
 
 import 'widgets/update_checker_widget.dart';
 import 'widgets/theme_transition.dart';
@@ -193,10 +195,12 @@ class _VisualPremiumAppState extends State<VisualPremiumApp> with WindowListener
         ChangeNotifierProvider(create: (_) => AuditLogProvider()),
         ChangeNotifierProvider(create: (_) => GastosCategoriaProvider()),
         ChangeNotifierProvider(create: (_) => AlertasEstoqueProvider()),
+        ChangeNotifierProvider(create: (_) => WidgetsFlutuantesProvider()..carregar()),
         ChangeNotifierProvider(create: (_) => VeiculoProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => NavLayoutProvider()),
         ChangeNotifierProvider(create: (_) => OrcamentoVendaProvider()),
+        ChangeNotifierProvider(create: (_) => ContaPagarProvider()),
         ChangeNotifierProvider(create: (_) => RoboHelperProvider()),
         ChangeNotifierProvider.value(value: widget.solicitacaoMaterialProvider),
         ChangeNotifierProvider.value(value: widget.chatProvider),

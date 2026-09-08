@@ -1,3 +1,18 @@
+/// Nome de exibição do material: "NOME DESCRICAO" quando o material é uma
+/// variante vinculada a um genérico (ex.: "TINTA" + descricao "AZUL 400ML"),
+/// ou apenas o nome quando não há descrição. Sem isso, o vínculo do
+/// fornecedor com uma variante aparece só com o nome do genérico pai.
+String? _nomeExibicaoMaterial(dynamic material) {
+  if (material == null) return null;
+  final nome = material['nome'];
+  final descricao = material['descricao'];
+  if (nome == null) return null;
+  if (descricao != null && descricao.toString().trim().isNotEmpty) {
+    return '$nome · ${descricao.toString().trim()}';
+  }
+  return nome;
+}
+
 class FornecedorSemelhanteModel {
   final int id;
   final String nomeFantasia;
@@ -44,6 +59,12 @@ class FornecedorMaterialVinculoModel {
   final int fornecedorId;
   final int materialId;
   final String? materialNome;
+  // Descrição "crua" da variante (ex.: "ABC" de "TINTA · ABC"), separada
+  // do nome de exibição já formatado em `materialNome`. Necessária em
+  // telas que precisam mostrar a descrição isoladamente (ex.: junto ao
+  // nome do fornecedor, com o mesmo separador " · " usado no resto do
+  // app), sem depender de parsear `materialNome`.
+  final String? materialDescricao;
   final String? materialIdentificador;
   final String? materialMedida;
   final String? materialEspessura;
@@ -54,12 +75,22 @@ class FornecedorMaterialVinculoModel {
   final String? materialUnidade;
   final double? materialLargura;
   final double? materialComprimento;
+  // Ativo do Material em si (não do vínculo fornecedor-material). Um
+  // vínculo pode estar `ativo == true` mesmo com o material desativado no
+  // Estoque — a tela de Fornecedores não deve listar esses materiais.
+  final bool materialAtivo;
+  // Indica se o Material vinculado é genérico (ex.: "TINTA"), caso em que
+  // a tela de Ordem de Compra / Orçamento deve pedir uma descrição pra
+  // criar/reaproveitar a variante concreta. Vínculos de material comum
+  // (não genérico) nunca devem exibir esse campo.
+  final bool ehGenerico;
 
   FornecedorMaterialVinculoModel({
     required this.id,
     required this.fornecedorId,
     required this.materialId,
     this.materialNome,
+    this.materialDescricao,
     this.materialIdentificador,
     this.materialMedida,
     this.materialEspessura,
@@ -70,6 +101,8 @@ class FornecedorMaterialVinculoModel {
     this.materialUnidade,
     this.materialLargura,
     this.materialComprimento,
+    this.materialAtivo = true,
+    this.ehGenerico = false,
   });
 
   String? get _dimensaoFormatada {
@@ -136,7 +169,8 @@ class FornecedorMaterialVinculoModel {
         id:                   json['id'],
         fornecedorId:         json['fornecedorId'],
         materialId:           json['materialId'],
-        materialNome:         json['material']?['nome'],
+        materialNome:         _nomeExibicaoMaterial(json['material']),
+        materialDescricao:    json['material']?['descricao'],
         materialIdentificador: json['material']?['identificador'],
         materialMedida:       json['material']?['medida'],
         materialEspessura:    json['material']?['espessura'],
@@ -153,6 +187,8 @@ class FornecedorMaterialVinculoModel {
         materialComprimento:  json['material']?['comprimento'] != null
             ? double.tryParse(json['material']['comprimento'].toString())
             : null,
+        materialAtivo:        json['material']?['ativo'] ?? true,
+        ehGenerico:           json['material']?['ehGenerico'] ?? false,
       );
 }
 

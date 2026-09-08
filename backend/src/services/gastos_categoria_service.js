@@ -6,6 +6,7 @@ async function valorEmEstoque() {
     select: {
       id:                true,
       nome:              true,
+      descricao:         true,
       categoria:         true,
       unidade:           true,
       identificador:     true,
@@ -60,6 +61,7 @@ async function valorEmEstoque() {
     porCategoria[cat].materiais.push({
       id:            mat.id,
       nome:          mat.nome,
+      descricao:     mat.descricao,
       unidade:       mat.unidade,
       identificador: mat.identificador,
       medida:        mat.medida,
@@ -104,7 +106,7 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
     include: {
       material: {
         select: {
-          id: true, nome: true, categoria: true,
+          id: true, nome: true, categoria: true, descricao: true,
           unidade: true, identificador: true, medida: true, espessura: true,
           largura: true, comprimento: true,
         },
@@ -158,6 +160,7 @@ async function gastosPorCategoria({ dataInicio, dataFim } = {}) {
         porCategoria[cat].materiais[matId] = {
           id:            matId,
           nome:          material.nome,
+          descricao:     material.descricao,
           unidade:       material.unidade,
           identificador: material.identificador,
           medida:        material.medida,

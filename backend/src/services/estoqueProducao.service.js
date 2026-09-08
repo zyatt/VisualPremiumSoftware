@@ -1,5 +1,5 @@
 const prisma = require('../utils/prisma');
-const { resolverRelacaoOSDescritiva } = require('./estoque.service');
+const { resolverRelacaoOSDescritiva, formatUnidade } = require('./estoque.service');
 
 function _calcularStatus(quantidade, estoqueMinimo, ativo) {
   if (!ativo) return 'INATIVO';
@@ -48,7 +48,7 @@ async function transferirParaProducao({
   if (saldo < qtd) {
     throw {
       status: 400,
-      message: `Estoque insuficiente: disponível ${saldo} ${material.unidade ?? ''}`.trim(),
+      message: `Estoque insuficiente: disponível ${saldo} ${formatUnidade(material.unidade)}`.trim(),
     };
   }
 
@@ -142,7 +142,7 @@ async function devolverAoEstoquePadrao({
     const disponivel = estoqueProd ? Number(estoqueProd.quantidade) : 0;
     throw {
       status: 400,
-      message: `Estoque de produção ${prod} insuficiente: disponível ${disponivel} ${material.unidade ?? ''}`.trim(),
+      message: `Estoque de produção ${prod} insuficiente: disponível ${disponivel} ${formatUnidade(material.unidade)}`.trim(),
     };
   }
 
@@ -279,7 +279,7 @@ async function listarEstoque({ producao, busca, categoria, identificador, medida
         select: {
           id: true, nome: true, unidade: true, categoria: true,
           identificador: true, medida: true, espessura: true,
-          largura: true, comprimento: true,
+          largura: true, comprimento: true, descricao: true,
           ultimoValorPago: true, ultimoValorPagoM2: true,
         },
       },
@@ -290,6 +290,7 @@ async function listarEstoque({ producao, busca, categoria, identificador, medida
   return registros.map((r) => ({
     id:            r.material.id,
     nome:          r.material.nome,
+    descricao:     r.material.descricao,
     unidade:       r.material.unidade,
     categoria:     r.material.categoria,
     identificador: r.material.identificador,
@@ -688,6 +689,7 @@ async function listarHistorico({ producao, busca, numeroOS } = {}) {
         select: {
           id: true, nome: true, unidade: true, identificador: true,
           medida: true, espessura: true, largura: true, comprimento: true,
+          descricao: true,
         },
       },
     },
@@ -716,7 +718,7 @@ async function listarPendentes({ producao, tipo, status } = {}) {
         select: {
           id: true, nome: true, unidade: true, categoria: true,
           identificador: true, medida: true, espessura: true,
-          largura: true, comprimento: true,
+          largura: true, comprimento: true, descricao: true,
         },
       },
     },

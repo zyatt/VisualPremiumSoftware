@@ -24,7 +24,29 @@ const listarParaMovimentacao = async (req, res, next) => {
 const criar = async (req, res, next) => {
   try {
     const { usuarioId, usuarioNome } = _usuario(req);
-    res.status(201).json(await svc.criar(req.body, usuarioId, usuarioNome));
+    res.status(201).json(await svc.criar(req.body, usuarioId, usuarioNome, req.usuario?.role));
+  } catch (e) { next(e); }
+};
+
+const listarPendentes = async (req, res, next) => {
+  try { res.json(await svc.listarPendentes()); } catch (e) { next(e); }
+};
+
+const contarPendentes = async (req, res, next) => {
+  try { res.json({ total: await svc.contarPendentes() }); } catch (e) { next(e); }
+};
+
+const aprovar = async (req, res, next) => {
+  try {
+    const { usuarioId, usuarioNome } = _usuario(req);
+    res.json(await svc.aprovar(+req.params.id, req.body, usuarioId, usuarioNome));
+  } catch (e) { next(e); }
+};
+
+const recusar = async (req, res, next) => {
+  try {
+    const { usuarioId, usuarioNome } = _usuario(req);
+    res.json(await svc.recusar(+req.params.id, usuarioId, usuarioNome));
   } catch (e) { next(e); }
 };
 
@@ -72,6 +94,13 @@ const atualizarCustoManual = async (req, res, next) => {
 
 const listarCategorias = async (req, res, next) => {
   try { res.json(await svc.listarCategorias()); } catch (e) { next(e); }
+};
+
+const listarVinculados = async (req, res, next) => {
+  try {
+    const apenasAtivos = req.query.ativo === 'true';
+    res.json(await svc.listarVinculados(+req.params.id, { apenasAtivos }));
+  } catch (e) { next(e); }
 };
 
 const listarHistoricoPrecos = async (req, res, next) => {
@@ -122,4 +151,9 @@ module.exports = {
   listarCategorias,
   listarHistoricoPrecos,
   notificacoes,
+  listarPendentes,
+  contarPendentes,
+  aprovar,
+  recusar,
+  listarVinculados,
 };

@@ -187,43 +187,23 @@ class _VeiculoPageState extends State<VeiculoPage> {
                   ],
                 ),
                 const Spacer(),
-                Tooltip(
-                  message: 'Cadastrar um novo veículo',
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: FilledButton.icon(
-                      onPressed: () => _abrirFormVeiculo(),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Novo Veículo'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                      ).copyWith(
-                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                      ),
-                    ),
-                  ),
+                _BotaoCabecalhoWidget(
+                  icone: Icons.add,
+                  texto: 'Novo Veículo',
+                  onPressed: () => _abrirFormVeiculo(),
+                  corFundo: AppTheme.primary,
+                  corTexto: Colors.white,
+                  tooltip: 'Cadastrar um novo veículo',
                 ),
                 SizedBox(width: 12),
-                Tooltip(
-                  message: 'Ver veículos desativados',
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: OutlinedButton.icon(
-                      onPressed: () => _abrirVeiculosDesativados(),
-                      icon: const Icon(Icons.inventory_2_outlined, size: 18),
-                      label: const Text('Desativados'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                      ).copyWith(
-                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                      ),
-                    ),
-                  ),
+                _BotaoCabecalhoWidget(
+                  icone: Icons.inventory_2_outlined,
+                  texto: 'Desativados',
+                  onPressed: () => _abrirVeiculosDesativados(),
+                  corFundo: Theme.of(context).colorScheme.surface,
+                  corTexto: Theme.of(context).colorScheme.onSurfaceVariant,
+                  corBorda: Theme.of(context).colorScheme.outlineVariant,
+                  tooltip: 'Ver veículos desativados',
                 ),
                 SizedBox(width: 12),
                 MouseRegion(
@@ -544,10 +524,16 @@ class _EmptyState extends StatelessWidget {
                   .bodyLarge
                   ?.copyWith(color: Theme.of(context).colorScheme.outline)),
           const SizedBox(height: 12),
-          TextButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add),
-            label: const Text('Adicionar veículo'),
+          Tooltip(
+            message: 'Cadastrar um novo veículo',
+            child: TextButton.icon(
+              onPressed: onAdd,
+              icon: const Icon(Icons.add),
+              label: const Text('Adicionar veículo'),
+              style: TextButton.styleFrom().copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+            ),
           ),
         ],
       ),
@@ -753,18 +739,19 @@ class _MiniIconBtn extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: tooltip,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        opaque: true,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: Icon(icon, size: 18, color: color),
-            ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          // Definido diretamente no InkWell: é o MouseRegion interno dele
+          // que fica mais próximo do ponteiro, então precisa receber o
+          // cursor explicitamente em vez de depender de um MouseRegion
+          // externo (que fica "atrás" dele na resolução de cursor).
+          mouseCursor: SystemMouseCursors.click,
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Icon(icon, size: 18, color: color),
           ),
         ),
       ),
@@ -928,22 +915,13 @@ class _VeiculoServicosPageState extends State<VeiculoServicosPage> {
                   ],
                 ),
                 const Spacer(),
-                Tooltip(
-                  message: 'Registrar um novo serviço para este veículo',
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: FilledButton.icon(
-                      onPressed: _novoServico,
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Novo Serviço'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ).copyWith(
-                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                      ),
-                    ),
-                  ),
+                _BotaoCabecalhoWidget(
+                  icone: Icons.add,
+                  texto: 'Novo Serviço',
+                  onPressed: _novoServico,
+                  corFundo: AppTheme.primary,
+                  corTexto: Colors.white,
+                  tooltip: 'Registrar um novo serviço para este veículo',
                 ),
                 const SizedBox(width: 12),
                 MouseRegion(
@@ -1017,10 +995,16 @@ class _VeiculoServicosPageState extends State<VeiculoServicosPage> {
                                         ?.copyWith(color: Theme.of(context).colorScheme.outline),
                                   ),
                                   const SizedBox(height: 12),
-                                  TextButton.icon(
-                                    onPressed: _novoServico,
-                                    icon: const Icon(Icons.add),
-                                    label: const Text('Adicionar serviço'),
+                                  Tooltip(
+                                    message: 'Adicionar novo serviço',
+                                    child: TextButton.icon(
+                                      onPressed: _novoServico,
+                                      icon: const Icon(Icons.add),
+                                      label: const Text('Adicionar serviço'),
+                                      style: TextButton.styleFrom().copyWith(
+                                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -1771,7 +1755,6 @@ class _BotaoVoltar extends StatefulWidget {
 
 class _BotaoVoltarState extends State<_BotaoVoltar> {
   bool _hovered = false;
-  static const _accent = Color(0xFFF59E0B);
 
   @override
   Widget build(BuildContext context) {
@@ -1781,37 +1764,109 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
       onExit:  (_) => setState(() => _hovered = false),
       child: Tooltip(
         message: widget.tooltip,
+        child: Material(
+          color: _hovered
+              ? AppTheme.primary.withValues(alpha: 0.85)
+              : AppTheme.primary,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            onTap: widget.onTap,
+            mouseCursor: SystemMouseCursors.click,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.arrow_back,
+                    size: 18,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.label,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Botão de ação do cabeçalho ("Novo Veículo", "Novo Serviço",
+/// "Desativados") — mesma base visual e de hover do [_BotaoVoltar]
+/// (Material + InkWell + padding manual, sem os mínimos de altura/target
+/// do FilledButton/OutlinedButton do Material Design), garantindo que
+/// todos os botões da barra tenham exatamente a mesma altura.
+class _BotaoCabecalhoWidget extends StatefulWidget {
+  final IconData icone;
+  final String texto;
+  final VoidCallback onPressed;
+  final Color corFundo;
+  final Color corTexto;
+  final String? tooltip;
+  final Color? corBorda;
+
+  const _BotaoCabecalhoWidget({
+    required this.icone,
+    required this.texto,
+    required this.onPressed,
+    required this.corFundo,
+    required this.corTexto,
+    this.tooltip,
+    this.corBorda,
+  });
+
+  @override
+  State<_BotaoCabecalhoWidget> createState() => _BotaoCabecalhoWidgetState();
+}
+
+class _BotaoCabecalhoWidgetState extends State<_BotaoCabecalhoWidget> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final botao = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Material(
+        color: _hovered
+            ? widget.corFundo.withValues(alpha: 0.85)
+            : widget.corFundo,
+        borderRadius: BorderRadius.circular(10),
         child: InkWell(
-          onTap: widget.onTap,
+          onTap: widget.onPressed,
           mouseCursor: SystemMouseCursors.click,
           borderRadius: BorderRadius.circular(10),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: _hovered
-                  ? _accent.withValues(alpha: 0.15)
-                  : _accent.withValues(alpha: 0.08),
-              border: Border.all(
-                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
-              ),
               borderRadius: BorderRadius.circular(10),
+              border: widget.corBorda != null ? Border.all(color: widget.corBorda!) : null,
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
-                  Icons.arrow_back,
-                  size: 18,
-                  color: _accent,
-                ),
+                Icon(widget.icone, size: 18, color: widget.corTexto),
                 const SizedBox(width: 6),
                 Text(
-                  widget.label,
-                  style: const TextStyle(
+                  widget.texto,
+                  style: TextStyle(
                     fontSize: 13,
-                    color: _accent,
+                    color: widget.corTexto,
                     fontWeight: FontWeight.w600,
+                    height: 1.0,
                   ),
                 ),
               ],
@@ -1820,5 +1875,7 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
         ),
       ),
     );
+
+    return widget.tooltip != null ? Tooltip(message: widget.tooltip, child: botao) : botao;
   }
 }

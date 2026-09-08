@@ -252,6 +252,25 @@ class FornecedorProvider extends ChangeNotifier {
     }
   }
 
+  /// Mesma ideia de [listarPorMaterial], mas resolvendo a variante de um
+  /// material genérico pela descrição digitada. Não propaga erro para
+  /// `_erroAcao`/UI quando a variante simplesmente ainda não existe —
+  /// nesse caso a lista vazia já é a resposta correta (nenhum
+  /// fornecedor pode estar vinculado a algo que não existe ainda).
+  Future<List<FornecedorModel>> listarPorMaterialGenericoEDescricao(
+    int materialGenericoId,
+    String descricao,
+  ) async {
+    try {
+      return await _repo.listarPorMaterialGenericoEDescricao(
+        materialGenericoId,
+        descricao,
+      );
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<List<Map<String, dynamic>>> buscarMateriais({
     String? idPrefix,
     String? nomePrefix,
@@ -270,6 +289,23 @@ class FornecedorProvider extends ChangeNotifier {
     } catch (e) {
       _erroAcao = _mensagemErro(e);
       notifyListeners();
+      return [];
+    }
+  }
+
+  /// Retorna as variantes já cadastradas de um material genérico (busca
+  /// sempre a API, sem cache local — variantes podem ser desativadas ou
+  /// excluídas em outras telas como Estoque, e o provider não tem como
+  /// saber disso; um cache aqui fazia variantes já excluídas continuarem
+  /// aparecendo até reiniciar o app). Usado para expandir "TINTA" e
+  /// mostrar "TINTA · AZUL", "TINTA · VERDE" etc nos diálogos de
+  /// Fornecedores/Ordem de Compra.
+  Future<List<Map<String, dynamic>>> buscarVariantesDeGenerico(
+    int materialGenericoId,
+  ) async {
+    try {
+      return await _repo.buscarVinculadosDeGenerico(materialGenericoId);
+    } catch (_) {
       return [];
     }
   }

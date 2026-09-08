@@ -12,6 +12,7 @@ router.get('/tipos',                   authMiddleware, roleMiddleware(LEITURA), 
 router.get('/verificar-semelhantes',   authMiddleware, roleMiddleware(LEITURA), ctrl.verificarSemelhantes);
 router.get('/buscar',                  authMiddleware, roleMiddleware(LEITURA), ctrl.buscarParaVinculo);
 router.get('/material/:materialId',    authMiddleware, roleMiddleware(LEITURA), ctrl.listarPorMaterial);
+router.get('/material/:materialId/variante', authMiddleware, roleMiddleware(LEITURA), ctrl.listarPorMaterialGenericoEDescricao);
 router.get('/:id',                     authMiddleware, roleMiddleware(LEITURA), ctrl.buscarPorId);
 
 router.post('/',                       authMiddleware, roleMiddleware(ESCRITA), ctrl.uploadImagem, ctrl.criar);

@@ -71,6 +71,9 @@ const adicionarItem = async (req, res, next) => {
       )
     );
   } catch (e) {
+    if (e && (e.status === 400 || e.status === 404)) {
+      return res.status(e.status).json({ message: e.message });
+    }
     next(e);
   }
 };
@@ -101,6 +104,24 @@ const substituirItens = async (req, res, next) => {
     }
     res.json(await svc.substituirItens(+req.params.id, itens, req.usuario.id));
   } catch (e) {
+    if (e && e.status === 400) {
+      return res.status(400).json({ message: e.message });
+    }
+    next(e);
+  }
+};
+
+const salvarRascunho = async (req, res, next) => {
+  try {
+    const { itens } = req.body;
+    if (!Array.isArray(itens)) {
+      return res.status(400).json({ message: 'Campo "itens" deve ser um array.' });
+    }
+    res.json(await svc.salvarRascunho(+req.params.id, itens, req.usuario.id));
+  } catch (e) {
+    if (e && e.status === 400) {
+      return res.status(400).json({ message: e.message });
+    }
     next(e);
   }
 };
@@ -109,6 +130,9 @@ const atualizarItem = async (req, res, next) => {
   try {
     res.json(await svc.atualizarItem(+req.params.itemId, req.body, req.usuario.id));
   } catch (e) {
+    if (e && e.status === 400) {
+      return res.status(400).json({ message: e.message });
+    }
     next(e);
   }
 };
@@ -117,6 +141,9 @@ const enviarParaAprovacao = async (req, res, next) => {
   try {
     res.json(await svc.enviarParaAprovacao(+req.params.id));
   } catch (e) {
+    if (e && e.status === 400) {
+      return res.status(400).json({ message: e.message });
+    }
     next(e);
   }
 };
@@ -175,17 +202,16 @@ const gerarOrdemCompra = async (req, res, next) => {
     const ocsCriadas = [];
     const ocService = require('../services/ordemCompra.service');
     
+    // Números de OS ficam fixos em "EMPRESA". item.materialId já aponta
+    // para o Material filho concreto (resolvido em substituirItens), então
+    // descricaoItem na OC deve ficar sempre null — a descrição já vive no
+    // próprio Material (item.material.descricao), igual ao padrão usado
+    // quando a OC é criada diretamente na tela de Ordem de Compra
+    // (ordemCompra.service.js:_resolverMateriaisGenericos). Copiar a
+    // descrição pra cá também duplicava o texto na exibição do item.
     for (const [fornecedorId, grupo] of itensPorFornecedor) {
-      const numerosOS = [...new Set(
-        grupo.itens
-          .map(i => i.descricaoItem?.trim())
-          .filter(Boolean)
-      )];
-      
-      if (numerosOS.length === 0) {
-        numerosOS.push('EMPRESA');
-      }
-      
+      const numerosOS = ['EMPRESA'];
+
       const itensOC = grupo.itens.map(item => {
         const qtdUnidade = item.qtdUnidade ?? null;
         const precoOrcamento = item.precoUnitario || 0;
@@ -195,8 +221,8 @@ const gerarOrdemCompra = async (req, res, next) => {
 
         return {
           materialId: item.materialId,
-          descricaoItem: item.descricaoItem || null,
-          numeroOS: item.descricaoItem?.trim() || numerosOS[0],
+          descricaoItem: null,
+          numeroOS: numerosOS[0],
           quantidade: item.quantidade,
           qtdUnidade,
           precoUnitario: precoUnitarioOC,
@@ -345,6 +371,7 @@ module.exports = {
   removerItem,
   limparItens,
   substituirItens,
+  salvarRascunho,
   atualizarItem,
   enviarParaAprovacao,
   aprovar,

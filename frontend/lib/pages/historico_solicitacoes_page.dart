@@ -1390,11 +1390,23 @@ class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;
   final VoidCallback onTap;
+  final double iconSize;
+  final double fontSize;
+  final double padH;
+  final double padV;
 
   const _BotaoVoltar({
     required this.label,
     required this.tooltip,
     required this.onTap,
+    // ignore: unused_element_parameter
+    this.iconSize = 18,
+    // ignore: unused_element_parameter
+    this.fontSize = 13,
+    // ignore: unused_element_parameter
+    this.padH = 16,
+    // ignore: unused_element_parameter
+    this.padV = 12,
   });
 
   @override
@@ -1403,50 +1415,46 @@ class _BotaoVoltar extends StatefulWidget {
 
 class _BotaoVoltarState extends State<_BotaoVoltar> {
   bool _hovered = false;
-  static const _accent = Color(0xFFF59E0B);
 
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
+      onExit:  (_) => setState(() => _hovered = false),
       child: Tooltip(
         message: widget.tooltip,
-        child: InkWell(
-          onTap: widget.onTap,
-          mouseCursor: SystemMouseCursors.click,
+        child: Material(
+          color: _hovered
+              ? AppTheme.primary.withValues(alpha: 0.85)
+              : AppTheme.primary,
           borderRadius: BorderRadius.circular(10),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: _hovered
-                  ? _accent.withValues(alpha: 0.15)
-                  : _accent.withValues(alpha: 0.08),
-              border: Border.all(
-                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.arrow_back,
-                  size: 18,
-                  color: _accent,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  widget.label,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: _accent,
-                    fontWeight: FontWeight.w600,
+          child: InkWell(
+            onTap: widget.onTap,
+            mouseCursor: SystemMouseCursors.click,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: widget.padH, vertical: widget.padV),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.arrow_back,
+                    size: widget.iconSize,
+                    color: Colors.white,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      fontSize: widget.fontSize,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

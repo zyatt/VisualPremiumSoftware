@@ -3,7 +3,7 @@ const prisma = require('../utils/prisma');
 const _includeCompleto = {
   movimentacoes: {
     include: {
-      material: { select: { id: true, nome: true, unidade: true, categoria: true, identificador: true, medida: true, espessura: true } },
+      material: { select: { id: true, nome: true, unidade: true, categoria: true, identificador: true, medida: true, espessura: true, descricao: true } },
       materialOrigem: { select: { id: true, nome: true } },
     },
     orderBy: { criadoEm: 'asc' },
@@ -62,7 +62,7 @@ async function listar({ busca, cliente, materialId, materialNome, materialIdenti
       movimentacoes: {
         where: whereMovimentacoesInclude,
         include: {
-          material: { select: { id: true, nome: true, unidade: true, categoria: true, identificador: true, medida: true, espessura: true } },
+          material: { select: { id: true, nome: true, unidade: true, categoria: true, identificador: true, medida: true, espessura: true, descricao: true } },
           materialOrigem: { select: { id: true, nome: true } },
         },
         orderBy: { criadoEm: 'desc' },
@@ -245,6 +245,7 @@ async function dadosParaPDF(numeroOS) {
 
     return {
       material:      m.material.nome,
+      materialDescricao: m.material.descricao ?? null,
       identificador: m.material.identificador ?? null,
       medida:        medidaExibida,
       espessura:     m.material.espessura     ?? null,

@@ -137,6 +137,15 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   OrcamentoProvider? _orcamentoProviderRef;
   bool _ajudaRoboJaAgendadaNesteFrame = false;
 
+  // Controla se já existe uma instância do OrcamentoEditorPage empilhada
+  // por cima desta página. Usado para impedir que múltiplas tentativas de
+  // abertura (tour, "Novo Orçamento", card do chat, orçamento pendente
+  // vindo do chat, etc.) empilhem o editor mais de uma vez seguida —
+  // o efeito visível disso era o editor "stackando" ao clicar várias
+  // vezes ou ao reabrir um encaminhamento enquanto o editor já estava
+  // aberto.
+  bool _editorAberto = false;
+
   @override
   void initState() {
     super.initState();
@@ -221,8 +230,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   bool _editorTourAberto = false;
 
   Future<void> _abrirEditorTour() async {
-    if (_editorTourAberto) return;
+    if (_editorTourAberto || _editorAberto) return;
     _editorTourAberto = true;
+    _editorAberto = true;
     tourQueAbriuEditorAtivo = 'Como criar um orçamento';
     final p = context.read<OrcamentoProvider>();
     p.adicionarAba(criadaPeloTour: true);
@@ -231,7 +241,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     );
 
     pushFuture.then((resultado) async {
-      if (mounted) _editorTourAberto = false;
+      if (mounted) {
+        _editorTourAberto = false;
+        _editorAberto = false;
+      }
       if (mounted) await _aoVoltarDoEditor(resultado);
     });
 
@@ -275,8 +288,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   }
 
   Future<void> _abrirEditorTourAprovacao() async {
-    if (_editorTourAberto) return;
+    if (_editorTourAberto || _editorAberto) return;
     _editorTourAberto = true;
+    _editorAberto = true;
     tourQueAbriuEditorAtivo = 'Como aprovar um orçamento';
     final p = context.read<OrcamentoProvider>();
     p.adicionarAba(criadaPeloTour: true);
@@ -286,7 +300,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     );
 
     pushFuture.then((resultado) async {
-      if (mounted) _editorTourAberto = false;
+      if (mounted) {
+        _editorTourAberto = false;
+        _editorAberto = false;
+      }
       if (mounted) await _aoVoltarDoEditor(resultado);
     });
 
@@ -323,8 +340,9 @@ class _OrcamentoPageState extends State<OrcamentoPage>
   }
 
   Future<void> _abrirEditorTourGerarOC() async {
-    if (_editorTourAberto) return;
+    if (_editorTourAberto || _editorAberto) return;
     _editorTourAberto = true;
+    _editorAberto = true;
     tourQueAbriuEditorAtivo = 'Como gerar uma Ordem de Compra';
     final p = context.read<OrcamentoProvider>();
     p.adicionarAba(criadaPeloTour: true);
@@ -334,7 +352,10 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     );
 
     pushFuture.then((resultado) async {
-      if (mounted) _editorTourAberto = false;
+      if (mounted) {
+        _editorTourAberto = false;
+        _editorAberto = false;
+      }
       if (mounted) await _aoVoltarDoEditor(resultado);
     });
 
@@ -485,6 +506,27 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     ]);
   }
 
+  /// Único ponto de entrada para navegar até o [OrcamentoEditorPage].
+  ///
+  /// Se o editor já estiver aberto (empilhado por cima desta página), não
+  /// empilha uma segunda instância — apenas ignora a tentativa. Isso
+  /// resolve o "stack" de páginas de orçamento que ocorria quando:
+  ///  - o usuário clicava várias vezes seguidas em algo que abre o editor
+  ///    antes da rota anterior terminar de empilhar;
+  ///  - um orçamento encaminhado pelo chat era reaberto enquanto o editor
+  ///    já estava na tela (ex.: clicar de novo no card do chat);
+  ///  - o listener do provider e o build() disparavam a mesma tentativa
+  ///    de abertura do orçamento pendente mais de uma vez.
+  Future<void> _abrirEditor() async {
+    if (!mounted || _editorAberto) return;
+    _editorAberto = true;
+    final resultado = await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
+    );
+    _editorAberto = false;
+    await _aoVoltarDoEditor(resultado);
+  }
+
   Future<void> _aoVoltarDoEditor(dynamic resultado) async {
     if (!mounted) return;
     int? abaAlvo;
@@ -586,8 +628,8 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           backgroundColor: AppTheme.success,
         ),
       );
-      if (_mainTabController.index != 1) {
-        _mainTabController.animateTo(1);
+      if (_mainTabController.index != 2) {
+        _mainTabController.animateTo(2);
       }
       await _carregarOrcamentosServidor(origem: 'aposAprovar');
     } catch (e, st) {
@@ -726,10 +768,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     if (abaExistente >= 0) {
       await _sincronizarAbaExistenteComServidor(orcId);
       if (mounted) {
-        final resultado = await Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
-        );
-        await _aoVoltarDoEditor(resultado);
+        await _abrirEditor();
       }
       return;
     }
@@ -740,16 +779,29 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       final orcamentoCompleto = await OrcamentoRepository().buscarPorId(orcId);
       final itens = (orcamentoCompleto['itens'] as List? ?? []);
 
-      final Map<int, ItemOrcamentoData> itensPorChave = {};
+      final Map<String, ItemOrcamentoData> itensPorChave = {};
 
       for (final item in itens) {
         final materialId = item['materialId'] as int;
         final materialData = item['material'] as Map<String, dynamic>?;
         final fornecedorId = item['fornecedorId'] as int?;
         final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
+        final ehGenerico = materialData?['ehGenerico'] as bool? ?? false;
+        // material.descricao é a fonte de verdade após salvar (ver
+        // orcamento_service.js substituirItens, que zera item.descricaoItem);
+        // descricaoItem local fica só como fallback pra itens não sincronizados.
+        final descricaoDoMaterial = materialData?['descricao'] as String?;
+        final descricaoItem = (descricaoDoMaterial != null && descricaoDoMaterial.trim().isNotEmpty)
+            ? descricaoDoMaterial
+            : item['descricaoItem'] as String?;
 
-        if (!itensPorChave.containsKey(materialId)) {
-          itensPorChave[materialId] = ItemOrcamentoData(
+        // Materiais genéricos podem aparecer várias vezes no mesmo
+        // orçamento, uma para cada descrição diferente — por isso a chave
+        // de agrupamento inclui a descrição quando o material é genérico.
+        final chave = ehGenerico ? '$materialId|${descricaoItem ?? ''}' : '$materialId';
+
+        if (!itensPorChave.containsKey(chave)) {
+          itensPorChave[chave] = ItemOrcamentoData(
             materialId: materialId,
             materialNome: materialData?['nome'] as String? ?? '',
             materialUnidade: materialData?['unidade'] as String?,
@@ -760,11 +812,13 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             qtdUnidade: item['qtdUnidade'] != null ? double.tryParse(item['qtdUnidade'].toString()) : null,
             precos: {},
+            ehGenerico: ehGenerico,
+            descricaoItem: descricaoItem,
           );
         }
 
         if (fornecedorId != null && fornecedorData != null) {
-          itensPorChave[materialId]!.precos[fornecedorId] = PrecoFornecedorData(
+          itensPorChave[chave]!.precos[fornecedorId] = PrecoFornecedorData(
             fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
             preco: item['precoUnitario'] != null
                 ? double.tryParse(item['precoUnitario'].toString())
@@ -773,7 +827,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           );
 
           if (item['selecionado'] as bool? ?? false) {
-            itensPorChave[materialId]!.fornecedorSelecionado = fornecedorId;
+            itensPorChave[chave]!.fornecedorSelecionado = fornecedorId;
           }
         }
       }
@@ -805,10 +859,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         ),
       );
 
-      final resultado = await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
-      );
-      await _aoVoltarDoEditor(resultado);
+      await _abrirEditor();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -833,15 +884,28 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       if (provider.tabAtual?.servidorId != orcId) return;
 
       final itensRemotos = (orcamentoCompleto['itens'] as List? ?? []);
-      final Map<int, ItemOrcamentoData> itensPorChave = {};
+      final Map<String, ItemOrcamentoData> itensPorChave = {};
       for (final item in itensRemotos) {
         final materialId = item['materialId'] as int;
         final materialData = item['material'] as Map<String, dynamic>?;
         final fornecedorId = item['fornecedorId'] as int?;
         final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
+        final ehGenerico = materialData?['ehGenerico'] as bool? ?? false;
+        // material.descricao é a fonte de verdade após salvar (ver
+        // orcamento_service.js substituirItens, que zera item.descricaoItem);
+        // descricaoItem local fica só como fallback pra itens não sincronizados.
+        final descricaoDoMaterial = materialData?['descricao'] as String?;
+        final descricaoItem = (descricaoDoMaterial != null && descricaoDoMaterial.trim().isNotEmpty)
+            ? descricaoDoMaterial
+            : item['descricaoItem'] as String?;
 
-        if (!itensPorChave.containsKey(materialId)) {
-          itensPorChave[materialId] = ItemOrcamentoData(
+        // Materiais genéricos podem aparecer várias vezes no mesmo
+        // orçamento, uma para cada descrição diferente — por isso a chave
+        // de agrupamento inclui a descrição quando o material é genérico.
+        final chave = ehGenerico ? '$materialId|${descricaoItem ?? ''}' : '$materialId';
+
+        if (!itensPorChave.containsKey(chave)) {
+          itensPorChave[chave] = ItemOrcamentoData(
             materialId: materialId,
             materialNome: materialData?['nome'] as String? ?? '',
             materialUnidade: materialData?['unidade'] as String?,
@@ -852,16 +916,18 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             qtdUnidade: item['qtdUnidade'] != null ? double.tryParse(item['qtdUnidade'].toString()) : null,
             precos: {},
+            ehGenerico: ehGenerico,
+            descricaoItem: descricaoItem,
           );
         }
         if (fornecedorId != null && fornecedorData != null) {
-          itensPorChave[materialId]!.precos[fornecedorId] = PrecoFornecedorData(
+          itensPorChave[chave]!.precos[fornecedorId] = PrecoFornecedorData(
             fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
             preco: item['precoUnitario'] != null ? double.tryParse(item['precoUnitario'].toString()) : null,
             observacao: item['observacao'] as String?,
           );
           if (item['selecionado'] as bool? ?? false) {
-            itensPorChave[materialId]!.fornecedorSelecionado = fornecedorId;
+            itensPorChave[chave]!.fornecedorSelecionado = fornecedorId;
           }
         }
       }
@@ -895,10 +961,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
     if (abaExistente >= 0) {
       await _sincronizarAbaExistenteComServidor(orcId);
       if (mounted) {
-        final resultado = await Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
-        );
-        await _aoVoltarDoEditor(resultado);
+        await _abrirEditor();
       }
       return;
     }
@@ -911,16 +974,29 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
       final itens = (orcamentoCompleto['itens'] as List? ?? []);
 
-      final Map<int, ItemOrcamentoData> itensPorChave = {};
+      final Map<String, ItemOrcamentoData> itensPorChave = {};
 
       for (final item in itens) {
         final materialId = item['materialId'] as int;
         final materialData = item['material'] as Map<String, dynamic>?;
         final fornecedorId = item['fornecedorId'] as int?;
         final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
+        final ehGenerico = materialData?['ehGenerico'] as bool? ?? false;
+        // material.descricao é a fonte de verdade após salvar (ver
+        // orcamento_service.js substituirItens, que zera item.descricaoItem);
+        // descricaoItem local fica só como fallback pra itens não sincronizados.
+        final descricaoDoMaterial = materialData?['descricao'] as String?;
+        final descricaoItem = (descricaoDoMaterial != null && descricaoDoMaterial.trim().isNotEmpty)
+            ? descricaoDoMaterial
+            : item['descricaoItem'] as String?;
 
-        if (!itensPorChave.containsKey(materialId)) {
-          itensPorChave[materialId] = ItemOrcamentoData(
+        // Materiais genéricos podem aparecer várias vezes no mesmo
+        // orçamento, uma para cada descrição diferente — por isso a chave
+        // de agrupamento inclui a descrição quando o material é genérico.
+        final chave = ehGenerico ? '$materialId|${descricaoItem ?? ''}' : '$materialId';
+
+        if (!itensPorChave.containsKey(chave)) {
+          itensPorChave[chave] = ItemOrcamentoData(
             materialId: materialId,
             materialNome: materialData?['nome'] as String? ?? '',
             materialUnidade: materialData?['unidade'] as String?,
@@ -931,11 +1007,13 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             qtdUnidade: item['qtdUnidade'] != null ? double.tryParse(item['qtdUnidade'].toString()) : null,
             precos: {},
+            ehGenerico: ehGenerico,
+            descricaoItem: descricaoItem,
           );
         }
 
         if (fornecedorId != null && fornecedorData != null) {
-          itensPorChave[materialId]!.precos[fornecedorId] = PrecoFornecedorData(
+          itensPorChave[chave]!.precos[fornecedorId] = PrecoFornecedorData(
             fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
             preco: item['precoUnitario'] != null
                 ? double.tryParse(item['precoUnitario'].toString())
@@ -944,7 +1022,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           );
 
           if (item['selecionado'] as bool? ?? false) {
-            itensPorChave[materialId]!.fornecedorSelecionado = fornecedorId;
+            itensPorChave[chave]!.fornecedorSelecionado = fornecedorId;
           }
         }
       }
@@ -984,10 +1062,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         ),
       );
 
-      final resultado = await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
-      );
-      await _aoVoltarDoEditor(resultado);
+      await _abrirEditor();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1015,15 +1090,28 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       final orcamentoCompleto = await OrcamentoRepository().buscarPorId(orcId);
       final itens = (orcamentoCompleto['itens'] as List? ?? []);
 
-      final Map<int, ItemOrcamentoData> itensPorChave = {};
+      final Map<String, ItemOrcamentoData> itensPorChave = {};
       for (final item in itens) {
         final materialId = item['materialId'] as int;
         final materialData = item['material'] as Map<String, dynamic>?;
         final fornecedorId = item['fornecedorId'] as int?;
         final fornecedorData = item['fornecedor'] as Map<String, dynamic>?;
+        final ehGenerico = materialData?['ehGenerico'] as bool? ?? false;
+        // material.descricao é a fonte de verdade após salvar (ver
+        // orcamento_service.js substituirItens, que zera item.descricaoItem);
+        // descricaoItem local fica só como fallback pra itens não sincronizados.
+        final descricaoDoMaterial = materialData?['descricao'] as String?;
+        final descricaoItem = (descricaoDoMaterial != null && descricaoDoMaterial.trim().isNotEmpty)
+            ? descricaoDoMaterial
+            : item['descricaoItem'] as String?;
 
-        if (!itensPorChave.containsKey(materialId)) {
-          itensPorChave[materialId] = ItemOrcamentoData(
+        // Materiais genéricos podem aparecer várias vezes no mesmo
+        // orçamento, uma para cada descrição diferente — por isso a chave
+        // de agrupamento inclui a descrição quando o material é genérico.
+        final chave = ehGenerico ? '$materialId|${descricaoItem ?? ''}' : '$materialId';
+
+        if (!itensPorChave.containsKey(chave)) {
+          itensPorChave[chave] = ItemOrcamentoData(
             materialId: materialId,
             materialNome: materialData?['nome'] as String? ?? '',
             materialUnidade: materialData?['unidade'] as String?,
@@ -1034,11 +1122,13 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             quantidade: double.tryParse(item['quantidade'].toString()) ?? 1,
             qtdUnidade: item['qtdUnidade'] != null ? double.tryParse(item['qtdUnidade'].toString()) : null,
             precos: {},
+            ehGenerico: ehGenerico,
+            descricaoItem: descricaoItem,
           );
         }
 
         if (fornecedorId != null && fornecedorData != null) {
-          itensPorChave[materialId]!.precos[fornecedorId] = PrecoFornecedorData(
+          itensPorChave[chave]!.precos[fornecedorId] = PrecoFornecedorData(
             fornecedorNome: fornecedorData['nomeFantasia'] as String? ?? '',
             preco: item['precoUnitario'] != null
                 ? double.tryParse(item['precoUnitario'].toString())
@@ -1046,7 +1136,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
             observacao: item['observacao'] as String?,
           );
           if (item['selecionado'] as bool? ?? false) {
-            itensPorChave[materialId]!.fornecedorSelecionado = fornecedorId;
+            itensPorChave[chave]!.fornecedorSelecionado = fornecedorId;
           }
         }
       }
@@ -1130,7 +1220,6 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         });
       });
     }
-    _tentarAbrirOrcamentoPendente();
     return Consumer<OrcamentoProvider>(
       builder: (context, provider, _) {
         if (!provider.carregado) {
@@ -1144,10 +1233,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           OrcamentoPage.abrirEditorAoEntrar = false;
           WidgetsBinding.instance.addPostFrameCallback((_) async {
             if (!mounted) return;
-            final resultado = await Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
-            );
-            await _aoVoltarDoEditor(resultado);
+            await _abrirEditor();
           });
         }
 
@@ -1447,10 +1533,7 @@ class _OrcamentoPageState extends State<OrcamentoPage>
       provider.atualizarFlagsTab(somenteLeitura: somenteLeituraAbaExistente);
       await _sincronizarAbaExistenteComServidor(info.id);
       if (mounted) {
-        final resultado = await Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
-        );
-        await _aoVoltarDoEditor(resultado);
+        await _abrirEditor();
       }
       return;
     }
@@ -1547,7 +1630,37 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
     final provider = context.read<OrcamentoProvider>();
     try {
-      await OrcamentoRepository().enviarParaAprovacao(info.id);
+      final repo = OrcamentoRepository();
+
+      // O rascunho (salvo via /itens/rascunho ao voltar/fechar a aba) NÃO
+      // resolve o Material genérico para o filho concreto — o item fica
+      // com materialId apontando pro pai genérico (ex.: "TINTA") e a
+      // descrição crua em descricaoItem. O backend só faz essa resolução
+      // em adicionarItem/substituirItens, e enviarParaAprovacao rejeita
+      // qualquer item cujo material ainda seja ehGenerico=true.
+      // Por isso, assim como o editor faz em _enviarParaAprovacao, é
+      // preciso reenviar os itens (limpar + readicionar) antes de
+      // enviar para aprovação — do contrário o backend rejeita mesmo com
+      // a descrição já preenchida.
+      final orcamentoCompleto = await repo.buscarPorId(info.id);
+      final itens = (orcamentoCompleto['itens'] as List? ?? []);
+
+      await repo.limparItens(info.id);
+      for (final item in itens) {
+        final itemMap = item as Map<String, dynamic>;
+        await repo.adicionarItem(info.id, {
+          'materialId': itemMap['materialId'],
+          'fornecedorId': itemMap['fornecedorId'],
+          'quantidade': itemMap['quantidade'],
+          'qtdUnidade': itemMap['qtdUnidade'],
+          'precoUnitario': itemMap['precoUnitario'],
+          'selecionado': itemMap['selecionado'] ?? false,
+          'observacao': itemMap['observacao'],
+          'descricaoItem': itemMap['descricaoItem'],
+        });
+      }
+
+      await repo.enviarParaAprovacao(info.id);
 
       final idx = provider.ativarAbaExistente(info.id);
       if (idx >= 0) provider.fecharAba(idx);
@@ -1595,15 +1708,21 @@ class _OrcamentoPageState extends State<OrcamentoPage>
           style: const TextStyle(fontSize: 13),
         ),
         actions: [
-          TextButton(
-            style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
+          Tooltip(
+            message: 'Fechar sem excluir o orçamento',
+            child: TextButton(
+              style: TextButton.styleFrom().copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Excluir'),
+          Tooltip(
+            message: 'Excluir permanentemente este orçamento',
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.error).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Excluir'),
+            ),
           ),
         ],
       ),
@@ -1778,33 +1897,26 @@ class _OrcamentoPageState extends State<OrcamentoPage>
 
         const Spacer(),
 
-        Tooltip(
-          message: 'Ver histórico de orçamentos finalizados',
-          child: OutlinedButton.icon(
-            onPressed: () async {
-              final resultado = await Navigator.of(context).push<dynamic>(
-                MaterialPageRoute(
-                  builder: (_) => const OrcamentoHistoricoPage(),
-                ),
-              );
-
-              if (!mounted) return;
-
-              if (resultado is Map &&
-                  resultado['reabrirServidorId'] != null) {
-
-              }
-            },
-            icon: const Icon(Icons.history, size: 18),
-            label: const Text('Histórico'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.onSurface,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-            ).copyWith(
-              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-            ),
-          ),
+        _BotaoCabecalhoWidget(
+          icone: Icons.history,
+          texto: 'Histórico',
+          onPressed: () async {
+            final resultado = await Navigator.of(context).push<dynamic>(
+              MaterialPageRoute(
+                builder: (_) => const OrcamentoHistoricoPage(),
+              ),
+            );
+            if (!mounted) return;
+            if (resultado is Map && resultado['reabrirServidorId'] != null) {}
+          },
+          corFundo: Theme.of(context).colorScheme.surfaceContainerHighest,
+          corTexto: Theme.of(context).colorScheme.onSurface,
+          corBorda: Theme.of(context).colorScheme.outlineVariant,
+          iconSize: 18,
+          fontSize: 14,
+          padH: 16,
+          padV: 12,
+          tooltip: 'Ver histórico de orçamentos finalizados',
         ),
 
         const SizedBox(width: 10),
@@ -1812,93 +1924,73 @@ class _OrcamentoPageState extends State<OrcamentoPage>
         Consumer<OrcamentoProvider>(
           builder: (context, provider, _) {
             final temAbas = provider.abas.isNotEmpty;
-            return Tooltip(
-              message: temAbas
+            Widget? badge;
+            if (temAbas) {
+              badge = Positioned(
+                right: -6,
+                top: -6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppTheme.warning, width: 1.5),
+                  ),
+                  constraints: const BoxConstraints(minWidth: 18),
+                  child: Text(
+                    '${provider.abas.length}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: AppTheme.warning,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              );
+            }
+            return _BotaoCabecalhoWidget(
+              icone: Icons.edit_note,
+              texto: 'Aberto',
+              onPressed: temAbas ? _abrirEditor : () {},
+              corFundo: temAbas
+                  ? AppTheme.warning
+                  : Theme.of(context).colorScheme.surfaceContainerHighest,
+              corTexto: temAbas
+                  ? Colors.white
+                  : Theme.of(context).colorScheme.onSurface,
+              corBorda: temAbas ? null : Theme.of(context).colorScheme.outlineVariant,
+              iconSize: 18,
+              fontSize: 14,
+              padH: 16,
+              padV: 12,
+              tooltip: temAbas
                   ? 'Ver orçamentos abertos em edição'
                   : 'Nenhum orçamento aberto no momento',
-              child: OutlinedButton.icon(
-                onPressed: temAbas
-                    ? () async {
-                        final resultado = await Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => const OrcamentoEditorPage()),
-                        );
-                        await _aoVoltarDoEditor(resultado);
-                      }
-                    : null,
-                icon: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    const Icon(Icons.edit_note, size: 18),
-                    if (temAbas)
-                      Positioned(
-                        right: -4,
-                        top: -4,
-                        child: Container(
-                          width: 14,
-                          height: 14,
-                          decoration: const BoxDecoration(
-                            color: AppTheme.warning,
-                            shape: BoxShape.circle,
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            '${provider.abas.length}',
-                            style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                label: const Text('Aberto'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: temAbas ? AppTheme.warning : Theme.of(context).colorScheme.onSurface,
-                  side: BorderSide(
-                      color: temAbas ? AppTheme.warning : Theme.of(context).colorScheme.outlineVariant),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                ).copyWith(
-                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-                ),
-              ),
+              badge: badge,
             );
           },
         ),
 
         const SizedBox(width: 10),
 
-        Tooltip(
-          key: _tourKeyNovoOrcamento,
-          message: 'Criar um novo orçamento de compra',
-          child: FilledButton.icon(
-            onPressed: () async {
-              final p = context.read<OrcamentoProvider>();
-              p.adicionarAba();
-              p.atualizarFlagsTab(modoEdicao: true);
-              final resultado = await Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const OrcamentoEditorPage()),
-              );
-              await _aoVoltarDoEditor(resultado);
-            },
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('Novo Orçamento'),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
-              ),
-            ).copyWith(
-              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-            ),
-          ),
+        _BotaoCabecalhoWidget(
+          tourKey: _tourKeyNovoOrcamento,
+          icone: Icons.add,
+          texto: 'Novo Orçamento',
+          onPressed: () async {
+            final p = context.read<OrcamentoProvider>();
+            p.adicionarAba();
+            p.atualizarFlagsTab(modoEdicao: true);
+            await _abrirEditor();
+          },
+          corFundo: AppTheme.primary,
+          corTexto: Colors.white,
+          iconSize: 18,
+          fontSize: 14,
+          padH: 20,
+          padV: 12,
+          tooltip: 'Criar um novo orçamento de compra',
         ),
 
         const SizedBox(width: 12),
@@ -2102,15 +2194,16 @@ class _DescricaoFieldState extends State<_DescricaoField> {
   @override
   Widget build(BuildContext context) {
     return TextField(
-      controller:_ctrl,
+      controller: _ctrl,
       maxLines: 2,
       inputFormatters: [_NoCommaFormatter()],
       decoration: InputDecoration(
-        hintText: 'Descrição',
+        hintText: 'Descrição (obrigatória)',
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
         isDense: true,
         filled: true,
         fillColor: Theme.of(context).colorScheme.surface,
-        errorText: _ctrl.text.trim().isEmpty ? 'Descrição obrigatória' : null,
       ),
       style: const TextStyle(fontSize: 13),
       onChanged: (v) {
@@ -2176,14 +2269,32 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
     final titulo = orcamento['titulo'] as String? ?? 'Orçamento';
     final itens = (orcamento['itens'] as List? ?? []);
 
-    final Map<int, String> materiaisUnicos = {};
+    // Chave por materialId + descrição do item: itens de um mesmo material
+    // genérico (ex.: "TINTA") com descrições diferentes (ex.: "AZUL 400ML",
+    // "VERMELHA 900ML") são variantes distintas e precisam aparecer como
+    // linhas separadas no resumo do card — agrupar só por materialId fazia
+    // "TINTA" aparecer duplicado sem nenhuma diferenciação.
+    final Map<String, String> materiaisUnicos = {};
     for (final item in itens) {
       final materialId = item['materialId'] as int?;
-      if (materialId == null || materiaisUnicos.containsKey(materialId)) continue;
+      if (materialId == null) continue;
       final materialData = item['material'] as Map<String, dynamic>?;
+      final descricaoMaterial = (materialData?['descricao'] as String?)?.trim();
+      final descricaoItem = (item['descricaoItem'] as String?)?.trim();
+      final descricao = (descricaoMaterial != null && descricaoMaterial.isNotEmpty)
+          ? descricaoMaterial
+          : (descricaoItem != null && descricaoItem.isNotEmpty ? descricaoItem : null);
+      final chave = descricao != null ? '$materialId|$descricao' : '$materialId';
+      if (materiaisUnicos.containsKey(chave)) continue;
+
       final nomeBase = (materialData?['nome'] as String? ?? '').isNotEmpty
           ? materialData!['nome'] as String
           : 'Material excluído';
+      // Nome de exibição: concatena a descrição da variante ao nome do
+      // material genérico (ex.: "TINTA" + "AZUL 400ML" = "TINTA AZUL 400ML"),
+      // igual à regra usada no restante do orçamento.
+      final nomeExibicao =
+          descricao != null && descricao.isNotEmpty ? '$nomeBase $descricao' : nomeBase;
       final medida = materialData?['medida'] as String?;
       final medidaOuDimensao = (medida != null && medida.isNotEmpty)
           ? medida
@@ -2201,8 +2312,8 @@ class _OrcamentoAprovacaoCardState extends State<_OrcamentoAprovacaoCard> {
         if (espessuraFormatada != null) espessuraFormatada,
       ];
       final nomeComPartes =
-          partes.isEmpty ? nomeBase : '$nomeBase · ${partes.join(' · ')}';
-      materiaisUnicos[materialId] = (identificador != null && identificador.isNotEmpty)
+          partes.isEmpty ? nomeExibicao : '$nomeExibicao · ${partes.join(' · ')}';
+      materiaisUnicos[chave] = (identificador != null && identificador.isNotEmpty)
           ? '$identificador · $nomeComPartes'
           : nomeComPartes;
     }
@@ -3111,9 +3222,12 @@ class _OrcamentoEmAbertoCardState extends State<_OrcamentoEmAbertoCard> {
                             ];
                             final nomeComPartes =
                                 partes.isEmpty ? nomeBase : '$nomeBase · ${partes.join(' · ')}';
-                            final desc = (m.identificador != null && m.identificador!.isNotEmpty)
+                            final nomeComIdentificador = (m.identificador != null && m.identificador!.isNotEmpty)
                                 ? '${m.identificador} · $nomeComPartes'
                                 : nomeComPartes;
+                            final desc = (m.descricaoItem != null && m.descricaoItem!.trim().isNotEmpty)
+                                ? '$nomeComIdentificador — ${m.descricaoItem!.trim()}'
+                                : nomeComIdentificador;
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 2),
                               child: Text(
@@ -3193,5 +3307,93 @@ class _OrcamentoEmAbertoCardState extends State<_OrcamentoEmAbertoCard> {
         ),
       ),
     );
+  }
+}
+// ─── Botão de cabeçalho reutilizável (mesmo padrão do estoque_page) ───────────
+class _BotaoCabecalhoWidget extends StatefulWidget {
+  final Key? tourKey;
+  final IconData icone;
+  final String texto;
+  final VoidCallback onPressed;
+  final Color corFundo;
+  final Color corTexto;
+  final double iconSize;
+  final double fontSize;
+  final double padH;
+  final double padV;
+  final String? tooltip;
+  final Color? corBorda;
+  final Widget? badge;
+
+  const _BotaoCabecalhoWidget({
+    this.tourKey,
+    required this.icone,
+    required this.texto,
+    required this.onPressed,
+    required this.corFundo,
+    required this.corTexto,
+    required this.iconSize,
+    required this.fontSize,
+    required this.padH,
+    required this.padV,
+    this.tooltip,
+    this.corBorda,
+    this.badge,
+  });
+
+  @override
+  State<_BotaoCabecalhoWidget> createState() => _BotaoCabecalhoWidgetState();
+}
+
+class _BotaoCabecalhoWidgetState extends State<_BotaoCabecalhoWidget> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final botao = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Material(
+        color: _hovered
+            ? widget.corFundo.withValues(alpha: 0.85)
+            : widget.corFundo,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: widget.onPressed,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: widget.padH, vertical: widget.padV),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: widget.corBorda != null ? Border.all(color: widget.corBorda!) : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(widget.icone, size: widget.iconSize, color: widget.corTexto),
+                const SizedBox(width: 6),
+                Text(
+                  widget.texto,
+                  style: TextStyle(
+                    fontSize: widget.fontSize,
+                    color: widget.corTexto,
+                    fontWeight: FontWeight.w600,
+                    height: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final comChave = widget.tourKey != null ? Container(key: widget.tourKey, child: botao) : botao;
+    final comTooltip = widget.tooltip != null ? Tooltip(message: widget.tooltip!, child: comChave) : comChave;
+
+    if (widget.badge == null) return comTooltip;
+    return Stack(clipBehavior: Clip.none, children: [comTooltip, widget.badge!]);
   }
 }

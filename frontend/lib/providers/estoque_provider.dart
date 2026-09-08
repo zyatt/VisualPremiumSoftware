@@ -308,6 +308,9 @@ class EstoqueProvider extends ChangeNotifier {
   bool _carregandoMovimentacoes = false;
   bool get carregandoMovimentacoes => _carregandoMovimentacoes;
 
+  String? _erroMovimentacoes;
+  String? get erroMovimentacoes => _erroMovimentacoes;
+
   Future<void> carregarMovimentacoesPagina({
     String? numeroOS,
     String? material,
@@ -323,6 +326,7 @@ class EstoqueProvider extends ChangeNotifier {
     int porPagina = 100,
   }) async {
     _carregandoMovimentacoes = true;
+    _erroMovimentacoes = null;
     notifyListeners();
     try {
       final resultado = await _repo.listarMovimentacoes(
@@ -342,7 +346,7 @@ class EstoqueProvider extends ChangeNotifier {
       _movimentacoesPagina      = resultado.itens;
       _totalMovimentacoesPagina = resultado.total;
     } catch (e) {
-      _erro = _mensagemErro(e);
+      _erroMovimentacoes = _mensagemErro(e);
     } finally {
       _carregandoMovimentacoes = false;
       notifyListeners();

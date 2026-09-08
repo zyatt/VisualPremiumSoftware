@@ -8,11 +8,16 @@ const ESCRITA      = ['ADMIN', 'GERENTE'];
 const EXCLUSAO     = ['ADMIN', 'GERENTE'];
 const CUSTO        = ['ADMIN', 'GERENTE', 'COMPRAS'];
 
+const APROVACAO = ['ADMIN', 'GERENTE'];
+
 router.get('/categorias',         authMiddleware, roleMiddleware(LEITURA),  ctrl.listarCategorias);
 router.get('/paginado',           authMiddleware, roleMiddleware(LEITURA),  ctrl.listarPaginado);
 router.get('/para-movimentacao',  authMiddleware, roleMiddleware(LEITURA),  ctrl.listarParaMovimentacao);
 router.get('/notificacoes',       authMiddleware, ctrl.notificacoes);
+router.get('/pendentes',          authMiddleware, roleMiddleware(APROVACAO), ctrl.listarPendentes);
+router.get('/pendentes/total',    authMiddleware, roleMiddleware(APROVACAO), ctrl.contarPendentes);
 router.get('/',                   authMiddleware, roleMiddleware(LEITURA),  ctrl.listar);
+router.get('/:id/vinculados',     authMiddleware, roleMiddleware(LEITURA),  ctrl.listarVinculados);
 router.get('/:id',                authMiddleware, roleMiddleware(LEITURA),  ctrl.buscarPorId);
 router.get('/:id/historico-precos', authMiddleware, roleMiddleware(LEITURA), ctrl.listarHistoricoPrecos);
 router.post('/',                  authMiddleware, roleMiddleware(CADASTRO), ctrl.criar);
@@ -21,6 +26,8 @@ router.patch('/:id/desativar',    authMiddleware, roleMiddleware(ESCRITA),  ctrl
 router.patch('/:id/reativar',     authMiddleware, roleMiddleware(ESCRITA),  ctrl.reativar);
 router.patch('/:id/confirmar',    authMiddleware, roleMiddleware(ESCRITA),  ctrl.confirmarEstoque);
 router.patch('/:id/custo',        authMiddleware, roleMiddleware(CUSTO),    ctrl.atualizarCustoManual);
+router.patch('/:id/aprovar',      authMiddleware, roleMiddleware(APROVACAO), ctrl.aprovar);
+router.delete('/:id/recusar',     authMiddleware, roleMiddleware(APROVACAO), ctrl.recusar);
 router.delete('/:id',             authMiddleware, roleMiddleware(EXCLUSAO), ctrl.excluir);
 
 module.exports = router;

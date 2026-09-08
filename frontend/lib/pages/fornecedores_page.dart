@@ -352,7 +352,7 @@ class _TipoFiltroDropdownState extends State<_TipoFiltroDropdown> {
                         autofocus: true,
                         inputFormatters: [_UpperCaseFormatter()],
                         decoration: InputDecoration(
-                          hintText:   'Buscar tipo...',
+                          hintText:   'Buscar tipo',
                           isDense:    true,
                           prefixIcon: Icon(Icons.search, size: 18, color: scheme.outline),
                         ),
@@ -370,6 +370,9 @@ class _TipoFiltroDropdownState extends State<_TipoFiltroDropdown> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             MenuItemButton(
+                              style: ButtonStyle(
+                                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                              ),
                               onPressed: () {
                                 widget.onSelecionar('');
                                 _menuController.close();
@@ -384,6 +387,9 @@ class _TipoFiltroDropdownState extends State<_TipoFiltroDropdown> {
                             ),
                             for (final t in filtrados)
                               MenuItemButton(
+                                style: ButtonStyle(
+                                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                                ),
                                 onPressed: () {
                                   widget.onSelecionar(t);
                                   _menuController.close();
@@ -782,7 +788,14 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
       context: context,
       barrierDismissible: true,
       builder: (_) => _MateriaisDialog(fornecedor: fornecedor),
-    );
+    ).then((_) {
+      // O dialog atualiza apenas seu próprio estado interno ao vincular/
+      // desvincular materiais; sem isto, o card e a lista desta página
+      // continuam com os dados antigos e, ao reabrir "Materiais
+      // vinculados", o vínculo recém-criado (ex.: material genérico)
+      // parece ter sumido até o usuário clicar em "atualizar".
+      if (mounted) _recarregarSemResetarPagina();
+    });
   }
 
   Future<void> _abrirMateriaisSimulado() {
@@ -884,40 +897,32 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                   ],
                 ),
                 const Spacer(),
-                Container(
-                  key: _tourKeyVincularPorMaterial,
-                  child: Tooltip(
-                    message: 'Vincular vários fornecedores a um material de uma vez',
-                    child: OutlinedButton.icon(
-                      onPressed: _abrirVincularPorMaterial,
-                      icon: const Icon(Icons.category_outlined, size: 18),
-                      label: const Text('Vincular por Material'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.primary,
-                        side: const BorderSide(color: AppTheme.primary),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 12),
-                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-                    ),
-                  ),
+                _BotaoCabecalhoWidget(
+                  tourKey: _tourKeyVincularPorMaterial,
+                  icone: Icons.category_outlined,
+                  texto: 'Vincular por Material',
+                  onPressed: _abrirVincularPorMaterial,
+                  corFundo: AppTheme.warning,
+                  corTexto: Colors.white,
+                  iconSize: 18,
+                  fontSize: 14,
+                  padH: 20,
+                  padV: 12,
+                  tooltip: 'Vincular vários fornecedores a um material de uma vez',
                 ),
                 const SizedBox(width: 12),
-                Container(
-                  key: _tourKeyNovoFornecedor,
-                  child: Tooltip(
-                    message: 'Cadastrar um novo fornecedor',
-                    child: FilledButton.icon(
-                      onPressed: () => _abrirFormulario(),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Novo Fornecedor'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 12),
-                      ).copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
-                    ),
-                  ),
+                _BotaoCabecalhoWidget(
+                  tourKey: _tourKeyNovoFornecedor,
+                  icone: Icons.add,
+                  texto: 'Novo Fornecedor',
+                  onPressed: () => _abrirFormulario(),
+                  corFundo: AppTheme.primary,
+                  corTexto: Colors.white,
+                  iconSize: 18,
+                  fontSize: 14,
+                  padH: 20,
+                  padV: 12,
+                  tooltip: 'Cadastrar um novo fornecedor',
                 ),
                 SizedBox(width: 10),
                 IconButton(
@@ -976,19 +981,28 @@ class _FornecedoresPageState extends State<FornecedoresPage> {
                     final temFiltro = v.text.isNotEmpty || _tipoFiltro.isNotEmpty;
                     return IconButton.outlined(
                       tooltip: 'Limpar filtros',
-                      icon: Icon(Icons.filter_alt_off,
-                          color: scheme.onSurfaceVariant),
-                      onPressed: () {
-                        if (!temFiltro) return;
-                        _buscaCtrl.clear();
-                        setState(() => _tipoFiltro = '');
-                        _aplicarFiltros();
-                      },
+                      icon: Icon(
+                        Icons.filter_alt_off,
+                        color: temFiltro
+                            ? scheme.onSurfaceVariant
+                            : scheme.onSurfaceVariant.withValues(alpha: 0.35),
+                      ),
+                      onPressed: temFiltro
+                          ? () {
+                              _buscaCtrl.clear();
+                              setState(() => _tipoFiltro = '');
+                              _aplicarFiltros();
+                            }
+                          : null,
                       style: IconButton.styleFrom(
-                        side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                        side: BorderSide(
+                          color: temFiltro
+                              ? Theme.of(context).colorScheme.outline
+                              : Theme.of(context).colorScheme.outline.withValues(alpha: 0.35),
+                        ),
                       ).copyWith(
                         mouseCursor: WidgetStateProperty.resolveWith((states) {
-                          if (!temFiltro) {
+                          if (states.contains(WidgetState.disabled)) {
                             return SystemMouseCursors.basic;
                           }
                           return SystemMouseCursors.click;
@@ -1426,42 +1440,81 @@ class _FornecedorCardState extends State<_FornecedorCard> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    InkWell(
-                      borderRadius:
-                          const BorderRadius.vertical(top: Radius.circular(10)),
-                      onTap: () => _selecionarOpcao(1),
-                      mouseCursor: SystemMouseCursors.click,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
-                        child: Row(
-                          children: [
-                            Icon(Icons.edit_outlined, size: 18, color: widget.cor),
-                            const SizedBox(width: 10),
-                            const Text('Editar fornecedor'),
-                          ],
-                        ),
-                      ),
-                    ),
-                    InkWell(
-                      key: widget.tourKeyMenuMateriaisVinculados,
-                      borderRadius:
-                          const BorderRadius.vertical(bottom: Radius.circular(10)),
-                      onTap: () => _selecionarOpcao(2),
-                      mouseCursor: SystemMouseCursors.click,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
-                        child: Row(
-                          children: [
-                            Icon(Icons.inventory_2_outlined,
-                                size: 18, color: widget.cor),
-                            const SizedBox(width: 10),
-                            const Text('Materiais vinculados'),
-                          ],
-                        ),
-                      ),
-                    ),
+                    Builder(builder: (_) {
+                      bool hov1 = false;
+                      return StatefulBuilder(
+                        builder: (context, setItemState) {
+                          return MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          onEnter: (_) => setItemState(() => hov1 = true),
+                          onExit: (_) => setItemState(() => hov1 = false),
+                          child: GestureDetector(
+                            onTap: () => _selecionarOpcao(1),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 120),
+                              decoration: BoxDecoration(
+                                color: hov1
+                                    ? widget.cor.withValues(alpha: 0.08)
+                                    : Colors.transparent,
+                                borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(10)),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 12),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit_outlined,
+                                        size: 18, color: widget.cor),
+                                    const SizedBox(width: 10),
+                                    const Text('Editar fornecedor'),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                        },
+                      );
+                    }),
+                    Builder(builder: (_) {
+                      bool hov2 = false;
+                      return StatefulBuilder(
+                        builder: (context, setItemState) {
+                          return MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          onEnter: (_) => setItemState(() => hov2 = true),
+                          onExit: (_) => setItemState(() => hov2 = false),
+                          child: GestureDetector(
+                            key: widget.tourKeyMenuMateriaisVinculados,
+                            onTap: () => _selecionarOpcao(2),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 120),
+                              decoration: BoxDecoration(
+                                color: hov2
+                                    ? widget.cor.withValues(alpha: 0.08)
+                                    : Colors.transparent,
+                                borderRadius: const BorderRadius.vertical(
+                                    bottom: Radius.circular(10)),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 12),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.inventory_2_outlined,
+                                        size: 18, color: widget.cor),
+                                    const SizedBox(width: 10),
+                                    const Text('Materiais vinculados'),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                        },
+                      );
+                    }),
                   ],
                 ),
               ),
@@ -1611,50 +1664,61 @@ class _FornecedorCardState extends State<_FornecedorCard> {
                             ),
                           ),
                           const Spacer(),
-                          Tooltip(
-                            message: 'Editar fornecedor',
-                            child: MouseRegion(
-                              cursor: SystemMouseCursors.click,
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(4),
-                                onTap: widget.onTap,
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: widget.cor.withValues(alpha: 0.10),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Icon(
-                                    Icons.edit_outlined,
-                                    size: 14,
-                                    color: widget.cor,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Tooltip(
-                            message: 'Ver materiais vinculados',
-                            child: MouseRegion(
-                              cursor: SystemMouseCursors.click,
-                              child: InkWell(
-                                key: widget.tourKeyBotaoMateriaisVinculados,
-                                borderRadius: BorderRadius.circular(4),
-                                onTap: widget.onVerMateriais,
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: widget.cor.withValues(alpha: 0.10),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Icon(
-                                    Icons.inventory_2_outlined,
-                                    size: 14,
-                                    color: widget.cor,
+                          AnimatedOpacity(
+                            opacity: _hovered ? 1.0 : 0.0,
+                            duration: const Duration(milliseconds: 150),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Tooltip(
+                                  message: 'Editar fornecedor',
+                                  child: MouseRegion(
+                                    cursor: _hovered ? SystemMouseCursors.click : MouseCursor.defer,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(4),
+                                      mouseCursor: SystemMouseCursors.click,
+                                      onTap: _hovered ? widget.onTap : null,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: widget.cor.withValues(alpha: 0.10),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Icon(
+                                          Icons.edit_outlined,
+                                          size: 14,
+                                          color: widget.cor,
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
+                                const SizedBox(width: 6),
+                                Tooltip(
+                                  message: 'Ver materiais vinculados',
+                                  child: MouseRegion(
+                                    cursor: _hovered ? SystemMouseCursors.click : MouseCursor.defer,
+                                    child: InkWell(
+                                      key: widget.tourKeyBotaoMateriaisVinculados,
+                                      borderRadius: BorderRadius.circular(4),
+                                      mouseCursor: SystemMouseCursors.click,
+                                      onTap: _hovered ? widget.onVerMateriais : null,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: widget.cor.withValues(alpha: 0.10),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Icon(
+                                          Icons.inventory_2_outlined,
+                                          size: 14,
+                                          color: widget.cor,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
@@ -2334,6 +2398,10 @@ class _MateriaisDialog extends StatefulWidget {
 class _MateriaisDialogState extends State<_MateriaisDialog> {
   FornecedorModel? _fornecedor;
 
+  // Nomes de materiais genéricos (grupo) atualmente expandidos na lista de
+  // vínculos, mostrando as variantes individuais abaixo do cabeçalho.
+  final Set<String> _genericosVinculadosExpandidos = {};
+
   final _filtroNomeCtrl         = TextEditingController();
   final _filtroIdentificadorCtrl = TextEditingController();
   final _filtroMedidaCtrl       = TextEditingController();
@@ -2361,7 +2429,11 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
   ];
 
   List<FornecedorMaterialVinculoModel> get _materiaisBase =>
-      _mostrandoSimulacao ? _materiaisSimulados : (_fornecedor?.materiais ?? []);
+      _mostrandoSimulacao
+          ? _materiaisSimulados
+          // Materiais desativados no Estoque não devem aparecer aqui,
+          // mesmo que o vínculo fornecedor-material em si esteja ativo.
+          : (_fornecedor?.materiais ?? []).where((m) => m.materialAtivo).toList();
 
   RoboHelperProvider? _roboHelper;
   void _onRoboHelperChanged() {
@@ -2541,7 +2613,7 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
       child: SizedBox(
-        width: 920,
+        width: 1040,
         height: 620,
         child: Column(
           children: [
@@ -2623,7 +2695,6 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                         child: TextField(
                           key: widget.tourKeys?.busca,
                           controller: _filtroNomeCtrl,
-                          autofocus: true,
                           inputFormatters: [_UpperCaseFormatter()],
                           decoration: InputDecoration(
                             hintText: 'Nome do material',
@@ -2632,38 +2703,32 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                             isDense: true,
                             contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 8),
-                            suffixIcon: ValueListenableBuilder(
-                              valueListenable: _filtroNomeCtrl,
-                              builder: (_, v, __) => v.text.isNotEmpty
-                                  ? IconButton(
-                                      icon: Icon(Icons.clear, size: 16),
-                                      onPressed: _filtroNomeCtrl.clear,
-                                      color: Theme.of(context).colorScheme.outline,
-                                    )
-                                  : const SizedBox.shrink(),
-                            ),
                           ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Tooltip(
-                        message: 'Limpar filtros',
-                        child: IconButton.outlined(
-                          icon: Icon(Icons.filter_alt_off, size: 18),
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () {
-                            if (!_temFiltro) return;
-                            _limparFiltros();
-                          },
-                          style: IconButton.styleFrom().copyWith(
-                            mouseCursor: WidgetStateProperty.resolveWith((states) {
-                              if (!_temFiltro) {
-                                return SystemMouseCursors.basic;
-                              }
-                              return SystemMouseCursors.click;
-                            }),
+                      IconButton.outlined(
+                        tooltip: 'Limpar filtros',
+                        icon: Icon(
+                          Icons.filter_alt_off,
+                          color: _temFiltro
+                              ? Theme.of(context).colorScheme.onSurfaceVariant
+                              : Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
+                        ),
+                        onPressed: _temFiltro ? _limparFiltros : null,
+                        style: IconButton.styleFrom(
+                          side: BorderSide(
+                            color: _temFiltro
+                                ? Theme.of(context).colorScheme.outline
+                                : Theme.of(context).colorScheme.outline.withValues(alpha: 0.35),
                           ),
+                        ).copyWith(
+                          mouseCursor: WidgetStateProperty.resolveWith((states) {
+                            if (states.contains(WidgetState.disabled)) {
+                              return SystemMouseCursors.basic;
+                            }
+                            return SystemMouseCursors.click;
+                          }),
                         ),
                       ),
                     ],
@@ -2709,7 +2774,20 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                           inputFormatters: [_EspessuraFormatter()],
                           decoration: InputDecoration(
                             hintText:   'Comprimento',
-                            suffixText: 'm',
+                            suffixIcon: Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                widthFactor: 1,
+                                child: Text(
+                                  'm',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.outline,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            ),
                             prefixIcon: Icon(Icons.height,
                                 color: Theme.of(context).colorScheme.outline, size: 18),
                             isDense: true,
@@ -2726,7 +2804,20 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                           inputFormatters: [_EspessuraFormatter()],
                           decoration: InputDecoration(
                             hintText:   'Largura',
-                            suffixText: 'm',
+                            suffixIcon: Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                widthFactor: 1,
+                                child: Text(
+                                  'm',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.outline,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            ),
                             prefixIcon: Icon(Icons.width_normal,
                                 color: Theme.of(context).colorScheme.outline, size: 18),
                             isDense: true,
@@ -2742,7 +2833,20 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                           inputFormatters: [_EspessuraFormatter()],
                           decoration: InputDecoration(
                             hintText:   'Espessura',
-                            suffixText: 'mm',
+                            suffixIcon: Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                widthFactor: 1,
+                                child: Text(
+                                  'mm',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.outline,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            ),
                             prefixIcon: Icon(Icons.layers,
                                 color: Theme.of(context).colorScheme.outline, size: 18),
                             isDense: true,
@@ -2811,18 +2915,93 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
                             ],
                           ),
                         )
-                      : ListView.separated(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: materiais.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 8),
-                          itemBuilder: (_, i) => _VinculoCard(
-                            vinculo: materiais[i],
-                            onEditar: () =>
-                                _abrirVincularOuEditar(vinculo: materiais[i]),
-                            onDesvincular: () => _desvincular(materiais[i]),
-                          ),
-                        ),
+                      : Builder(builder: (_) {
+                          // Agrupa variantes do mesmo material genérico (ex.:
+                          // "TINTA · teste123", "TINTA · ababab") sob um único
+                          // cabeçalho expansível "TINTA", em vez de listar cada
+                          // vínculo solto — sem isso o pai genérico fica
+                          // "invisível" e a lista de variantes de um mesmo
+                          // material aparece espalhada e sem contexto.
+                          //
+                          // O agrupamento usa o campo real `ehGenerico` do
+                          // vínculo — mas isso só cobre o próprio genérico
+                          // "puro" (ex.: card "TINTA" sem descrição). Uma
+                          // variante (ex.: "TINTA · ABC") tem `ehGenerico`
+                          // false, pois o material vinculado de fato é a
+                          // variante concreta, não o genérico. Por isso
+                          // também tratamos como agrupável todo vínculo que
+                          // tenha `materialDescricao` preenchido (marca de
+                          // variante de genérico) — material comum nunca
+                          // deve ser agrupado, mesmo que seu nome/medida
+                          // contenha " · " por coincidência (ex.:
+                          // "ACRILICO ESPELHADO PRATA · 2x1m · 2mm" na
+                          // descrição completa), pois esse texto vem de
+                          // `descricaoCompleta`, não de `materialDescricao`.
+                          final grupos = <String, List<FornecedorMaterialVinculoModel>>{};
+                          final ordemGrupos = <String>[];
+                          final soltos = <FornecedorMaterialVinculoModel>[];
+                          for (final m in materiais) {
+                            final ehVariante = (m.materialDescricao ?? '').isNotEmpty;
+                            if (!m.ehGenerico && !ehVariante) {
+                              soltos.add(m);
+                              continue;
+                            }
+                            // materialNome já vem como "NOME · DESCRICAO" para
+                            // variantes de genérico (ver _nomeExibicaoMaterial);
+                            // agrupa pela parte antes do " · ".
+                            final nome = m.materialNome ?? '';
+                            final chave = nome.contains(' · ') ? nome.split(' · ').first : nome;
+                            if (!grupos.containsKey(chave)) ordemGrupos.add(chave);
+                            grupos.putIfAbsent(chave, () => []).add(m);
+                          }
+
+                          final linhas = <Widget>[];
+                          for (final m in soltos) {
+                            // Material comum (não é variante de genérico):
+                            // mostra o card normalmente, sem agrupamento.
+                            linhas.add(_VinculoCard(
+                              vinculo: m,
+                              onEditar: () => _abrirVincularOuEditar(vinculo: m),
+                              onDesvincular: () => _desvincular(m),
+                            ));
+                          }
+                          for (final chave in ordemGrupos) {
+                            final itensGrupo = grupos[chave]!;
+
+                            final expandido = _genericosVinculadosExpandidos.contains(chave);
+                            linhas.add(_GrupoGenericoHeader(
+                              nome: chave,
+                              quantidade: itensGrupo.length,
+                              expandido: expandido,
+                              onTap: () => setState(() {
+                                if (expandido) {
+                                  _genericosVinculadosExpandidos.remove(chave);
+                                } else {
+                                  _genericosVinculadosExpandidos.add(chave);
+                                }
+                              }),
+                            ));
+                            if (expandido) {
+                              for (final v in itensGrupo) {
+                                linhas.add(Padding(
+                                  padding: const EdgeInsets.only(left: 20, top: 8),
+                                  child: _VinculoCard(
+                                    vinculo: v,
+                                    onEditar: () => _abrirVincularOuEditar(vinculo: v),
+                                    onDesvincular: () => _desvincular(v),
+                                  ),
+                                ));
+                              }
+                            }
+                          }
+
+                          return ListView.separated(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: linhas.length,
+                            separatorBuilder: (_, __) => const SizedBox(height: 8),
+                            itemBuilder: (_, i) => linhas[i],
+                          );
+                        }),
             ),
           ],
         ),
@@ -2831,7 +3010,95 @@ class _MateriaisDialogState extends State<_MateriaisDialog> {
   }
 }
 
+class _GrupoGenericoHeader extends StatefulWidget {
+  final String nome;
+  final int quantidade;
+  final bool expandido;
+  final VoidCallback onTap;
+
+  const _GrupoGenericoHeader({
+    required this.nome,
+    required this.quantidade,
+    required this.expandido,
+    required this.onTap,
+  });
+
+  @override
+  State<_GrupoGenericoHeader> createState() => _GrupoGenericoHeaderState();
+}
+
+class _GrupoGenericoHeaderState extends State<_GrupoGenericoHeader> {
+  bool _hovered = false;
+
+  void _onHover(PointerHoverEvent _) {
+    if (!_hovered) setState(() => _hovered = true);
+  }
+
+  void _onExit(PointerExitEvent _) {
+    if (_hovered) setState(() => _hovered = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: widget.onTap,
+        onHover: (h) => h ? _onHover(PointerHoverEvent()) : _onExit(PointerExitEvent()),
+        mouseCursor: SystemMouseCursors.click,
+        borderRadius: BorderRadius.circular(10),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: _hovered
+                ? const Color(0xFFFF9800).withValues(alpha: 0.08)
+                : Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Icon(
+                  widget.expandido ? Icons.expand_more : Icons.chevron_right,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.category_outlined, size: 18, color: AppTheme.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    widget.nome,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${widget.quantidade} tipo${widget.quantidade != 1 ? 's' : ''}',
+                    style: const TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _VinculoCard extends StatefulWidget {
+
   final FornecedorMaterialVinculoModel vinculo;
   final VoidCallback onEditar;
   final VoidCallback onDesvincular;
@@ -3001,6 +3268,8 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
   Timer? _debounceId;
   bool _ignorarListeners = false;
   String? _unidadeSelecionada;
+  bool _materialEhGenerico = false;
+  final _descricaoVarianteCtrl = TextEditingController();
 
   bool get _editando => widget.vinculo != null;
 
@@ -3052,6 +3321,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     _precoCtrl.dispose();
     _precoM2Ctrl.dispose();
     _precoUnidadeMedidaCtrl.dispose();
+    _descricaoVarianteCtrl.dispose();
     super.dispose();
   }
 
@@ -3248,6 +3518,14 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     final largura      = material['largura'];
     final espessura    = material['espessura']    as String?;
     final unidade      = material['unidade']      as String?;
+    final ehGenerico   = material['ehGenerico']   as bool? ?? false;
+    final descricao    = material['descricao']    as String?;
+    final materialGenericoId = material['materialGenericoId'];
+    // Um filho de genérico (variante já criada, ex.: "TINTA" + "AZUL")
+    // também precisa do campo de descrição preenchido/travado — do
+    // contrário, ao selecioná-lo direto pela busca, o formulário não
+    // mostra a descrição e o usuário acha que ela "sumiu".
+    final ehFilhoDeGenerico = materialGenericoId != null;
 
     _ignorarListeners = true;
     _materialIdCtrl.text            = id.toString();
@@ -3257,6 +3535,11 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     _materialComprimentoCtrl.text   = comprimento?.toString() ?? '';
     _materialLarguraCtrl.text       = largura?.toString() ?? '';
     _materialEspessuraCtrl.text     = espessura ?? '';
+    if (ehFilhoDeGenerico) {
+      _descricaoVarianteCtrl.text = descricao ?? '';
+    } else if (!ehGenerico) {
+      _descricaoVarianteCtrl.clear();
+    }
     _ignorarListeners = false;
 
     setState(() {
@@ -3264,6 +3547,12 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
       _idNaoEncontrado       = false;
       _sugestoes             = [];
       _unidadeSelecionada    = unidade;
+      // Um filho já resolvido se comporta, no formulário, como o próprio
+      // genérico: mostra o campo de descrição (preenchido acima) para que
+      // o usuário veja/edite a variante já vinculada, mas o vínculo salvo
+      // aponta direto pro filho (materialId = id do filho), sem passar de
+      // novo por resolverOuCriarFilho.
+      _materialEhGenerico    = ehGenerico || ehFilhoDeGenerico;
     });
   }
 
@@ -3291,6 +3580,7 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
     } else {
       sucesso = await prov.vincularMaterial(widget.fornecedorId, {
         'materialId': _materialIdSelecionado ?? int.parse(_materialIdCtrl.text),
+        if (_materialEhGenerico) 'descricao': _descricaoVarianteCtrl.text.trim(),
         ...dados,
       });
     }
@@ -3374,6 +3664,29 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                   ],
                 ),
 
+                if (_materialEhGenerico) ...[
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _descricaoVarianteCtrl,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      labelText: 'Descrição da variante (obrigatório para material genérico)',
+                      helperText:
+                          '"${_materialNomeCtrl.text}" é genérico — descreva a variante, ex.: cor ou tamanho',
+                      isDense: true,
+                      prefixIcon: Icon(Icons.edit_note,
+                          color: Theme.of(context).colorScheme.outline, size: 18),
+                    ),
+                    inputFormatters: [_UpperCaseFormatter()],
+                    validator: (v) {
+                      if (_materialEhGenerico && (v == null || v.trim().isEmpty)) {
+                        return 'Informe a descrição da variante';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -3425,7 +3738,20 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         decoration: InputDecoration(
                           labelText: 'Comprimento',
-                          suffixText: 'm',
+                          suffixIcon: Padding(
+                            padding: const EdgeInsets.only(right: 12),
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              widthFactor: 1,
+                              child: Text(
+                                'm',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.outline,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ),
                           isDense: true,
                           prefixIcon: Icon(
                             Icons.height,
@@ -3446,7 +3772,20 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         decoration: InputDecoration(
                           labelText: 'Largura',
-                          suffixText: 'm',
+                          suffixIcon: Padding(
+                            padding: const EdgeInsets.only(right: 12),
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              widthFactor: 1,
+                              child: Text(
+                                'm',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.outline,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ),
                           isDense: true,
                           prefixIcon: Icon(
                             Icons.width_normal,
@@ -3466,7 +3805,20 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
                         controller: _materialEspessuraCtrl,
                         decoration: InputDecoration(
                           labelText: 'Espessura',
-                          suffixText: 'mm',
+                          suffixIcon: Padding(
+                            padding: const EdgeInsets.only(right: 12),
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              widthFactor: 1,
+                              child: Text(
+                                'mm',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.outline,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ),
                           isDense: true,
                           prefixIcon: Icon(
                             Icons.layers,
@@ -3481,14 +3833,47 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
 
                     const SizedBox(width: 8),
 
-                    IconButton.outlined(
-                      tooltip: 'Limpar filtros',
-                      icon: Icon(Icons.filter_alt_off,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      onPressed: _limparSelecaoMaterial,
-                      style: IconButton.styleFrom(
-                        side: BorderSide(color: Theme.of(context).colorScheme.outline),
-                      ),
+                    ListenableBuilder(
+                      listenable: Listenable.merge([
+                        _materialNomeCtrl,
+                        _materialIdentificadorCtrl,
+                        _materialMedidaCtrl,
+                        _materialComprimentoCtrl,
+                        _materialLarguraCtrl,
+                        _materialEspessuraCtrl,
+                      ]),
+                      builder: (context, __) {
+                        final temFiltro = _materialNomeCtrl.text.isNotEmpty ||
+                            _materialIdentificadorCtrl.text.isNotEmpty ||
+                            _materialMedidaCtrl.text.isNotEmpty ||
+                            _materialComprimentoCtrl.text.isNotEmpty ||
+                            _materialLarguraCtrl.text.isNotEmpty ||
+                            _materialEspessuraCtrl.text.isNotEmpty;
+                        return IconButton.outlined(
+                          tooltip: 'Limpar filtros',
+                          icon: Icon(
+                            Icons.filter_alt_off,
+                            color: temFiltro
+                                ? Theme.of(context).colorScheme.onSurfaceVariant
+                                : Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
+                          ),
+                          onPressed: temFiltro ? _limparSelecaoMaterial : null,
+                          style: IconButton.styleFrom(
+                            side: BorderSide(
+                              color: temFiltro
+                                  ? Theme.of(context).colorScheme.outline
+                                  : Theme.of(context).colorScheme.outline.withValues(alpha: 0.35),
+                            ),
+                          ).copyWith(
+                            mouseCursor: WidgetStateProperty.resolveWith((states) {
+                              if (states.contains(WidgetState.disabled)) {
+                                return SystemMouseCursors.basic;
+                              }
+                              return SystemMouseCursors.click;
+                            }),
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -3699,6 +4084,11 @@ class _FornecedorVinculoEntry {
   final TextEditingController precoM2Ctrl;
   final TextEditingController precoUnidadeMedidaCtrl;
   final bool jaVinculado;
+  // Descrição da variante do vínculo já existente (ex.: "ABC" de
+  // "TINTA · ABC"), usada para exibir junto ao nome do fornecedor na
+  // linha da tag "já vinculado". Null quando não há vínculo ou o
+  // material não é uma variante com descrição.
+  final String? descricaoVariante;
 
   _FornecedorVinculoEntry({
     required this.fornecedor,
@@ -3707,6 +4097,7 @@ class _FornecedorVinculoEntry {
     required this.precoM2Ctrl,
     TextEditingController? precoUnidadeMedidaCtrl,
     this.jaVinculado = false,
+    this.descricaoVariante,
   }) : precoUnidadeMedidaCtrl = precoUnidadeMedidaCtrl ?? TextEditingController();
 
   void dispose() {
@@ -3749,6 +4140,14 @@ class _VincularPorMaterialDialogState
   List<Map<String, dynamic>> _sugestoes = [];
   Timer? _debounceId;
   String? _unidadeSelecionada;
+  bool _materialEhGenerico = false;
+  final _descricaoVarianteCtrl = TextEditingController();
+  Timer? _debounceDescricaoVariante;
+  // Evita que a resposta de uma busca antiga (descrição já trocada de
+  // novo, ou material trocado) sobrescreva o resultado da busca mais
+  // recente — sem isso, respostas fora de ordem da API podiam fazer a
+  // lista "voltar" para o estado de uma descrição anterior.
+  int _buscaVarianteSeq = 0;
 
   List<_FornecedorVinculoEntry> _entradas = [];
   bool _carregandoFornecedores = false;
@@ -3791,6 +4190,7 @@ class _VincularPorMaterialDialogState
     _materialEspessuraCtrl.addListener(_onFiltroAdicionalChanged);
     _buscaFornecedorCtrl.addListener(_onBuscaFornecedorChanged);
     _buscaFornecedorFocus.addListener(_onBuscaFornecedorFocusChanged);
+    _descricaoVarianteCtrl.addListener(_onDescricaoVarianteChanged);
     _carregarFornecedores();
     if (widget.tourKeys != null) {
       _roboHelper = context.read<RoboHelperProvider>();
@@ -3802,6 +4202,7 @@ class _VincularPorMaterialDialogState
   void dispose() {
     _debounceId?.cancel();
     _debounceFornecedor?.cancel();
+    _debounceDescricaoVariante?.cancel();
     _roboHelper?.removeListener(_onRoboHelperChanged);
     _materialIdCtrl.removeListener(_onIdChanged);
     _materialNomeCtrl.removeListener(_onNomeChanged);
@@ -3812,6 +4213,7 @@ class _VincularPorMaterialDialogState
     _materialEspessuraCtrl.removeListener(_onFiltroAdicionalChanged);
     _buscaFornecedorCtrl.removeListener(_onBuscaFornecedorChanged);
     _buscaFornecedorFocus.removeListener(_onBuscaFornecedorFocusChanged);
+    _descricaoVarianteCtrl.removeListener(_onDescricaoVarianteChanged);
     _overlayEntry?.remove();
     _overlayEntry = null;
     _materialIdCtrl.dispose();
@@ -3821,6 +4223,7 @@ class _VincularPorMaterialDialogState
     _materialComprimentoCtrl.dispose();
     _materialLarguraCtrl.dispose();
     _materialEspessuraCtrl.dispose();
+    _descricaoVarianteCtrl.dispose();
     _buscaFornecedorCtrl.dispose();
     _buscaFornecedorFocus.dispose();
     for (final e in _entradas) {
@@ -3941,6 +4344,54 @@ class _VincularPorMaterialDialogState
     }
   }
 
+  void _onDescricaoVarianteChanged() {
+    // Só faz sentido resolver uma variante quando o material selecionado
+    // é genérico — para material comum a busca já foi feita pelo id
+    // direto em _selecionarMaterial().
+    if (_materialIdSelecionado == null || !_materialEhGenerico) return;
+
+    _debounceDescricaoVariante?.cancel();
+    final materialGenericoId = _materialIdSelecionado!;
+    final descricao = _descricaoVarianteCtrl.text.trim();
+
+    if (descricao.isEmpty) {
+      // Sem descrição ainda não há variante para resolver — mostra a
+      // lista vazia (nada digitado, nada vinculado) em vez de manter o
+      // resultado da última descrição digitada.
+      _buscaVarianteSeq++;
+      setState(() => _reconstruirEntradas([], materialTrocou: true));
+      return;
+    }
+
+    _debounceDescricaoVariante = Timer(const Duration(milliseconds: 400), () {
+      _carregarFornecedoresDaVariante(materialGenericoId, descricao);
+    });
+  }
+
+  Future<void> _carregarFornecedoresDaVariante(
+    int materialGenericoId,
+    String descricao,
+  ) async {
+    final minhaSeq = ++_buscaVarianteSeq;
+    if (mounted) setState(() => _carregandoFornecedores = true);
+    try {
+      final prov = context.read<FornecedorProvider>();
+      final lista = await prov.listarPorMaterialGenericoEDescricao(
+        materialGenericoId,
+        descricao,
+      );
+      // Descarta se o material mudou, a descrição mudou de novo, ou o
+      // diálogo já foi fechado enquanto a resposta ainda estava a
+      // caminho.
+      if (!mounted || minhaSeq != _buscaVarianteSeq) return;
+      _reconstruirEntradas(lista, materialTrocou: true);
+    } finally {
+      if (mounted && minhaSeq == _buscaVarianteSeq) {
+        setState(() => _carregandoFornecedores = false);
+      }
+    }
+  }
+
   void _reconstruirEntradas(
     List<FornecedorModel> fornecedores, {
     bool materialTrocou = false,
@@ -3954,10 +4405,23 @@ class _VincularPorMaterialDialogState
 
     final antigos = {for (final e in _entradas) e.fornecedor.id: e};
 
+    // Para material genérico, o backend já filtra `f.materiais` para
+    // conter apenas o vínculo da VARIANTE resolvida (id diferente do
+    // genérico em _materialIdSelecionado) — então usamos o primeiro
+    // vínculo ativo retornado em vez de comparar contra o id do
+    // genérico, que nunca bateria. Para material comum (não genérico),
+    // `f.materiais` já vem filtrado pelo próprio _materialIdSelecionado
+    // no backend, então o comportamento não muda.
     final novas = <_FornecedorVinculoEntry>[];
     for (final f in fornecedores) {
       FornecedorMaterialVinculoModel? vinculo;
-      if (_materialIdSelecionado != null) {
+      if (_materialEhGenerico) {
+        try {
+          vinculo = f.materiais.firstWhere((m) => m.ativo);
+        } catch (_) {
+          vinculo = null;
+        }
+      } else if (_materialIdSelecionado != null) {
         try {
           vinculo = f.materiais.firstWhere(
             (m) => m.materialId == _materialIdSelecionado && m.ativo,
@@ -3990,6 +4454,7 @@ class _VincularPorMaterialDialogState
         precoM2Ctrl: TextEditingController(text: precoM2Inicial),
         precoUnidadeMedidaCtrl: TextEditingController(text: precoUnidadeMedidaInicial),
         jaVinculado: jaVinculado,
+        descricaoVariante: vinculo?.materialDescricao,
       ));
 
       if (!materialTrocou) antigo?.dispose();
@@ -4000,6 +4465,8 @@ class _VincularPorMaterialDialogState
 
   void _limparSelecaoMaterial() {
     _debounceId?.cancel();
+    _debounceDescricaoVariante?.cancel();
+    _buscaVarianteSeq++; // invalida qualquer busca de variante em voo
     _ignorarListeners = true;
     _materialIdCtrl.text            = '';
     _materialNomeCtrl.text          = '';
@@ -4008,12 +4475,14 @@ class _VincularPorMaterialDialogState
     _materialComprimentoCtrl.text   = '';
     _materialLarguraCtrl.text       = '';
     _materialEspessuraCtrl.text     = '';
+    _descricaoVarianteCtrl.text     = '';
     _ignorarListeners = false;
     for (final e in _entradas) { e.dispose(); }
     setState(() {
       _sugestoes             = [];
       _materialIdSelecionado = null;
       _idNaoEncontrado       = false;
+      _materialEhGenerico    = false;
       _entradas              = [];
     });
   }
@@ -4025,7 +4494,8 @@ class _VincularPorMaterialDialogState
       _materialMedidaCtrl.text.trim().isNotEmpty ||
       _materialComprimentoCtrl.text.trim().isNotEmpty ||
       _materialLarguraCtrl.text.trim().isNotEmpty ||
-      _materialEspessuraCtrl.text.trim().isNotEmpty;
+      _materialEspessuraCtrl.text.trim().isNotEmpty ||
+      _descricaoVarianteCtrl.text.trim().isNotEmpty;
 
   void _onIdChanged() {
     if (_ignorarListeners) return;
@@ -4212,6 +4682,7 @@ class _VincularPorMaterialDialogState
     final largura       = material['largura'];
     final comprimento   = material['comprimento'];
     final unidade       = material['unidade']       as String?;
+    final ehGenerico    = material['ehGenerico']    as bool? ?? false;
 
     _ignorarListeners = true;
     _materialIdCtrl.text            = id.toString();
@@ -4224,20 +4695,41 @@ class _VincularPorMaterialDialogState
     _ignorarListeners = false;
 
     _materialIdSelecionado = id;
+    _debounceDescricaoVariante?.cancel();
+    _buscaVarianteSeq++; // invalida qualquer busca de variante em voo
 
     setState(() {
       _idNaoEncontrado = false;
       _sugestoes       = [];
       _unidadeSelecionada = unidade;
+      _materialEhGenerico = ehGenerico;
+      if (!ehGenerico) _descricaoVarianteCtrl.clear();
     });
 
-    _carregarFornecedoresDoMaterial(id);
+    // Para material genérico, a lista de fornecedores depende da
+    // descrição da variante (ainda não digitada aqui), então começa
+    // vazia em vez de carregar pelo id do genérico — ver
+    // _onDescricaoVarianteChanged / _carregarFornecedoresDaVariante.
+    if (ehGenerico) {
+      _reconstruirEntradas([], materialTrocou: true);
+    } else {
+      _carregarFornecedoresDoMaterial(id);
+    }
   }
 
   Future<void> _salvar() async {
     if (_materialIdSelecionado == null) return;
 
     if (_entradas.isEmpty) return;
+
+    if (_materialEhGenerico && _descricaoVarianteCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            '"${_materialNomeCtrl.text}" é um material genérico: informe a descrição da variante antes de vincular.'),
+        backgroundColor: AppTheme.error,
+      ));
+      return;
+    }
 
     setState(() => _salvando = true);
 
@@ -4253,6 +4745,7 @@ class _VincularPorMaterialDialogState
     for (final entrada in _entradas) {
       final dados = {
         'materialId': _materialIdSelecionado,
+        if (_materialEhGenerico) 'descricao': _descricaoVarianteCtrl.text.trim(),
         'preco':               parsePreco(entrada.precoCtrl.text),
         'precoMetroQuadrado':  parsePreco(entrada.precoM2Ctrl.text),
         'precoUnidadeMedida':  parsePreco(entrada.precoUnidadeMedidaCtrl.text),
@@ -4370,7 +4863,7 @@ class _VincularPorMaterialDialogState
                             controller: _materialNomeCtrl,
                             autofocus: true,
                             decoration: InputDecoration(
-                              labelText: 'Nome do material',
+                              hintText: 'Nome do material',
                               isDense: true,
                               prefixIcon: Icon(Icons.inventory_2_outlined,
                                   color: Theme.of(context).colorScheme.outline, size: 18),
@@ -4397,6 +4890,22 @@ class _VincularPorMaterialDialogState
                     ],
                   ),
 
+                  if (_materialEhGenerico) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _descricaoVarianteCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Descrição da variante (obrigatório para material genérico)',
+                        helperText:
+                            '"${_materialNomeCtrl.text}" é genérico — descreva a variante, ex.: cor ou tamanho',
+                        isDense: true,
+                        prefixIcon: Icon(Icons.edit_note,
+                            color: Theme.of(context).colorScheme.outline, size: 18),
+                      ),
+                      inputFormatters: [_UpperCaseFormatter()],
+                    ),
+                  ],
+
                   const SizedBox(height: 8),
                   Column(
                     key: widget.tourKeys?.identificador,
@@ -4413,7 +4922,7 @@ class _VincularPorMaterialDialogState
                               child: TextField(
                                 controller: _materialIdentificadorCtrl,
                                 decoration: InputDecoration(
-                                  labelText: 'Identificador',
+                                  hintText: 'Identificador',
                                   isDense: true,
                                   prefixIcon: Icon(Icons.qr_code,
                                       size: 16, color: Theme.of(context).colorScheme.outline),
@@ -4438,7 +4947,7 @@ class _VincularPorMaterialDialogState
                               child: TextField(
                                 controller: _materialMedidaCtrl,
                                 decoration: InputDecoration(
-                                  labelText: 'Medida',
+                                  hintText: 'Medida',
                                   isDense: true,
                                   prefixIcon: Icon(Icons.straighten,
                                       size: 16, color: Theme.of(context).colorScheme.outline),
@@ -4463,8 +4972,21 @@ class _VincularPorMaterialDialogState
                                 controller: _materialComprimentoCtrl,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 decoration: InputDecoration(
-                                  labelText: 'Comprimento',
-                                  suffixText: 'm',
+                                  hintText: 'Comprimento',
+                                  suffixIcon: Padding(
+                                    padding: const EdgeInsets.only(right: 12),
+                                    child: Align(
+                                      alignment: Alignment.centerRight,
+                                      widthFactor: 1,
+                                      child: Text(
+                                        'm',
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.outline,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                   isDense: true,
                                   prefixIcon: Icon(Icons.height,
                                       size: 16, color: Theme.of(context).colorScheme.outline),
@@ -4484,8 +5006,21 @@ class _VincularPorMaterialDialogState
                                 controller: _materialLarguraCtrl,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 decoration: InputDecoration(
-                                  labelText: 'Largura',
-                                  suffixText: 'm',
+                                  hintText: 'Largura',
+                                  suffixIcon: Padding(
+                                    padding: const EdgeInsets.only(right: 12),
+                                    child: Align(
+                                      alignment: Alignment.centerRight,
+                                      widthFactor: 1,
+                                      child: Text(
+                                        'm',
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.outline,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                   isDense: true,
                                   prefixIcon: Icon(Icons.width_normal,
                                       size: 16, color: Theme.of(context).colorScheme.outline),
@@ -4504,8 +5039,21 @@ class _VincularPorMaterialDialogState
                               child: TextField(
                                 controller: _materialEspessuraCtrl,
                                 decoration: InputDecoration(
-                                  labelText: 'Espessura',
-                                  suffixText: 'mm',
+                                  hintText: 'Espessura',
+                                  suffixIcon: Padding(
+                                    padding: const EdgeInsets.only(right: 12),
+                                    child: Align(
+                                      alignment: Alignment.centerRight,
+                                      widthFactor: 1,
+                                      child: Text(
+                                        'mm',
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.outline,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                   isDense: true,
                                   prefixIcon: Icon(Icons.layers,
                                       size: 16, color: Theme.of(context).colorScheme.outline),
@@ -4516,24 +5064,28 @@ class _VincularPorMaterialDialogState
                             ),
                           ),
                           const SizedBox(width: 8),
-                          MouseRegion(
-                            cursor: _algumFiltroPreenchido
-                                ? SystemMouseCursors.click
-                                : SystemMouseCursors.basic,
-                            child: IconButton.outlined(
-                              tooltip: 'Limpar filtros',
-                              icon: Icon(Icons.filter_alt_off,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
-                              onPressed: _algumFiltroPreenchido ? _limparSelecaoMaterial : null,
-                              style: IconButton.styleFrom(
-                                side: BorderSide(color: Theme.of(context).colorScheme.outline),
-                              ).copyWith(
-                                mouseCursor: WidgetStateProperty.all(
-                                  _algumFiltroPreenchido
-                                      ? SystemMouseCursors.click
-                                      : SystemMouseCursors.basic,
-                                ),
+                          IconButton.outlined(
+                            tooltip: 'Limpar filtros',
+                            icon: Icon(
+                              Icons.filter_alt_off,
+                              color: _algumFiltroPreenchido
+                                  ? Theme.of(context).colorScheme.onSurfaceVariant
+                                  : Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
+                            ),
+                            onPressed: _algumFiltroPreenchido ? _limparSelecaoMaterial : null,
+                            style: IconButton.styleFrom(
+                              side: BorderSide(
+                                color: _algumFiltroPreenchido
+                                    ? Theme.of(context).colorScheme.outline
+                                    : Theme.of(context).colorScheme.outline.withValues(alpha: 0.35),
                               ),
+                            ).copyWith(
+                              mouseCursor: WidgetStateProperty.resolveWith((states) {
+                                if (states.contains(WidgetState.disabled)) {
+                                  return SystemMouseCursors.basic;
+                                }
+                                return SystemMouseCursors.click;
+                              }),
                             ),
                           ),
                         ],
@@ -5165,6 +5717,31 @@ class _FornecedorVinculoTileState extends State<_FornecedorVinculoTile> {
                       ),
                       if (e.jaVinculado) ...[
                         const SizedBox(width: 6),
+                        if (e.descricaoVariante != null &&
+                            e.descricaoVariante!.trim().isNotEmpty) ...[
+                          Text(
+                            '·',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withValues(alpha: 0.4),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              e.descricaoVariante!.trim(),
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
                         Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 6, vertical: 2),
@@ -5411,5 +5988,84 @@ class _AvisoFornecedorSemelhante extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+class _BotaoCabecalhoWidget extends StatefulWidget {
+  final Key? tourKey;
+  final IconData icone;
+  final String texto;
+  final VoidCallback? onPressed;
+  final Color corFundo;
+  final Color corTexto;
+  final double iconSize;
+  final double fontSize;
+  final double padH;
+  final double padV;
+  final String? tooltip;
+
+  const _BotaoCabecalhoWidget({
+    this.tourKey,
+    required this.icone,
+    required this.texto,
+    required this.onPressed,
+    required this.corFundo,
+    required this.corTexto,
+    this.iconSize = 18,
+    this.fontSize = 14,
+    this.padH = 16,
+    this.padV = 12,
+    this.tooltip,
+  });
+
+  @override
+  State<_BotaoCabecalhoWidget> createState() => _BotaoCabecalhoWidgetState();
+}
+
+class _BotaoCabecalhoWidgetState extends State<_BotaoCabecalhoWidget> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final botao = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: Material(
+        color: _hovered
+            ? widget.corFundo.withValues(alpha: 0.85)
+            : widget.corFundo,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: widget.onPressed,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: widget.padH, vertical: widget.padV),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(widget.icone, size: widget.iconSize, color: widget.corTexto),
+                const SizedBox(width: 6),
+                Text(
+                  widget.texto,
+                  style: TextStyle(
+                    fontSize: widget.fontSize,
+                    color: widget.corTexto,
+                    fontWeight: FontWeight.w600,
+                    height: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final comChave = widget.tourKey != null ? Container(key: widget.tourKey, child: botao) : botao;
+    return widget.tooltip != null ? Tooltip(message: widget.tooltip, child: comChave) : comChave;
   }
 }

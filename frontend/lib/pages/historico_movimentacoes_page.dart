@@ -565,7 +565,20 @@ class _HistoricoMovimentacoesPageState
                     onChanged: _onFiltroDigitado,
                     decoration: InputDecoration(
                       hintText: 'Comprimento',
-                      suffixText: 'm',
+                      suffixIcon: Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          widthFactor: 1,
+                          child: Text(
+                            'm',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.outline,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
                       prefixIcon: Icon(Icons.height,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -581,7 +594,20 @@ class _HistoricoMovimentacoesPageState
                     onChanged: _onFiltroDigitado,
                     decoration: InputDecoration(
                       hintText: 'Largura',
-                      suffixText: 'm',
+                      suffixIcon: Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          widthFactor: 1,
+                          child: Text(
+                            'm',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.outline,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
                       prefixIcon: Icon(Icons.width_normal,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -595,8 +621,21 @@ class _HistoricoMovimentacoesPageState
                     inputFormatters: [_EspessuraFormatter()],
                     onChanged: _onFiltroDigitado,
                     decoration: InputDecoration(
-                      hintText: 'Espessura...',
-                      suffixText: 'mm',
+                      hintText: 'Espessura',
+                      suffixIcon: Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          widthFactor: 1,
+                          child: Text(
+                            'mm',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.outline,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
                       prefixIcon: Icon(Icons.layers,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -759,14 +798,14 @@ class _HistoricoMovimentacoesPageState
             Expanded(
               child: provider.carregandoMovimentacoes
                   ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
-                  : provider.erro != null
+                  : provider.erroMovimentacoes != null
                       ? Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.cloud_off_outlined, size: 48, color: AppTheme.error),
                               const SizedBox(height: 12),
-                              Text(provider.erro!,
+                              Text(provider.erroMovimentacoes!,
                                   style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                               const SizedBox(height: 16),
                               FilledButton.icon(
@@ -888,6 +927,7 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
     );
     final espessuraFmt = formatarEspessuraComSufixo(mov.materialEspessura);
     final temIdentificador = mov.materialIdentificador != null && mov.materialIdentificador!.isNotEmpty;
+    final temDescricao = mov.materialDescricao != null && mov.materialDescricao!.trim().isNotEmpty;
     final detalhesMaterial = [
       if (medidaFmt != null) medidaFmt,
       if (espessuraFmt != null) espessuraFmt,
@@ -946,6 +986,8 @@ class _LinhaHistoricoState extends State<_LinhaHistorico> {
                       if (temIdentificador)
                         TextSpan(text: '${mov.materialIdentificador!} · '),
                       TextSpan(text: mov.materialNome),
+                      if (temDescricao)
+                        TextSpan(text: ' · ${mov.materialDescricao!.trim()}'),
                       if (detalhesMaterial.isNotEmpty)
                         TextSpan(text: ' · $detalhesMaterial'),
                     ],
@@ -1092,7 +1134,6 @@ class _BotaoVoltar extends StatefulWidget {
 
 class _BotaoVoltarState extends State<_BotaoVoltar> {
   bool _hovered = false;
-  static const _accent = Color(0xFFF59E0B);
 
   @override
   Widget build(BuildContext context) {
@@ -1102,40 +1143,37 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
       onExit:  (_) => setState(() => _hovered = false),
       child: Tooltip(
         message: widget.tooltip,
-        child: InkWell(
-          onTap: widget.onTap,
-          mouseCursor: SystemMouseCursors.click,
+        child: Material(
+          color: _hovered
+              ? AppTheme.primary.withValues(alpha: 0.85)
+              : AppTheme.primary,
           borderRadius: BorderRadius.circular(10),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: _hovered
-                  ? _accent.withValues(alpha: 0.15)
-                  : _accent.withValues(alpha: 0.08),
-              border: Border.all(
-                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.arrow_back,
-                  size: 18,
-                  color: _accent,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  widget.label,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: _accent,
-                    fontWeight: FontWeight.w600,
+          child: InkWell(
+            onTap: widget.onTap,
+            mouseCursor: SystemMouseCursors.click,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.arrow_back,
+                    size: 18,
+                    color: Colors.white,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.label,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

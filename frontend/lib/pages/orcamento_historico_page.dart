@@ -29,6 +29,65 @@ String _brl(double? v) {
   return 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
 }
 
+String _formatQtd(double v) {
+  if (v == v.truncateToDouble()) return v.toInt().toString();
+  return v.toString().replaceAll('.', ',');
+}
+
+String _formatarUnidadeExibicao(String? unidade) {
+  if (unidade == null || unidade.trim().isEmpty) return '';
+  final u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'UNIDADE': return 'Unidade';
+    case 'M/L':     return 'm/l';
+    case 'M':       return 'm';
+    case 'ML':      return 'ml';
+    case 'M²':
+    case 'M2':      return 'm²';
+    case 'KG':      return 'Kg';
+    case 'G':       return 'g';
+    default:        return unidade;
+  }
+}
+
+String _unidadeDescricaoCompleta(String? unidade) {
+  if (unidade == null || unidade.trim().isEmpty) return '';
+  final u = unidade.trim().toUpperCase();
+  switch (u) {
+    case 'M/L':     return 'm/l (metro linear)';
+    case 'M':       return 'm (metro)';
+    case 'ML':      return 'ml (mililitro)';
+    case 'M²':
+    case 'M2':      return 'm² (metro quadrado)';
+    case 'G':       return 'g (grama)';
+    case 'KG':      return 'kg (quilograma)';
+    case 'UNIDADE':
+    case 'UN':
+    case 'UNID':    return 'unidade';
+    default:        return unidade.toLowerCase();
+  }
+}
+
+String _formatQtdComUnidade(double v, String? unidade) {
+  final u = _formatarUnidadeExibicao(unidade).toLowerCase();
+  return u.isEmpty ? _formatQtd(v) : '${_formatQtd(v)} $u';
+}
+
+String? _materialDimensaoFormatada(double? largura, double? comprimento) {
+  if (largura == null || comprimento == null || largura <= 0 || comprimento <= 0) return null;
+  String fmt(double v) =>
+      v == v.truncateToDouble() ? v.toInt().toString() : v.toString().replaceAll('.', ',');
+  return '${fmt(comprimento)}x${fmt(largura)}m';
+}
+
+String? _formatarEspessura(String? esp) {
+  if (esp == null) return null;
+  final v = esp.trim();
+  if (v.isEmpty) return v;
+  if (v.toLowerCase().endsWith('mm')) return v;
+  return '${v}mm';
+}
+
 DateTime _paraBrasilia(DateTime dt) {
   final utc = dt.isUtc ? dt : dt.toUtc();
   return utc.subtract(const Duration(hours: 3));
@@ -259,11 +318,14 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom()
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             child: const Text('Cancelar'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error)
+                .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
             child: const Text('Excluir'),
           ),
         ],
@@ -322,6 +384,12 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
           itensPorMaterial[materialId] = {
             'materialId': item['materialId'],
             'materialNome': item['material']?['nome'] ?? '',
+            // Em orçamentos convertidos em OC o materialId já aponta pro
+            // Material filho concreto e descricaoItem foi zerado (ver
+            // orcamento.controller.js:gerarOrdemCompra) — a descrição da
+            // variante só existe em material.descricao a partir daqui.
+            'descricao': item['material']?['descricao'] ?? item['descricaoItem'],
+            'ehGenerico': item['material']?['ehGenerico'] ?? false,
             'materialUnidade': item['material']?['unidade'],
             'materialCategoria': item['material']?['categoria'],
             'materialMedida': item['material']?['medida'],
@@ -407,8 +475,8 @@ class _OrcamentoHistoricoPageState extends State<OrcamentoHistoricoPage>
             Row(
               children: [
                 _BotaoVoltar(
-                  label: 'Voltar',
-                  tooltip: 'Voltar',
+                  label: 'Categorias',
+                  tooltip: 'Voltar para orçamentos',
                   onTap: () => Navigator.of(context).pop(),
                 ),
                 const SizedBox(width: 16),
@@ -1056,11 +1124,36 @@ class _OrcamentoHistoricoCardState
     final primeiroItem = grupo.first;
     final materialData =
         primeiroItem['material'] as Map<String, dynamic>?;
-    final materialNome = materialData?['nome'] as String? ??
+    final materialNomeBase = materialData?['nome'] as String? ??
         'Material #${primeiroItem['materialId']}';
+    final materialDescricao = materialData?['descricao'] as String?;
+    final descricaoItem = primeiroItem['descricaoItem'] as String?;
+    final descricaoExibida = (materialDescricao != null && materialDescricao.trim().isNotEmpty)
+        ? materialDescricao.trim()
+        : (descricaoItem != null && descricaoItem.trim().isNotEmpty ? descricaoItem.trim() : null);
+
     final materialUnidade = materialData?['unidade'] as String?;
+    final materialIdentificador = materialData?['identificador'] as String?;
+    final materialMedida = materialData?['medida'] as String?;
+    final materialEspessura = _formatarEspessura(materialData?['espessura'] as String?);
+    final materialLargura = materialData?['largura'] != null
+        ? double.tryParse(materialData!['largura'].toString())
+        : null;
+    final materialComprimento = materialData?['comprimento'] != null
+        ? double.tryParse(materialData!['comprimento'].toString())
+        : null;
+    final medidaOuDimensao = (materialMedida != null && materialMedida.isNotEmpty)
+        ? materialMedida
+        : _materialDimensaoFormatada(materialLargura, materialComprimento);
+    final detalhe = [medidaOuDimensao, materialEspessura, materialIdentificador]
+        .where((s) => s != null && s.isNotEmpty)
+        .join(' · ');
+
     final quantidade =
         double.tryParse(primeiroItem['quantidade']?.toString() ?? '1') ?? 1;
+    final qtdUnidade = primeiroItem['qtdUnidade'] != null
+        ? double.tryParse(primeiroItem['qtdUnidade'].toString())
+        : null;
 
     final precos = grupo
         .map((i) => i['precoUnitario'] != null
@@ -1111,31 +1204,61 @@ class _OrcamentoHistoricoCardState
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        materialNome,
+                        materialNomeBase,
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: cs.onSurface,
                         ),
                       ),
+                      if (detalhe.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          detalhe,
+                          style: TextStyle(
+                              fontSize: 11, color: cs.onSurfaceVariant),
+                        ),
+                      ],
+                      if (descricaoExibida != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          descricaoExibida,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontStyle: FontStyle.italic,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          Text(
-                            'Qtd: ${quantidade % 1 == 0 ? quantidade.toInt().toString() : quantidade.toString()}',
-                            style: TextStyle(
-                                fontSize: 11, color: cs.onSurfaceVariant),
-                          ),
-                          if (materialUnidade != null &&
-                              materialUnidade.isNotEmpty) ...[
-                            Text(
-                              ' $materialUnidade',
-                              style: TextStyle(
-                                  fontSize: 11, color: cs.onSurfaceVariant),
+                          Expanded(
+                            child: Wrap(
+                              spacing: 10,
+                              runSpacing: 2,
+                              children: [
+                                Text(
+                                  'Quantidade: ${_formatQtd(quantidade)}',
+                                  style: TextStyle(
+                                      fontSize: 11, color: cs.onSurfaceVariant),
+                                ),
+                                if (qtdUnidade != null && qtdUnidade > 0)
+                                  Text(
+                                    'Quantidade por unidade: ${_formatQtdComUnidade(qtdUnidade, materialUnidade)} (${_unidadeDescricaoCompleta(materialUnidade)})',
+                                    style: TextStyle(
+                                        fontSize: 11, color: cs.onSurfaceVariant),
+                                  )
+                                else if (materialUnidade != null && materialUnidade.isNotEmpty)
+                                  Text(
+                                    _formatarUnidadeExibicao(materialUnidade).toLowerCase(),
+                                    style: TextStyle(
+                                        fontSize: 11, color: cs.onSurfaceVariant),
+                                  ),
+                              ],
                             ),
-                          ],
+                          ),
                           if (mediaPreco != null) ...[
-                            const Spacer(),
                             Icon(Icons.bar_chart,
                                 size: 11, color: cs.outline),
                             const SizedBox(width: 3),
@@ -1305,53 +1428,42 @@ class _BotaoVoltar extends StatefulWidget {
 
 class _BotaoVoltarState extends State<_BotaoVoltar> {
   bool _hovered = false;
-  static const _accent = Color(0xFFF59E0B);
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit:  (_) => setState(() => _hovered = false),
       child: Tooltip(
         message: widget.tooltip,
-        child: InkWell(
-          onTap: widget.onTap,
-          mouseCursor: SystemMouseCursors.click,
+        child: Material(
+          color: _hovered
+              ? AppTheme.primary.withValues(alpha: 0.85)
+              : AppTheme.primary,
           borderRadius: BorderRadius.circular(10),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: _hovered
-                  ? _accent.withValues(alpha: 0.10)
-                  : Colors.transparent,
-              border: Border.all(
-                color: _hovered
-                    ? _accent.withValues(alpha: 0.6)
-                    : scheme.outlineVariant,
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.arrow_back,
-                  size: 18,
-                  color: _hovered ? _accent : scheme.onSurfaceVariant,
-                ),
-                SizedBox(width: 6),
-                Text(
-                  widget.label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: _hovered ? _accent : scheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
+          child: InkWell(
+            onTap: widget.onTap,
+            mouseCursor: SystemMouseCursors.click,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.arrow_back, size: 18, color: Colors.white),
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.label,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

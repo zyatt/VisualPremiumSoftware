@@ -114,6 +114,24 @@ class FornecedorRepository {
         .toList();
   }
 
+  /// Lista fornecedores já vinculados à variante (filho) de um material
+  /// genérico, resolvendo pela descrição digitada em vez de um id fixo —
+  /// usado enquanto o usuário ainda está digitando a descrição da
+  /// variante no diálogo "Vincular por Material" e a variante concreta
+  /// pode ainda nem existir. Se não existir, o backend devolve lista
+  /// vazia (não é erro).
+  Future<List<FornecedorModel>> listarPorMaterialGenericoEDescricao(
+    int materialGenericoId,
+    String descricao,
+  ) async {
+    final path =
+        '/fornecedores/material/$materialGenericoId/variante?descricao=${Uri.encodeComponent(descricao)}';
+    final list = await ApiClient.getList(path);
+    return list
+        .map((e) => FornecedorModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<FornecedorModel> criar(
     Map<String, dynamic> dados, {
     File? imagem,
@@ -193,6 +211,43 @@ class FornecedorRepository {
         'unidade':      item['unidade'],
         'largura':      item['largura'],
         'comprimento':  item['comprimento'],
+        'ehGenerico':   item['ehGenerico'] ?? false,
+        // Sem isso, um material filho (variante de um genérico, ex.:
+        // "TINTA" + descricao "AZUL") volta da busca sem a descrição:
+        // a tela de Fornecedores não consegue diferenciar as variantes
+        // na lista de sugestões nem reaproveitar o filho já existente
+        // ao vincular de novo, e a "descrição some" visualmente.
+        'descricao':         item['descricao'],
+        'materialGenericoId': item['materialGenericoId'],
+      };
+    }).toList();
+  }
+
+  /// Lista os materiais "filhos" (variantes) de um material genérico,
+  /// ex.: as variantes de cor/tamanho cadastradas para "TINTA".
+  /// Usado para expandir um material genérico nos diálogos de
+  /// Fornecedores e Ordem de Compra, mostrando as variantes já
+  /// existentes junto do próprio pai.
+  Future<List<Map<String, dynamic>>> buscarVinculadosDeGenerico(
+    int materialGenericoId,
+  ) async {
+    final data = await ApiClient.get('/materiais/$materialGenericoId/vinculados');
+    final itens = (data['itens'] as List? ?? []);
+    return itens.map<Map<String, dynamic>>((e) {
+      final item = e as Map<String, dynamic>;
+      return {
+        'id':                item['id'],
+        'nome':              item['nome'],
+        'identificador':     item['identificador'],
+        'medida':            item['medida'],
+        'espessura':         item['espessura'],
+        'unidade':           item['unidade'],
+        'largura':           item['largura'],
+        'comprimento':       item['comprimento'],
+        'ehGenerico':        item['ehGenerico'] ?? false,
+        'descricao':         item['descricao'],
+        'materialGenericoId': item['materialGenericoId'],
+        'nomeExibicao':      item['nomeExibicao'],
       };
     }).toList();
   }

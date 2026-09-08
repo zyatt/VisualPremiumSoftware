@@ -106,6 +106,15 @@ function _mapearMaterial(m) {
   };
 }
 
+// Nome de exibição de um material vinculado a um genérico: "NOME DESCRICAO".
+// Para materiais normais (sem descricao), retorna o próprio nome.
+function _nomeExibicao(m) {
+  if (m.descricao && m.descricao.trim()) {
+    return `${m.nome} ${m.descricao.trim()}`;
+  }
+  return m.nome;
+}
+
 const _includeFornecedores = {
   fornecedorMateriais: {
     where: { ativo: true },
@@ -114,20 +123,55 @@ const _includeFornecedores = {
 };
 
 function _montarWhere(filtros = {}) {
-  const { busca, categoria, semCategoria, status, comFornecedor, id, medida, espessura, largura, comprimento, identificador, ativo } = filtros;
+  const { busca, categoria, semCategoria, status, comFornecedor, id, medida, espessura, largura, comprimento, identificador, ativo, ehGenerico, materialGenericoId, incluirVinculados } = filtros;
 
   const where = {};
+
+  // Materiais aguardando aprovação de um ADMIN ficam ocultos das listagens
+  // normais de estoque — só aparecem na fila dedicada (listarPendentes).
+  where.aguardandoAprovacao = false;
+
+  // Materiais "filhos" de um genérico ficam sempre ocultos das listagens
+  // normais de Estoque (aparecem só dentro do dialog do próprio genérico,
+  // via listarVinculados). Isso evita duplicar visualmente o mesmo grupo
+  // de material na tela de estoque.
+  // Passar materialGenericoId explicitamente (ex.: no dialog de vínculo)
+  // sobrepõe esse comportamento e busca só os filhos daquele genérico.
+  //
+  // EXCEÇÃO OPT-IN: telas que precisam localizar uma variante já criada
+  // pelo nome (ex.: Orçamento, ao digitar "TINTA AZUL" ou "AZUL") devem
+  // passar `incluirVinculados: true` explicitamente junto de `busca` — do
+  // contrário nunca reencontrariam a variante, só o genérico "TINTA", e
+  // salvar de novo criaria um novo vínculo em vez de reaproveitar o filho.
+  // Isso é uma decisão explícita do chamador, não implícita a qualquer
+  // busca — a tela de Estoque NUNCA deve passar essa flag.
+  if (materialGenericoId !== undefined && materialGenericoId !== '' && materialGenericoId !== null) {
+    where.materialGenericoId = Number(materialGenericoId);
+  } else if (!(busca && incluirVinculados === 'true')) {
+    where.materialGenericoId = null;
+  }
+
+  if (ehGenerico === 'true')  where.ehGenerico = true;
+  if (ehGenerico === 'false') where.ehGenerico = false;
 
   if (ativo === 'true') where.ativo = true;
   if (id) where.id = Number(id);
   if (busca) {
     const tokens = busca.trim().split(/\s+/).filter(Boolean);
+    // Casa pelo próprio nome OU pelo nome do genérico-pai (para achar
+    // filhos digitando o nome do pai) OU pela descrição (para achar
+    // "TINTA AZUL" digitando "AZUL").
+    const tokenFiltro = (t) => ({
+      OR: [
+        { nome: { contains: t, mode: 'insensitive' } },
+        { descricao: { contains: t, mode: 'insensitive' } },
+        { materialGenerico: { nome: { contains: t, mode: 'insensitive' } } },
+      ],
+    });
     if (tokens.length === 1) {
-      where.nome = { contains: tokens[0], mode: 'insensitive' };
+      Object.assign(where, tokenFiltro(tokens[0]));
     } else {
-      where.AND = (where.AND ?? []).concat(
-        tokens.map((t) => ({ nome: { contains: t, mode: 'insensitive' } }))
-      );
+      where.AND = (where.AND ?? []).concat(tokens.map(tokenFiltro));
     }
   }
   if (identificador) where.identificador = { contains: identificador, mode: 'insensitive' };
@@ -153,6 +197,8 @@ function _montarWhere(filtros = {}) {
   if (status && _statusValidos.has(status)) where.status = status;
   if (comFornecedor === 'true') {
     where.fornecedorMateriais = { some: { ativo: true } };
+  } else if (comFornecedor === 'false') {
+    where.fornecedorMateriais = { none: { ativo: true } };
   }
 
   return where;
@@ -291,44 +337,106 @@ async function buscarPorId(id) {
   return _mapearMaterial(m);
 }
 
-async function criar(data, usuarioId, usuarioNome) {
+async function _validarVinculoGenerico(data, { idAtual } = {}) {
+  const ehGenerico = !!data.ehGenerico;
+  const materialGenericoId = data.materialGenericoId != null && data.materialGenericoId !== ''
+    ? Number(data.materialGenericoId)
+    : null;
+  const descricao = data.descricao?.trim() || null;
+
+  if (ehGenerico && materialGenericoId) {
+    throw { status: 400, message: 'Um material genérico não pode estar vinculado a outro material genérico.' };
+  }
+
+  if (materialGenericoId) {
+    if (idAtual && materialGenericoId === idAtual) {
+      throw { status: 400, message: 'Um material não pode ser vinculado a si mesmo.' };
+    }
+    if (!descricao) {
+      throw { status: 400, message: 'Informe uma descrição para vincular este material ao material genérico.' };
+    }
+    const pai = await prisma.material.findUnique({ where: { id: materialGenericoId } });
+    if (!pai) throw { status: 404, message: 'Material genérico não encontrado.' };
+    if (!pai.ehGenerico) {
+      throw { status: 400, message: 'O material selecionado não é um material genérico.' };
+    }
+  } else if (data.materialGenericoId !== undefined) {
+    // materialGenericoId explicitamente removido: também não faz sentido manter descrição.
+  }
+
+  return { ehGenerico, materialGenericoId, descricao };
+}
+
+async function criar(data, usuarioId, usuarioNome, usuarioRole) {
+  const { ehGenerico, materialGenericoId, descricao } = await _validarVinculoGenerico(data);
+  data.ehGenerico         = ehGenerico;
+  data.materialGenericoId = materialGenericoId;
+  data.descricao          = materialGenericoId ? descricao : null;
+
   const nomeTrimmed      = data.nome?.trim();
   const medidaTrimmed    = data.medida?.trim()       ?? null;
   const espessuraTrimmed = data.espessura?.trim()    ?? null;
 
   const identificadorTrimmed = data.identificador?.trim() ?? null;
-  const duplicado = await prisma.material.findFirst({
-    where: {
-      nome:         { equals: nomeTrimmed, mode: 'insensitive' },
-      identificador: identificadorTrimmed
-        ? { equals: identificadorTrimmed, mode: 'insensitive' }
-        : null,
-      medida:       medidaTrimmed    ? { equals: medidaTrimmed,    mode: 'insensitive' } : null,
-      espessura:    espessuraTrimmed ? { equals: espessuraTrimmed, mode: 'insensitive' } : null,
-    },
-  });
+
+  // Materiais vinculados a um genérico se diferenciam pela descrição, não
+  // pela combinação nome/identificador/medida/espessura — então a checagem
+  // de duplicado padrão (que ignora descricao) não se aplica a eles.
+  const duplicado = materialGenericoId
+    ? null
+    : await prisma.material.findFirst({
+        where: {
+          nome:         { equals: nomeTrimmed, mode: 'insensitive' },
+          identificador: identificadorTrimmed
+            ? { equals: identificadorTrimmed, mode: 'insensitive' }
+            : null,
+          medida:       medidaTrimmed    ? { equals: medidaTrimmed,    mode: 'insensitive' } : null,
+          espessura:    espessuraTrimmed ? { equals: espessuraTrimmed, mode: 'insensitive' } : null,
+        },
+      });
 
   if (duplicado) _throwDuplicado(medidaTrimmed, espessuraTrimmed);
+
+  // Usuários que não são ADMIN têm o cadastro colocado em fila de
+  // aprovação: o material é criado normalmente no banco, mas fica marcado
+  // com aguardandoAprovacao = true e some das listagens padrão de estoque
+  // até um ADMIN revisar, editar se necessário e aprovar.
+  const precisaAprovacao = usuarioRole && usuarioRole !== 'ADMIN';
 
   const status = calcularStatus(data.quantidade || 0, data.estoqueMinimo || 0, true);
   data.ultimoValorPago   = _normalizarPreco(data.ultimoValorPago);
   data.ultimoValorPagoM2 = _normalizarPreco(data.ultimoValorPagoM2);
 
   try {
-    const material = await prisma.material.create({ data: { ...data, status } });
+    const material = await prisma.material.create({
+      data: {
+        ...data,
+        status,
+        aguardandoAprovacao: !!precisaAprovacao,
+        criadoPorId:   usuarioId ?? null,
+        criadoPorNome: usuarioNome ?? null,
+      },
+    });
 
-    await auditSvc.registrar(material.id, 'CADASTRO', {
+    await auditSvc.registrar(material.id, precisaAprovacao ? 'CADASTRO_PENDENTE' : 'CADASTRO', {
       valorDepois: material.nome,
       usuarioId,
       usuarioNome,
       material,
     });
 
-    _broadcast('material_atualizado', {
-      motivo: 'criar',
-      materialId: material.id,
-      nome: material.nome,
-    }, usuarioId);
+    if (!precisaAprovacao) {
+      _broadcast('material_atualizado', {
+        motivo: 'criar',
+        materialId: material.id,
+        nome: material.nome,
+      }, usuarioId);
+    } else {
+      _broadcast('material_pendente_aprovacao', {
+        materialId: material.id,
+        nome: material.nome,
+      }, usuarioId);
+    }
 
     return material;
   } catch (e) {
@@ -339,23 +447,43 @@ async function criar(data, usuarioId, usuarioNome) {
 
 async function atualizar(id, data, usuarioId, usuarioNome) {
   const atual = await prisma.material.findUnique({ where: { id } });
+  if (!atual) throw { status: 404, message: 'Material não encontrado' };
+
+  if (atual.ehGenerico) {
+    const temFilhos = await prisma.material.count({ where: { materialGenericoId: id } });
+    if (temFilhos > 0 && data.ehGenerico === false) {
+      throw { status: 400, message: 'Não é possível desmarcar como genérico: existem materiais vinculados a ele.' };
+    }
+  }
+
+  const dadosParaValidar = {
+    ehGenerico:         data.ehGenerico ?? atual.ehGenerico,
+    materialGenericoId: data.materialGenericoId !== undefined ? data.materialGenericoId : atual.materialGenericoId,
+    descricao:          data.descricao !== undefined ? data.descricao : atual.descricao,
+  };
+  const { ehGenerico, materialGenericoId, descricao } = await _validarVinculoGenerico(dadosParaValidar, { idAtual: id });
+  data.ehGenerico         = ehGenerico;
+  data.materialGenericoId = materialGenericoId;
+  data.descricao          = materialGenericoId ? descricao : null;
 
   const nomeTrimmed        = (data.nome        ?? atual.nome)?.trim();
   const medidaTrimmed      = (data.medida       ?? atual.medida)?.trim()       ?? null;
   const espessuraTrimmed   = (data.espessura    ?? atual.espessura)?.trim()    ?? null;
 
   const identificadorTrimmed = (data.identificador ?? atual.identificador)?.trim() ?? null;
-  const duplicado = await prisma.material.findFirst({
-    where: {
-      id:           { not: id },
-      nome:         { equals: nomeTrimmed, mode: 'insensitive' },
-      identificador: identificadorTrimmed
-        ? { equals: identificadorTrimmed, mode: 'insensitive' }
-        : null,
-      medida:       medidaTrimmed    ? { equals: medidaTrimmed,    mode: 'insensitive' } : null,
-      espessura:    espessuraTrimmed ? { equals: espessuraTrimmed, mode: 'insensitive' } : null,
-    },
-  });
+  const duplicado = materialGenericoId
+    ? null
+    : await prisma.material.findFirst({
+        where: {
+          id:           { not: id },
+          nome:         { equals: nomeTrimmed, mode: 'insensitive' },
+          identificador: identificadorTrimmed
+            ? { equals: identificadorTrimmed, mode: 'insensitive' }
+            : null,
+          medida:       medidaTrimmed    ? { equals: medidaTrimmed,    mode: 'insensitive' } : null,
+          espessura:    espessuraTrimmed ? { equals: espessuraTrimmed, mode: 'insensitive' } : null,
+        },
+      });
 
   if (duplicado) _throwDuplicado(medidaTrimmed, espessuraTrimmed);
 
@@ -391,6 +519,131 @@ async function atualizar(id, data, usuarioId, usuarioNome) {
     if (e?.code === 'P2002') _throwDuplicado(medidaTrimmed, espessuraTrimmed);
     throw e;
   }
+}
+
+async function listarPendentes() {
+  const materiais = await prisma.material.findMany({
+    where: { aguardandoAprovacao: true },
+    include: _includeFornecedores,
+    orderBy: { criadoEm: 'asc' },
+  });
+  return materiais.map(_mapearMaterial);
+}
+
+async function contarPendentes() {
+  return prisma.material.count({ where: { aguardandoAprovacao: true } });
+}
+
+/// Aprova um material que estava aguardando aprovação. O ADMIN pode enviar
+/// `data` com qualquer campo alterado (mesmo conjunto aceito por
+/// `atualizar`) — esses valores são aplicados antes de tirar o material da
+/// fila. Se `data` vier vazio/undefined, o material é aprovado como foi
+/// originalmente cadastrado.
+async function aprovar(id, data = {}, usuarioId, usuarioNome) {
+  const atual = await prisma.material.findUnique({ where: { id } });
+  if (!atual) throw { status: 404, message: 'Material não encontrado' };
+  if (!atual.aguardandoAprovacao) {
+    throw { status: 400, message: 'Este material não está aguardando aprovação' };
+  }
+
+  const nomeTrimmed        = (data.nome        ?? atual.nome)?.trim();
+  const medidaTrimmed      = (data.medida       ?? atual.medida)?.trim()       ?? null;
+  const espessuraTrimmed   = (data.espessura    ?? atual.espessura)?.trim()    ?? null;
+  const identificadorTrimmed = (data.identificador ?? atual.identificador)?.trim() ?? null;
+
+  const duplicado = await prisma.material.findFirst({
+    where: {
+      id:           { not: id },
+      nome:         { equals: nomeTrimmed, mode: 'insensitive' },
+      identificador: identificadorTrimmed
+        ? { equals: identificadorTrimmed, mode: 'insensitive' }
+        : null,
+      medida:       medidaTrimmed    ? { equals: medidaTrimmed,    mode: 'insensitive' } : null,
+      espessura:    espessuraTrimmed ? { equals: espessuraTrimmed, mode: 'insensitive' } : null,
+    },
+  });
+  if (duplicado) _throwDuplicado(medidaTrimmed, espessuraTrimmed);
+
+  const quantidade    = data.quantidade    ?? atual.quantidade;
+  const estoqueMinimo = data.estoqueMinimo ?? atual.estoqueMinimo;
+  const status = calcularStatus(quantidade, estoqueMinimo, true);
+
+  if (data.ultimoValorPago !== undefined) {
+    data.ultimoValorPago = _normalizarPreco(data.ultimoValorPago);
+  }
+  if (data.ultimoValorPagoM2 !== undefined) {
+    data.ultimoValorPagoM2 = _normalizarPreco(data.ultimoValorPagoM2);
+  }
+
+  try {
+    const material = await prisma.material.update({
+      where: { id },
+      data: {
+        ...data,
+        status,
+        ativo: true,
+        aguardandoAprovacao: false,
+        aprovadoPorId:   usuarioId ?? null,
+        aprovadoPorNome: usuarioNome ?? null,
+        aprovadoEm:      new Date(),
+      },
+    });
+
+    await auditSvc.registrarEdicao(id, atual, material, usuarioId, usuarioNome);
+    await auditSvc.registrar(id, 'APROVACAO_CADASTRO', {
+      valorDepois: material.nome,
+      usuarioId,
+      usuarioNome,
+      material,
+    });
+
+    _broadcast('material_atualizado', {
+      motivo: 'aprovar',
+      materialId: material.id,
+      nome: material.nome,
+    }, usuarioId);
+
+    notificarSeCritico(atual.status, material);
+
+    return material;
+  } catch (e) {
+    if (e?.code === 'P2002') _throwDuplicado(medidaTrimmed, espessuraTrimmed);
+    throw e;
+  }
+}
+
+/// Recusa (exclui) um cadastro pendente de aprovação. Só permitido enquanto
+/// o material ainda estiver aguardando aprovação — depois de aprovado, a
+/// exclusão segue o fluxo normal (excluir(), que exige desativação prévia).
+async function recusar(id, usuarioId, usuarioNome) {
+  const atual = await prisma.material.findUnique({ where: { id } });
+  if (!atual) throw { status: 404, message: 'Material não encontrado' };
+  if (!atual.aguardandoAprovacao) {
+    throw { status: 400, message: 'Este material não está aguardando aprovação' };
+  }
+
+  let deletado;
+  try {
+    deletado = await prisma.material.delete({ where: { id } });
+  } catch (e) {
+    if (e?.code === 'P2003') {
+      throw {
+        status: 400,
+        message: 'Não é possível recusar: já existem registros vinculados a este material.',
+      };
+    }
+    throw e;
+  }
+
+  await auditSvc.registrar(id, 'RECUSA_CADASTRO', {
+    valorAntes: atual.nome,
+    usuarioId,
+    usuarioNome,
+    material: atual,
+  });
+
+  _broadcast('material_atualizado', { motivo: 'recusar', materialId: id }, usuarioId);
+  return deletado;
 }
 
 async function desativar(id, usuarioId, usuarioNome) {
@@ -484,6 +737,111 @@ async function confirmarEstoque(id, usuarioId, usuarioNome) {
   await auditSvc.registrar(id, 'ESTOQUE_CONFIRMADO', { usuarioId, usuarioNome, material: result });
   _broadcast('material_atualizado', { motivo: 'confirmar', materialId: id }, usuarioId);
   return result;
+}
+
+/// Lista todos os materiais vinculados (filhos) de um material genérico.
+/// Usado pelo dialog que abre ao selecionar um material genérico em
+/// Orçamento/Ordem de Compra/Solicitações/Estoque.
+async function listarVinculados(materialGenericoId, { apenasAtivos } = {}) {
+  const generico = await prisma.material.findUnique({
+    where: { id: materialGenericoId },
+    include: _includeFornecedores,
+  });
+  if (!generico) throw { status: 404, message: 'Material não encontrado' };
+  if (!generico.ehGenerico) {
+    throw { status: 400, message: 'Este material não é um material genérico' };
+  }
+
+  const where = { materialGenericoId };
+  if (apenasAtivos) where.ativo = true;
+
+  const vinculados = await prisma.material.findMany({
+    where,
+    include: _includeFornecedores,
+    orderBy: [{ ativo: 'desc' }, { descricao: 'asc' }],
+  });
+
+  return {
+    generico: _mapearMaterial(generico),
+    itens: vinculados.map((m) => ({ ..._mapearMaterial(m), nomeExibicao: _nomeExibicao(m) })),
+  };
+}
+
+/// Resolve (ou cria) o Material "filho" de um genérico para uma descrição
+/// específica. Idempotente: se um filho com essa descrição já existir
+/// (comparação case-insensitive, ignorando espaços nas pontas), retorna
+/// ele; caso contrário cria um novo, copiando dados default do genérico
+/// (unidade, categoria) para o filho começar consistente.
+///
+/// Usado pelo orçamento (adicionarItem/atualizarItem/substituirItens) para
+/// que cada variante de um material genérico (ex.: "TINTA" + "AZUL",
+/// "TINTA" + "cc") vire um Material concreto com id próprio — o que
+/// automaticamente resolve o vínculo fornecedor-material (FornecedorMaterial
+/// é único por materialId) e o estoque, preço e histórico de cada variante
+/// sem qualquer alteração nessas outras tabelas.
+///
+/// Usa SELECT ... FOR UPDATE dentro de uma transação para evitar que duas
+/// requisições concorrentes criem dois filhos duplicados com a mesma
+/// descrição (mesma técnica de lock já usada em orcamento.service.js).
+async function resolverOuCriarFilho(materialGenericoId, descricao) {
+  const descTrimmed = descricao?.trim();
+  if (!descTrimmed) {
+    throw { status: 400, message: 'Informe uma descrição para este material genérico.' };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const genericoRows = await tx.$queryRaw`
+      SELECT * FROM materiais WHERE id = ${materialGenericoId} FOR UPDATE
+    `;
+    const generico = genericoRows[0];
+    if (!generico) throw { status: 404, message: 'Material genérico não encontrado.' };
+    if (!generico.ehGenerico) {
+      throw { status: 400, message: 'O material selecionado não é um material genérico.' };
+    }
+
+    const filhoExistente = await tx.material.findFirst({
+      where: {
+        materialGenericoId,
+        descricao: { equals: descTrimmed, mode: 'insensitive' },
+      },
+    });
+    if (filhoExistente) return filhoExistente;
+
+    try {
+      return await tx.material.create({
+        data: {
+          nome: generico.nome,
+          unidade: generico.unidade,
+          categoria: generico.categoria,
+          materialGenericoId,
+          descricao: descTrimmed,
+          ehGenerico: false,
+          // quantidade/estoqueMinimo começam em 0/0, então calcularStatus
+          // resolve para 'LIMITE' (q === min) — evita cair no default
+          // 'OK' do schema, que ficaria inconsistente com o resto do
+          // sistema (reativar, criar, atualizar sempre passam por
+          // calcularStatus).
+          status: calcularStatus(0, 0, true),
+        },
+      });
+    } catch (e) {
+      // Corrida rara: outra transação criou o mesmo filho entre o
+      // findFirst acima e este create (ex.: dois requests bem próximos
+      // sem lock efetivo por algum motivo). O índice único de expressão
+      // (materiais_generico_descricao_null_safe_key) barra o duplicado —
+      // nesse caso, apenas busca e retorna o que já foi criado.
+      if (e?.code === 'P2002') {
+        const jaCriado = await tx.material.findFirst({
+          where: {
+            materialGenericoId,
+            descricao: { equals: descTrimmed, mode: 'insensitive' },
+          },
+        });
+        if (jaCriado) return jaCriado;
+      }
+      throw e;
+    }
+  });
 }
 
 async function listarCategorias() {
@@ -586,4 +944,10 @@ module.exports = {
   listarCategorias,
   listarHistoricoPrecos,
   registrarSseCliente,
+  listarPendentes,
+  contarPendentes,
+  aprovar,
+  recusar,
+  listarVinculados,
+  resolverOuCriarFilho,
 };

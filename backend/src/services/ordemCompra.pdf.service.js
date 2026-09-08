@@ -531,6 +531,20 @@ function drawInfoFixa(doc) {
   }
 }
 
+function drawWatermarkCancelada(doc) {
+  doc.save();
+  doc.fillColor(C.statusErr).opacity(0.14);
+  doc.font('Helvetica-Bold').fontSize(92);
+
+  const cx = PAGE_W / 2;
+  const cy = PAGE_H / 2;
+  doc.rotate(-38, { origin: [cx, cy] });
+  doc.text('CANCELADA', 0, cy - 46, { width: PAGE_W, align: 'center', lineBreak: false });
+
+  doc.restore();
+  doc.opacity(1);
+}
+
 function drawFooter(doc, pageNum, empresaNome = 'Visual Premium') {
   const y = PAGE_H - 36;
   hline(doc, y - 8);
@@ -631,6 +645,9 @@ const ordemCompraPdfService = {
       const empresaNomeRodape = (oc.logoEmpresa === 'GUINDASTE' || oc.empresa === 'VISUAL GUINDASTE') ? 'Visual Guindaste' : 'Visual Premium';
       for (let i = 0; i < range.count; i++) {
         doc.switchToPage(range.start + i);
+        if (oc.status === 'CANCELADO') {
+          drawWatermarkCancelada(doc);
+        }
         drawFooter(doc, i + 1, empresaNomeRodape);
       }
 

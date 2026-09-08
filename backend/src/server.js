@@ -36,6 +36,9 @@ app.use('/api/configuracoes',         require('./routes/configuracao.routes'));
 app.use('/api/solicitacoes-material', require('./routes/solicitacao_material.routes'));
 app.use('/api/chat',                  require('./routes/chat.routes'));
 
+app.use('/api/contas-pagar', require('./routes/contaPagar.routes'));
+app.use('/api/certificados-a1', require('./routes/certificadoA1.routes'));
+
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 
 app.use((err, req, res, next) => {

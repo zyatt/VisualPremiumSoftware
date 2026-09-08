@@ -1,6 +1,7 @@
 class EstoqueMaterialModel {
   final int     id;
   final String  nome;
+  final String? descricao;
   final String? unidade;
   final String? identificador;
   final String? medida;
@@ -17,6 +18,7 @@ class EstoqueMaterialModel {
   const EstoqueMaterialModel({
     required this.id,
     required this.nome,
+    this.descricao,
     this.unidade,
     this.identificador,
     this.medida,
@@ -31,6 +33,9 @@ class EstoqueMaterialModel {
     required this.valorTotal,
   });
 
+  String get nomeExibicao =>
+      (descricao != null && descricao!.trim().isNotEmpty) ? '$nome ${descricao!.trim()}' : nome;
+
   bool get semCusto =>
       (ultimoValorPago == null || ultimoValorPago! <= 0) &&
       (ultimoValorPagoM2 == null || ultimoValorPagoM2! <= 0);
@@ -39,6 +44,7 @@ class EstoqueMaterialModel {
       EstoqueMaterialModel(
         id:                (json['id'] as num?)?.toInt() ?? 0,
         nome:              json['nome'] ?? '',
+        descricao:         json['descricao'],
         unidade:           json['unidade'],
         identificador:     json['identificador'],
         medida:            json['medida'],
@@ -83,6 +89,7 @@ class EstoqueCategoriaModel {
 class GastoMaterialModel {
   final int     id;
   final String  nome;
+  final String? descricao;
   final String? unidade;
   final String? identificador;
   final String? medida;
@@ -95,6 +102,7 @@ class GastoMaterialModel {
   const GastoMaterialModel({
     required this.id,
     required this.nome,
+    this.descricao,
     this.unidade,
     this.identificador,
     this.medida,
@@ -105,10 +113,14 @@ class GastoMaterialModel {
     required this.qtdGasta,
   });
 
+  String get nomeExibicao =>
+      (descricao != null && descricao!.trim().isNotEmpty) ? '$nome ${descricao!.trim()}' : nome;
+
   factory GastoMaterialModel.fromJson(Map<String, dynamic> json) =>
       GastoMaterialModel(
         id:            (json['id'] as num?)?.toInt() ?? 0,
         nome:          json['nome'] ?? '',
+        descricao:     json['descricao'],
         unidade:       json['unidade'],
         identificador: json['identificador'],
         medida:        json['medida'],

@@ -466,11 +466,19 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                 const SizedBox(width: 10),
                 IconButton.outlined(
                   tooltip: 'Limpar filtros',
-                  icon: Icon(Icons.filter_alt_off,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  icon: Icon(
+                    Icons.filter_alt_off,
+                    color: _temFiltroMaterial
+                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                        : Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
+                  ),
                   onPressed: _temFiltroMaterial ? _limparFiltrosMaterial : null,
                   style: IconButton.styleFrom(
-                    side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                    side: BorderSide(
+                      color: _temFiltroMaterial
+                          ? Theme.of(context).colorScheme.outline
+                          : Theme.of(context).colorScheme.outline.withValues(alpha: 0.35),
+                    ),
                   ).copyWith(
                     mouseCursor: WidgetStateProperty.resolveWith((states) {
                       if (states.contains(WidgetState.disabled)) {
@@ -526,7 +534,20 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     inputFormatters: [_EspessuraFormatter()],
                     decoration: InputDecoration(
                       hintText: 'Comprimento',
-                      suffixText: 'm',
+                      suffixIcon: Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          widthFactor: 1,
+                          child: Text(
+                            'm',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.outline,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
                       prefixIcon: Icon(Icons.height,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -543,7 +564,20 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     inputFormatters: [_EspessuraFormatter()],
                     decoration: InputDecoration(
                       hintText: 'Largura',
-                      suffixText: 'm',
+                      suffixIcon: Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          widthFactor: 1,
+                          child: Text(
+                            'm',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.outline,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
                       prefixIcon: Icon(Icons.width_normal,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -560,7 +594,20 @@ class _RelatorioOSPageState extends State<RelatorioOSPage> {
                     inputFormatters: [_EspessuraFormatter()],
                     decoration: InputDecoration(
                       hintText: 'Espessura',
-                      suffixText: 'mm',
+                      suffixIcon: Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          widthFactor: 1,
+                          child: Text(
+                            'mm',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.outline,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
                       prefixIcon: Icon(Icons.layers,
                           color: Theme.of(context).colorScheme.outline, size: 18),
                       isDense: true,
@@ -1585,138 +1632,154 @@ class _RelatorioDetalheState extends State<_RelatorioDetalhe> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        titleSpacing: 16,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _BotaoVoltar(
-              label: 'Voltar',
-              tooltip: 'Voltar para a lista de relatórios',
-              onTap: () {
-                provider.limparSelecao();
-                Navigator.of(context).pop();
-              },
-            ),
-            const SizedBox(width: 12),
-            Text(_titulo),
-            const SizedBox(width: 10),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: _corFechada.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                    color: _corFechada.withValues(alpha: 0.35)),
-              ),
-              child: const Text(
-                'Fechada',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: _corFechada,
+            Row(
+              children: [
+                _BotaoVoltar(
+                  label: 'Voltar',
+                  tooltip: 'Voltar para a lista de relatórios',
+                  onTap: () {
+                    provider.limparSelecao();
+                    Navigator.of(context).pop();
+                  },
+                  iconSize: 18,
+                  fontSize: 13,
+                  padH: 16,
+                  padV: 12,
                 ),
-              ),
-            ),
-            if (rel != null && (rel.cliente ?? '').trim().isNotEmpty) ...[
-              const SizedBox(width: 14),
-              Icon(Icons.person_outline, size: 16,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 4),
-              Text(
-                rel.cliente!.trim(),
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                const SizedBox(width: 12),
+                Text(
+                  _titulo,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 10),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _corFechada.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: _corFechada.withValues(alpha: 0.35)),
+                  ),
+                  child: const Text(
+                    'Fechada',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: _corFechada,
+                    ),
+                  ),
+                ),
+                if (rel != null && (rel.cliente ?? '').trim().isNotEmpty) ...[
+                  const SizedBox(width: 14),
+                  Icon(Icons.person_outline, size: 16,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 4),
+                  Text(
+                    rel.cliente!.trim(),
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                if (rel != null) ...[
+
+                  _revertendo
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Color(0xFFED6C02)),
+                          ),
+                        )
+                      : Tooltip(
+                          message: 'Reverter OS para Em Andamento',
+                          child: TextButton.icon(
+                            onPressed: _confirmarReverterOS,
+                            icon: const Icon(Icons.undo_rounded,
+                                size: 18, color: Color(0xFFED6C02)),
+                            label: const Text(
+                              'Reverter OS',
+                              style: TextStyle(
+                                color: Color(0xFFED6C02),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            style: TextButton.styleFrom().copyWith(
+                              mouseCursor: WidgetStateProperty.all(
+                                  SystemMouseCursors.click),
+                            ),
+                          ),
+                        ),
+                  const SizedBox(width: 4),
+
+                  _gerandoPdf
+                      ? const Padding(
+                          padding:
+                              EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: _corFechada),
+                          ),
+                        )
+                      : Tooltip(
+                          message: 'Gerar PDF desta OS',
+                          child: TextButton.icon(
+                            onPressed: _gerarPDF,
+                            icon: const Icon(Icons.picture_as_pdf_outlined,
+                                size: 18, color: _corFechada),
+                            label: const Text(
+                              'Gerar PDF',
+                              style: TextStyle(
+                                color: _corFechada,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            style: TextButton.styleFrom().copyWith(
+                              mouseCursor: WidgetStateProperty.all(
+                                  SystemMouseCursors.click),
+                            ),
+                          ),
+                        ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: provider.carregandoDetalhe
+                  ? Center(
+                      child: CircularProgressIndicator(color: AppTheme.primary))
+                  : rel == null
+                      ? Center(
+                          child: Text(
+                            'Relatório não encontrado',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(color: Theme.of(context).colorScheme.outline),
+                          ),
+                        )
+                      : _RelatorioDetalheBody(rel: rel),
+            ),
           ],
         ),
-        actions: [
-          if (rel != null) ...[
-
-            _revertendo
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Color(0xFFED6C02)),
-                    ),
-                  )
-                : Tooltip(
-                    message: 'Reverter OS para Em Andamento',
-                    child: TextButton.icon(
-                      onPressed: _confirmarReverterOS,
-                      icon: const Icon(Icons.undo_rounded,
-                          size: 18, color: Color(0xFFED6C02)),
-                      label: const Text(
-                        'Reverter OS',
-                        style: TextStyle(
-                          color: Color(0xFFED6C02),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      style: TextButton.styleFrom().copyWith(
-                        mouseCursor: WidgetStateProperty.all(
-                            SystemMouseCursors.click),
-                      ),
-                    ),
-                  ),
-            const SizedBox(width: 4),
-
-            _gerandoPdf
-                ? const Padding(
-                    padding:
-                        EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: _corFechada),
-                    ),
-                  )
-                : Tooltip(
-                    message: 'Gerar PDF desta OS',
-                    child: TextButton.icon(
-                      onPressed: _gerarPDF,
-                      icon: const Icon(Icons.picture_as_pdf_outlined,
-                          size: 18, color: _corFechada),
-                      label: const Text(
-                        'Gerar PDF',
-                        style: TextStyle(
-                          color: _corFechada,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      style: TextButton.styleFrom().copyWith(
-                        mouseCursor: WidgetStateProperty.all(
-                            SystemMouseCursors.click),
-                      ),
-                    ),
-                  ),
-          ],
-        ],
       ),
-      body: provider.carregandoDetalhe
-          ? Center(
-              child: CircularProgressIndicator(color: AppTheme.primary))
-          : rel == null
-              ? Center(
-                  child: Text(
-                    'Relatório não encontrado',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: Theme.of(context).colorScheme.outline),
-                  ),
-                )
-              : _RelatorioDetalheBody(rel: rel),
     );
   }
 }
@@ -2118,27 +2181,49 @@ class _MovimentacaoSection extends StatelessWidget {
                                         '${ref.materialEspessura!.replaceAll(RegExp(r'\s*mm\s*$', caseSensitive: false), '')}mm',
                                     ].join(' · ');
                                     final identificador = (ref.materialIdentificador ?? '').trim();
-                                    return Text.rich(
-                                      TextSpan(
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                          color: Theme.of(context).colorScheme.onSurface,
-                                        ),
-                                        children: [
-                                          if (identificador.isNotEmpty)
-                                            TextSpan(
-                                              text: '$identificador  ·  ',
-                                              style: TextStyle(
-                                                color: Theme.of(context).colorScheme.onSurface,
-                                              ),
+                                    final materialDescricao =
+                                        (ref.materialDescricao ?? '').trim();
+                                    return Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text.rich(
+                                          TextSpan(
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w500,
+                                              color: Theme.of(context).colorScheme.onSurface,
                                             ),
-                                          TextSpan(text: ref.materialNome),
-                                          if (detalhe.isNotEmpty)
-                                            TextSpan(text: '  ·  $detalhe'),
+                                            children: [
+                                              if (identificador.isNotEmpty)
+                                                TextSpan(
+                                                  text: '$identificador  ·  ',
+                                                  style: TextStyle(
+                                                    color: Theme.of(context).colorScheme.onSurface,
+                                                  ),
+                                                ),
+                                              TextSpan(text: ref.materialNome),
+                                              if (detalhe.isNotEmpty)
+                                                TextSpan(text: '  ·  $detalhe'),
+                                            ],
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        if (materialDescricao.isNotEmpty) ...[
+                                          SizedBox(height: 2),
+                                          Text(
+                                            materialDescricao,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                            ),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
                                         ],
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
+                                      ],
                                     );
                                   }),
 
@@ -2395,11 +2480,19 @@ class _BotaoVoltar extends StatefulWidget {
   final String label;
   final String tooltip;
   final VoidCallback onTap;
+  final double iconSize;
+  final double fontSize;
+  final double padH;
+  final double padV;
 
   const _BotaoVoltar({
     required this.label,
     required this.tooltip,
     required this.onTap,
+    this.iconSize = 18,
+    this.fontSize = 13,
+    this.padH = 16,
+    this.padV = 12,
   });
 
   @override
@@ -2408,7 +2501,6 @@ class _BotaoVoltar extends StatefulWidget {
 
 class _BotaoVoltarState extends State<_BotaoVoltar> {
   bool _hovered = false;
-  static const _accent = Color(0xFFF59E0B);
 
   @override
   Widget build(BuildContext context) {
@@ -2418,40 +2510,37 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
       onExit:  (_) => setState(() => _hovered = false),
       child: Tooltip(
         message: widget.tooltip,
-        child: InkWell(
-          onTap: widget.onTap,
-          mouseCursor: SystemMouseCursors.click,
+        child: Material(
+          color: _hovered
+              ? AppTheme.primary.withValues(alpha: 0.85)
+              : AppTheme.primary,
           borderRadius: BorderRadius.circular(10),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: _hovered
-                  ? _accent.withValues(alpha: 0.15)
-                  : _accent.withValues(alpha: 0.08),
-              border: Border.all(
-                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.arrow_back,
-                  size: 18,
-                  color: _accent,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  widget.label,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: _accent,
-                    fontWeight: FontWeight.w600,
+          child: InkWell(
+            onTap: widget.onTap,
+            mouseCursor: SystemMouseCursors.click,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: widget.padH, vertical: widget.padV),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.arrow_back,
+                    size: widget.iconSize,
+                    color: Colors.white,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      fontSize: widget.fontSize,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

@@ -19,12 +19,6 @@ String _dimensoesDoMaterial(String infoLine) {
   return partes.join(' · ');
 }
 
-String _nomeCampoExibicao(String? campo) {
-  if (campo == null || campo.isEmpty) return '—';
-  if (campo.trim().toLowerCase() == 'espessura') return '$campo (mm)';
-  return campo;
-}
-
 String _mensagemErroAmigavel(String raw) {
   final lower = raw.toLowerCase();
   if (lower.contains('socketexception') ||
@@ -59,7 +53,7 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
   DateTime? _dataInicio;
   DateTime? _dataFim;
   String    _acaoFiltro  = '';
-  bool      _acaoHovered = false;
+  final MenuController _acaoMenuController = MenuController();
   Timer?    _debounce;
 
   static const int _itensPorPagina = 50;
@@ -74,6 +68,10 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
     ('EXCLUSAO',           'Exclusão'),
     ('ESTOQUE_CONFIRMADO', 'Estoque confirmado'),
     ('CUSTO_MANUAL',       'Custo manual'),
+    // Fluxo de aprovação de cadastro (usuários não-ADMIN)
+    ('CADASTRO_PENDENTE',  'Enviado para aprovação'),
+    ('APROVACAO',          'Cadastro aprovado'),
+    ('RECUSA',             'Cadastro recusado'),
   ];
 
   @override
@@ -244,44 +242,14 @@ class _HistoricoMaterialPageState extends State<HistoricoMaterialPage> {
                   ),
                   const SizedBox(width: 12),
                 ],
-                MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  onEnter: (_) => setState(() => _acaoHovered = true),
-                  onExit:  (_) => setState(() => _acaoHovered = false),
-                  child: SizedBox(
-                    width: 200,
-                    child: Theme(
-                      data: Theme.of(context).copyWith(
-                        inputDecorationTheme: Theme.of(context).inputDecorationTheme.copyWith(
-                          hoverColor: Colors.transparent,
-                          focusColor: Colors.transparent,
-                        ),
-                      ),
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _acaoFiltro,
-                        decoration: InputDecoration(
-                          labelText: 'Ação',
-                          isDense:   true,
-                          suffixIcon: Icon(
-                            Icons.arrow_drop_down,
-                            color: _acaoHovered
-                                ? AppTheme.primary
-                                : Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          focusedBorder: Theme.of(context).inputDecorationTheme.enabledBorder,
-                        ),
-                        mouseCursor: SystemMouseCursors.click,
-                        icon: const SizedBox.shrink(),
-                        items: _acoes
-                            .map((a) => DropdownMenuItem(value: a.$1, child: Text(a.$2)))
-                            .toList(),
-                        onChanged: (v) {
-                          setState(() => _acaoFiltro = v ?? '');
-                          _carregar();
-                        },
-                      ),
-                    ),
-                  ),
+                _AcaoFiltroDropdown(
+                  menuController: _acaoMenuController,
+                  valorSelecionado: _acaoFiltro,
+                  opcoes: _acoes,
+                  onSelecionar: (v) {
+                    setState(() => _acaoFiltro = v);
+                    _carregar();
+                  },
                 ),
                 const SizedBox(width: 12),
 
@@ -433,7 +401,6 @@ class _BotaoVoltar extends StatefulWidget {
 
 class _BotaoVoltarState extends State<_BotaoVoltar> {
   bool _hovered = false;
-  static const _accent = Color(0xFFF59E0B);
 
   @override
   Widget build(BuildContext context) {
@@ -443,40 +410,37 @@ class _BotaoVoltarState extends State<_BotaoVoltar> {
       onExit:  (_) => setState(() => _hovered = false),
       child: Tooltip(
         message: widget.tooltip,
-        child: InkWell(
-          onTap: widget.onTap,
-          mouseCursor: SystemMouseCursors.click,
+        child: Material(
+          color: _hovered
+              ? AppTheme.primary.withValues(alpha: 0.85)
+              : AppTheme.primary,
           borderRadius: BorderRadius.circular(10),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: _hovered
-                  ? _accent.withValues(alpha: 0.15)
-                  : _accent.withValues(alpha: 0.08),
-              border: Border.all(
-                color: _accent.withValues(alpha: _hovered ? 0.9 : 0.5),
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.arrow_back,
-                  size: 18,
-                  color: _accent,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  widget.label,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: _accent,
-                    fontWeight: FontWeight.w600,
+          child: InkWell(
+            onTap: widget.onTap,
+            mouseCursor: SystemMouseCursors.click,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.arrow_back,
+                    size: 18,
+                    color: Colors.white,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.label,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -556,7 +520,7 @@ class _CabecalhoTabela extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 96,
+            width: 132,
             child: Text('Ação',
                 style: _estiloHeader(context)),
           ),
@@ -566,7 +530,7 @@ class _CabecalhoTabela extends StatelessWidget {
               child: Text('Material', style: _estiloHeader(context)),
             ),
           SizedBox(
-            width: 140,
+            width: 150,
             child: Text('Campo', style: _estiloHeader(context)),
           ),
           Expanded(
@@ -625,7 +589,7 @@ class _LinhaLog extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 1),
             child: SizedBox(
-              width: 96,
+              width: 132,
               child: _BadgeAcao(label: log.acaoLabel, cor: cor),
             ),
           ),
@@ -638,7 +602,7 @@ class _LinhaLog extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    log.materialNome ?? '—',
+                    log.materialNome != null ? log.materialNomeExibicao : '—',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -694,14 +658,15 @@ class _LinhaLog extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: SizedBox(
-              width: 140,
+              width: 150,
               child: Text(
-                _nomeCampoExibicao(log.campo),
+                log.campoExibicao,
                 style: TextStyle(
                   fontSize: 12,
+                  fontWeight: FontWeight.w500,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  fontStyle: FontStyle.italic,
                 ),
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -796,7 +761,9 @@ class _BadgeAcao extends StatelessWidget {
                 fontSize:   11,
                 fontWeight: FontWeight.w600,
                 color:      cor,
+                height:     1.25,
               ),
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -1003,6 +970,108 @@ class _BotaoNumeroPagina extends StatelessWidget {
             color: ativa ? Colors.black87 : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
+      ),
+    );
+  }
+}
+class _AcaoFiltroDropdown extends StatefulWidget {
+  final MenuController menuController;
+  final String valorSelecionado;
+  final List<(String, String)> opcoes;
+  final ValueChanged<String> onSelecionar;
+
+  const _AcaoFiltroDropdown({
+    required this.menuController,
+    required this.valorSelecionado,
+    required this.opcoes,
+    required this.onSelecionar,
+  });
+
+  @override
+  State<_AcaoFiltroDropdown> createState() => _AcaoFiltroDropdownState();
+}
+
+class _AcaoFiltroDropdownState extends State<_AcaoFiltroDropdown> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final labelSelecionado = widget.opcoes
+        .firstWhere((a) => a.$1 == widget.valorSelecionado, orElse: () => widget.opcoes.first)
+        .$2;
+
+    return SizedBox(
+      width: 260,
+      child: MenuAnchor(
+        controller: widget.menuController,
+        style: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(scheme.surface),
+          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+          elevation: const WidgetStatePropertyAll(6),
+          padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(color: scheme.outlineVariant),
+            ),
+          ),
+        ),
+        menuChildren: [
+          SizedBox(
+            width: 260,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final a in widget.opcoes)
+                  MenuItemButton(
+                    style: ButtonStyle(
+                      mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    ),
+                    onPressed: () {
+                      widget.onSelecionar(a.$1);
+                      widget.menuController.close();
+                    },
+                    trailingIcon: widget.valorSelecionado == a.$1
+                        ? Icon(Icons.check, size: 16, color: AppTheme.primary)
+                        : null,
+                    child: SizedBox(
+                      width: 228,
+                      child: Text(a.$2, overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+        builder: (context, controller, child) {
+          return MouseRegion(
+            cursor: SystemMouseCursors.click,
+            onEnter: (_) => setState(() => _hovered = true),
+            onExit:  (_) => setState(() => _hovered = false),
+            child: GestureDetector(
+              onTap: () => controller.isOpen ? controller.close() : controller.open(),
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: 'Ação',
+                  isDense:   true,
+                  suffixIcon: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: Icon(
+                      controller.isOpen ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+                      color: _hovered ? AppTheme.primary : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                child: Text(
+                  labelSelecionado,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 14, color: scheme.onSurface),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
