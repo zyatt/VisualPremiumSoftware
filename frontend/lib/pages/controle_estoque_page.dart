@@ -19,8 +19,21 @@ String _fmtData(DateTime? dt) {
       '${dt.year}';
 }
 
+/// Decide quantas casas decimais usar ao exibir um valor monetário.
+/// Usa 2 casas normalmente; só aumenta a precisão (até [casasMax]) quando
+/// 2 casas arredondariam um valor positivo para "0,00" — caso comum de
+/// preço unitário de materiais vendidos em unidades muito pequenas
+/// (ex.: preço por grama de um saco de 50kg: R$ 39,00 / 50000g = R$ 0,00078/g).
+int _casasParaExibirValor(double v, {int casasMax = 6}) {
+  if (v == 0) return 2;
+  final comDuasCasas = double.parse(v.toStringAsFixed(2));
+  if (comDuasCasas != 0) return 2;
+  return casasMax;
+}
+
 String _brl6(double v) {
-  final s2 = v.toStringAsFixed(2);
+  final casas = _casasParaExibirValor(v);
+  final s2 = v.toStringAsFixed(casas);
   final partes = s2.split('.');
   final decFinal = partes.length > 1 ? partes[1] : '00';
 
@@ -4563,7 +4576,8 @@ class _UltimoPrecoRow extends StatelessWidget {
       }
     } else {
       if (pu != null) {
-        chips.add(_PrecoBadge(label: 'Unidade', valor: _brl(pu)));
+        final unLabel = formatarUnidadeExibicao(unidade);
+        chips.add(_PrecoBadge(label: unLabel.isNotEmpty ? unLabel : 'Unidade', valor: _brl(pu)));
       }
       if (pm2 != null) {
         if (chips.isNotEmpty) chips.add(const SizedBox(width: 4));

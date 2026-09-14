@@ -38,7 +38,7 @@ function _broadcast(tipo, dados, excludeUsuarioId) {
 const _materialSelect = {
   id: true, nome: true, unidade: true, identificador: true,
   medida: true, espessura: true, categoria: true, quantidade: true,
-  largura: true, comprimento: true,
+  largura: true, comprimento: true, descricao: true,
 };
 
 function _formatarNumero(valor) {
@@ -49,6 +49,12 @@ function _formatarNumero(valor) {
   if (s.endsWith('0')) s = s.slice(0, -1);
   if (s.endsWith('.')) s = s.slice(0, -1);
   return s;
+}
+
+function _nomeMaterialExibicao(material) {
+  const nome = material?.nome ?? 'Material';
+  const descricao = (material?.descricao ?? '').toString().trim();
+  return descricao ? `${nome} · ${descricao}` : nome;
 }
 
 function _snapshotMaterial(registro) {
@@ -93,8 +99,17 @@ async function listar(filtros = {}) {
     where.OR = [
       { numeroOS:    { contains: busca, mode: 'insensitive' } },
       { nomeCliente: { contains: busca, mode: 'insensitive' } },
-      { itens:     { some: { material: { nome: { contains: busca, mode: 'insensitive' } } } } },
-      { adicionais: { some: { material: { nome: { contains: busca, mode: 'insensitive' } } } } },
+      // Também casa pela `descricao` (variante), não só pelo `nome` do
+      // material — para que digitar a descrição de uma variante encontre
+      // a solicitação que usou aquele material.
+      { itens: { some: { material: { OR: [
+        { nome:      { contains: busca, mode: 'insensitive' } },
+        { descricao: { contains: busca, mode: 'insensitive' } },
+      ] } } } },
+      { adicionais: { some: { material: { OR: [
+        { nome:      { contains: busca, mode: 'insensitive' } },
+        { descricao: { contains: busca, mode: 'insensitive' } },
+      ] } } } },
     ];
   }
   if (andamento)  where.andamento = andamento;
@@ -363,7 +378,7 @@ async function adicionarMateriais(solicitacaoId, itens, usuarioId, usuarioNome, 
               adicionado: true,
               ..._snapshotMaterial(c),
             },
-            item: `${c.material?.nome ?? 'Material'} (adicional)`,
+            item: `${_nomeMaterialExibicao(c.material)} (adicional)`,
           },
         })
       )
@@ -449,7 +464,7 @@ async function marcarStatusCompra(tipo, itemId, usuarioId, usuarioNome, usuarioR
         editorNome:    usuarioNome ?? 'Desconhecido',
         antes:  { status: _labelStatus(statusAnterior) },
         depois: { status: _labelStatus(status) },
-        item: `${atualizado.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
+        item: `${_nomeMaterialExibicao(atualizado.material)}${tipo === 'adicional' ? ' (adicional)' : ''}`,
       },
     });
   }
@@ -585,7 +600,7 @@ async function atualizarItem(tipo, itemId, data, usuarioId, usuarioNome, usuario
         editorNome:    usuarioNome ?? 'Desconhecido',
         antes,
         depois,
-        item: `${registro.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
+        item: `${_nomeMaterialExibicao(registro.material)}${tipo === 'adicional' ? ' (adicional)' : ''}`,
       },
     });
 
@@ -595,7 +610,7 @@ async function atualizarItem(tipo, itemId, data, usuarioId, usuarioNome, usuario
       nomeCliente: sol.nomeCliente,
       editorNome:  usuarioNome ?? 'Desconhecido',
       acao:        'edicao_material',
-      item:        `${registro.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
+      item:        `${_nomeMaterialExibicao(registro.material)}${tipo === 'adicional' ? ' (adicional)' : ''}`,
       antes,
       depois,
     }, usuarioId);
@@ -643,7 +658,7 @@ async function excluirItem(tipo, itemId, usuarioId, usuarioNome, usuarioRole) {
         editorNome:    usuarioNome ?? 'Desconhecido',
         antes: { quantidade: registro.quantidade, observacao: registro.observacao },
         depois: { excluido: true },
-        item: `${registro.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
+        item: `${_nomeMaterialExibicao(registro.material)}${tipo === 'adicional' ? ' (adicional)' : ''}`,
       },
     });
   }
@@ -655,7 +670,7 @@ async function excluirItem(tipo, itemId, usuarioId, usuarioNome, usuarioRole) {
     editorNome:  usuarioNome ?? 'Desconhecido',
     acao:        'exclusao_material',
     materialNome: registro.material?.nome,
-    item:        `${registro.material?.nome ?? 'Material'}${tipo === 'adicional' ? ' (adicional)' : ''}`,
+    item:        `${_nomeMaterialExibicao(registro.material)}${tipo === 'adicional' ? ' (adicional)' : ''}`,
     antes:       { quantidade: registro.quantidade, observacao: registro.observacao },
     depois:      { excluido: true },
   }, usuarioId);
