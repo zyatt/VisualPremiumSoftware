@@ -34,11 +34,21 @@ async function listar({ busca, cliente, materialId, materialNome, materialIdenti
   const filtroMaterial = {};
   if (materialId)            filtroMaterial.id            = Number(materialId);
   if (materialNome) {
+    // Também casa pela `descricao` (variante) e pelo nome do genérico-pai,
+    // não só pelo `nome` — para que digitar a descrição de uma variante
+    // encontre a OS que usou aquele material.
     const tokens = materialNome.trim().split(/\s+/).filter(Boolean);
+    const tokenFiltro = (t) => ({
+      OR: [
+        { nome: { contains: t, mode: 'insensitive' } },
+        { descricao: { contains: t, mode: 'insensitive' } },
+        { materialGenerico: { nome: { contains: t, mode: 'insensitive' } } },
+      ],
+    });
     if (tokens.length === 1) {
-      filtroMaterial.nome = { contains: tokens[0], mode: 'insensitive' };
+      Object.assign(filtroMaterial, tokenFiltro(tokens[0]));
     } else {
-      filtroMaterial.AND = tokens.map((t) => ({ nome: { contains: t, mode: 'insensitive' } }));
+      filtroMaterial.AND = tokens.map(tokenFiltro);
     }
   }
   if (materialIdentificador) filtroMaterial.identificador = { contains: materialIdentificador, mode: 'insensitive' };

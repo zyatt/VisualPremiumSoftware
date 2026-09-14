@@ -3637,6 +3637,7 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
               materialNome: item.materialNome,
               materialUnidade: item.materialUnidade,
               materialIdentificador: item.materialIdentificador,
+              materialDescricao: item.materialDescricao,
               materialMedida: item.materialMedida,
               materialEspessura: item.materialEspessura,
               materialLargura: item.materialLargura,
@@ -3688,6 +3689,7 @@ class _AbaMateriaisSolicitacao extends StatelessWidget {
               materialNome: ad.materialNome,
               materialUnidade: ad.materialUnidade,
               materialIdentificador: ad.materialIdentificador,
+              materialDescricao: ad.materialDescricao,
               materialMedida: ad.materialMedida,
               materialEspessura: ad.materialEspessura,
               materialLargura: ad.materialLargura,
@@ -3729,6 +3731,7 @@ class _MaterialCard extends StatelessWidget {
   final String materialNome;
   final String? materialUnidade;
   final String? materialIdentificador;
+  final String? materialDescricao;
   final String? materialMedida;
   final String? materialEspessura;
   final double? materialLargura;
@@ -3799,6 +3802,7 @@ class _MaterialCard extends StatelessWidget {
     required this.materialNome,
     this.materialUnidade,
     this.materialIdentificador,
+    this.materialDescricao,
     this.materialMedida,
     this.materialEspessura,
     this.materialLargura,
@@ -3933,12 +3937,22 @@ class _MaterialCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
-                            child: Text(
-                              (materialIdentificador != null && materialIdentificador!.isNotEmpty)
-                                  ? '$materialIdentificador · $materialNome'
-                                  : materialNome,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w600, fontSize: 14),
+                            child: Text.rich(
+                              TextSpan(
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600, fontSize: 14),
+                                children: [
+                                  TextSpan(
+                                    text: (materialIdentificador != null &&
+                                            materialIdentificador!.isNotEmpty)
+                                        ? '$materialIdentificador · $materialNome'
+                                        : materialNome,
+                                  ),
+                                  if (materialDescricao != null &&
+                                      materialDescricao!.trim().isNotEmpty)
+                                    TextSpan(text: ' · ${materialDescricao!.trim()}'),
+                                ],
+                              ),
                               softWrap: true,
                             ),
                           ),

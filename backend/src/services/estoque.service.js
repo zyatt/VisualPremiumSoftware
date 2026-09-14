@@ -672,12 +672,37 @@ async function listarTodas(filtros = {}) {
   }
 
   const materialWhere = {};
-  if (material)      materialWhere.nome         = { contains: material, mode: 'insensitive' };
+  if (material) {
+    // Também casa pela `descricao` (variante) e pelo nome do genérico-pai,
+    // não só pelo `nome` — para que digitar a descrição de uma variante
+    // (ex.: "AZUL FRISIA FLEET COLOR") encontre a OS que usou aquele
+    // material, mesmo que o material vinculado à movimentação seja a
+    // variante (filho) e não o genérico.
+    const tokens = material.trim().split(/\s+/).filter(Boolean);
+    const tokenFiltro = (t) => ({
+      OR: [
+        { nome: { contains: t, mode: 'insensitive' } },
+        { descricao: { contains: t, mode: 'insensitive' } },
+        { materialGenerico: { nome: { contains: t, mode: 'insensitive' } } },
+      ],
+    });
+    if (tokens.length === 1) {
+      Object.assign(materialWhere, tokenFiltro(tokens[0]));
+    } else {
+      materialWhere.AND = tokens.map(tokenFiltro);
+    }
+  }
   if (identificador)  materialWhere.identificador = { contains: identificador, mode: 'insensitive' };
   if (medida)         materialWhere.medida        = { contains: medida, mode: 'insensitive' };
   if (espessura)       materialWhere.espessura     = { contains: espessura, mode: 'insensitive' };
-  if (comprimento)     materialWhere.comprimento   = { equals: Number(comprimento) };
-  if (largura)          materialWhere.largura       = { equals: Number(largura) };
+  if (comprimento) {
+    const filtro = materialSvc.filtroNumericoContem(comprimento);
+    if (filtro) materialWhere.comprimento = filtro;
+  }
+  if (largura) {
+    const filtro = materialSvc.filtroNumericoContem(largura);
+    if (filtro) materialWhere.largura = filtro;
+  }
   if (Object.keys(materialWhere).length > 0) {
     where.movimentacoes = { some: { material: { is: materialWhere } } };
   }
@@ -735,12 +760,34 @@ async function listarMovimentacoes(filtros = {}) {
   }
 
   const materialWhere = {};
-  if (material)       materialWhere.nome           = { contains: material, mode: 'insensitive' };
+  if (material) {
+    // Mesma lógica de listarTodas: também casa pela `descricao` da
+    // variante e pelo nome do genérico-pai.
+    const tokens = material.trim().split(/\s+/).filter(Boolean);
+    const tokenFiltro = (t) => ({
+      OR: [
+        { nome: { contains: t, mode: 'insensitive' } },
+        { descricao: { contains: t, mode: 'insensitive' } },
+        { materialGenerico: { nome: { contains: t, mode: 'insensitive' } } },
+      ],
+    });
+    if (tokens.length === 1) {
+      Object.assign(materialWhere, tokenFiltro(tokens[0]));
+    } else {
+      materialWhere.AND = tokens.map(tokenFiltro);
+    }
+  }
   if (identificador)  materialWhere.identificador   = { contains: identificador, mode: 'insensitive' };
   if (medida)         materialWhere.medida          = { contains: medida, mode: 'insensitive' };
   if (espessura)      materialWhere.espessura       = { contains: espessura, mode: 'insensitive' };
-  if (comprimento)    materialWhere.comprimento     = { equals: Number(comprimento) };
-  if (largura)        materialWhere.largura         = { equals: Number(largura) };
+  if (comprimento) {
+    const filtro = materialSvc.filtroNumericoContem(comprimento);
+    if (filtro) materialWhere.comprimento = filtro;
+  }
+  if (largura) {
+    const filtro = materialSvc.filtroNumericoContem(largura);
+    if (filtro) materialWhere.largura = filtro;
+  }
   if (Object.keys(materialWhere).length > 0) where.material = { is: materialWhere };
 
   const take = Number(porPagina) || 100;

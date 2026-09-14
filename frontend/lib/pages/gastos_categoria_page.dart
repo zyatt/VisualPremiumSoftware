@@ -25,6 +25,29 @@ String _fmtMilhar(double v) {
   return '${negativo ? '-' : ''}${buffer.toString()},$decimal';
 }
 
+// Para valores unitários muito pequenos (ex: custo por grama), 2 casas
+// decimais zeram o valor (R$ 0,00). Estende as casas até haver um dígito
+// significativo, evitando exibir um custo real como se fosse zero.
+String _fmtMilharPreciso(double v) {
+  if (v == 0) return _fmtMilhar(0);
+  if (v.abs() >= 0.005) return _fmtMilhar(v);
+
+  final negativo = v < 0;
+  final fixado   = v.abs().toStringAsFixed(6);
+  final partes   = fixado.split('.');
+  final inteiro  = partes[0];
+  final decimal  = partes[1];
+
+  final buffer = StringBuffer();
+  final len = inteiro.length;
+  for (int i = 0; i < len; i++) {
+    if (i > 0 && (len - i) % 3 == 0) buffer.write('.');
+    buffer.write(inteiro[i]);
+  }
+
+  return '${negativo ? '-' : ''}${buffer.toString()},$decimal';
+}
+
 String _brl(double v) => v == 0 ? '—' : 'R\$ ${_fmtMilhar(v)}';
 
 String _fmtData(DateTime? dt) {
@@ -41,7 +64,7 @@ String _fmtQtd(double q) {
       : _fmtMilhar(arredondado);
 }
 
-String _fmtCusto(double v) => _fmtMilhar(v);
+String _fmtCusto(double v) => _fmtMilharPreciso(v);
 
 String _fmtDim(double v) {
   final arredondado = double.parse(v.toStringAsFixed(2));
@@ -884,7 +907,7 @@ class _EstoqueCategoriaCardState extends State<_EstoqueCategoriaCard> {
                   const Expanded(flex: 3, child: _HeaderCol('Material')),
                   const _HeaderCol('Qtd', align: TextAlign.right),
                   const SizedBox(width: 8),
-                  const _HeaderCol('Custo unit.',
+                  const _HeaderCol('Preço',
                       align: TextAlign.right),
                   const SizedBox(width: 8),
                   const _HeaderColWide('Valor total',

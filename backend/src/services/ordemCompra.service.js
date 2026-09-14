@@ -46,9 +46,33 @@ function _expandirItensComDistribuicao(itens) {
       : [];
 
     if (dist.length > 0) {
-      for (const linha of dist) {
+      // O precoTotal do item (rascunho da tela) é a fonte da verdade —
+      // ver comentário em criar()/atualizar(). Ao expandir por OS,
+      // rateamos esse total proporcionalmente à quantidade de cada
+      // linha, em vez de recalcular cada linha do zero a partir de
+      // precoUnitario (que amplificaria o arredondamento de exibição).
+      // A última linha recebe o resto da divisão para garantir que a
+      // soma das linhas expandidas seja EXATAMENTE igual ao total
+      // original, sem sobra nem falta por arredondamento de centavos.
+      const precoTotalItem = Number(item.precoTotal ?? 0);
+      const quantidadeTotalItem = dist.reduce((acc, l) => acc + Number(l.quantidade), 0);
+      const usarRateio = precoTotalItem > 0 && quantidadeTotalItem > 0;
+
+      let precoTotalAcumulado = 0;
+      dist.forEach((linha, idx) => {
         let precoTotal;
-        if (item.usarM2 && Number(item.precoMetroQuadrado) > 0) {
+        if (usarRateio) {
+          if (idx === dist.length - 1) {
+            // última linha: resto exato, sem perda de centavos por
+            // arredondamento nas linhas anteriores
+            precoTotal = Number((precoTotalItem - precoTotalAcumulado).toFixed(2));
+          } else {
+            precoTotal = Number(
+              ((Number(linha.quantidade) / quantidadeTotalItem) * precoTotalItem).toFixed(2)
+            );
+          }
+          precoTotalAcumulado += precoTotal;
+        } else if (item.usarM2 && Number(item.precoMetroQuadrado) > 0) {
           precoTotal = Number(linha.quantidade) * Number(item.precoMetroQuadrado);
         } else {
           const precoUnit = Number(item.precoUnitario ?? 0);
@@ -59,14 +83,14 @@ function _expandirItensComDistribuicao(itens) {
             precoTotal = Number(linha.quantidade) * precoUnit;
           }
         }
-        
+
         resultado.push({
           ...item,
           numeroOS:   String(linha.os).trim(),
           quantidade: Number(linha.quantidade),
           precoTotal,
         });
-      }
+      });
     } else {
       resultado.push(item);
     }
@@ -394,7 +418,24 @@ async function listarPagina(filtros = {}) {
   if (numeroNum != null && !Number.isNaN(numeroNum)) where.id = numeroNum;
 
   const itemMaterialWhere = {};
-  if (material)      itemMaterialWhere.nome         = { contains: material, mode: 'insensitive' };
+  if (material) {
+    // Também casa pela `descricao` (variante) e pelo nome do genérico-pai,
+    // não só pelo `nome` — para que digitar a descrição de uma variante
+    // encontre a Ordem de Compra que tem aquele material.
+    const tokens = material.trim().split(/\s+/).filter(Boolean);
+    const tokenFiltro = (t) => ({
+      OR: [
+        { nome: { contains: t, mode: 'insensitive' } },
+        { descricao: { contains: t, mode: 'insensitive' } },
+        { materialGenerico: { nome: { contains: t, mode: 'insensitive' } } },
+      ],
+    });
+    if (tokens.length === 1) {
+      Object.assign(itemMaterialWhere, tokenFiltro(tokens[0]));
+    } else {
+      itemMaterialWhere.AND = tokens.map(tokenFiltro);
+    }
+  }
   if (identificador)  itemMaterialWhere.identificador = { contains: identificador, mode: 'insensitive' };
   if (medida)          itemMaterialWhere.medida        = { contains: medida, mode: 'insensitive' };
   if (espessura)        itemMaterialWhere.espessura     = { contains: espessura, mode: 'insensitive' };
@@ -488,9 +529,23 @@ async function criar(data, usuarioId) {
   _validarSemItensDuplicados(itensResolvidos);
   const itensExpandidos = _expandirItensComDistribuicao(itensResolvidos);
 
+  // O valorTotal da OC precisa ser a soma exata do precoTotal que será
+  // efetivamente gravado em cada OrdemCompraItem (ver bloco de criação
+  // dos itens logo abaixo) — e não um recálculo independente a partir de
+  // quantidade × precoUnitario. O precoUnitario exibido/salvo é
+  // arredondado para 2 casas na tela, então recalcular o total a partir
+  // dele produzia um valorTotal levemente diferente da soma real dos
+  // itens (ex.: R$165,00 em vez de R$165,40), mesmo com os itens
+  // individuais corretos. Usamos aqui a MESMA regra de "fonte da
+  // verdade" (precoTotal enviado pelo front) que o bloco de criação dos
+  // itens já aplica, para os dois nunca divergirem.
   const valorTotal = itensExpandidos.reduce((acc, item) => {
+    const usarM2 = item.usarM2 ?? false;
+    const precoTotalEnviado = Number(item.precoTotal ?? 0);
     let precoItem;
-    if (item.usarM2 && Number(item.precoMetroQuadrado) > 0) {
+    if (precoTotalEnviado > 0) {
+      precoItem = precoTotalEnviado;
+    } else if (usarM2 && Number(item.precoMetroQuadrado) > 0) {
       precoItem = Number(item.quantidade) * Number(item.precoMetroQuadrado);
     } else {
       const precoUnit = Number(item.precoUnitario ?? 0);
@@ -516,8 +571,19 @@ async function criar(data, usuarioId) {
         ? {
             create: itensExpandidos.map((item) => {
               const usarM2 = item.usarM2 ?? false;
+              // O preço total é a fonte da verdade quando o usuário o
+              // define manualmente na tela (ele deriva o preço unitário a
+              // partir do total, não o contrário). Recalcular aqui a
+              // partir de quantidade/qtdUnidade/precoUnitario amplifica
+              // qualquer arredondamento de exibição do preço unitário e
+              // faz o total "pular" ao reabrir a OC. Só recalculamos como
+              // fallback quando o item não trouxe precoTotal (itens
+              // legados/fluxos antigos).
+              const precoTotalEnviado = Number(item.precoTotal ?? 0);
               let precoTotal;
-              if (usarM2 && Number(item.precoMetroQuadrado) > 0) {
+              if (precoTotalEnviado > 0) {
+                precoTotal = precoTotalEnviado;
+              } else if (usarM2 && Number(item.precoMetroQuadrado) > 0) {
                 precoTotal = Number(item.quantidade) * Number(item.precoMetroQuadrado);
               } else {
                 const precoUnit = Number(item.precoUnitario ?? 0);
@@ -587,8 +653,15 @@ async function atualizar(id, data) {
       await prisma.ordemCompraItem.createMany({
         data: itensExpandidos.map((item) => {
           const usarM2 = item.usarM2 ?? false;
+          // Mesma regra da criação: respeitar o precoTotal enviado pelo
+          // front (fonte da verdade quando editado manualmente) e só
+          // recalcular como fallback se ele não vier preenchido — ver
+          // comentário equivalente em criar().
+          const precoTotalEnviado = Number(item.precoTotal ?? 0);
           let precoTotal;
-          if (usarM2 && Number(item.precoMetroQuadrado) > 0) {
+          if (precoTotalEnviado > 0) {
+            precoTotal = precoTotalEnviado;
+          } else if (usarM2 && Number(item.precoMetroQuadrado) > 0) {
             precoTotal = Number(item.quantidade) * Number(item.precoMetroQuadrado);
           } else {
             const precoUnit = Number(item.precoUnitario ?? 0);
@@ -655,10 +728,16 @@ async function adicionarItem(ordemCompraId, itemData) {
     }
   }
 
-  const usarM2     = itemResolvidoSemOrigem.usarM2 ?? false;
-  const precoTotal = usarM2 && Number(itemResolvidoSemOrigem.precoMetroQuadrado) > 0
-    ? Number(itemResolvidoSemOrigem.quantidade) * Number(itemResolvidoSemOrigem.precoMetroQuadrado)
-    : Number(itemResolvidoSemOrigem.quantidade) * Number(itemResolvidoSemOrigem.precoUnitario);
+  const usarM2 = itemResolvidoSemOrigem.usarM2 ?? false;
+  // Respeita o precoTotal vindo do front (fonte da verdade quando o
+  // usuário o edita manualmente) — só recalcula como fallback se não
+  // vier. Ver comentário equivalente em criar()/atualizar().
+  const precoTotalEnviado = Number(itemResolvidoSemOrigem.precoTotal ?? 0);
+  const precoTotal = precoTotalEnviado > 0
+    ? precoTotalEnviado
+    : (usarM2 && Number(itemResolvidoSemOrigem.precoMetroQuadrado) > 0
+      ? Number(itemResolvidoSemOrigem.quantidade) * Number(itemResolvidoSemOrigem.precoMetroQuadrado)
+      : Number(itemResolvidoSemOrigem.quantidade) * Number(itemResolvidoSemOrigem.precoUnitario));
 
   const dadosItem = {
     ...itemResolvidoSemOrigem,
@@ -737,7 +816,13 @@ async function atualizarItem(itemId, data) {
 
   const quantidade    = dadosResolvidos.quantidade    ?? item.quantidade;
   const precoUnitario = dadosResolvidos.precoUnitario ?? item.precoUnitario;
-  const precoTotal    = Number(quantidade) * Number(precoUnitario);
+  // Mesma regra: se um precoTotal explícito vier no payload, ele é a
+  // fonte da verdade; senão recalcula a partir de quantidade/preço
+  // unitário (fallback para chamadas que só ajustam esses dois campos).
+  const precoTotalEnviado = Number(dadosResolvidos.precoTotal ?? 0);
+  const precoTotal = precoTotalEnviado > 0
+    ? precoTotalEnviado
+    : Number(quantidade) * Number(precoUnitario);
   const updated = await prisma.ordemCompraItem.update({
     where: { id: itemId },
     data: { ...dadosResolvidos, precoTotal },

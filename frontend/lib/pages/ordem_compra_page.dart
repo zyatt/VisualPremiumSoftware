@@ -130,6 +130,21 @@ double? parseNumeroBr(String texto) {
   return double.tryParse(comPontoDecimal);
 }
 
+/// Formata um preço unitário usando 2 casas decimais sempre que possível.
+/// Só aumenta a precisão (até [casasMax]) quando 2 casas decimais
+/// arredondariam um valor positivo para "0,00" — caso comum quando o
+/// material é vendido em unidades muito pequenas (ex.: preço por grama de
+/// um saco de 50kg: R$ 39,00 / 50000 = R$ 0,00078/g). Quando isso
+/// acontece, usa direto [casasMax] casas em vez de tentar achar o
+/// mínimo necessário — o mínimo pode cair numa casa que ainda arredonda
+/// o valor exibido (ex.: 3 casas mostraria "0,001" em vez de "0,00078").
+String formatarPrecoUnitario(double valor, {int casasMax = 6}) {
+  if (valor == 0) return formatarNumeroBr(valor, 2);
+  final comDuasCasas = double.parse(valor.toStringAsFixed(2));
+  if (comDuasCasas != 0) return formatarNumeroBr(valor, 2);
+  return formatarNumeroBr(valor, casasMax);
+}
+
 String formatarNumeroBr(double valor, int casas) {
   final fixo = valor.toStringAsFixed(casas);
   final partes = fixo.split('.');
@@ -2687,7 +2702,7 @@ class OrdemCompraDetalhePageState extends State<OrdemCompraDetalhePage> {
                     if (item.qtdUnidade != null && item.qtdUnidade! > 0)
                       _itemChipDestaque(
                         null,
-                        'Preço ${unidadeExibicao(item.materialUnidade).isEmpty ? 'unid.' : unidadeExibicao(item.materialUnidade)}: R\$ ${formatarNumeroBr(item.precoUnitario, 2)}',
+                        'Preço ${unidadeExibicao(item.materialUnidade).isEmpty ? 'unid.' : unidadeExibicao(item.materialUnidade)}: R\$ ${formatarPrecoUnitario(item.precoUnitario)}',
                         ativo: true,
                       ),
                   ],
@@ -2939,6 +2954,11 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
         r.distribuicao.add(_DistribuicaoLinha(os: i.numeroOS, quantidade: i.quantidade));
         r.quantidade += i.quantidade;
         r.numeroOS = r.distribuicao.first.os;
+        // Soma o precoTotal já persistido de cada linha agrupada, em vez
+        // de deixar recalcular a partir de precoUnitario — preserva o
+        // valor exato salvo, mesmo que o usuário tenha editado o total
+        // manualmente com arredondamento diferente do "quantidade × preço".
+        r.precoTotal += i.precoTotal;
       } else {
         grupos[chave] = _ItemRascunho(
           materialId:            materialId,
@@ -2957,7 +2977,7 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           precoUnitario:         i.precoUnitario,
           precoMetroQuadrado:    i.precoMetroQuadrado,
           distribuicao: [_DistribuicaoLinha(os: i.numeroOS, quantidade: i.quantidade)],
-        );
+        )..precoTotal = i.precoTotal;
       }
     }
     return grupos.values.toList();
@@ -3259,6 +3279,13 @@ class _EditarOrdemCompraPageState extends State<_EditarOrdemCompraPage> {
           'quantidade': i.quantidade,
           'qtdUnidade': i.qtdUnidade,
           'precoUnitario': i.precoUnitario,
+          // Envia o preço total exato exibido/editado na tela — o
+          // backend agora usa este valor como fonte da verdade e só
+          // recalcula a partir de quantidade×preço como fallback (ver
+          // ordemCompra.service.js), evitando o "salto" de valor que
+          // ocorria quando o total era sempre recomputado a partir do
+          // preço unitário arredondado.
+          'precoTotal': i.precoTotal,
           'precoMetroQuadrado': i.precoM2Calculado,
           'usarM2': false,
           'distribuicao': i.distribuicao.where((l) => l.os.isNotEmpty && l.quantidade > 0).map((l) => {'os': l.os, 'quantidade': l.quantidade}).toList(),
@@ -4110,6 +4137,9 @@ class NovaOrdemCompraPageState extends State<NovaOrdemCompraPage> {
                   'quantidade': i.quantidade,
                   'qtdUnidade': i.qtdUnidade,
                   'precoUnitario': i.precoUnitario,
+                  // Mesmo motivo do outro payload de envio (ver
+                  // comentário equivalente acima, no fluxo de editar OC).
+                  'precoTotal': i.precoTotal,
                   'precoMetroQuadrado': i.precoM2Calculado,
                   'usarM2': false,
                   'distribuicao': i.distribuicao.where((l) => l.os.isNotEmpty && l.quantidade > 0).map((l) => {'os': l.os, 'quantidade': l.quantidade}).toList(),
@@ -5261,11 +5291,28 @@ class _ItemRascunho {
     return quantidade;
   }
 
-  double get precoTotal {
+  // Preço total do item. Antes era um getter sempre recalculado a partir
+  // de quantidade/qtdUnidade/precoUnitario — mas o preço unitário exibido
+  // (e salvo) é arredondado para exibição (formatarNumeroBr com 2 casas),
+  // então recalcular o total a partir dele amplifica esse arredondamento
+  // e o total "pula" de valor ao reabrir a OC (ex.: usuário define
+  // R$116,40 digitando o total direto, sistema guarda um precoUnitario
+  // arredondado, e ao reabrir recalcula R$121,50 a partir desse
+  // arredondado). Agora é um campo gravável: o valor exato que o usuário
+  // viu/editou é o que é enviado ao backend, sem recomputar.
+  double precoTotal = 0;
+
+  /// Recalcula precoTotal a partir de quantidade/qtdUnidade/precoUnitario.
+  /// Chamar apenas quando o campo total NÃO foi a última coisa editada
+  /// pelo usuário (ver _ItemFormCardState._campoEditado) — quando foi o
+  /// total que o usuário editou, o valor dele já é a fonte da verdade e
+  /// não deve ser sobrescrito por este cálculo.
+  void recalcularPrecoTotal() {
     if (precisaQtdUnidade && qtdUnidade != null && qtdUnidade! > 0) {
-      return quantidade * qtdUnidade! * precoUnitario;
+      precoTotal = quantidade * qtdUnidade! * precoUnitario;
+    } else {
+      precoTotal = quantidade * precoUnitario;
     }
-    return quantidade * precoUnitario;
   }
 }
 
@@ -5315,7 +5362,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     _precoCtrl = TextEditingController(
         text: widget.item.precoUnitario == 0
             ? ''
-            : formatarNumeroBr(widget.item.precoUnitario, 2));
+            : formatarPrecoUnitario(widget.item.precoUnitario));
 
     final precoTotalCalculado = _calcularPrecoTotal();
     final usarPrecoTotalInicial = precoTotalCalculado == 0 &&
@@ -5323,14 +5370,25 @@ class _ItemFormCardState extends State<_ItemFormCard> {
         widget.item.precoTotalInicial != null &&
         widget.item.precoTotalInicial! > 0;
 
-    _precoTotalCtrl = TextEditingController(
-        text: usarPrecoTotalInicial
-            ? formatarNumeroBr(widget.item.precoTotalInicial!, 2)
-            : (precoTotalCalculado == 0
-                ? ''
-                : formatarNumeroBr(precoTotalCalculado, 2)));
+    // Preço total exibido: prioriza o valor já persistido no item
+    // (widget.item.precoTotal, gravado pelo backend/carregamento) sobre o
+    // recalculado a partir de quantidade×preço — isso é o que evita o
+    // "salto" de valor ao reabrir a OC, já que o total salvo pode ter
+    // sido definido manualmente com mais precisão do que
+    // quantidade×precoUnitario(arredondado) reproduziria.
+    final precoTotalPersistido = widget.item.precoTotal;
+    final precoTotalParaExibir = precoTotalPersistido > 0
+        ? precoTotalPersistido
+        : (usarPrecoTotalInicial ? widget.item.precoTotalInicial! : precoTotalCalculado);
 
-    if (usarPrecoTotalInicial) {
+    _precoTotalCtrl = TextEditingController(
+        text: precoTotalParaExibir > 0
+            ? formatarNumeroBr(precoTotalParaExibir, 2)
+            : '');
+
+    widget.item.precoTotal = precoTotalParaExibir > 0 ? precoTotalParaExibir : 0;
+
+    if (usarPrecoTotalInicial || precoTotalPersistido > 0) {
       _campoEditado = 'total';
     }
 
@@ -5374,6 +5432,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
       if (_campoEditado == 'unitario' && _precoTotalCtrl.text.isNotEmpty) {
         _ignorarCalculo = true;
         _precoTotalCtrl.clear();
+        widget.item.precoTotal = 0;
         _ignorarCalculo = false;
       }
       return;
@@ -5384,6 +5443,11 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     final total = _calcularPrecoTotal();
     if (total > 0) {
       final novoTexto = formatarNumeroBr(total, 2);
+      // Sempre grava o total no item, mesmo quando o texto exibido não
+      // muda (ex.: 116,4 -> 116,40 têm o mesmo valor numérico mas o
+      // texto pode já estar formatado) — sem isso o item.precoTotal
+      // podia ficar desatualizado em relação ao que a tela mostra.
+      widget.item.precoTotal = total;
       if (_precoTotalCtrl.text != novoTexto) {
         _ignorarCalculo = true;
         _precoTotalCtrl.text = novoTexto;
@@ -5401,6 +5465,10 @@ class _ItemFormCardState extends State<_ItemFormCard> {
     }
 
     _campoEditado = 'total';
+    // O total digitado é a fonte da verdade — grava exatamente o que o
+    // usuário digitou, e nunca deixa isso ser reconstruído depois a
+    // partir do preço unitário arredondado exibido.
+    widget.item.precoTotal = total;
 
     final qtd = parseNumeroBr(_qtdCtrl.text) ?? 0;
     final qtdUnit = parseNumeroBr(_qtdUnidadeCtrl.text);
@@ -5414,7 +5482,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
       precoUnitario = total / qtd;
     }
 
-    final novoTexto = formatarNumeroBr(precoUnitario, 2);
+    final novoTexto = formatarPrecoUnitario(precoUnitario);
     if (_precoCtrl.text != novoTexto) {
       _ignorarCalculo = true;
       _precoCtrl.text = novoTexto;
@@ -5441,8 +5509,13 @@ class _ItemFormCardState extends State<_ItemFormCard> {
           }
 
           _ignorarCalculo = true;
-          _precoCtrl.text = formatarNumeroBr(precoUnitario, 2);
+          _precoCtrl.text = formatarPrecoUnitario(precoUnitario);
           widget.item.precoUnitario = precoUnitario;
+          // O campo total continua sendo a fonte da verdade quando
+          // quantidade/qtdUnidade mudam com prioridade 'total': o valor
+          // do total em si NÃO é recalculado aqui, só o preço unitário
+          // que deriva dele — mantém widget.item.precoTotal já correto.
+          widget.item.precoTotal = total;
           _ignorarCalculo = false;
         }
       }
@@ -5453,6 +5526,7 @@ class _ItemFormCardState extends State<_ItemFormCard> {
         if (total > 0) {
           _ignorarCalculo = true;
           _precoTotalCtrl.text = formatarNumeroBr(total, 2);
+          widget.item.precoTotal = total;
           _ignorarCalculo = false;
         }
       }
@@ -5740,7 +5814,18 @@ class _ItemFormCardState extends State<_ItemFormCard> {
                         ),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: [_NumeroBrFormatter(casasDecimais: 2)],
-                        onChanged: (_) {
+                        onChanged: (v) {
+                          // Garante que item.precoTotal reflita o texto
+                          // exato digitado mesmo se o listener do
+                          // controller (_onPrecoTotalChanged) não
+                          // disparar por o texto formatado não ter
+                          // mudado (ex.: completar "116,4" -> o texto
+                          // final pode coincidir com o já exibido) — sem
+                          // isso o total digitado não era gravado no
+                          // item e o backend recebia o valor antigo.
+                          _campoEditado = 'total';
+                          final total = parseNumeroBr(v);
+                          item.precoTotal = total ?? 0;
                           widget.onChanged();
                           setState(() {});
                         },
