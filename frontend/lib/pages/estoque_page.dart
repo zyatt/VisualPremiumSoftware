@@ -2517,34 +2517,33 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
   }
 
   Future<void> _abrirFormMaterial(
-    [MaterialModel? material, bool abrirComoGenerico = false]
+    [MaterialModel? material, bool abrirComoGenerico = false, MaterialModel? materialGenericoInicial]
   ) async {
     // Material genérico: em vez de abrir o form de edição direto, mostra
     // primeiro o dialog com as variantes vinculadas a ele. Escolher uma
-    // variante abre o form de edição dela normalmente; "Novo material
-    // vinculado" (dentro do dialog) abre o form já pré-preenchido com o
-    // vínculo ao genérico. `abrirComoGenerico: true` pula essa etapa e
-    // abre direto o form de edição do próprio genérico (botão "Editar"
-    // dentro do dialog de variantes).
+    // variante abre o form de edição dela normalmente; "Nova variante"
+    // (dentro do dialog) abre o form de CADASTRO já pré-preenchido com o
+    // vínculo ao genérico (nome/unidade herdados, só falta a Descrição).
+    // `abrirComoGenerico: true` pula essa etapa e abre direto o form de
+    // edição do próprio genérico (botão "Editar" dentro do dialog de
+    // variantes).
     if (material != null && material.ehGenerico && !abrirComoGenerico) {
-      final escolhido = await showMaterialVinculadosDialog(
+      final resultado = await showMaterialVinculadosDialog(
         context,
         materialGenerico: material,
         apenasAtivos: false,
       );
       if (!mounted) return;
-      if (escolhido != null) {
-        // Se o próprio material genérico foi retornado (botão "Editar" do
-        // dialog de variantes), abre o form de edição dele diretamente,
-        // em vez de reabrir o dialog de variantes de novo.
-        // Se o próprio material genérico foi retornado (botão "Editar" do
-        // dialog de variantes), abre o form de edição dele diretamente,
-        // passando `abrirComoGenerico: true` para não cair de novo no
-        // ramo acima (que reabriria o dialog de variantes).
-        if (escolhido.id == material.id) {
-          await _abrirFormMaterial(escolhido, true);
-        } else {
-          await _abrirFormMaterial(escolhido);
+      if (resultado != null) {
+        if (resultado.editarGenerico) {
+          // Botão "Editar" do dialog de variantes: edita o próprio genérico.
+          await _abrirFormMaterial(material, true);
+        } else if (resultado.novaVariante) {
+          // Botão "Nova variante" do dialog de variantes: abre o form de
+          // CADASTRO (material == null) já vinculado a este genérico.
+          await _abrirFormMaterial(null, false, material);
+        } else if (resultado.variante != null) {
+          await _abrirFormMaterial(resultado.variante);
         }
       }
       return;
@@ -2559,6 +2558,7 @@ class _EstoqueCategoriaPageState extends State<EstoqueCategoriaPage> {
       barrierDismissible: !_dialogTourAberto,
       builder: (_) => _MaterialFormDialog(
         material:    material,
+        materialGenericoInicial: materialGenericoInicial,
         onDesativar: (!isCompras && material != null) ? _desativar : null,
         onReativar:  (!isCompras && material != null) ? _reativar  : null,
         onExcluir:   (!isCompras && material != null) ? _excluir   : null,
@@ -4736,6 +4736,13 @@ class _AguardandoAprovacaoDialog extends StatelessWidget {
 
 class _MaterialFormDialog extends StatefulWidget {
   final MaterialModel? material;
+
+  /// Quando informado (e [material] == null, ou seja, modo de cadastro),
+  /// abre o formulário já vinculado a este material genérico: nome e
+  /// unidade herdados (bloqueados), restando ao usuário preencher apenas
+  /// a Descrição — equivalente a escolher "GENÉRICO" no cadastro normal,
+  /// mas pulando direto para o formulário sem passar pelo seletor.
+  final MaterialModel? materialGenericoInicial;
   final void Function(MaterialModel)? onDesativar;
   final void Function(MaterialModel)? onReativar;
   final void Function(MaterialModel)? onExcluir;
@@ -4752,7 +4759,7 @@ class _MaterialFormDialog extends StatefulWidget {
   final void Function(MaterialModel)? onRecusar;
 
   final _MaterialFormTourKeys? tourKeys;
-  const _MaterialFormDialog({this.material, this.onDesativar, this.onReativar, this.onExcluir, this.roleUsuario, this.somenteLeitura = false, this.aprovando = false, this.onRecusar, this.tourKeys});
+  const _MaterialFormDialog({this.material, this.materialGenericoInicial, this.onDesativar, this.onReativar, this.onExcluir, this.roleUsuario, this.somenteLeitura = false, this.aprovando = false, this.onRecusar, this.tourKeys});
 
   @override
   State<_MaterialFormDialog> createState() => _MaterialFormDialogState();
@@ -4839,7 +4846,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       _editando;
 
   static const _unidadesValidas = {
-    'UNIDADE', 'M/L', 'M', 'ML', 'M²', 'G',
+    'UNIDADE', 'M/L', 'M', 'ML', 'M²', 'G', 'KG',
   };
   static const _aliasUnidade = {
     'M2': 'M²',
@@ -4940,6 +4947,16 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
     for (final c in [_nome, _identificador, _medida, _espessura, _largura, _comprimento, _descricao]) {
       c.addListener(_agendarVerificacaoDuplicata);
+    }
+
+    // Cadastro de nova variante iniciado a partir do dialog de variantes
+    // vinculadas (botão "Nova variante"): pré-vincula ao genérico, herdando
+    // nome e unidade, exatamente como faz _abrirSeletorGenerico().
+    if (m == null && widget.materialGenericoInicial != null) {
+      final generico = widget.materialGenericoInicial!;
+      _materialGenericoEscolhido = generico;
+      _nome.text = generico.nome;
+      _unidade   = _normalizarUnidade(generico.unidade);
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _agendarVerificacaoDuplicata());
@@ -5759,6 +5776,10 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                               value: 'G',
                               child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('g — (grama)')),
                             ),
+                            DropdownMenuItem(
+                              value: 'KG',
+                              child: MouseRegion(cursor: SystemMouseCursors.click, child: Text('Kg — (quilograma)')),
+                            ),
                           ],
                           validator: (v) =>
                               (v == null || v.isEmpty) ? 'Selecione uma unidade' : null,
@@ -5769,7 +5790,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
             ]),
             const SizedBox(height: 10),
-            if (_unidade != 'ML' && _unidade != 'G') ...[
+            if (_unidade != 'ML' && _unidade != 'G' && _unidade != 'KG') ...[
             KeyedSubtree(
               key: widget.tourKeys?.medida,
               child: TextFormField(
@@ -5796,7 +5817,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
             ),
             ],
-            if (_unidade != 'ML' && _unidade != 'G') ...[
+            if (_unidade != 'ML' && _unidade != 'G' && _unidade != 'KG') ...[
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
@@ -6016,7 +6037,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     );
 
     String formatarMoeda(double valor) {
-      final partes = valor.toStringAsFixed(2).split('.');
+      final partes = valor.toStringAsFixed(_casasParaExibirValor(valor)).split('.');
       final inteiro = partes[0];
       final decimal = partes[1];
       final buffer = StringBuffer();
@@ -7329,8 +7350,21 @@ class _EstoqueMinimoBloqueadoInfo extends StatelessWidget {
   }
 }
 
+/// Decide quantas casas decimais usar ao exibir um valor monetário.
+/// Usa 2 casas normalmente; só aumenta a precisão (até [casasMax]) quando
+/// 2 casas arredondariam um valor positivo para "0,00" — caso comum de
+/// preço unitário de materiais vendidos em unidades muito pequenas
+/// (ex.: preço por grama de um saco de 50kg: R$ 39,00 / 50000g = R$ 0,00078/g).
+int _casasParaExibirValor(double valor, {int casasMax = 6}) {
+  if (valor == 0) return 2;
+  final comDuasCasas = double.parse(valor.toStringAsFixed(2));
+  if (comDuasCasas != 0) return 2;
+  return casasMax;
+}
+
 String _formatarCustoVisual(double valor) {
-  final fixo = valor.toStringAsFixed(2);
+  final casas = _casasParaExibirValor(valor);
+  final fixo = valor.toStringAsFixed(casas);
   final partes = fixo.split('.');
   final inteiro = partes[0];
   final decimal = partes.length > 1 ? partes[1] : '00';
@@ -7521,6 +7555,32 @@ class _CustoCellState extends State<_CustoCell> {
   }
 }
 
+/// Resultado retornado por [showMaterialVinculadosDialog]/[_MaterialVinculadosDialog].
+///
+/// - [variante] preenchido: usuário escolheu uma variante existente.
+/// - [editarGenerico] true: usuário tocou em "Editar" (editar o próprio
+///   material genérico).
+/// - [novaVariante] true: usuário tocou em "Nova variante" (cadastrar uma
+///   nova variante vinculada a este genérico).
+class ResultadoVinculadosDialog {
+  final MaterialModel? variante;
+  final bool editarGenerico;
+  final bool novaVariante;
+
+  const ResultadoVinculadosDialog._({
+    this.variante,
+    this.editarGenerico = false,
+    this.novaVariante = false,
+  });
+
+  factory ResultadoVinculadosDialog.variante(MaterialModel m) =>
+      ResultadoVinculadosDialog._(variante: m);
+  factory ResultadoVinculadosDialog.editarGenericoResultado() =>
+      const ResultadoVinculadosDialog._(editarGenerico: true);
+  factory ResultadoVinculadosDialog.novaVarianteResultado() =>
+      const ResultadoVinculadosDialog._(novaVariante: true);
+}
+
 /// Dialog exibido ao selecionar um material "genérico" (ex.: "TINTA").
 /// Lista todos os materiais vinculados a ele — cada um com sua própria
 /// descrição, fornecedores, preços e estoque próprios — permitindo
@@ -7529,20 +7589,20 @@ class _CustoCellState extends State<_CustoCell> {
 ///
 /// Uso:
 /// ```dart
-/// final selecionado = await showMaterialVinculadosDialog(
+/// final resultado = await showMaterialVinculadosDialog(
 ///   context,
 ///   materialGenerico: material, // material.ehGenerico == true
 /// );
-/// if (selecionado != null) {
-///   // usar `selecionado` (um MaterialModel filho) normalmente
+/// if (resultado?.variante != null) {
+///   // usar `resultado!.variante` (um MaterialModel filho) normalmente
 /// }
 /// ```
-Future<MaterialModel?> showMaterialVinculadosDialog(
+Future<ResultadoVinculadosDialog?> showMaterialVinculadosDialog(
   BuildContext context, {
   required MaterialModel materialGenerico,
   bool apenasAtivos = true,
 }) {
-  return showDialog<MaterialModel>(
+  return showDialog<ResultadoVinculadosDialog>(
     context: context,
     builder: (_) => _MaterialVinculadosDialog(
       materialGenerico: materialGenerico,
@@ -7850,9 +7910,26 @@ class _MaterialVinculadosDialogState extends State<_MaterialVinculadosDialog>
                       child: TextButton.icon(
                         onPressed: _processando
                             ? null
-                            : () => Navigator.of(context).pop(widget.materialGenerico),
+                            : () => Navigator.of(context).pop(
+                                  ResultadoVinculadosDialog.editarGenericoResultado(),
+                                ),
                         icon: const Icon(Icons.edit_outlined, size: 18),
                         label: const Text('Editar'),
+                        style: TextButton.styleFrom()
+                            .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
+                      ),
+                    ),
+                  if (!modoSelecao)
+                    Tooltip(
+                      message: 'Cadastrar nova variante deste material',
+                      child: TextButton.icon(
+                        onPressed: _processando
+                            ? null
+                            : () => Navigator.of(context).pop(
+                                  ResultadoVinculadosDialog.novaVarianteResultado(),
+                                ),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Nova variante'),
                         style: TextButton.styleFrom()
                             .copyWith(mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click)),
                       ),
@@ -8001,7 +8078,8 @@ class _MaterialVinculadosDialogState extends State<_MaterialVinculadosDialog>
                                   selecaoEhAtiva: selecaoEhAtiva,
                                   corStatus: _corStatus,
                                   onAlternarSelecao: _alternarSelecao,
-                                  onSelecionar: (item) => Navigator.of(context).pop(item),
+                                  onSelecionar: (item) => Navigator.of(context)
+                                      .pop(ResultadoVinculadosDialog.variante(item)),
                                 );
                               }
 
@@ -8432,6 +8510,11 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
     if (ok) {
       _ctrlUnit.clear();
       _ctrlM2.clear();
+      // Recarrega o histórico para que o valor inserido manualmente
+      // apareça no card "Preço / Preço m²" e na tabela, igual ao que vem
+      // de uma Ordem de Compra.
+      await _carregar();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Custo atualizado com sucesso.'),
@@ -8554,6 +8637,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
   /// preenchido (m/l, ml, g...).
   double? _precoUnitarioReal(HistoricoPrecoModel h) {
     if (h.usarM2) return null;
+    // Lançamento manual não tem quantidade: usa o preço digitado direto.
+    if (h.manual) return h.precoUnitario > 0 ? h.precoUnitario : null;
     if (h.quantidade > 0 && h.total > 0) return h.total / h.quantidade;
     if (h.precoUnitario > 0) return h.precoUnitario;
     return null;
@@ -8609,9 +8694,21 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
     return null;
   }
 
+  /// Compras que vieram de Ordem de Compra. Lançamentos manuais ficam
+  /// fora da tabela (só alimentam o card de Preço no topo).
+  List<HistoricoPrecoModel> get _historicoOC =>
+      _historico.where((h) => !h.manual).toList();
+
+  /// Preço unitário da linha = total / quantidade (qualquer unidade).
+  double? _precoUnitLinha(HistoricoPrecoModel h) {
+    if (h.quantidade > 0 && h.total > 0) return h.total / h.quantidade;
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final m = widget.material;
+    final historicoOC = _historicoOC;
 
     final ultimoUnitario      = _ultimoDoTipo(_TipoPreco.unitario);
     final ultimoM2            = _ultimoDoTipo(_TipoPreco.m2);
@@ -8626,6 +8723,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
     final temCustoUnidade = ultimoCustoUnidade != null && ultimoCustoUnidade > 0 &&
         deveExibirPrecoUnidade(m.unidade);
     final labelUnidade = labelPrecoUnidade(m.unidade);
+    final unidadeMaterial = formatarUnidadeExibicao(m.unidade);
+    final unidadeMaterialCurta = unidadeMaterial == '—' ? 'unid.' : unidadeMaterial;
 
     return Dialog(
       backgroundColor: Theme.of(context).colorScheme.surface,
@@ -8705,23 +8804,26 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                         valor: temCustoM2 ? ultimoCustoM2 : null,
                       ),
                     ),
-                    SizedBox(
-                      height: 30,
-                      child: VerticalDivider(
-                        width: 24,
-                        thickness: 0.8,
-                        color: const Color(0xFFE85D04).withValues(alpha: 0.2),
+                    if (deveExibirPrecoUnidade(m.unidade)) ...[
+                      SizedBox(
+                        height: 30,
+                        child: VerticalDivider(
+                          width: 24,
+                          thickness: 0.8,
+                          color: const Color(0xFFE85D04).withValues(alpha: 0.2),
+                        ),
                       ),
-                    ),
-                    Expanded(
-                      child: _PrecoResumoColuna(
-                        label: labelUnidade,
-                        valor: temCustoUnidade ? ultimoCustoUnidade : null,
+                      Expanded(
+                        child: _PrecoResumoColuna(
+                          label: labelUnidade,
+                          valor: temCustoUnidade ? ultimoCustoUnidade : null,
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
+            if (historicoOC.isNotEmpty || _historico.isEmpty)
             Container(
               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
@@ -8756,23 +8858,34 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                     ),
                   ),
                   SizedBox(
-                    width: 80,
-                    child: Text(
-                      'm/l por unidade',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                  ),
-                  SizedBox(
                     width: 90,
                     child: Text(
-                      'Valor/m/l',
+                      'Preço unit.',
                       textAlign: TextAlign.right,
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
                           color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
+                  if (deveExibirPrecoUnidade(m.unidade)) ...[
+                    SizedBox(
+                      width: 80,
+                      child: Text(
+                        '$unidadeMaterialCurta por unidade',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 90,
+                      child: Text(
+                        'Valor/$unidadeMaterialCurta',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                  ],
                   SizedBox(
                     width: 90,
                     child: Text(
@@ -8834,6 +8947,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                   ),
                 ),
               )
+            else if (_historico.isNotEmpty && historicoOC.isEmpty)
+              const SizedBox.shrink()
             else if (_historico.isEmpty)
               Padding(
                 padding: EdgeInsets.symmetric(vertical: 32),
@@ -8848,8 +8963,8 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
             else
               Column(
                 mainAxisSize: MainAxisSize.min,
-                children: List.generate(_historico.length, (i) {
-                      final h = _historico[i];
+                children: List.generate(historicoOC.length, (i) {
+                      final h = historicoOC[i];
                       final isUltimo = i == 0;
                       final data = h.dataOrdem ?? h.criadoEm;
                       final dataStr =
@@ -8912,7 +9027,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                 SizedBox(
                                   width: 60,
                                   child: Text(
-                                    formatarQuantidadeExibicao(h.quantidade),
+                                    h.manual ? '—' : formatarQuantidadeExibicao(h.quantidade),
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
                                       fontSize: 13,
@@ -8925,38 +9040,57 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                 ),
                                 SizedBox(
                                   width: 90,
-                                  child: Text(
-                                    !h.usarM2 && h.qtdUnidade != null && h.qtdUnidade! > 0
-                                        ? '${formatarQuantidadeExibicao(h.qtdUnidade!)} m/l'
-                                        : '—',
-                                    textAlign: TextAlign.right,
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: isUltimo ? FontWeight.w700 : FontWeight.normal,
-                                      color: isUltimo
-                                          ? Theme.of(context).colorScheme.onSurface
-                                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                                  child: Builder(builder: (_) {
+                                    final pu = _precoUnitLinha(h);
+                                    return Text(
+                                      pu != null ? 'R\$ ${_formatarCustoVisual(pu)}' : '—',
+                                      textAlign: TextAlign.right,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: isUltimo ? FontWeight.w700 : FontWeight.normal,
+                                        color: isUltimo
+                                            ? const Color(0xFFE85D04)
+                                            : Theme.of(context).colorScheme.onSurface,
+                                      ),
+                                    );
+                                  }),
+                                ),
+                                if (deveExibirPrecoUnidade(m.unidade)) ...[
+                                  SizedBox(
+                                    width: 90,
+                                    child: Text(
+                                      !h.usarM2 && h.qtdUnidade != null && h.qtdUnidade! > 0
+                                          ? '${formatarQuantidadeExibicao(h.qtdUnidade!)} $unidadeMaterialCurta'
+                                          : '—',
+                                      textAlign: TextAlign.right,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: isUltimo ? FontWeight.w700 : FontWeight.normal,
+                                        color: isUltimo
+                                            ? Theme.of(context).colorScheme.onSurface
+                                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                SizedBox(
-                                  width: 90,
-                                  child: Text(
-                                    !h.usarM2 && h.precoUnitario > 0
-                                        ? 'R\$ ${_formatarCustoVisual(h.precoUnitario)}'
-                                        : '—',
-                                    textAlign: TextAlign.right,
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: isUltimo
-                                          ? FontWeight.w700
-                                          : FontWeight.normal,
-                                      color: isUltimo
-                                          ? Color(0xFFE85D04)
-                                          : Theme.of(context).colorScheme.onSurface,
+                                  SizedBox(
+                                    width: 90,
+                                    child: Text(
+                                      !h.usarM2 && h.precoUnitario > 0
+                                          ? 'R\$ ${_formatarCustoVisual(h.precoUnitario)}'
+                                          : '—',
+                                      textAlign: TextAlign.right,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: isUltimo
+                                            ? FontWeight.w700
+                                            : FontWeight.normal,
+                                        color: isUltimo
+                                            ? Color(0xFFE85D04)
+                                            : Theme.of(context).colorScheme.onSurface,
+                                      ),
                                     ),
                                   ),
-                                ),
+                                ],
                                 SizedBox(
                                   width: 90,
                                   child: Builder(builder: (_) {
@@ -8981,7 +9115,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                                 SizedBox(
                                   width: 90,
                                   child: Text(
-                                    'R\$ ${_formatarCustoVisual(h.total)}',
+                                    h.manual ? '—' : 'R\$ ${_formatarCustoVisual(h.total)}',
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
                                       fontSize: 13,
@@ -9004,7 +9138,7 @@ class _HistoricoPrecoDialogState extends State<_HistoricoPrecoDialog> {
                               ],
                             ),
                           ),
-                          if (i < _historico.length - 1)
+                          if (i < historicoOC.length - 1)
                             Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant),
                         ],
                       );

@@ -36,6 +36,9 @@ class HistoricoPrecoModel {
   final DateTime criadoEm;
   final DateTime? dataOrdem;
 
+  /// True quando o preço foi inserido manualmente (sem Ordem de Compra).
+  final bool manual;
+
   double get quantidadeReal {
     if (!usarM2 && qtdUnidade != null && qtdUnidade! > 0) {
       return quantidade * qtdUnidade!;
@@ -61,6 +64,7 @@ class HistoricoPrecoModel {
     this.usarM2 = false,
     required this.criadoEm,
     this.dataOrdem,
+    this.manual = false,
   });
 
   factory HistoricoPrecoModel.fromJson(Map<String, dynamic> json) =>
@@ -69,7 +73,9 @@ class HistoricoPrecoModel {
         materialId:     (json['materialId'] as num?)?.toInt() ?? 0,
         ordemCompraId:  (json['ordemCompraId'] as num?)?.toInt(),
         fornecedorId:   (json['fornecedorId'] as num?)?.toInt(),
-        fornecedorNome: json['fornecedor']?['nomeFantasia'] ?? '—',
+        fornecedorNome: json['fornecedor']?['nomeFantasia'] ??
+            ((json['manual'] ?? false) ? 'Manual' : '—'),
+        manual:         json['manual'] ?? false,
         precoUnitario:  double.tryParse(json['precoUnitario'].toString()) ?? 0,
         precoM2:        json['precoM2'] != null
             ? double.tryParse(json['precoM2'].toString())

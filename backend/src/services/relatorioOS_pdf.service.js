@@ -10,6 +10,23 @@ function formatCurrency(value) {
   return `R$ ${intFormatted},${decPart}`;
 }
 
+// Para preços unitários muito pequenos (ex: preço por grama), 2 casas decimais
+// zeram o valor (R$ 0,00). Estende as casas decimais até haver um dígito
+// significativo, igual ao comportamento já usado no app (frontend).
+function formatCurrencyPreco(value) {
+  const n = Number(value ?? 0);
+  if (n === 0) return formatCurrency(0);
+  if (Math.round(n * 100) / 100 !== 0 || Math.abs(n) >= 0.01) {
+    // já representável com 2 casas sem virar zero
+    if (Math.abs(n) >= 0.005) return formatCurrency(n);
+  }
+  // precisa de mais casas: usa até 6 casas decimais, aparando zeros à direita
+  const s6 = n.toFixed(6);
+  const [intPart, decPart] = s6.split('.');
+  const intFormatted = new Intl.NumberFormat('pt-BR').format(parseInt(intPart, 10));
+  return `R$ ${intFormatted},${decPart}`;
+}
+
 function formatDate(date) {
   if (!date) return '—';
   return new Date(date).toLocaleDateString('pt-BR');
@@ -290,7 +307,7 @@ function drawMovRow(doc, item, idx, y, comPreco, pageH) {
     cx += cols[1].w;
 
     doc.font('Helvetica').fontSize(FONT_SZ).fillColor(C.gray)
-       .text(item.precoUnitario > 0 ? formatCurrency(item.precoUnitario) : '—',
+       .text(item.precoUnitario > 0 ? formatCurrencyPreco(item.precoUnitario) : '—',
              cx + 4, tySingle, { width: cols[2].w - 8, align: 'right', lineBreak: false });
     if (item.unidade) {
       const unidLabel = item.usarM2 ? `por m²` : `por ${formatUnidade(item.unidade, 1)}`;

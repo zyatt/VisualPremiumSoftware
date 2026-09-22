@@ -94,6 +94,7 @@ class ItemSolicitacaoModel {
   final String materialNome;
   final String? materialUnidade;
   final String? materialIdentificador;
+  final String? materialDescricao;
   final String? materialMedida;
   final String? materialEspessura;
   final double? materialLargura;
@@ -150,6 +151,7 @@ class ItemSolicitacaoModel {
     required this.materialNome,
     this.materialUnidade,
     this.materialIdentificador,
+    this.materialDescricao,
     this.materialMedida,
     this.materialEspessura,
     this.materialLargura,
@@ -180,6 +182,7 @@ class ItemSolicitacaoModel {
       materialNome:  json['material']?['nome'] ?? '',
       materialUnidade:       json['material']?['unidade'],
       materialIdentificador: json['material']?['identificador'],
+      materialDescricao:     json['material']?['descricao'],
       materialMedida:        json['material']?['medida'],
       materialEspessura:     json['material']?['espessura'],
       materialLargura:       json['material']?['largura'] != null
@@ -233,6 +236,7 @@ class ItemSolicitacaoModel {
       materialNome: materialNome,
       materialUnidade: materialUnidade,
       materialIdentificador: materialIdentificador,
+      materialDescricao: materialDescricao,
       materialMedida: materialMedida,
       materialEspessura: materialEspessura,
       materialLargura: materialLargura,
@@ -272,6 +276,7 @@ class AdicionalSolicitacaoModel {
   final String materialNome;
   final String? materialUnidade;
   final String? materialIdentificador;
+  final String? materialDescricao;
   final String? materialMedida;
   final String? materialEspessura;
   final double? materialLargura;
@@ -330,6 +335,7 @@ class AdicionalSolicitacaoModel {
     required this.materialNome,
     this.materialUnidade,
     this.materialIdentificador,
+    this.materialDescricao,
     this.materialMedida,
     this.materialEspessura,
     this.materialLargura,
@@ -362,6 +368,7 @@ class AdicionalSolicitacaoModel {
       materialNome:  json['material']?['nome'] ?? '',
       materialUnidade:       json['material']?['unidade'],
       materialIdentificador: json['material']?['identificador'],
+      materialDescricao:     json['material']?['descricao'],
       materialMedida:        json['material']?['medida'],
       materialEspessura:     json['material']?['espessura'],
       materialLargura:       json['material']?['largura'] != null
@@ -417,6 +424,7 @@ class AdicionalSolicitacaoModel {
       materialNome: materialNome,
       materialUnidade: materialUnidade,
       materialIdentificador: materialIdentificador,
+      materialDescricao: materialDescricao,
       materialMedida: materialMedida,
       materialEspessura: materialEspessura,
       materialLargura: materialLargura,

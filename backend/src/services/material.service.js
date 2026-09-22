@@ -122,7 +122,30 @@ const _includeFornecedores = {
   },
 };
 
-function _montarWhere(filtros = {}) {
+// Monta um filtro Prisma para campos numéricos (largura/comprimento) que se
+// comporta como uma busca "contém": digitar "1" deve casar com 1, 1.20,
+// 1.5, 1.99 etc. (qualquer valor cuja parte inteira seja 1), e digitar
+// "1.2" deve casar com 1.2, 1.20, 1.25 etc. (prefixo decimal). Não dá para
+// usar `contains` do Prisma em colunas numéricas, então convertemos o texto
+// digitado num intervalo [gte, lt) equivalente.
+function filtroNumericoContem(valorDigitado) {
+  if (valorDigitado === undefined || valorDigitado === null) return null;
+  const texto = valorDigitado.toString().trim().replace(',', '.');
+  if (texto === '') return null;
+  const numero = Number(texto);
+  if (Number.isNaN(numero)) return null;
+
+  const casasDecimais = texto.includes('.') ? texto.split('.')[1].length : 0;
+  const passo = Math.pow(10, -casasDecimais);
+  // Evita problemas de ponto flutuante (ex.: 1.1 + 0.1 = 1.2000000000000002)
+  const casasArred = casasDecimais + 2;
+  const min = numero;
+  const max = Number((numero + passo).toFixed(casasArred));
+
+  return { gte: min, lt: max };
+}
+
+async function _montarWhere(filtros = {}) {
   const { busca, categoria, semCategoria, status, comFornecedor, id, medida, espessura, largura, comprimento, identificador, ativo, ehGenerico, materialGenericoId, incluirVinculados } = filtros;
 
   const where = {};
@@ -168,10 +191,41 @@ function _montarWhere(filtros = {}) {
         { materialGenerico: { nome: { contains: t, mode: 'insensitive' } } },
       ],
     });
-    if (tokens.length === 1) {
-      Object.assign(where, tokenFiltro(tokens[0]));
+    const buscaWhere = tokens.length === 1
+      ? tokenFiltro(tokens[0])
+      : { AND: tokens.map(tokenFiltro) };
+
+    // As variantes (filhas) ficam sempre ocultas das listagens normais
+    // (materialGenericoId = null acima). Isso significa que buscaWhere,
+    // sozinho, NUNCA vai casar pela `descricao` de uma variante, já que
+    // esse campo só existe nos filhos. Para que digitar a descrição de
+    // uma variante (ex.: "AZUL FRISIA FLEET COLOR") continue encontrando
+    // e exibindo o material GENÉRICO pai — em Estoque, Controle e
+    // Relatório, Ordem de Compra, Solicitação e Produção — procuramos
+    // também entre os filhos e trazemos o(s) pai(s) correspondente(s).
+    // Isso é pulado quando `incluirVinculados: true`, pois nesse caso o
+    // chamador já pediu para localizar a própria variante (ver acima).
+    if (incluirVinculados !== 'true') {
+      const filtroVariante = tokens.length === 1
+        ? tokenFiltro(tokens[0])
+        : { AND: tokens.map(tokenFiltro) };
+
+      const filhosCorrespondentes = await prisma.material.findMany({
+        where: { materialGenericoId: { not: null }, ...filtroVariante },
+        select: { materialGenericoId: true },
+        distinct: ['materialGenericoId'],
+      });
+      const idsGenericosPorVariante = filhosCorrespondentes
+        .map((f) => f.materialGenericoId)
+        .filter((v) => v !== null);
+
+      if (idsGenericosPorVariante.length > 0) {
+        where.OR = [buscaWhere, { id: { in: idsGenericosPorVariante } }];
+      } else {
+        Object.assign(where, buscaWhere);
+      }
     } else {
-      where.AND = (where.AND ?? []).concat(tokens.map(tokenFiltro));
+      Object.assign(where, buscaWhere);
     }
   }
   if (identificador) where.identificador = { contains: identificador, mode: 'insensitive' };
@@ -181,12 +235,12 @@ function _montarWhere(filtros = {}) {
     where.espessura = { contains: espessuraNum ?? espessura, mode: 'insensitive' };
   }
   if (largura !== undefined && largura !== '') {
-    const larguraNum = Number(largura);
-    if (!Number.isNaN(larguraNum)) where.largura = larguraNum;
+    const filtro = filtroNumericoContem(largura);
+    if (filtro) where.largura = filtro;
   }
   if (comprimento !== undefined && comprimento !== '') {
-    const comprimentoNum = Number(comprimento);
-    if (!Number.isNaN(comprimentoNum)) where.comprimento = comprimentoNum;
+    const filtro = filtroNumericoContem(comprimento);
+    if (filtro) where.comprimento = filtro;
   }
   if (semCategoria === 'true') {
     where.categoria = null;
@@ -220,7 +274,7 @@ function _resolverOrderBy(ordenarPor, direcao) {
 
 async function listar(filtros = {}) {
   const { limite, pagina, porPagina } = filtros;
-  const where = _montarWhere(filtros);
+  const where = await _montarWhere(filtros);
 
   const take = limite != null && limite !== ''
     ? Number(limite)
@@ -280,7 +334,7 @@ async function _listarPaginadoPorMedia(where, { campoMedia, direcao, take, skip,
 
 async function listarPaginado(filtros = {}) {
   const { pagina = 1, porPagina = 50, ordenarPor, direcao } = filtros;
-  const where = _montarWhere(filtros);
+  const where = await _montarWhere(filtros);
 
   const take = Number(porPagina) || 50;
   const skip = (Number(pagina) - 1) * take;
@@ -883,6 +937,20 @@ async function atualizarCustoManual(id, data, usuarioId, usuarioNome) {
 
   const result = await prisma.material.update({ where: { id }, data: updateData });
 
+  // Registra o lançamento manual no histórico de compras, para que ele
+  // apareça no modal (card "Preço / Preço m²" e tabela) igual a um preço
+  // vindo de Ordem de Compra. Sem OC e sem fornecedor => manual = true.
+  await prisma.historicoPrecoMaterial.create({
+    data: {
+      materialId:    id,
+      manual:        true,
+      quantidade:    0,
+      precoUnitario: novoUnitario ?? null,
+      precoM2:       novoM2 ?? null,
+      usarM2:        novoUnitario === undefined && novoM2 !== undefined,
+    },
+  });
+
   if (novoUnitario !== material.ultimoValorPago) {
     await auditSvc.registrar(id, 'CUSTO_MANUAL', {
       campo: 'Último Valor Pago',
@@ -930,6 +998,7 @@ async function atualizarCustoManual(id, data, usuarioId, usuarioNome) {
 module.exports = {
   calcularStatus,
   notificarSeCritico,
+  filtroNumericoContem,
   listar,
   listarPaginado,
   listarParaMovimentacao,

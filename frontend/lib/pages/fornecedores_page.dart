@@ -58,6 +58,30 @@ String _formatarPreco(num valor) {
   return '${negativo ? '-' : ''}${buffer.toString()},$decimais';
 }
 
+// Para preços unitários muito pequenos (ex: preço por grama), 2 casas
+// decimais zeram o valor (R$ 0,00). Estende as casas até haver um dígito
+// significativo, evitando exibir um preço real como se fosse zero.
+String _formatarPrecoExibicao(num valor) {
+  if (valor == 0) return _formatarPreco(0);
+  if (valor.abs() >= 0.005) return _formatarPreco(valor);
+
+  final partes = valor.toStringAsFixed(6).split('.');
+  final inteiro = partes[0];
+  final decimais = partes[1];
+  final negativo = inteiro.startsWith('-');
+  final digitos = negativo ? inteiro.substring(1) : inteiro;
+
+  final buffer = StringBuffer();
+  for (int i = 0; i < digitos.length; i++) {
+    if (i > 0 && (digitos.length - i) % 3 == 0) {
+      buffer.write('.');
+    }
+    buffer.write(digitos[i]);
+  }
+
+  return '${negativo ? '-' : ''}${buffer.toString()},$decimais';
+}
+
 String _labelPrecoUnidade(String? unidade) {
   final u = _formatarUnidadeExibicao(unidade);
   if (u == '—' || u.isEmpty) return 'Preço unidade';
@@ -3220,7 +3244,7 @@ class _PriceTag extends StatelessWidget {
         children: [
           TextSpan(text: '$label '),
           TextSpan(
-            text: 'R\$ ${_formatarPreco(valor)}',
+            text: 'R\$ ${_formatarPrecoExibicao(valor)}',
             style: const TextStyle(
                 color: AppTheme.success, fontWeight: FontWeight.w600),
           ),
@@ -3287,9 +3311,9 @@ class _VinculoMaterialDialogState extends State<_VinculoMaterialDialog> {
       _materialEspessuraCtrl.text = v.materialEspessura ?? '';
       _materialIdSelecionado = v.materialId;
       _unidadeSelecionada = v.materialUnidade;
-      _precoCtrl.text = v.preco == 0 ? '' : _formatarPreco(v.preco);
-      _precoM2Ctrl.text = v.precoMetroQuadrado == 0 ? '' : _formatarPreco(v.precoMetroQuadrado);
-      _precoUnidadeMedidaCtrl.text = v.precoUnidadeMedida == 0 ? '' : _formatarPreco(v.precoUnidadeMedida);
+      _precoCtrl.text = v.preco == 0 ? '' : _formatarPrecoExibicao(v.preco);
+      _precoM2Ctrl.text = v.precoMetroQuadrado == 0 ? '' : _formatarPrecoExibicao(v.precoMetroQuadrado);
+      _precoUnidadeMedidaCtrl.text = v.precoUnidadeMedida == 0 ? '' : _formatarPrecoExibicao(v.precoUnidadeMedida);
     }
 
     _materialIdCtrl.addListener(_onIdChanged);
@@ -4442,9 +4466,9 @@ class _VincularPorMaterialDialogState
         precoM2Inicial = antigo.precoM2Ctrl.text;
         precoUnidadeMedidaInicial = antigo.precoUnidadeMedidaCtrl.text;
       } else if (jaVinculado) {
-        precoInicial   = _formatarPreco(vinculo.preco);
-        precoM2Inicial = _formatarPreco(vinculo.precoMetroQuadrado);
-        precoUnidadeMedidaInicial = _formatarPreco(vinculo.precoUnidadeMedida);
+        precoInicial   = _formatarPrecoExibicao(vinculo.preco);
+        precoM2Inicial = _formatarPrecoExibicao(vinculo.precoMetroQuadrado);
+        precoUnidadeMedidaInicial = _formatarPrecoExibicao(vinculo.precoUnidadeMedida);
       }
 
       novas.add(_FornecedorVinculoEntry(

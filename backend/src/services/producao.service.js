@@ -53,7 +53,23 @@ async function listarMateriais({ busca, categoria, status, id, identificador, me
     const idNum = parseInt(id, 10);
     if (!isNaN(idNum)) where.id = idNum;
   }
-  if (busca)         where.nome           = { contains: busca,         mode: 'insensitive' };
+  if (busca) {
+    // Também casa pela `descricao` (variante) e pelo nome do genérico-pai,
+    // não só pelo `nome` do material.
+    const tokens = busca.trim().split(/\s+/).filter(Boolean);
+    const tokenFiltro = (t) => ({
+      OR: [
+        { nome: { contains: t, mode: 'insensitive' } },
+        { descricao: { contains: t, mode: 'insensitive' } },
+        { materialGenerico: { nome: { contains: t, mode: 'insensitive' } } },
+      ],
+    });
+    if (tokens.length === 1) {
+      Object.assign(where, tokenFiltro(tokens[0]));
+    } else {
+      where.AND = (where.AND ?? []).concat(tokens.map(tokenFiltro));
+    }
+  }
   if (categoria)     where.categoria      = { equals:   categoria,     mode: 'insensitive' };
   if (identificador) where.identificador  = { contains: identificador, mode: 'insensitive' };
   if (medida)        where.medida         = { contains: medida,        mode: 'insensitive' };

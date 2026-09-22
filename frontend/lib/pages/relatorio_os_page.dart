@@ -21,9 +21,22 @@ String formatarUnidadeComPlural(String? unidade, double quantidade) {
   return base;
 }
 
+/// Decide quantas casas decimais usar ao exibir um valor monetário.
+/// Usa 2 casas normalmente; só aumenta a precisão (até [casasMax]) quando
+/// 2 casas arredondariam um valor positivo para "0,00" — caso comum de
+/// preço unitário de materiais vendidos em unidades muito pequenas
+/// (ex.: preço por grama de um saco de 50kg: R$ 39,00 / 50000g = R$ 0,00078/g).
+int _casasParaExibirValor(double v, {int casasMax = 6}) {
+  if (v == 0) return 2;
+  final comDuasCasas = double.parse(v.toStringAsFixed(2));
+  if (comDuasCasas != 0) return 2;
+  return casasMax;
+}
+
 String _brl(double v) {
   if (v == 0) return '—';
-  final s2 = v.toStringAsFixed(2);
+  final casas = _casasParaExibirValor(v);
+  final s2 = v.toStringAsFixed(casas);
   final partes = s2.split('.');
   final decFinal = partes[1];
 

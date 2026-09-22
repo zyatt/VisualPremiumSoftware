@@ -151,19 +151,21 @@ model Material {
 }
 
 model HistoricoPrecoMaterial {
-  id            Int         @id @default(autoincrement())
+  id            Int          @id @default(autoincrement())
   materialId    Int
-  ordemCompraId Int
-  fornecedorId  Int
-  precoUnitario Decimal?    @db.Decimal(15, 6)
-  precoM2       Decimal?    @db.Decimal(15, 6)
-  quantidade    Decimal     @db.Decimal(15, 6)
-  qtdUnidade    Decimal?    @db.Decimal(15, 6)
-  usarM2        Boolean     @default(false)
-  criadoEm      DateTime    @default(now())
-  fornecedor    Fornecedor  @relation(fields: [fornecedorId], references: [id])
-  material      Material    @relation(fields: [materialId], references: [id], onDelete: Cascade)
-  ordemCompra   OrdemCompra @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
+  ordemCompraId Int?
+  fornecedorId  Int?
+  precoUnitario Decimal?     @db.Decimal(15, 6)
+  precoM2       Decimal?     @db.Decimal(15, 6)
+  quantidade    Decimal      @default(0) @db.Decimal(15, 6)
+  qtdUnidade    Decimal?     @db.Decimal(15, 6)
+  usarM2        Boolean      @default(false)
+  // true quando o preço foi inserido manualmente (sem Ordem de Compra)
+  manual        Boolean      @default(false)
+  criadoEm      DateTime     @default(now())
+  fornecedor    Fornecedor?  @relation(fields: [fornecedorId], references: [id])
+  material      Material     @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  ordemCompra   OrdemCompra? @relation(fields: [ordemCompraId], references: [id], onDelete: Cascade)
 
   @@map("historico_precos_material")
 }
